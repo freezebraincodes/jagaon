@@ -60,3 +60,60 @@ export {
   type BloodKetoneMeasurementMethod,
   type UrineKetoneMeasurementMethod,
 } from "./ketone-reading";
+
+// Packet 3A: observation temporal
+export {
+  intakeTemporalSchema,
+  symptomTemporalSchema,
+  activityTemporalSchema,
+  type IntakeTemporal,
+  type SymptomTemporal,
+  type ActivityTemporal,
+} from "./observation-temporal";
+
+// Packet 3A: intake event
+export {
+  intakeEventPayloadSchema,
+  intakeKindSchema,
+  intakeSlotSchema,
+  intakeItemSchema,
+  intakeReasonSchema,
+  patientDefinedIntakeSlotKeySchema,
+  INTAKE_EVENT_DELETION_POLICY,
+  INTAKE_EVENT_REVISION_ACTIONS,
+  type IntakeEventPayload,
+  type IntakeKind,
+  type IntakeSlot,
+  type IntakeItem,
+  type IntakeReason,
+  type PatientDefinedIntakeSlotKey,
+} from "./intake-event";
+
+// Packet 3A: symptom report
+export {
+  symptomReportPayloadSchema,
+  symptomCodeSchema,
+  symptomEntrySchema,
+  safetyCapabilitySnapshotSchema,
+  capabilityStateSchema,
+  SYMPTOM_REPORT_DELETION_POLICY,
+  SYMPTOM_REPORT_REVISION_ACTIONS,
+  type SymptomReportPayload,
+  type SymptomEntry,
+  type SymptomCode,
+  type SafetyCapabilitySnapshot,
+  type CapabilityState,
+} from "./symptom-report";
+
+// Packet 3A: activity event
+export {
+  activityEventPayloadSchema,
+  activityCategorySchema,
+  activityReportedIntensitySchema,
+  reportedDurationMinutesSchema,
+  ACTIVITY_EVENT_DELETION_POLICY,
+  ACTIVITY_EVENT_REVISION_ACTIONS,
+  type ActivityEventPayload,
+  type ActivityCategory,
+  type ActivityReportedIntensity,
+} from "./activity-event";
