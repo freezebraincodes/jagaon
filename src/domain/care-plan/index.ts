@@ -49,3 +49,17 @@ export {
   type PrescriptionEffectivePeriod,
   type PrescriptionDoseInstruction,
 } from "./prescription-version";
+
+// Section 6.6: patient-reported prescription changes
+export {
+  prescriptionChangeKindSchema,
+  prescriptionInstructionCandidateSchema,
+  prescriptionChangeReconciliationSchema,
+  prescriptionChangeCandidatePayloadSchema,
+  PRESCRIPTION_CHANGE_CANDIDATE_DELETION_POLICY,
+  PRESCRIPTION_CHANGE_CANDIDATE_REVISION_ACTIONS,
+  type PrescriptionChangeKind,
+  type PrescriptionInstructionCandidate,
+  type PrescriptionChangeReconciliation,
+  type PrescriptionChangeCandidatePayload,
+} from "./prescription-change-candidate";
