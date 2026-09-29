@@ -108,3 +108,9 @@ export {
   deletionTombstoneSchema,
   type DeletionTombstone,
 } from "./deletion";
+
+// Packet 2B: shared text validation
+export {
+  countCodePoints,
+  createBoundedTextSchema,
+} from "./text";
