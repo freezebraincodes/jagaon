@@ -1,10 +1,20 @@
+import { CURRENT_RELEASE_PROFILE } from "@/config/release-profile";
+import { DemoBoundaryNotice } from "@/components/demo/DemoBoundaryNotice";
+import { getMessages } from "@/i18n/get-messages";
+
 export default function Home() {
+  const messages = getMessages("en-SG");
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-8">
-      <h1 className="text-3xl font-bold tracking-tight sm:text-5xl">JagaOn</h1>
-      <p className="text-base text-gray-600 sm:text-lg">
-        Project foundation is running
-      </p>
-    </main>
+    <div
+      data-release-profile={CURRENT_RELEASE_PROFILE}
+      className="app-shell"
+    >
+      <DemoBoundaryNotice />
+      <main className="app-main">
+        <h1 className="app-title">{messages.appName}</h1>
+        <p className="app-status">{messages.foundationStatus}</p>
+      </main>
+    </div>
   );
 }
