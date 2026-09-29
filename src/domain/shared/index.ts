@@ -114,3 +114,9 @@ export {
   countCodePoints,
   createBoundedTextSchema,
 } from "./text";
+
+// Packet 2C: typed revision reference
+export {
+  createTypedRevisionRefSchema,
+  type TypedRevisionRef,
+} from "./typed-revision-ref";
