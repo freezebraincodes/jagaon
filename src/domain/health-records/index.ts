@@ -117,3 +117,20 @@ export {
   type ActivityCategory,
   type ActivityReportedIntensity,
 } from "./activity-event";
+
+// Packet 3B2b: medication event
+export {
+  medicationEventPayloadSchema,
+  medicationEventTemporalSchema,
+  medicationOccasionSchema,
+  recordedMedicationAmountSchema,
+  medicationSafetyConcernSchema,
+  MEDICATION_EVENT_DELETION_POLICY,
+  MEDICATION_EVENT_REVISION_ACTIONS,
+  type MedicationEventPayload,
+  type MedicationEventBase,
+  type MedicationEventTemporal,
+  type MedicationOccasion,
+  type RecordedMedicationAmount,
+  type MedicationSafetyConcern,
+} from "./medication-event";
