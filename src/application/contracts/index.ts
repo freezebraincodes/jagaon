@@ -60,3 +60,11 @@ export {
   type CarePreparationEventName,
   type DomainEventName,
 } from "./command-event-names";
+
+// Task 3: typed command envelope and head expectations (Packet 4B)
+export {
+  recordHeadExpectationSchema,
+  createCommandEnvelopeSchema,
+  type RecordHeadExpectation,
+  type CommandEnvelope,
+} from "./command-envelope";

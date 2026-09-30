@@ -413,6 +413,9 @@ describe("public barrel", () => {
     "safetyEventNameSchema",
     "carePreparationEventNameSchema",
     "domainEventNameSchema",
+    // Task 3 command envelope
+    "recordHeadExpectationSchema",
+    "createCommandEnvelopeSchema",
   ]);
 
   it("exports every approved contract", () => {
