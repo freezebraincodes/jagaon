@@ -68,3 +68,21 @@ export {
   type RecordHeadExpectation,
   type CommandEnvelope,
 } from "./command-envelope";
+
+// Task 4: canonical JSON SHA-256 hashing (Packet 4C)
+export {
+  sha256DigestSchema,
+  canonicalizeJson,
+  hashCanonicalJson,
+  hashCommandEnvelope,
+  type Sha256Digest,
+} from "./canonical-json";
+
+// Task 4: command errors and receipts (Packet 4C)
+export {
+  COMMAND_ERROR_CODES,
+  commandErrorCodeSchema,
+  commandReceiptSchema,
+  type CommandErrorCode,
+  type CommandReceipt,
+} from "./command-receipt";

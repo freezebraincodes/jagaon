@@ -416,6 +416,15 @@ describe("public barrel", () => {
     // Task 3 command envelope
     "recordHeadExpectationSchema",
     "createCommandEnvelopeSchema",
+    // Task 4 canonical JSON hashing (Packet 4C)
+    "sha256DigestSchema",
+    "canonicalizeJson",
+    "hashCanonicalJson",
+    "hashCommandEnvelope",
+    // Task 4 command errors and receipts (Packet 4C)
+    "COMMAND_ERROR_CODES",
+    "commandErrorCodeSchema",
+    "commandReceiptSchema",
   ]);
 
   it("exports every approved contract", () => {
