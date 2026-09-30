@@ -1,5 +1,5 @@
 /**
- * Narrow storage barrel for Packet 4F1 and Packet 4F2.
+ * Narrow storage barrel for Packet 4F1 through Packet 4F3.
  *
  * Exports only the approved Packet 4F1 constants, types, class, and factory,
  * plus the Packet 4F2 strict stored-row contracts and validation codecs.
@@ -63,3 +63,43 @@ export {
   type StoredRecordRevision,
   type StoredRecordRevisionCodec,
 } from "./stored-record-revision";
+
+// --- Packet 4F3 authoritative repositories ---
+
+export {
+  eventSequenceHighWaterMarkRowSchema,
+  type EventSequenceHighWaterMarkRow,
+} from "./event-sequence-metadata";
+
+export {
+  CommandTransactionError,
+  createAuthoritativeCommandStore,
+  type CommandTransactionErrorCode,
+  type PreparedDomainEvent,
+  type SafetyTransactionParticipation,
+  type AuthoritativeCommitPlan,
+  type TerminalReceiptPlan,
+  type AuthoritativeCommandPlan,
+  type AuthoritativeCommandStore,
+} from "./authoritative-command-transaction";
+
+export {
+  WorkLeaseError,
+  createEventWorkRepository,
+  type WorkLeaseErrorCode,
+  type WorkClaimRequest,
+  type PlannedCommandInput,
+  type WorkTransitionState,
+  type EventWorkRepository,
+} from "./event-work-repository";
+
+export {
+  createBootstrapLocaleRepository,
+  type BootstrapLocaleRepository,
+} from "./bootstrap-locale-repository";
+
+export {
+  DEMO_STORAGE_RESET_CONFIRMATION,
+  resetSyntheticDemoStorage,
+  type SyntheticDemoStorageResetRequest,
+} from "./demo-storage-reset";

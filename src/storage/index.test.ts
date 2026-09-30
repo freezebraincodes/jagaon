@@ -31,6 +31,30 @@ import {
   type StoredTemporalIndexFields,
   type StoredRecordRevision,
   type StoredRecordRevisionCodec,
+  // Packet 4F3 exports
+  CommandTransactionError,
+  createAuthoritativeCommandStore,
+  type CommandTransactionErrorCode,
+  type PreparedDomainEvent,
+  type SafetyTransactionParticipation,
+  type AuthoritativeCommitPlan,
+  type TerminalReceiptPlan,
+  type AuthoritativeCommandPlan,
+  type AuthoritativeCommandStore,
+  WorkLeaseError,
+  createEventWorkRepository,
+  type WorkLeaseErrorCode,
+  type WorkClaimRequest,
+  type PlannedCommandInput,
+  type WorkTransitionState,
+  type EventWorkRepository,
+  eventSequenceHighWaterMarkRowSchema,
+  type EventSequenceHighWaterMarkRow,
+  createBootstrapLocaleRepository,
+  type BootstrapLocaleRepository,
+  DEMO_STORAGE_RESET_CONFIRMATION,
+  resetSyntheticDemoStorage,
+  type SyntheticDemoStorageResetRequest,
 } from "./index";
 
 // Compile-time fixture: confirm the approved Packet 4F1 public API is
@@ -136,8 +160,8 @@ describe("storage barrel Packet 4F2A exports", () => {
 });
 
 describe("storage barrel Packet 4F2 completion exports", () => {
-  it("has the exact approved runtime export manifest", () => {
-    expect(Object.keys(storage).sort()).toEqual([
+  it("retains every approved Packet 4F2 runtime export", () => {
+    const packet4F2Exports = [
       "IMPLEMENTED_STORAGE_ROW_TABLES",
       "JAGAON_DATABASE_NAME",
       "JAGAON_DEXIE_VERSION",
@@ -153,7 +177,10 @@ describe("storage barrel Packet 4F2 completion exports", () => {
       "createStoredRecordRevisionCodec",
       "implementedStorageRowCodecs",
       "storedEventWorkItemSchema",
-    ]);
+    ];
+    for (const exportedName of packet4F2Exports) {
+      expect(exportedName in storage).toBe(true);
+    }
     expect("createStorageRowCodec" in storage).toBe(false);
   });
 
@@ -188,5 +215,95 @@ describe("storage barrel Packet 4F2 completion exports", () => {
     expect(stored).toBeUndefined();
     expect(codec).toBeUndefined();
     expect(createStoredRecordRevisionCodec).toBeTypeOf("function");
+  });
+});
+
+describe("storage barrel Packet 4F3 exports", () => {
+  it("has the exact approved runtime export manifest", () => {
+    expect(Object.keys(storage).sort()).toEqual([
+      "CommandTransactionError",
+      "DEMO_STORAGE_RESET_CONFIRMATION",
+      "IMPLEMENTED_STORAGE_ROW_TABLES",
+      "JAGAON_DATABASE_NAME",
+      "JAGAON_DEXIE_VERSION",
+      "JAGAON_STORES_V1",
+      "JAGAON_TABLE_NAMES",
+      "JagaOnDatabase",
+      "StorageRowValidationError",
+      "WORK_PRIORITY_RANKS",
+      "WorkLeaseError",
+      "appPreferenceRowSchema",
+      "createAuthoritativeCommandStore",
+      "createBootstrapLocaleRepository",
+      "createEventWorkRepository",
+      "createJagaOnDatabase",
+      "createLanguagePreferenceRow",
+      "createStoredEventWorkItem",
+      "createStoredRecordRevisionCodec",
+      "eventSequenceHighWaterMarkRowSchema",
+      "implementedStorageRowCodecs",
+      "resetSyntheticDemoStorage",
+      "storedEventWorkItemSchema",
+    ]);
+    expect("eventSequenceHighWaterMarkRowCodec" in storage).toBe(false);
+    expect("workTable" in storage).toBe(false);
+  });
+
+  it("exports the authoritative transaction contracts", () => {
+    const errorCode: CommandTransactionErrorCode =
+      "COMMAND_REPLAY_MISMATCH";
+    const prepared: PreparedDomainEvent<never> | undefined = undefined;
+    const safety: SafetyTransactionParticipation = { kind: "NOT_REQUIRED" };
+    const commit: AuthoritativeCommitPlan<never, never, never, never, never> |
+      undefined = undefined;
+    const terminal: TerminalReceiptPlan | undefined = undefined;
+    const plan: AuthoritativeCommandPlan<never, never, never, never, never> |
+      undefined = undefined;
+    const store: AuthoritativeCommandStore<
+      never,
+      never,
+      never,
+      never,
+      never
+    > | undefined = undefined;
+    expect(errorCode).toBe("COMMAND_REPLAY_MISMATCH");
+    expect(prepared).toBeUndefined();
+    expect(safety.kind).toBe("NOT_REQUIRED");
+    expect(commit).toBeUndefined();
+    expect(terminal).toBeUndefined();
+    expect(plan).toBeUndefined();
+    expect(store).toBeUndefined();
+    expect(CommandTransactionError).toBeTypeOf("function");
+    expect(createAuthoritativeCommandStore).toBeTypeOf("function");
+  });
+
+  it("exports the durable-work repository contracts", () => {
+    const errorCode: WorkLeaseErrorCode = "LEASE_EXPIRED";
+    const claim: WorkClaimRequest | undefined = undefined;
+    const command: PlannedCommandInput | undefined = undefined;
+    const transition: WorkTransitionState | undefined = undefined;
+    const repository: EventWorkRepository | undefined = undefined;
+    expect(errorCode).toBe("LEASE_EXPIRED");
+    expect(claim).toBeUndefined();
+    expect(command).toBeUndefined();
+    expect(transition).toBeUndefined();
+    expect(repository).toBeUndefined();
+    expect(WorkLeaseError).toBeTypeOf("function");
+    expect(createEventWorkRepository).toBeTypeOf("function");
+  });
+
+  it("exports metadata, locale, and guarded demo-reset contracts", () => {
+    const metadata: EventSequenceHighWaterMarkRow | undefined = undefined;
+    const locale: BootstrapLocaleRepository | undefined = undefined;
+    const reset: SyntheticDemoStorageResetRequest | undefined = undefined;
+    expect(metadata).toBeUndefined();
+    expect(locale).toBeUndefined();
+    expect(reset).toBeUndefined();
+    expect(eventSequenceHighWaterMarkRowSchema).toBeDefined();
+    expect(createBootstrapLocaleRepository).toBeTypeOf("function");
+    expect(DEMO_STORAGE_RESET_CONFIRMATION).toBe(
+      "RESET_SYNTHETIC_DEMO_DATABASE",
+    );
+    expect(resetSyntheticDemoStorage).toBeTypeOf("function");
   });
 });
