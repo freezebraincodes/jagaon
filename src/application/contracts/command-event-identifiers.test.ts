@@ -425,6 +425,24 @@ describe("public barrel", () => {
     "COMMAND_ERROR_CODES",
     "commandErrorCodeSchema",
     "commandReceiptSchema",
+    // Packet 4D: immutable domain-event envelope
+    "eventRecordChangeSchema",
+    "createDomainEventEnvelopeSchema",
+    // Packet 4E: durable work contracts
+    "workItemIdSchema",
+    "createWorkItemId",
+    "CONSUMER_KEYS",
+    "consumerKeySchema",
+    "WORK_PRIORITIES",
+    "workPrioritySchema",
+    "WORK_ERROR_CODES",
+    "workErrorCodeSchema",
+    "WORK_OBSOLETE_REASON_CODES",
+    "workObsoleteReasonCodeSchema",
+    "eventWorkStateSchema",
+    "eventWorkItemSchema",
+    // Packet 4E: consumer receipts
+    "eventConsumerReceiptSchema",
   ]);
 
   it("exports every approved contract", () => {

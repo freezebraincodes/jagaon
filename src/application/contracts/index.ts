@@ -86,3 +86,40 @@ export {
   type CommandErrorCode,
   type CommandReceipt,
 } from "./command-receipt";
+
+// Packet 4D: immutable domain-event envelope (Section 3.2)
+export {
+  eventRecordChangeSchema,
+  createDomainEventEnvelopeSchema,
+  type EventRecordChange,
+  type DomainEventEnvelope,
+} from "./domain-event-envelope";
+
+// Packet 4E: durable work contracts (Section 4.1)
+export {
+  workItemIdSchema,
+  createWorkItemId,
+  CONSUMER_KEYS,
+  consumerKeySchema,
+  WORK_PRIORITIES,
+  workPrioritySchema,
+  WORK_ERROR_CODES,
+  workErrorCodeSchema,
+  WORK_OBSOLETE_REASON_CODES,
+  workObsoleteReasonCodeSchema,
+  eventWorkStateSchema,
+  eventWorkItemSchema,
+  type WorkItemId,
+  type ConsumerKey,
+  type WorkPriority,
+  type WorkErrorCode,
+  type WorkObsoleteReasonCode,
+  type EventWorkState,
+  type EventWorkItem,
+} from "./event-work";
+
+// Packet 4E: consumer receipts (Section 4.2)
+export {
+  eventConsumerReceiptSchema,
+  type EventConsumerReceipt,
+} from "./event-consumer-receipt";
