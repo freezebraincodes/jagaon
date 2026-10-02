@@ -59,11 +59,49 @@ describe("Packet 6 runtime import boundary", () => {
       file.startsWith("src/safety/") ||
       file.startsWith("src/learning/") ||
       file.startsWith("src/patterns/") ||
+      file.startsWith("src/inquiry/") ||
       /(?:^|\/)(?:live|google|onemap)[^/]*(?:provider|places|maps?)[^/]*\.[jt]sx?$/.test(file),
     );
 
     expect(forbidden, `Forbidden runtime imports:\n${forbidden.join("\n")}`).toEqual([]);
     expect(graph).toContain("src/app/page.tsx");
     expect(graph).toContain("src/components/jagaon/JagaOnApp.tsx");
+  });
+});
+
+describe("Packet 6A onboarding import boundary", () => {
+  const ONBOARDING_ENTRYPOINTS = [
+    "src/application/onboarding/demo-onboarding-contracts.ts",
+    "src/application/onboarding/demo-medicine-catalogue.ts",
+    "src/application/onboarding/demo-onboarding-repository.ts",
+    "src/application/onboarding/demo-onboarding-edits.ts",
+    "src/application/onboarding/prepared-onboarding-fixture.ts",
+    "src/components/jagaon/onboarding/OnboardingFlow.tsx",
+    "src/components/jagaon/screens/MyMedicinesScreen.tsx",
+  ];
+
+  it("imports no Safety, Learning, Pattern, Inquiry, AI, storage or journal write service", () => {
+    const graph = new Set<string>();
+    for (const entry of ONBOARDING_ENTRYPOINTS) {
+      for (const file of collectRuntimeGraph(join(PROJECT_ROOT, entry))) {
+        graph.add(relative(PROJECT_ROOT, file).replaceAll("\\", "/"));
+      }
+    }
+    const forbidden = [...graph].filter(
+      (file) =>
+        file.startsWith("src/domain/safety/") ||
+        file.startsWith("src/safety/") ||
+        file.startsWith("src/learning/") ||
+        file.startsWith("src/patterns/") ||
+        file.startsWith("src/inquiry/") ||
+        file.startsWith("src/ai/") ||
+        file.startsWith("src/storage/") ||
+        file.startsWith("src/repositories/") ||
+        file.startsWith("src/application/contracts/") ||
+        file.startsWith("src/application/journal/journal-command-service") ||
+        file.startsWith("src/application/journal/browser-journal-runtime"),
+    );
+    expect(forbidden, `Forbidden onboarding imports:\n${forbidden.join("\n")}`).toEqual([]);
+    expect(graph).toContain("src/application/onboarding/demo-onboarding-repository.ts");
   });
 });

@@ -8,6 +8,7 @@ import {
   forwardRef,
   useId,
 } from "react";
+import { AlertCircleIcon } from "./Icons";
 
 type FieldChromeProps = {
   /** Visible label; may include `sr-only` spans that complete the name. */
@@ -40,6 +41,7 @@ function FieldFooter({ fieldId, error, hint }: { fieldId: string; error?: string
       ) : null}
       {error ? (
         <p className="field-error" id={`${fieldId}-error`} role="alert">
+          <AlertCircleIcon size={20} />
           {error}
         </p>
       ) : null}

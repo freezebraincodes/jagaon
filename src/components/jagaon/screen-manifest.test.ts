@@ -4,6 +4,8 @@ import {
   TOP_LEVEL_SCREENS,
   PACKET_6_CHILD_SCREENS,
   PACKET_6_ENABLED_SCREENS,
+  PACKET_6A_CHILD_SCREENS,
+  ONBOARDING_ROUTES,
   type ScreenId,
 } from "./screen-manifest";
 
@@ -34,7 +36,21 @@ describe("screen-manifest", () => {
     expect(PACKET_6_ENABLED_SCREENS).toEqual([
       ...TOP_LEVEL_SCREENS,
       ...PACKET_6_CHILD_SCREENS,
+      ...PACKET_6A_CHILD_SCREENS,
     ]);
+  });
+
+  it("keeps onboarding routes closed and separate from bottom navigation", () => {
+    expect(ONBOARDING_ROUTES).toEqual([
+      "WELCOME", "PROFILE", "MEDICINES", "ADD_MEDICINE", "DIRECTIONS",
+      "REVIEW", "COMPLETE", "RESUME", "SKIPPED", "STORAGE_FAILURE",
+    ]);
+    expect(Object.isFrozen(ONBOARDING_ROUTES)).toBe(true);
+    for (const route of ONBOARDING_ROUTES) {
+      expect(ALL_SCREENS.has(route as ScreenId)).toBe(false);
+      expect(TOP_LEVEL_SCREENS).not.toContain(route);
+    }
+    expect(Object.isFrozen(PACKET_6A_CHILD_SCREENS)).toBe(true);
   });
 
   it("ALL_SCREENS matches the enabled set", () => {
@@ -44,8 +60,10 @@ describe("screen-manifest", () => {
     }
   });
 
-  it("has exactly the 11 screens named by the Packet 6 plan", () => {
-    expect(ALL_SCREENS.size).toBe(11);
+  it("has the 11 Packet 6 screens plus the Packet 6A My medicines screen", () => {
+    expect(PACKET_6A_CHILD_SCREENS).toEqual(["MY_MEDICINES"]);
+    expect(ALL_SCREENS.size).toBe(12);
+    expect(ALL_SCREENS.has("MY_MEDICINES")).toBe(true);
     expect(ALL_SCREENS.has("SETTINGS" as ScreenId)).toBe(false);
   });
 

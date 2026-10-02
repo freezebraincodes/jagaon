@@ -10,8 +10,31 @@ import type { JagaOnRuntime } from "@/application/journal/browser-journal-runtim
 import { getMessages } from "@/i18n/get-messages";
 import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-fixture";
 import { JagaOnApp } from "./JagaOnApp";
+import {
+  createDemoOnboardingRepository,
+  createMemoryOnboardingStorage,
+  DEMO_ONBOARDING_STORAGE_KEY,
+  type DemoOnboardingStoragePort,
+} from "@/application/onboarding/demo-onboarding-repository";
+import { createPreparedOnboardingState } from "@/application/onboarding/prepared-onboarding-fixture";
+import type { DemoOnboardingStateV1 } from "@/application/onboarding/demo-onboarding-contracts";
 
 afterEach(() => cleanup());
+
+const NOW = "2026-10-02T08:00:00.000Z";
+
+/** Onboarding storage seeded with a raw payload under the versioned key. */
+function onboardingStorage(payload?: DemoOnboardingStateV1 | string, extra: Record<string, string> = {}) {
+  const initial: Record<string, string> = { ...extra };
+  if (payload !== undefined) {
+    initial[DEMO_ONBOARDING_STORAGE_KEY] = typeof payload === "string" ? payload : JSON.stringify(payload);
+  }
+  const storage: DemoOnboardingStoragePort = createMemoryOnboardingStorage(initial);
+  return { storage, factory: () => createDemoOnboardingRepository(storage) };
+}
+
+/** A completed prepared setup, so journal tests start on Today. */
+const completed = () => onboardingStorage(createPreparedOnboardingState("en-SG", NOW)).factory;
 
 const committed: JournalCommitResult = {
   kind: "COMMITTED",
@@ -141,9 +164,29 @@ function fakeRuntime(): JagaOnRuntime {
 }
 
 describe("JagaOnApp journal integration", () => {
+  it("does not erase IndexedDB when onboarding storage cannot be cleared", async () => {
+    const messages = getMessages("en-SG");
+    const runtime = fakeRuntime();
+    const state = createPreparedOnboardingState("en-SG", NOW);
+    const repository = createDemoOnboardingRepository({
+      getItem: () => JSON.stringify(state),
+      setItem: () => undefined,
+      removeItem: () => {
+        throw new Error("storage unavailable");
+      },
+    });
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={() => repository} />);
+    await screen.findByRole("button", { name: messages.today.recordReading });
+    fireEvent.click(screen.getByRole("button", { name: messages.shared.navMore }));
+    fireEvent.click(screen.getByRole("button", { name: messages.settings.resetAction }));
+    fireEvent.click(screen.getByRole("button", { name: messages.settings.resetConfirm }));
+    expect(await screen.findByText(messages.shared.storageUnavailable)).toBeInTheDocument();
+    expect(runtime.resetDemo).not.toHaveBeenCalled();
+  });
+
   it("refreshes Today from the query port after a committed glucose entry", async () => {
     const runtime = fakeRuntime();
-    render(<JagaOnApp runtimeFactory={async () => runtime} />);
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} />);
 
     await waitFor(() => expect(runtime.query.loadToday).toHaveBeenCalledTimes(1));
 
@@ -167,7 +210,7 @@ describe("JagaOnApp journal integration", () => {
     const en = getMessages("en-SG");
     const zh = getMessages("zh-SG");
     const runtime = fakeRuntime();
-    render(<JagaOnApp runtimeFactory={async () => runtime} />);
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} />);
 
     await screen.findByRole("button", { name: en.today.recordReading });
     fireEvent.click(screen.getByRole("button", { name: en.today.recordReading }));
@@ -215,8 +258,12 @@ describe("JagaOnApp journal integration", () => {
 
     fireEvent.click(screen.getByRole("button", { name: en.shared.navMore }));
     fireEvent.click(screen.getByRole("button", { name: en.medication.screenTitle }));
+    // My medicines (management list) links to the reviewed information.
+    expect(screen.getByRole("heading", { level: 1, name: en.medication.screenTitle })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.medicineInformationLink }));
     expect((await screen.findAllByText(en.medication.reviewedTag)).length).toBeGreaterThan(0);
     expect(screen.getAllByText(en.medication.recordedVerbatim).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
     fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
 
     fireEvent.click(screen.getByRole("button", { name: new RegExp(en.more.foodInformation) }));
@@ -247,7 +294,9 @@ describe("JagaOnApp journal integration", () => {
     fireEvent.click(screen.getByRole("button", { name: zh.settings.resetAction }));
     fireEvent.click(screen.getByRole("button", { name: zh.settings.resetConfirm }));
 
-    expect(await screen.findByText(en.today.greeting("Alex"))).toBeInTheDocument();
+    // A full demo reset clears IndexedDB and the onboarding key: back to Welcome.
+    expect(await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
     expect(runtime.resetDemo).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("6.8")).not.toBeInTheDocument();
     expect(screen.queryByText("Brown rice")).not.toBeInTheDocument();
@@ -297,7 +346,7 @@ describe("JagaOnApp journal integration", () => {
     runtime.commands.recordInsulin = vi.fn(async () => ({ kind: "FAILED", code: "COMMIT_FAILED" }) as const);
     runtime.commands.recordMeal = vi.fn(async () => ({ kind: "FAILED", code: "VALIDATION_FAILED" }) as const);
 
-    render(<JagaOnApp runtimeFactory={async () => runtime} />);
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} />);
     await screen.findByRole("button", { name: en.today.recordReading });
     await waitFor(() => expect(screen.getByRole("button", { name: en.today.recordReading })).toBeEnabled());
     const todayText = () => screen.getByRole("main").textContent;
@@ -351,7 +400,7 @@ describe("JagaOnApp journal integration", () => {
   it("shows Booklet and History as disabled later-packet tabs that never navigate", async () => {
     const en = getMessages("en-SG");
     const runtime = fakeRuntime();
-    render(<JagaOnApp runtimeFactory={async () => runtime} />);
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} />);
     await screen.findByRole("button", { name: en.today.recordReading });
 
     const nav = screen.getByRole("navigation");
@@ -369,5 +418,123 @@ describe("JagaOnApp journal integration", () => {
       fireEvent.click(tab);
       expect(within(nav).getByRole("button", { name: en.shared.navToday })).toHaveAttribute("aria-current", "page");
     }
+  });
+});
+
+describe("JagaOnApp onboarding startup gate", () => {
+  const en = getMessages("en-SG");
+
+  function start(storage: ReturnType<typeof onboardingStorage>) {
+    const runtime = fakeRuntime();
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={storage.factory} />);
+    return runtime;
+  }
+
+  it("opens Welcome with no bottom navigation when nothing is saved", async () => {
+    start(onboardingStorage());
+    expect(await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["malformed JSON", "{oops"],
+    ["an unknown version", JSON.stringify({ ...createPreparedOnboardingState("en-SG", NOW), schemaVersion: 9 })],
+  ])("clears only the onboarding key and opens Welcome for %s", async (_label, payload) => {
+    const storage = onboardingStorage(payload, { "jagaon:other": "keep" });
+    start(storage);
+    expect(await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle })).toBeInTheDocument();
+    expect(storage.storage.getItem(DEMO_ONBOARDING_STORAGE_KEY)).toBeNull();
+    expect(storage.storage.getItem("jagaon:other")).toBe("keep");
+  });
+
+  it("opens Resume for an in-progress setup", async () => {
+    start(
+      onboardingStorage({
+        ...createPreparedOnboardingState("en-SG", NOW),
+        status: "IN_PROGRESS",
+        lastCompletedStep: "PROFILE",
+      }),
+    );
+    expect(await screen.findByRole("heading", { level: 1, name: en.onboarding.resumeTitle })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+  });
+
+  it("opens Today with the setup's name, locale and medicines once completed", async () => {
+    const zh = getMessages("zh-SG");
+    start(onboardingStorage({ ...createPreparedOnboardingState("zh-SG", NOW), preferredName: "陈女士（示例）" }));
+    expect(await screen.findByRole("heading", { level: 1, name: zh.today.greeting("陈女士（示例）") })).toBeInTheDocument();
+    expect(screen.getByRole("navigation")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Nocturin pen (demo)" })).toBeInTheDocument();
+  });
+
+  it("opens a neutral Today with no medicines after an explicit skip, and adds one from there", async () => {
+    const storage = onboardingStorage({
+      schemaVersion: 1,
+      status: "SKIPPED",
+      lastCompletedStep: null,
+      locale: "en-SG",
+      preferredName: null,
+      medicines: [],
+      updatedAt: NOW,
+    });
+    start(storage);
+    expect(await screen.findByRole("heading", { level: 1, name: en.today.greetingNoName })).toBeInTheDocument();
+    expect(screen.getByText(en.today.noMedicinesTitle)).toBeInTheDocument();
+    expect(screen.getByText(en.today.noMedicinesNotMissed)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: en.today.addRecord })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.addMedicine }));
+    expect(screen.getByRole("heading", { level: 1, name: en.medication.screenTitle })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.addMedicine }));
+    fireEvent.click(screen.getByRole("radio", { name: /Veltora pen \(demo\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: en.shared.continue }));
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.saveRecorded }));
+    expect(screen.getByRole("heading", { level: 1, name: en.medication.screenTitle })).toBeInTheDocument();
+    const saved = JSON.parse(storage.storage.getItem(DEMO_ONBOARDING_STORAGE_KEY)!);
+    expect(saved).toMatchObject({ status: "COMPLETED" });
+    expect(saved.medicines[0]).toMatchObject({ displayName: "Veltora pen (demo)", reviewedContentKey: "insulin-aspart" });
+
+    fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
+    expect(screen.getByRole("group", { name: "Veltora pen (demo)" })).toBeInTheDocument();
+  });
+
+  it("enters the journal from completion and hands Review my medicines to My medicines", async () => {
+    start(onboardingStorage());
+    await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle });
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.startSetup }));
+    fireEvent.click(screen.getByRole("button", { name: en.shared.continue }));
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.addMedicine }));
+    fireEvent.click(screen.getByRole("radio", { name: /Glucotab \(demo\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: en.shared.continue }));
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.saveRecorded }));
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.finishSetup }));
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.reviewMedicines }));
+    expect(screen.getByRole("heading", { level: 1, name: en.medication.screenTitle })).toBeInTheDocument();
+    expect(screen.getByText("Glucotab (demo)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
+    expect(screen.getByRole("navigation")).toBeInTheDocument();
+  });
+
+  it("does not claim reset success when the onboarding key cannot be cleared", async () => {
+    const storage = onboardingStorage(createPreparedOnboardingState("en-SG", NOW));
+    const failing = {
+      factory: () =>
+        createDemoOnboardingRepository({
+          ...storage.storage,
+          getItem: storage.storage.getItem,
+          setItem: storage.storage.setItem,
+          removeItem: () => {
+            throw new Error("blocked");
+          },
+        }),
+    };
+    start({ ...storage, factory: failing.factory });
+    await screen.findByRole("button", { name: en.today.recordReading });
+    fireEvent.click(screen.getByRole("button", { name: en.shared.navMore }));
+    fireEvent.click(screen.getByRole("button", { name: en.settings.resetAction }));
+    fireEvent.click(screen.getByRole("button", { name: en.settings.resetConfirm }));
+    expect(await screen.findByText(en.shared.storageUnavailable)).toBeInTheDocument();
+    expect(screen.queryByText(en.settings.resetDone)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1, name: en.onboarding.welcomeTitle })).not.toBeInTheDocument();
   });
 });

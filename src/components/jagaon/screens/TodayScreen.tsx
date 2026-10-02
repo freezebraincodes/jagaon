@@ -1,7 +1,10 @@
 "use client";
 
 import { type AppMessages, type SupportedLocale } from "@/i18n/types";
-import type { DemoPatientProfile } from "@/application/governed/demo-scenario-fixture";
+import {
+  isDemoInsulinPrescription,
+  type DemoPatientProfile,
+} from "@/application/governed/demo-scenario-fixture";
 import type { ScreenId } from "../screen-manifest";
 import type {
   TodayJournalEntry,
@@ -18,6 +21,7 @@ import {
   CircleIcon,
   DropIcon,
   PencilIcon,
+  PillIcon,
   PlusIcon,
   WalkIcon,
 } from "../primitives/Icons";
@@ -30,6 +34,7 @@ import {
 } from "../journal/singapore-time";
 import { storedGlucoseContextLabel } from "../journal/glucose-context";
 import { labelAndValue } from "../locale-format";
+import { sourceLabel } from "../onboarding/medicine-labels";
 
 type TodayScreenProps = {
   messages: AppMessages;
@@ -101,6 +106,9 @@ export function TodayScreen({
 }: TodayScreenProps) {
   const msg = messages.today;
   const greetingName = locale === "zh-SG" ? fixture.displayNameZh : fixture.displayName;
+  const prescriptions = fixture.recordedPrescriptions;
+  const allPens = prescriptions.length > 0 && prescriptions.every((p) => p.catalogueForm === "PRE_FILLED_PEN");
+  const canRecordInsulin = prescriptions.some(isDemoInsulinPrescription);
   const todayEntries = journal.entries.filter((entry) =>
     isSameSingaporeDay(occurrenceOf(entry), now),
   );
@@ -129,7 +137,7 @@ export function TodayScreen({
     <div className="today-screen">
       <header className="today-header">
         <p className="today-date">{formatSingaporeLongDate(locale, now)}</p>
-        <h1 className="today-greeting">{msg.greeting(greetingName)}</h1>
+        <h1 className="today-greeting">{greetingName ? msg.greeting(greetingName) : msg.greetingNoName}</h1>
       </header>
 
       {journal.unavailable ? (
@@ -221,61 +229,81 @@ export function TodayScreen({
 
       <section className="today-card" aria-labelledby="insulin-today-heading">
         <h2 id="insulin-today-heading" className="eyebrow">
-          {msg.insulinToday}
+          {allPens ? msg.insulinToday : msg.medicinesToday}
         </h2>
-        <div className="insulin-list">
-          {fixture.recordedPrescriptions.map((prescription) => {
-            const recorded = todayEntries.find(
-              (entry) =>
-                entry.recordType === "MEDICATION_EVENT" &&
-                entry.displayContext === prescription.medicationRecordId,
-            );
-            const recordedText = recorded
-              ? (insulinAmountText(messages, recorded) ??
-                messages.shared.recordedAt(formatSingaporeTime(locale, occurrenceOf(recorded))))
-              : null;
-            return (
-              <div
-                key={prescription.medicationId}
-                className="insulin-item"
-                role="group"
-                aria-labelledby={`insulin-${prescription.medicationId}`}
+        {prescriptions.length === 0 ? (
+          <>
+            {/* Frame 31: nothing recorded is stated neutrally, never as missed. */}
+            <div className="today-empty-medicines">
+              <PillIcon size={28} />
+              <p className="today-empty-title">{msg.noMedicinesTitle}</p>
+              <p>{msg.noMedicinesNotMissed}</p>
+            </div>
+            <button type="button" className="btn btn-outline btn-wide" onClick={() => navigate("MY_MEDICINES")}>
+              <PlusIcon size={22} />
+              {messages.onboarding.addMedicine}
+            </button>
+            <p className="provenance-line">{msg.noMedicinesNote}</p>
+          </>
+        ) : (
+          <>
+            <div className="insulin-list">
+              {prescriptions.map((prescription) => {
+                const recorded = todayEntries.find(
+                  (entry) =>
+                    entry.recordType === "MEDICATION_EVENT" &&
+                    entry.displayContext === prescription.medicationRecordId,
+                );
+                const recordedText = recorded
+                  ? (insulinAmountText(messages, recorded) ??
+                    messages.shared.recordedAt(formatSingaporeTime(locale, occurrenceOf(recorded))))
+                  : null;
+                return (
+                  <div
+                    key={prescription.medicationRecordId}
+                    className="insulin-item"
+                    role="group"
+                    aria-labelledby={`insulin-${prescription.medicationRecordId}`}
+                  >
+                    <h3 id={`insulin-${prescription.medicationRecordId}`} className="insulin-name">
+                      {prescription.displayName}
+                    </h3>
+                    <dl className="insulin-facts">
+                      <div className="insulin-fact">
+                        <dt className="eyebrow">{msg.scheduled}</dt>
+                        <dd>
+                          <CalendarIcon size={18} />
+                          {prescription.scheduledTime ?? messages.onboarding.unknownValue}
+                        </dd>
+                      </div>
+                      <div className={`insulin-fact ${recorded ? "insulin-fact--recorded" : ""}`}>
+                        <dt className="eyebrow">{msg.intakeRecord}</dt>
+                        <dd>
+                          {recorded ? <CheckIcon size={18} /> : <CircleIcon size={18} />}
+                          {recordedText ?? msg.notRecorded}
+                        </dd>
+                      </div>
+                    </dl>
+                    <p className="provenance-line">
+                      {labelAndValue(locale, messages.shared.source, sourceLabel(messages, prescription.source))}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+            {canRecordInsulin ? (
+              <button
+                type="button"
+                className="text-link text-link--large"
+                onClick={() => navigate("RECORD_INSULIN")}
+                disabled={actionsDisabled}
               >
-                <h3 id={`insulin-${prescription.medicationId}`} className="insulin-name">
-                  {prescription.displayName}
-                </h3>
-                <dl className="insulin-facts">
-                  <div className="insulin-fact">
-                    <dt className="eyebrow">{msg.scheduled}</dt>
-                    <dd>
-                      <CalendarIcon size={18} />
-                      {prescription.scheduledTime}
-                    </dd>
-                  </div>
-                  <div className={`insulin-fact ${recorded ? "insulin-fact--recorded" : ""}`}>
-                    <dt className="eyebrow">{msg.intakeRecord}</dt>
-                    <dd>
-                      {recorded ? <CheckIcon size={18} /> : <CircleIcon size={18} />}
-                      {recordedText ?? msg.notRecorded}
-                    </dd>
-                  </div>
-                </dl>
-                <p className="provenance-line">
-                  {labelAndValue(locale, messages.shared.source, prescription.provenance.detail)}
-                </p>
-              </div>
-            );
-          })}
-        </div>
-        <button
-          type="button"
-          className="text-link text-link--large"
-          onClick={() => navigate("RECORD_INSULIN")}
-          disabled={actionsDisabled}
-        >
-          <PlusIcon size={20} />
-          {msg.addRecord}
-        </button>
+                <PlusIcon size={20} />
+                {msg.addRecord}
+              </button>
+            ) : null}
+          </>
+        )}
       </section>
 
       <section className="summary-tiles" aria-label={msg.summaryTiles}>

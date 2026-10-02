@@ -10,7 +10,7 @@ describe("bilingual evidence — en-SG and zh-SG parity", () => {
     // Verify that every message section is present in both locales
     const sections = [
       "shared", "today", "glucose", "readingTime", "insulin",
-      "meal", "medication", "food", "more", "settings", "help",
+      "meal", "medication", "food", "more", "settings", "help", "onboarding",
     ] as const;
     for (const section of sections) {
       expect(en[section]).toBeDefined();
@@ -109,8 +109,8 @@ describe("bilingual evidence — en-SG and zh-SG parity", () => {
     expect(zh.today.futureFeature).toContain("后续演示阶段");
   });
 
-  it("all 11 Packet 6 screens are enabled (no Packet 7-9 routes)", () => {
-    expect(ALL_SCREENS.size).toBe(11);
+  it("all 11 Packet 6 screens plus My medicines are enabled (no Packet 7-9 routes)", () => {
+    expect(ALL_SCREENS.size).toBe(12);
     const deferred = [
       "TRENDS", "WEEKLY_TRENDS", "REMINDERS", "CREATE_REMINDER",
       "PREVENTIVE_CARE", "APPOINTMENTS", "SCHEDULE_APPOINTMENT",
@@ -123,26 +123,52 @@ describe("bilingual evidence — en-SG and zh-SG parity", () => {
 });
 
 describe("catalogue wording boundaries", () => {
-  function strings(obj: Record<string, unknown>): string[] {
-    return Object.values(obj).flatMap((value) => {
-      if (typeof value === "string") return [value];
-      if (typeof value === "function") return [String((value as (...a: unknown[]) => string)("X", "Y"))];
-      if (value && typeof value === "object") return strings(value as Record<string, unknown>);
+  function entries(obj: Record<string, unknown>, path = ""): Array<[string, string]> {
+    return Object.entries(obj).flatMap(([key, value]): Array<[string, string]> => {
+      const at = `${path}${key}`;
+      if (typeof value === "string") return [[at, value]];
+      if (typeof value === "function") return [[at, String((value as (...a: unknown[]) => string)("X", "Y"))]];
+      if (value && typeof value === "object") return entries(value as Record<string, unknown>, `${at}.`);
       return [];
     });
   }
 
+  // Approved sentences that name a prohibited idea only to deny it.
+  const DENIAL_SENTENCES = new Set([
+    "onboarding.noSensitiveData",
+    "onboarding.notMissed",
+    "onboarding.skippedBody",
+    "today.noMedicinesNotMissed",
+  ]);
+
   it("contains no diagnosis, risk, urgency, missed-dose or take-now wording in either locale", () => {
-    const en = strings(getMessages("en-SG"));
-    const zh = strings(getMessages("zh-SG"));
     const englishProhibited = [
       /\bmissed\b/i, /take now/i, /take it now/i, /\boverdue\b/i, /\brisk\b/i, /diagnos/i,
       /you should/i, /too (high|low)/i, /\bin range\b/i, /double (up|dose)/i, /catch[- ]up/i,
-      /lower gi/i, /healthier/i,
+      /lower gi/i, /healthier/i, /recommended dose/i,
     ];
-    const chineseProhibited = [/漏服/, /立即服用/, /过期未/, /风险/, /诊断/, /您应该/, /偏高了/, /偏低了/, /低GI/i, /较健康/];
-    for (const text of en) for (const pattern of englishProhibited) expect(text, text).not.toMatch(pattern);
-    for (const text of zh) for (const pattern of chineseProhibited) expect(text, text).not.toMatch(pattern);
+    const chineseProhibited = [/漏服/, /漏用/, /立即服用/, /过期未/, /风险/, /诊断/, /您应该/, /偏高了/, /偏低了/, /低GI/i, /较健康/];
+    for (const [key, text] of entries(getMessages("en-SG"))) {
+      if (DENIAL_SENTENCES.has(key)) continue;
+      for (const pattern of englishProhibited) expect(text, key).not.toMatch(pattern);
+    }
+    for (const [key, text] of entries(getMessages("zh-SG"))) {
+      if (DENIAL_SENTENCES.has(key)) continue;
+      for (const pattern of chineseProhibited) expect(text, key).not.toMatch(pattern);
+    }
+  });
+
+  it("keeps each denial sentence a denial in both locales", () => {
+    const en = getMessages("en-SG");
+    const zh = getMessages("zh-SG");
+    expect(en.onboarding.notMissed).toMatch(/does not mean/);
+    expect(en.today.noMedicinesNotMissed).toMatch(/does not mean/);
+    expect(en.onboarding.skippedBody).toMatch(/does not mean/);
+    expect(en.onboarding.noSensitiveData).toMatch(/does not ask/);
+    expect(zh.onboarding.notMissed).toMatch(/不代表/);
+    expect(zh.today.noMedicinesNotMissed).toMatch(/不代表/);
+    expect(zh.onboarding.skippedBody).toMatch(/不代表/);
+    expect(zh.onboarding.noSensitiveData).toMatch(/不会询问/);
   });
 
   it("keeps parameterised messages aligned across locales", () => {
@@ -156,5 +182,21 @@ describe("catalogue wording boundaries", () => {
       );
     }
     expect(shape(zh).sort()).toEqual(shape(en).sort());
+  });
+
+  it("passes user-entered onboarding values through unchanged in both locales", () => {
+    for (const locale of ["en-SG", "zh-SG"] as const) {
+      const msg = getMessages(locale).onboarding;
+      expect(msg.directionsFor("Oxatril (demo)")).toContain("Oxatril (demo)");
+      expect(msg.removeBody("Nocturin pen (demo)")).toContain("Nocturin pen (demo)");
+      expect(msg.editNamed("陈女士（示例）")).toContain("陈女士（示例）");
+    }
+  });
+
+  it("uses the design's compact bilingual boundary", () => {
+    expect(getMessages("en-SG").onboarding.compactBoundary).toBe(
+      "Hackathon demo. Synthetic data only. Not for patient use.",
+    );
+    expect(getMessages("zh-SG").onboarding.compactBoundary).toBe("黑客松演示。仅使用模拟资料。不供病患使用。");
   });
 });

@@ -1,8 +1,9 @@
 "use client";
 
-import { type ReactNode, type ButtonHTMLAttributes } from "react";
+import { type ReactNode, type ComponentPropsWithRef } from "react";
 
-type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+// React 19 passes `ref` as a prop, so callers can focus the button.
+type ButtonProps = ComponentPropsWithRef<"button"> & {
   variant?: "primary" | "secondary" | "outline" | "ghost";
   busy?: boolean;
   children: ReactNode;

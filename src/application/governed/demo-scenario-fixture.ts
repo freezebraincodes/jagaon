@@ -9,13 +9,20 @@
 
 import type { SupportedLocale } from "@/domain/patient-settings/locale";
 import type { RecordId, RevisionId } from "@/domain/shared/identifiers";
+import type {
+  DemoMedicineSource,
+  DemoOnboardingMedicine,
+  DemoOnboardingStateV1,
+} from "@/application/onboarding/demo-onboarding-contracts";
+import { findDemoCatalogueEntry, type DemoMedicineForm } from "@/application/onboarding/demo-medicine-catalogue";
+import { createPreparedOnboardingState } from "@/application/onboarding/prepared-onboarding-fixture";
 
 export type DemoPatientProfile = {
-  /** Display name shown in the greeting. */
-  displayName: string;
-  /** Locale-specific display name. */
-  displayNameZh: string;
-  /** All recorded prescriptions (verbatim, not translated). */
+  /** Greeting name exactly as entered during setup; null when not provided. */
+  displayName: string | null;
+  /** The same verbatim name; names are never translated. */
+  displayNameZh: string | null;
+  /** Medicines recorded during setup (verbatim, not translated). */
   recordedPrescriptions: readonly DemoRecordedPrescription[];
   /** Foods the person chose as their usuals; tapping one only fills text. */
   usualFoods: readonly DemoUsualFood[];
@@ -27,39 +34,48 @@ export type DemoPatientProfile = {
   defaultLocale: SupportedLocale;
 };
 
-export type DemoPrescriptionProvenance =
-  | { kind: "ENTERED_BY_USER"; detail: string }
-  | { kind: "TRANSCRIBED_FROM_DOCUMENT"; detail: string };
-
+/**
+ * View projection of one setup medicine. Unknown facts stay null and are
+ * shown as unknown; nothing is filled from another medicine.
+ */
 export type DemoRecordedPrescription = {
-  /** Source-bound medication ID. */
+  /** Governed content key for reviewed information, or an unmapped id. */
   medicationId: string;
   /** Stable synthetic revision reference used by the journal command. */
   medicationRecordId: RecordId;
   medicationRevisionId: RevisionId;
-  /** Medicine name as recorded (brand name in this scenario). */
+  /** Medicine name as recorded. */
   displayName: string;
-  /** Recorded generic name, shown as data. */
-  genericName: string;
-  /** Recorded form, as entered. */
-  form: string;
-  /** Recorded amount and unit, as entered. */
-  amountText: string;
-  /** Recorded timing or schedule, as entered. */
-  timingText: string;
-  /** Recorded effective date (YYYY-MM-DD). */
-  effectiveDate: string;
-  provenance: DemoPrescriptionProvenance;
-  /**
-   * Patient-entered or recorded direction text, shown verbatim.
-   * Not automatically translated.
-   */
-  recordedDirection: string;
-  /** Explicit display-only schedule supplied by the synthetic fixture. */
-  scheduledTime: string;
+  /** Visible generic identity, only for governed catalogue entries. */
+  genericName: string | null;
+  /** Catalogue form, used only to offer pens on the insulin screen. */
+  catalogueForm: DemoMedicineForm | null;
+  form: string | null;
+  strength: string | null;
+  amountText: string | null;
+  timingText: string | null;
+  effectiveDate: string | null;
+  source: DemoMedicineSource;
+  /** Recorded direction text, shown verbatim. Not automatically translated. */
+  recordedDirection: string | null;
+  /** The recorded schedule or timing, shown as entered. */
+  scheduledTime: string | null;
   /** Whether reviewed general info is available for this medicine. */
   hasReviewedInfo: boolean;
 };
+
+/**
+ * Only the two closed catalogue mappings with governed insulin content may
+ * enter the insulin-recording flow. A free-text medicine is never inferred
+ * to be insulin from its name, form or recorded directions.
+ */
+export function isDemoInsulinPrescription(
+  prescription: DemoRecordedPrescription,
+): boolean {
+  return prescription.catalogueForm === "PRE_FILLED_PEN" &&
+    (prescription.medicationId === "insulin-glargine" ||
+      prescription.medicationId === "insulin-aspart");
+}
 
 export type DemoUsualFood = {
   id: string;
@@ -87,47 +103,8 @@ export type DemoCareDate = {
 // Synthetic fixture data
 // ---------------------------------------------------------------------------
 
-const DEMO_PROFILE: DemoPatientProfile = Object.freeze({
-  displayName: "Alex",
-  displayNameZh: "陈先生",
-  recordedPrescriptions: Object.freeze([
-    Object.freeze({
-      medicationId: "insulin-glargine",
-      medicationRecordId: "00000000-0000-4000-8000-000000000101" as RecordId,
-      medicationRevisionId: "00000000-0000-4000-8000-000000000102" as RevisionId,
-      displayName: "Lantus",
-      genericName: "insulin glargine",
-      form: "Pre-filled pen, 100 units/mL",
-      amountText: "12 units",
-      timingText: "Daily · 9:00 pm",
-      effectiveDate: "2026-08-12",
-      provenance: Object.freeze({
-        kind: "ENTERED_BY_USER" as const,
-        detail: "Entered by you — checked 12 Sep 2026",
-      }),
-      recordedDirection: "Inject 12 units under the skin once daily at 9:00 pm.",
-      scheduledTime: "9:00 pm",
-      hasReviewedInfo: true,
-    }),
-    Object.freeze({
-      medicationId: "insulin-aspart",
-      medicationRecordId: "00000000-0000-4000-8000-000000000103" as RecordId,
-      medicationRevisionId: "00000000-0000-4000-8000-000000000104" as RevisionId,
-      displayName: "NovoRapid",
-      genericName: "insulin aspart",
-      form: "Pre-filled pen, 100 units/mL",
-      amountText: "6 units",
-      timingText: "With meals",
-      effectiveDate: "2026-08-12",
-      provenance: Object.freeze({
-        kind: "TRANSCRIBED_FROM_DOCUMENT" as const,
-        detail: "Jelutong Polyclinic (demo) prescription, 12 Aug 2026",
-      }),
-      recordedDirection: "Inject 6 units under the skin with meals.",
-      scheduledTime: "6:30 pm",
-      hasReviewedInfo: true,
-    }),
-  ]),
+/** Synthetic fixtures that onboarding never changes. */
+const UNCHANGED_FIXTURES = Object.freeze({
   usualFoods: Object.freeze([
     Object.freeze({ id: "usual-kaya-toast", kind: "FOOD" as const, label: "Kaya toast", quantityText: "2 slices" }),
     Object.freeze({ id: "usual-kopi-c-kosong", kind: "DRINK" as const, label: "Kopi C kosong", quantityText: "1 cup" }),
@@ -156,17 +133,58 @@ const DEMO_PROFILE: DemoPatientProfile = Object.freeze({
       enteredDateText: "Nov 2026",
     }),
   ]),
-  defaultLocale: "en-SG",
 });
 
 // ---------------------------------------------------------------------------
-// Fixture factory
+// Projection from the validated onboarding state
 // ---------------------------------------------------------------------------
 
-export function createDemoScenarioFixture(): DemoPatientProfile {
-  return DEMO_PROFILE;
+/**
+ * A second stable UUID for the synthetic revision reference: each hex digit
+ * of the last block is complemented, keeping the v4 version/variant digits.
+ */
+function demoRevisionId(id: string): RevisionId {
+  const head = id.slice(0, 24);
+  const tail = [...id.slice(24)].map((digit) => (15 - parseInt(digit, 16)).toString(16)).join("");
+  return `${head}${tail}` as RevisionId;
 }
 
-// Export for tests
-export const DEMO_DISPLAY_NAME = "Alex";
-export const DEMO_DISPLAY_NAME_ZH = "陈先生";
+function projectMedicine(medicine: DemoOnboardingMedicine): DemoRecordedPrescription {
+  return Object.freeze({
+    medicationId: medicine.reviewedContentKey ?? `demo-medicine:${medicine.id}`,
+    medicationRecordId: medicine.id as RecordId,
+    medicationRevisionId: demoRevisionId(medicine.id),
+    displayName: medicine.displayName,
+    genericName: medicine.genericName,
+    catalogueForm: findDemoCatalogueEntry(medicine.catalogueKey)?.form ?? null,
+    form: medicine.form,
+    strength: medicine.strength,
+    amountText: medicine.amountAndUnit,
+    timingText: medicine.scheduleOrTiming,
+    effectiveDate: medicine.effectiveDate,
+    source: medicine.source,
+    recordedDirection: medicine.verbatimDirections,
+    scheduledTime: medicine.scheduleOrTiming,
+    hasReviewedInfo: medicine.reviewedContentKey !== null,
+  });
+}
+
+const PREPARED_TIMESTAMP = "2026-10-02T00:00:00.000Z";
+
+/**
+ * Projects validated setup state into the view fixture without creating
+ * any authoritative record. A skipped setup has no medicines. With no
+ * state, the prepared synthetic profile is used.
+ */
+export function createDemoScenarioFixture(state?: DemoOnboardingStateV1 | null): DemoPatientProfile {
+  const source = state ?? createPreparedOnboardingState("en-SG", PREPARED_TIMESTAMP);
+  return Object.freeze({
+    ...UNCHANGED_FIXTURES,
+    displayName: source.preferredName,
+    displayNameZh: source.preferredName,
+    recordedPrescriptions: Object.freeze(
+      source.status === "SKIPPED" ? [] : source.medicines.map(projectMedicine),
+    ),
+    defaultLocale: source.locale,
+  });
+}

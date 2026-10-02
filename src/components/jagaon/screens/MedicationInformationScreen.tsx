@@ -5,6 +5,7 @@ import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { DemoPatientProfile } from "@/application/governed/demo-scenario-fixture";
 import { createMedicationInformationAdapter } from "@/application/governed/medication-information-adapter";
 import { labelAndValue } from "../locale-format";
+import { sourceLabel } from "../onboarding/medicine-labels";
 import {
   BookIcon,
   ChevronRightIcon,
@@ -24,15 +25,6 @@ type MedicationInformationScreenProps = {
   goBack: () => void;
 };
 
-function formatRecordedDate(locale: SupportedLocale, date: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    timeZone: "UTC",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(`${date}T00:00:00Z`));
-}
-
 export function MedicationInformationScreen({
   messages,
   locale,
@@ -50,16 +42,16 @@ export function MedicationInformationScreen({
           const info = adapter.getGeneralInfo(rx.medicationId, messages, locale);
           const reviewed = rx.hasReviewedInfo && info.available;
           const ids = {
-            name: `${rx.medicationId}-name`,
-            reviewed: `${rx.medicationId}-reviewed`,
-            recorded: `${rx.medicationId}-recorded`,
-            actions: `${rx.medicationId}-actions`,
+            name: `${rx.medicationRecordId}-name`,
+            reviewed: `${rx.medicationRecordId}-reviewed`,
+            recorded: `${rx.medicationRecordId}-recorded`,
+            actions: `${rx.medicationRecordId}-actions`,
           };
-          const provenanceLabel =
-            rx.provenance.kind === "ENTERED_BY_USER" ? msg.provenanceUser : msg.provenanceDocument;
+          const provenanceLabel = sourceLabel(messages, rx.source);
+          const unknown = messages.onboarding.unknownValue;
 
           return (
-            <article key={rx.medicationId} className="medication-card" aria-labelledby={ids.name}>
+            <article key={rx.medicationRecordId} className="medication-card" aria-labelledby={ids.name}>
               <header className="medication-header">
                 <span className="medication-mark" aria-hidden="true">
                   <PenIcon size={26} />
@@ -68,7 +60,7 @@ export function MedicationInformationScreen({
                   <h2 id={ids.name} className="medication-name">
                     {rx.displayName}
                   </h2>
-                  <p className="medication-generic">{rx.genericName}</p>
+                  {rx.genericName ? <p className="medication-generic">{rx.genericName}</p> : null}
                 </div>
               </header>
 
@@ -114,37 +106,37 @@ export function MedicationInformationScreen({
                 <dl className="recorded-facts">
                   <div>
                     <dt>{messages.insulin.medicineLabel}</dt>
-                    <dd>{`${rx.displayName} (${rx.genericName})`}</dd>
+                    <dd>{rx.genericName ? `${rx.displayName} (${rx.genericName})` : rx.displayName}</dd>
                   </div>
                   <div>
                     <dt>{msg.fieldForm}</dt>
-                    <dd>{rx.form}</dd>
+                    <dd>{rx.form ?? unknown}</dd>
                   </div>
                   <div>
                     <dt>{msg.fieldAmount}</dt>
-                    <dd>{rx.amountText}</dd>
+                    <dd>{rx.amountText ?? unknown}</dd>
                   </div>
                   <div>
                     <dt>{msg.fieldTiming}</dt>
-                    <dd>{rx.timingText}</dd>
+                    <dd>{rx.timingText ?? unknown}</dd>
                   </div>
                   <div>
                     <dt>{msg.fieldEffective}</dt>
-                    <dd>{formatRecordedDate(locale, rx.effectiveDate)}</dd>
+                    <dd>{rx.effectiveDate ?? unknown}</dd>
                   </div>
                   <div>
                     <dt>{msg.fieldProvenance}</dt>
-                    <dd>{rx.provenance.detail}</dd>
+                    <dd>{provenanceLabel}</dd>
                   </div>
                   <div>
                     <dt>{msg.fieldDirections}</dt>
                     <dd>
-                      <blockquote className="recorded-direction-text">{rx.recordedDirection}</blockquote>
+                      <blockquote className="recorded-direction-text">{rx.recordedDirection ?? unknown}</blockquote>
                     </dd>
                   </div>
                 </dl>
                 <p className="provenance-chip">
-                  {rx.provenance.kind === "ENTERED_BY_USER" ? <PencilIcon size={16} /> : <DocumentIcon size={16} />}
+                  {rx.source === "PATIENT_ENTERED" ? <PencilIcon size={16} /> : <DocumentIcon size={16} />}
                   {provenanceLabel}
                 </p>
                 <p className="provenance-line">{msg.recordedVerbatim}</p>
@@ -193,7 +185,7 @@ export function MedicationInformationScreen({
                     ) : null}
                     <div>
                       <dt>{msg.recordedTag}</dt>
-                      <dd>{`${provenanceLabel} · ${rx.provenance.detail}`}</dd>
+                      <dd>{provenanceLabel}</dd>
                     </div>
                   </dl>
                 </details>

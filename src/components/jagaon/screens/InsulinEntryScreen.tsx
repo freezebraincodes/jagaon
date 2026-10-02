@@ -2,8 +2,12 @@
 
 import { useState, type FormEvent } from "react";
 import { type AppMessages, type SupportedLocale } from "@/i18n/types";
-import type { DemoPatientProfile } from "@/application/governed/demo-scenario-fixture";
+import {
+  isDemoInsulinPrescription,
+  type DemoPatientProfile,
+} from "@/application/governed/demo-scenario-fixture";
 import { labelAndValue, labelWithAside } from "../locale-format";
+import { sourceLabel } from "../onboarding/medicine-labels";
 import { Banner } from "../primitives/Card";
 import { Button } from "../primitives/Button";
 import { ChoiceGroup } from "../primitives/ChoiceGroup";
@@ -52,9 +56,8 @@ export function InsulinEntryScreen({
   onCommitted,
 }: InsulinEntryScreenProps) {
   const msg = messages.insulin;
-  const [medicineId, setMedicineId] = useState(
-    fixture.recordedPrescriptions[0]?.medicationId ?? "",
-  );
+  const prescriptions = fixture.recordedPrescriptions.filter(isDemoInsulinPrescription);
+  const [medicineId, setMedicineId] = useState(prescriptions[0]?.medicationRecordId ?? "");
   const [amount, setAmount] = useState("");
   const [initialTime] = useState(() => singaporeNowParts().time);
   const [time, setTime] = useState(initialTime);
@@ -65,9 +68,8 @@ export function InsulinEntryScreen({
   const [notSaved, setNotSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const selectedPrescription = fixture.recordedPrescriptions.find(
-    (p) => p.medicationId === medicineId,
-  );
+  const selectedPrescription = prescriptions.find((p) => p.medicationRecordId === medicineId);
+  const unknown = messages.onboarding.unknownValue;
   const hasPositiveAmount = Number(amount.trim()) > 0;
   const instant = singaporeWallClockToInstant(singaporeNowParts().date, time);
   const timeText = instant
@@ -136,10 +138,10 @@ export function InsulinEntryScreen({
           legend={msg.medicineLabel}
           legendHidden
           variant="card"
-          options={fixture.recordedPrescriptions.map((p) => ({
-            value: p.medicationId,
+          options={prescriptions.map((p) => ({
+            value: p.medicationRecordId,
             label: p.displayName,
-            detail: p.genericName,
+            detail: p.genericName ?? undefined,
           }))}
           value={medicineId}
           onChange={(next) => {
@@ -158,13 +160,13 @@ export function InsulinEntryScreen({
               {labelAndValue(
                 locale,
                 msg.prescriptionSchedule,
-                `${selectedPrescription.amountText}, ${selectedPrescription.timingText}`,
+                `${selectedPrescription.amountText ?? unknown}, ${selectedPrescription.timingText ?? unknown}`,
               )}
             </p>
-            <p className="provenance-line">{selectedPrescription.provenance.detail}</p>
+            <p className="provenance-line">{sourceLabel(messages, selectedPrescription.source)}</p>
             <div className="recorded-direction-block">
               <p className="eyebrow eyebrow--small">{msg.recordedDirection}</p>
-              <p className="recorded-direction-text">{selectedPrescription.recordedDirection}</p>
+              <p className="recorded-direction-text">{selectedPrescription.recordedDirection ?? unknown}</p>
               <p className="provenance-line">{messages.medication.recordedVerbatim}</p>
             </div>
           </section>

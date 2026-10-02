@@ -34,7 +34,9 @@ export type ScreenId =
   /** Child: Food venue details (frame 07 details) */
   | "FOOD_VENUE_DETAILS"
   /** Child: Help and emergency information (frame 13) */
-  | "HELP_INFORMATION";
+  | "HELP_INFORMATION"
+  /** Child (Packet 6A): post-setup My medicines management */
+  | "MY_MEDICINES";
 
 // Settings (language and demo reset) render inside More, as in frame 12.
 
@@ -59,11 +61,21 @@ export const PACKET_6_CHILD_SCREENS: readonly ScreenId[] = Object.freeze([
   "HELP_INFORMATION",
 ]);
 
-/** Every Packet 6 enabled screen (top-level + children). */
+/** Packet 6A post-setup management destination, reached from More/Today. */
+export const PACKET_6A_CHILD_SCREENS: readonly ScreenId[] = Object.freeze(["MY_MEDICINES"]);
+
+/** Every enabled journal screen (top-level + Packet 6 and 6A children). */
 export const PACKET_6_ENABLED_SCREENS: readonly ScreenId[] = Object.freeze([
   ...TOP_LEVEL_SCREENS,
   ...PACKET_6_CHILD_SCREENS,
+  ...PACKET_6A_CHILD_SCREENS,
 ]);
+
+/**
+ * Closed first-run onboarding routes. They render in the onboarding shell
+ * (no bottom navigation) and are never journal screens or tabs.
+ */
+export { DEMO_ONBOARDING_ROUTES as ONBOARDING_ROUTES } from "@/application/onboarding/demo-onboarding-contracts";
 
 /**
  * The complete set of enabled screens, used by tests to verify

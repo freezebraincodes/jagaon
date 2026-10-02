@@ -547,9 +547,16 @@ h1[tabindex="-1"]:focus {
 }
 
 .field-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   font-size: 0.9375rem;
   color: var(--danger);
   font-weight: 700;
+}
+
+.field-error .icon {
+  margin-top: 1px;
 }
 
 .input {
@@ -2926,4 +2933,746 @@ button.summary-tile:hover:not(:disabled) {
   padding: 2px 8px;
   font-size: 0.875rem;
   font-weight: 800;
+}
+
+/* ------------------------------------------------------------------ */
+/* Packet 6A synthetic onboarding (frames 14–31)                        */
+/* ------------------------------------------------------------------ */
+
+.onboarding {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.onboarding-boundary {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background-color: var(--ink);
+  color: #fffdf8;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  margin-inline: calc(var(--gutter) * -1);
+  padding: calc(var(--safe-top) + 12px) 20px 14px;
+}
+
+.onboarding-boundary p {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
+.onboarding-boundary .icon {
+  margin-top: 2px;
+}
+
+.onboarding-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Senior-first practical targets: at least 56px throughout setup. */
+.onboarding .btn,
+.my-medicines .btn,
+.onboarding .text-link,
+.my-medicines .text-link,
+.onboarding .choice-face,
+.my-medicines .choice-face,
+.alert-dialog .btn {
+  min-height: 3.5rem;
+}
+
+.onboarding-topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.onboarding-back {
+  position: static;
+  flex-shrink: 0;
+}
+
+.onboarding-progress {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.onboarding-progress-text {
+  font-size: 0.9375rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.onboarding-progress-segments {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.onboarding-progress-segment {
+  height: 0.6rem;
+  border-radius: 999px;
+  border: 2px solid var(--line-strong);
+  background: var(--card);
+}
+
+/* Completed segments are filled AND the text names the step. */
+.onboarding-progress-segment.is-done {
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+.onboarding-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Welcome, completion and recovery keep their actions near the bottom. */
+.onboarding-page--spread {
+  min-height: calc(100dvh - 9rem);
+  justify-content: space-between;
+}
+
+.onboarding-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.onboarding-logo {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-family: var(--font-display);
+  font-size: 2.5rem;
+  font-weight: 800;
+  padding-top: 1rem;
+}
+
+.onboarding-logo-mark {
+  width: 3.75rem;
+  height: 3.75rem;
+  border-radius: var(--radius-md);
+  background: var(--terracotta);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.onboarding-title {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.onboarding-title:focus {
+  outline: none;
+}
+
+.onboarding-lead {
+  font-size: 1.1875rem;
+  line-height: 1.5;
+}
+
+.onboarding-lead--muted {
+  color: var(--ink-2);
+}
+
+.onboarding-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.onboarding-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.onboarding-footnote {
+  font-size: 1rem;
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+
+.onboarding-footnote--center {
+  text-align: center;
+}
+
+.onboarding-icon-tile {
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: var(--radius-sm);
+  background: var(--recess);
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.onboarding-icon-tile--large {
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: var(--radius-md);
+}
+
+/* Language picker: two large options, a check on the selected one. */
+.choice-group--language .choice-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+  gap: 12px;
+}
+
+.choice-group--language .choice {
+  display: flex;
+}
+
+.choice-group--language .choice-face {
+  width: 100%;
+  justify-content: center;
+  min-height: 4rem;
+  padding-inline: 0.75rem;
+  border-radius: var(--radius-md);
+  font-size: 1.375rem;
+  color: var(--ink);
+}
+
+.choice-group--language .choice-input:checked + .choice-face {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--card);
+}
+
+.choice-group--language .choice-input:checked + .choice-face .choice-check {
+  color: var(--card);
+  order: -1;
+}
+
+.notice--status {
+  border: 1px solid var(--line-strong);
+}
+
+.notice--status p + p {
+  margin-top: 6px;
+}
+
+.notice--compact {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 14px;
+  font-size: 0.9375rem;
+}
+
+.notice--compact .icon {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.notice--reviewed {
+  background: #dfe9f1;
+  color: var(--reviewed);
+  font-weight: 700;
+}
+
+/* Medicine list (frames 16, 21, 25) */
+.onboarding-empty {
+  border: 2px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  color: var(--ink-2);
+}
+
+.onboarding-empty-title {
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.medicine-cards {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.medicine-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.medicine-card.is-dimmed {
+  opacity: 0.55;
+}
+
+.medicine-card-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.medicine-card-names {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.medicine-card-name {
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.medicine-card-subtitle {
+  font-size: 1.0625rem;
+  color: var(--ink-2);
+}
+
+.medicine-card-directions {
+  font-size: 1.0625rem;
+  line-height: 1.5;
+}
+
+.medicine-card-label {
+  color: var(--ink-2);
+}
+
+.medicine-card-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.medicine-card-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+  gap: 10px;
+}
+
+/* Fictional catalogue selection (frames 17, 22, 23) */
+.field--search .input {
+  min-height: 4rem;
+  border-radius: var(--radius-md);
+}
+
+.recorded-exactly {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  font-size: 1.0625rem;
+  color: var(--ink-2);
+}
+
+.recorded-exactly strong {
+  color: var(--ink);
+  font-family: var(--font-display);
+}
+
+.catalogue-group {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.catalogue-group > legend {
+  margin-bottom: 10px;
+}
+
+.catalogue-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.catalogue-card {
+  position: relative;
+  display: flex;
+}
+
+.catalogue-card-face {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--card);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  min-height: 5.5rem;
+  cursor: pointer;
+}
+
+.catalogue-card--free .catalogue-card-face {
+  border-style: dashed;
+  border-color: var(--line-strong);
+}
+
+.catalogue-card-face:hover {
+  border-color: var(--terracotta-soft);
+}
+
+.choice-input:checked + .catalogue-card-face {
+  border: 2px solid var(--ink);
+  border-style: solid;
+  background: var(--card-2);
+}
+
+.choice-input:focus-visible + .catalogue-card-face {
+  outline: 3px solid var(--terracotta-dark);
+  outline-offset: 3px;
+}
+
+.catalogue-card-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.catalogue-card-name {
+  font-family: var(--font-display);
+  font-size: 1.3125rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.catalogue-card-subtitle {
+  font-size: 1rem;
+  color: var(--ink-2);
+}
+
+.catalogue-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.catalogue-card-check {
+  display: none;
+}
+
+.choice-input:checked + .catalogue-card-face .catalogue-card-check {
+  display: inline-block;
+}
+
+.reviewed-unavailable-note {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: var(--reviewed-tint);
+  border: 1px solid var(--reviewed-line);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  color: var(--ink);
+}
+
+.reviewed-unavailable-note .icon {
+  color: var(--reviewed);
+  margin-top: 2px;
+}
+
+/* Recorded directions and reviewed information (frames 18, 24) */
+.record-section-title {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.input--wrap {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.input--readonly {
+  background: var(--card-2);
+}
+
+.input--unknown {
+  background: var(--recess);
+  border-style: dashed;
+  color: var(--ink-2);
+}
+
+.fact-field {
+  gap: 6px;
+}
+
+.fact-unknown-toggle {
+  align-self: flex-start;
+  font-size: 1rem;
+}
+
+.fact-unknown-toggle[aria-pressed="true"] {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.about-section {
+  background: var(--reviewed-tint);
+  border-color: var(--reviewed-line);
+}
+
+.about-generic {
+  font-weight: 700;
+  color: var(--reviewed);
+}
+
+.about-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.about-fact-label {
+  font-size: 0.9375rem;
+  color: var(--ink-2);
+}
+
+.about-unavailable {
+  color: var(--ink);
+}
+
+.about-boundary {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+/* Review and completion (frames 19, 20) */
+.review-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.review-fact {
+  font-size: 1.125rem;
+  line-height: 1.5;
+}
+
+.review-fact-label {
+  color: var(--ink-2);
+}
+
+.completion-mark {
+  width: 6rem;
+  height: 6rem;
+  border-radius: 50%;
+  border: 3px dashed var(--green);
+  color: var(--green);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.check-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.check-list li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 1.125rem;
+  line-height: 1.45;
+}
+
+.check-list li .icon {
+  color: var(--green);
+  margin-top: 3px;
+}
+
+.check-list--pending li .icon {
+  color: var(--ink-2);
+}
+
+/* Storage failure (frame 28) */
+.failure-status {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line-strong);
+  background: var(--card-2);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  font-weight: 600;
+}
+
+/* Alert dialogs (frames 25, 30) */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: var(--gutter);
+  background: rgba(43, 38, 32, 0.35);
+  overflow-y: auto;
+}
+
+@media (min-width: 48rem) {
+  .dialog-backdrop {
+    align-items: center;
+  }
+}
+
+.alert-dialog {
+  width: 100%;
+  max-width: 30rem;
+  background: var(--card);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-lg);
+  padding: 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: calc(100dvh - 2 * var(--gutter));
+  overflow-y: auto;
+}
+
+.alert-dialog-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-display);
+  font-size: 1.625rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.alert-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 1.1875rem;
+  line-height: 1.5;
+}
+
+.alert-dialog-note {
+  color: var(--ink-2);
+}
+
+.btn-dark {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--card);
+}
+
+.btn-dark:hover:not(:disabled) {
+  background: #000;
+}
+
+.btn-dark:focus-visible {
+  outline-offset: 4px;
+}
+
+/* Destructive: outlined, labelled and iconed — never colour alone. */
+.btn-danger-outline {
+  background: var(--card);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn-danger-outline:hover:not(:disabled) {
+  background: var(--danger-tint);
+}
+
+/* Frame 31: Today with no medicines recorded */
+.today-empty-medicines {
+  border: 2px dashed var(--dash);
+  background: var(--recess);
+  border-radius: var(--radius-md);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  color: var(--ink-2);
+}
+
+.today-empty-title {
+  font-family: var(--font-display);
+  font-size: 1.3125rem;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+/* My medicines inside the journal shell: title clears the back button. */
+.app-main--child > .onboarding-page > .onboarding-title:first-child,
+.app-main--child > .my-medicines > .onboarding-page > .onboarding-title:first-child {
+  min-height: 3.5rem;
+  padding-left: 4.5rem;
+  display: flex;
+  align-items: center;
+}
+
+.my-medicines {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+@media (max-width: 22rem) {
+  .app-main--child > .onboarding-page > .onboarding-title:first-child,
+  .app-main--child > .my-medicines > .onboarding-page > .onboarding-title:first-child {
+    padding-left: 0;
+    padding-top: 4.25rem;
+  }
+}
+
+/* Inline source links still get a practical 56px target during setup. */
+.onboarding .source-attr a,
+.my-medicines .source-attr a {
+  min-height: 3.5rem;
+  display: inline-flex;
+  align-items: center;
 }

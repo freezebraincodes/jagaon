@@ -342,4 +342,67 @@ describe("TodayScreen", () => {
     expect(tile).toHaveTextContent(messages.today.enteredByYou);
     expect(within(tile).queryByRole("button")).not.toBeInTheDocument();
   });
+  it("shows frame 31 — no medicines recorded, never missed — after an explicit skip", () => {
+    const messages = getMessages("en-SG");
+    const navigate = vi.fn();
+    const skipped = createDemoScenarioFixture({
+      schemaVersion: 1,
+      status: "SKIPPED",
+      lastCompletedStep: null,
+      locale: "en-SG",
+      preferredName: null,
+      medicines: [],
+      updatedAt: "2026-10-02T04:00:00.000Z",
+    });
+    const { getByRole, getByText, queryByRole } = render(
+      <TodayScreen messages={messages} locale="en-SG" fixture={skipped} journal={journal} navigate={navigate} now={NOW} />,
+    );
+    expect(getByRole("heading", { level: 1, name: messages.today.greetingNoName })).toBeInTheDocument();
+    const medicines = getByRole("region", { name: messages.today.medicinesToday });
+    expect(within(medicines).getByText(messages.today.noMedicinesTitle)).toBeInTheDocument();
+    expect(within(medicines).getByText(messages.today.noMedicinesNotMissed)).toBeInTheDocument();
+    expect(getByText(messages.today.noMedicinesNote)).toBeInTheDocument();
+    expect(queryByRole("button", { name: messages.today.addRecord })).not.toBeInTheDocument();
+    expect(medicines.textContent).not.toMatch(/scheduled|due|overdue/i);
+    fireEvent.click(within(medicines).getByRole("button", { name: messages.onboarding.addMedicine }));
+    expect(navigate).toHaveBeenCalledWith("MY_MEDICINES");
+    // Unrelated synthetic sections keep working.
+    expect(getByRole("button", { name: messages.today.recordReading })).toBeInTheDocument();
+  });
+
+  it("titles the card by medicines when a non-pen medicine is recorded and offers insulin only for pens", () => {
+    const messages = getMessages("en-SG");
+    const base = createDemoScenarioFixture();
+    const tabletOnly = {
+      ...base,
+      recordedPrescriptions: [{ ...base.recordedPrescriptions[0]!, catalogueForm: "TABLET" as const, displayName: "Glucotab (demo)" }],
+    };
+    const { getByRole, queryByRole } = render(
+      <TodayScreen messages={messages} locale="en-SG" fixture={tabletOnly} journal={journal} navigate={vi.fn()} now={NOW} />,
+    );
+    expect(getByRole("heading", { name: messages.today.medicinesToday })).toBeInTheDocument();
+    expect(queryByRole("button", { name: messages.today.addRecord })).not.toBeInTheDocument();
+  });
+
+  it("does not offer insulin recording for an arbitrary free-text medicine", () => {
+    const messages = getMessages("en-SG");
+    const base = createDemoScenarioFixture();
+    const freeTextOnly = {
+      ...base,
+      recordedPrescriptions: [
+        {
+          ...base.recordedPrescriptions[0]!,
+          medicationId: "demo-medicine:free-text",
+          displayName: "Aspirin",
+          genericName: null,
+          catalogueForm: null,
+          hasReviewedInfo: false,
+        },
+      ],
+    };
+    const { queryByRole } = render(
+      <TodayScreen messages={messages} locale="en-SG" fixture={freeTextOnly} journal={journal} navigate={vi.fn()} now={NOW} />,
+    );
+    expect(queryByRole("button", { name: messages.today.addRecord })).not.toBeInTheDocument();
+  });
 });

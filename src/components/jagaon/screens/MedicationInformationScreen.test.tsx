@@ -34,9 +34,9 @@ describe("MedicationInformationScreen", () => {
       expect(reviewed).toHaveTextContent(messages.shared.reviewedOn("2026-10-02"));
       expect(within(reviewed).getByRole("link", { name: `${messages.shared.source}: HealthHub` }))
         .toHaveAttribute("href", expect.stringContaining("healthhub.sg"));
-      expect(recorded).toHaveTextContent(prescription.recordedDirection);
+      expect(recorded).toHaveTextContent(prescription.recordedDirection!);
       // Recorded directions never appear inside the reviewed region, and vice versa.
-      expect(reviewed).not.toHaveTextContent(prescription.recordedDirection);
+      expect(reviewed).not.toHaveTextContent(prescription.recordedDirection!);
       expect(recorded).not.toHaveTextContent(messages.medication.glarginePurpose);
     }
   });
@@ -62,7 +62,7 @@ describe("MedicationInformationScreen", () => {
     );
 
     for (const prescription of fixture.recordedPrescriptions) {
-      expect(screen.getByText(prescription.recordedDirection)).toBeInTheDocument();
+      expect(screen.getByText(prescription.recordedDirection!)).toBeInTheDocument();
     }
   });
 
@@ -113,18 +113,18 @@ describe("MedicationInformationScreen", () => {
     for (const rx of fixture.recordedPrescriptions) {
       const medicine = screen.getByRole("article", { name: rx.displayName });
       const recorded = within(medicine).getByRole("region", { name: messages.medication.recordedHeading });
-      for (const value of [rx.form, rx.amountText, rx.timingText, rx.provenance.detail, rx.recordedDirection]) {
-        expect(within(recorded).getByText(value)).toBeInTheDocument();
+      for (const value of [rx.form, rx.amountText, rx.timingText, rx.effectiveDate, rx.recordedDirection]) {
+        expect(within(recorded).getByText(value!)).toBeInTheDocument();
       }
       expect(recorded).toHaveTextContent(
-        rx.provenance.kind === "ENTERED_BY_USER"
-          ? messages.medication.provenanceUser
-          : messages.medication.provenanceDocument,
+        rx.source === "PRESCRIPTION_LABEL"
+          ? messages.onboarding.sourcePrescriptionLabel
+          : messages.onboarding.sourceCareTeam,
       );
       // Recorded directions never appear inside the reviewed panel.
       const reviewed = within(medicine).getByRole("region", { name: messages.medication.reviewedTag });
-      expect(reviewed).not.toHaveTextContent(rx.amountText);
-      expect(reviewed).not.toHaveTextContent(rx.recordedDirection);
+      expect(reviewed).not.toHaveTextContent(rx.amountText!);
+      expect(reviewed).not.toHaveTextContent(rx.recordedDirection!);
     }
   });
 
@@ -143,7 +143,36 @@ describe("MedicationInformationScreen", () => {
     expect(add).toHaveAccessibleDescription(messages.today.futureFeature);
     const history = within(actions).getByText(messages.medication.sourceHistory).closest("details")!;
     expect(history).toHaveTextContent("HealthHub");
-    expect(history).toHaveTextContent(fixture.recordedPrescriptions[0]!.provenance.detail);
+    expect(history).toHaveTextContent(messages.onboarding.sourcePrescriptionLabel);
     expect(screen.getByText(messages.medication.generalLimit)).toBeInTheDocument();
+  });
+  it("shows unknown setup facts as unknown and no reviewed content for free text", () => {
+    const source = createDemoScenarioFixture();
+    const messages = getMessages("en-SG");
+    const fixture = {
+      ...source,
+      recordedPrescriptions: [
+        {
+          ...source.recordedPrescriptions[0]!,
+          medicationId: "demo-medicine:55555555-5555-4555-8555-555555555555",
+          displayName: "Oxatril (demo)",
+          genericName: null,
+          form: null,
+          amountText: null,
+          timingText: null,
+          effectiveDate: null,
+          recordedDirection: null,
+          source: "UNKNOWN" as const,
+          hasReviewedInfo: false,
+        },
+      ],
+    };
+    render(<MedicationInformationScreen messages={messages} locale="en-SG" fixture={fixture} goBack={vi.fn()} />);
+    const medicine = screen.getByRole("article", { name: "Oxatril (demo)" });
+    const recorded = within(medicine).getByRole("region", { name: messages.medication.recordedHeading });
+    expect(within(recorded).getAllByText(messages.onboarding.unknownValue).length).toBeGreaterThanOrEqual(5);
+    const reviewed = within(medicine).getByRole("region", { name: messages.medication.reviewedTag });
+    expect(reviewed).toHaveTextContent(messages.medication.infoUnavailable);
+    expect(within(reviewed).queryByRole("link")).not.toBeInTheDocument();
   });
 });

@@ -54,7 +54,7 @@ export function MoreScreen({ messages, navigate, ...settings }: MoreScreenProps)
           <button
             type="button"
             className="more-tile"
-            onClick={() => navigate("MEDICATION_INFORMATION")}
+            onClick={() => navigate("MY_MEDICINES")}
           >
             <PillIcon size={30} className="icon more-tile-icon" />
             <span className="more-tile-label">{messages.medication.screenTitle}</span>

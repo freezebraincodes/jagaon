@@ -318,12 +318,12 @@ describe("glucose entry", () => {
 // Insulin (frame 04)
 // ---------------------------------------------------------------------------
 
-function renderInsulin(commands = serviceWith()) {
+function renderInsulin(commands = serviceWith(), scenario = fixture) {
   const view = render(
     <InsulinEntryScreen
       messages={en}
       locale="en-SG"
-      fixture={fixture}
+      fixture={scenario}
       commandService={commands}
       goBack={() => undefined}
     />,
@@ -335,7 +335,10 @@ function insulinAmountInput() {
   return screen.getByLabelText(/Amount taken \(units\)/);
 }
 
-const [lantus, novoRapid] = fixture.recordedPrescriptions as [
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const named = (text: string) => new RegExp(escape(text));
+
+const [nocturin, veltora] = fixture.recordedPrescriptions as [
   (typeof fixture.recordedPrescriptions)[number],
   (typeof fixture.recordedPrescriptions)[number],
 ];
@@ -352,14 +355,33 @@ describe("insulin entry", () => {
 
   it("offers the recorded medicines as cards with their recorded generic names", () => {
     renderInsulin();
-    const name = (rx: typeof lantus) => new RegExp(`^${rx.displayName}\\s*${rx.genericName}$`);
-    expect(screen.getByRole("radio", { name: name(lantus) })).toBeChecked();
-    expect(screen.getByRole("radio", { name: name(novoRapid) })).not.toBeChecked();
+    const name = (rx: typeof nocturin) => new RegExp(`^${escape(rx.displayName)}\\s*${escape(rx.genericName!)}$`);
+    expect(screen.getByRole("radio", { name: name(nocturin) })).toBeChecked();
+    expect(screen.getByRole("radio", { name: name(veltora) })).not.toBeChecked();
+  });
+
+  it("never offers an arbitrary free-text medicine as insulin", () => {
+    const freeTextOnly = {
+      ...fixture,
+      recordedPrescriptions: [
+        {
+          ...nocturin,
+          medicationId: "demo-medicine:free-text",
+          displayName: "Aspirin",
+          genericName: null,
+          catalogueForm: null,
+          hasReviewedInfo: false,
+        },
+      ],
+    };
+    renderInsulin(serviceWith(), freeTextOnly);
+    expect(screen.queryByRole("radio", { name: /Aspirin/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: en.insulin.saveAction })).toBeDisabled();
   });
 
   it("sends exactly the selected medicine, typed amount and time", async () => {
     const { commands } = renderInsulin();
-    fireEvent.click(screen.getByRole("radio", { name: new RegExp(novoRapid.displayName) }));
+    fireEvent.click(screen.getByRole("radio", { name: named(veltora.displayName) }));
     fireEvent.change(insulinAmountInput(), { target: { value: "6.5" } });
     fireEvent.change(screen.getByLabelText(en.insulin.timeLabel), {
       target: { value: "12:05" },
@@ -375,8 +397,8 @@ describe("insulin entry", () => {
       state: "TAKEN",
       medication: {
         recordType: "MEDICATION",
-        recordId: novoRapid.medicationRecordId,
-        revisionId: novoRapid.medicationRevisionId,
+        recordId: veltora.medicationRecordId,
+        revisionId: veltora.medicationRevisionId,
       },
       amountTaken: { kind: "KNOWN", amount: { value: "6.5", unit: "UNIT" } },
       patientNote: { text: "left arm", language: "en-SG" },
@@ -436,16 +458,16 @@ describe("insulin entry", () => {
     expect(commands.recordInsulin).not.toHaveBeenCalled();
   });
 
-  it("shows the selected medicine's recorded schedule and direction verbatim with provenance", () => {
+  it("shows the selected medicine's recorded schedule and direction verbatim with its source", () => {
     renderInsulin();
-    expect(screen.getByText(lantus.recordedDirection)).toBeInTheDocument();
-    expect(screen.getByText(lantus.provenance.detail)).toBeInTheDocument();
+    expect(screen.getByText(nocturin.recordedDirection!)).toBeInTheDocument();
+    expect(screen.getByText(en.onboarding.sourcePrescriptionLabel)).toBeInTheDocument();
     expect(
-      screen.getByText(`${en.insulin.prescriptionSchedule}: ${lantus.amountText}, ${lantus.timingText}`),
+      screen.getByText(`${en.insulin.prescriptionSchedule}: ${nocturin.amountText}, ${nocturin.timingText}`),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: new RegExp(novoRapid.displayName) }));
-    expect(screen.getByText(novoRapid.recordedDirection)).toBeInTheDocument();
-    expect(screen.queryByText(lantus.recordedDirection)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: named(veltora.displayName) }));
+    expect(screen.getByText(veltora.recordedDirection!)).toBeInTheDocument();
+    expect(screen.queryByText(nocturin.recordedDirection!)).not.toBeInTheDocument();
   });
 
   it("shows correction history as a disabled later-packet row", () => {
@@ -458,14 +480,14 @@ describe("insulin entry", () => {
   it("retains input after a failed write and retries with unchanged values", async () => {
     const recordInsulin = vi.fn().mockResolvedValueOnce(failed).mockResolvedValueOnce(committed);
     renderInsulin(serviceWith({ recordInsulin }));
-    fireEvent.click(screen.getByRole("radio", { name: new RegExp(novoRapid.displayName) }));
+    fireEvent.click(screen.getByRole("radio", { name: named(veltora.displayName) }));
     fireEvent.change(insulinAmountInput(), { target: { value: "4" } });
     fireEvent.change(screen.getByLabelText(en.insulin.timeLabel), { target: { value: "11:55" } });
     fireEvent.click(screen.getByRole("button", { name: en.insulin.saveAction }));
 
     expect(await screen.findByText(en.shared.notSaved)).toBeInTheDocument();
     expect(screen.queryByText(en.insulin.saved)).not.toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: new RegExp(novoRapid.displayName) })).toBeChecked();
+    expect(screen.getByRole("radio", { name: named(veltora.displayName) })).toBeChecked();
     expect(insulinAmountInput()).toHaveValue("4");
     expect(screen.getByLabelText(en.insulin.timeLabel)).toHaveValue("11:55");
 

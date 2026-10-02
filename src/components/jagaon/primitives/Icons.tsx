@@ -175,3 +175,18 @@ export const FilterIcon = (p: IconProps) => (
 export const StoreIcon = (p: IconProps) => (
   <Icon {...p}><path d="M4 9l1.5-5h13L20 9M4 9h16v3a3 3 0 0 1-6 0 3 3 0 0 1-4 0 3 3 0 0 1-6 0zM5 14v7h14v-7" /></Icon>
 );
+export const TrashIcon = (p: IconProps) => (
+  <Icon {...p}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M9 7V4h6v3" /></Icon>
+);
+export const QuoteIcon = (p: IconProps) => (
+  <Icon {...p}><path d="M7 8H4v6h3l-1 4M16 8h-3v6h3l-1 4" /></Icon>
+);
+export const AlertCircleIcon = (p: IconProps) => (
+  <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v6M12 16.5h.01" /></Icon>
+);
+export const SunIcon = (p: IconProps) => (
+  <Icon {...p}><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></Icon>
+);
+export const LoaderIcon = (p: IconProps) => (
+  <Icon {...p}><circle cx="12" cy="12" r="8" strokeDasharray="3 3" /></Icon>
+);

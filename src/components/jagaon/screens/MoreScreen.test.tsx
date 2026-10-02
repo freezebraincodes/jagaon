@@ -31,7 +31,7 @@ describe("MoreScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: new RegExp(messages.more.helpInfo) }));
 
     expect(navigate.mock.calls.map(([screenId]) => screenId)).toEqual([
-      "MEDICATION_INFORMATION",
+      "MY_MEDICINES",
       "NEARBY_FOOD",
       "HELP_INFORMATION",
     ]);

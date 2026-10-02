@@ -4,41 +4,38 @@ import { render, screen, cleanup } from "@testing-library/react";
 import Home from "@/app/page";
 
 describe("Home page", () => {
-  afterEach(() => cleanup());
-
-  it("renders the Packet 6 Today experience", () => {
-    render(<Home />);
-
-    const heading = screen.getByRole("heading", {
-      level: 1,
-      name: "Hello, Alex",
-    });
-    const action = screen.getByRole("button", { name: "Record a reading" });
-
-    expect(heading).toBeInTheDocument();
-    expect(action).toBeInTheDocument();
+  afterEach(() => {
+    cleanup();
+    // jsdom may not expose localStorage here; the app treats that as unavailable.
+    window.localStorage?.clear();
   });
 
-  it("shows the English demo boundary notice", () => {
+  it("opens the Packet 6A first-run Welcome when no demo setup is saved", async () => {
+    render(<Home />);
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Welcome to JagaOn" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start demo setup" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use the prepared demo profile" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+  });
+
+  it("shows the English demo boundary notice", async () => {
     render(<Home />);
     expect(
-      screen.getByText(
-        "Hackathon demo. This prototype uses synthetic data only and is not for patient use.",
-      ),
+      await screen.findByText("Hackathon demo. Synthetic data only. Not for patient use."),
     ).toBeInTheDocument();
   });
 
-  it("shows the Chinese demo boundary notice", () => {
+  it("shows the Chinese demo boundary notice", async () => {
     render(<Home />);
-    expect(
-      screen.getByText(
-        "黑客松演示版本。本原型只使用模拟资料，不可用于实际病患护理。",
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("黑客松演示。仅使用模拟资料。不供病患使用。")).toBeInTheDocument();
   });
 
-  it("does not contain prohibited HSA-status claims", () => {
+  it("does not contain prohibited HSA-status claims", async () => {
     const { container } = render(<Home />);
+    await screen.findByRole("heading", { level: 1 });
     const text = container.textContent ?? "";
     expect(text).not.toContain("HSA compliant");
     expect(text).not.toContain("HSA approved");

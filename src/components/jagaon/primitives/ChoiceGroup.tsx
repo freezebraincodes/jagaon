@@ -17,7 +17,7 @@ type ChoiceGroupProps<T extends string> = {
   options: readonly ChoiceOption<T>[];
   value: T | null;
   onChange: (value: T) => void;
-  variant?: "chip" | "card" | "segmented";
+  variant?: "chip" | "card" | "segmented" | "language";
   error?: string;
 };
 

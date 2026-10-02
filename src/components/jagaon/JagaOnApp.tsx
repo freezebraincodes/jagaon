@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SupportedLocale } from "@/domain/patient-settings/locale";
 import { getMessages } from "@/i18n/get-messages";
 import type { AppMessages } from "@/i18n/types";
@@ -25,6 +25,14 @@ import {
 } from "@/application/journal/browser-journal-runtime";
 import type { TodayJournalViewModel } from "@/application/journal/journal-contracts";
 import type { RecordId } from "@/domain/shared/identifiers";
+import type { DemoOnboardingStateV1 } from "@/application/onboarding/demo-onboarding-contracts";
+import {
+  createBrowserOnboardingStorage,
+  createDemoOnboardingRepository,
+  type DemoOnboardingRepository,
+} from "@/application/onboarding/demo-onboarding-repository";
+import { OnboardingFlow, type OnboardingExit } from "./onboarding/OnboardingFlow";
+import { MyMedicinesScreen, type MyMedicinesView } from "./screens/MyMedicinesScreen";
 
 // --- Section: Navigation state --------------------------------------------
 
@@ -35,7 +43,19 @@ type NavigationEntry = {
 
 type JagaOnAppProps = {
   runtimeFactory?: () => Promise<JagaOnRuntime>;
+  /** Injected for tests; defaults to the single versioned browser storage key. */
+  onboardingRepositoryFactory?: () => DemoOnboardingRepository;
 };
+
+/** Startup gate: onboarding until setup is completed or explicitly skipped. */
+type Phase =
+  | { kind: "LOADING" }
+  | { kind: "ONBOARDING"; initial: DemoOnboardingStateV1 | null }
+  | { kind: "APP" };
+
+function browserOnboardingRepository(): DemoOnboardingRepository {
+  return createDemoOnboardingRepository(createBrowserOnboardingStorage());
+}
 
 const EMPTY_TODAY: TodayJournalViewModel = Object.freeze({
   entries: [],
@@ -44,9 +64,13 @@ const EMPTY_TODAY: TodayJournalViewModel = Object.freeze({
 
 export function JagaOnApp({
   runtimeFactory = createBrowserJournalRuntime,
+  onboardingRepositoryFactory = browserOnboardingRepository,
 }: JagaOnAppProps = {}) {
-  const fixture = useMemo(() => createDemoScenarioFixture(), []);
-  const [locale, setLocale] = useState<SupportedLocale>(fixture.defaultLocale);
+  const [repository, setRepository] = useState<DemoOnboardingRepository | null>(null);
+  const [phase, setPhase] = useState<Phase>({ kind: "LOADING" });
+  const [onboarding, setOnboarding] = useState<DemoOnboardingStateV1 | null>(null);
+  const fixture = useMemo(() => createDemoScenarioFixture(onboarding), [onboarding]);
+  const [locale, setLocale] = useState<SupportedLocale>("en-SG");
   const messages = useMemo<AppMessages>(
     () => getMessages(locale),
     [locale],
@@ -57,6 +81,8 @@ export function JagaOnApp({
   ]);
   const [runtime, setRuntime] = useState<JagaOnRuntime | null>(null);
   const [today, setToday] = useState<TodayJournalViewModel>(EMPTY_TODAY);
+  /** True once a saved setup supplied the locale; it then wins over IndexedDB. */
+  const onboardingLocaleRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -74,7 +100,8 @@ export function JagaOnApp({
           return;
         }
         setRuntime(nextRuntime);
-        setLocale(resolvedLocale);
+        // The setup's own locale wins once onboarding state exists.
+        setLocale((current) => (onboardingLocaleRef.current ? current : resolvedLocale));
         setToday(todayView);
       })
       .catch(() => {
@@ -86,6 +113,31 @@ export function JagaOnApp({
       createdRuntime?.close();
     };
   }, [runtimeFactory]);
+
+  // Load the onboarding state on the client only (never during server
+  // rendering). Malformed state has already been cleared by the repository.
+  useEffect(() => {
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      const repo = onboardingRepositoryFactory();
+      const saved = repo.load();
+      setRepository(repo);
+      setOnboarding(saved);
+      if (saved) {
+        onboardingLocaleRef.current = true;
+        setLocale(saved.locale);
+      }
+      setPhase(
+        saved && (saved.status === "COMPLETED" || saved.status === "SKIPPED")
+          ? { kind: "APP" }
+          : { kind: "ONBOARDING", initial: saved },
+      );
+    });
+    return () => {
+      active = false;
+    };
+  }, [onboardingRepositoryFactory]);
 
   // Keep the document language in step with the UI so assistive technology
   // reads zh-SG copy with a Chinese voice.
@@ -106,6 +158,54 @@ export function JagaOnApp({
 
   const switchTab = useCallback((screen: ScreenId) => {
     setStack([{ screen }]);
+  }, []);
+
+  /** My medicines sub-views: add/directions push; list pops back to the list. */
+  const showMedicinesView = useCallback((view: MyMedicinesView, medicineId?: string) => {
+    setStack((prev) => {
+      const entry: NavigationEntry = {
+        screen: "MY_MEDICINES",
+        params: medicineId ? { view, medicineId } : { view },
+      };
+      if (view === "list") {
+        const index = prev.findLastIndex(
+          (candidate) => candidate.screen === "MY_MEDICINES" && (candidate.params?.view ?? "list") === "list",
+        );
+        return index >= 0 ? prev.slice(0, index + 1) : [...prev.slice(0, -1), entry];
+      }
+      const top = prev[prev.length - 1];
+      if (view === "directions" && top?.screen === "MY_MEDICINES" && top.params?.view === "add") {
+        return [...prev.slice(0, -1), entry];
+      }
+      return [...prev, entry];
+    });
+  }, []);
+
+  /** Persists a complete onboarding state from the journal side. */
+  const saveOnboarding = useCallback(
+    (next: DemoOnboardingStateV1) => {
+      if (!repository) return { ok: false as const, reason: "STORAGE_UNAVAILABLE" as const };
+      const result = repository.save({ ...next, updatedAt: new Date().toISOString() });
+      if (result.ok) setOnboarding(result.state);
+      return result;
+    },
+    [repository],
+  );
+
+  const finishOnboarding = useCallback((exit: OnboardingExit) => {
+    setOnboarding(exit.state);
+    setPhase({ kind: "APP" });
+    setStack(
+      exit.destination === "TODAY"
+        ? [{ screen: "TODAY" }]
+        : [
+            { screen: "TODAY" },
+            {
+              screen: "MY_MEDICINES",
+              params: { view: exit.destination === "MY_MEDICINES_ADD" ? "add" : "list" },
+            },
+          ],
+    );
   }, []);
 
   const refreshToday = useCallback(async () => {
@@ -212,14 +312,44 @@ export function JagaOnApp({
             persistLocale={async (nextLocale) => {
               if (!runtime) throw new Error("STORAGE_UNAVAILABLE");
               await runtime.persistLocale(nextLocale);
+              if (onboarding && !saveOnboarding({ ...onboarding, locale: nextLocale }).ok) {
+                throw new Error("STORAGE_UNAVAILABLE");
+              }
             }}
             resetDemo={async () => {
-              if (!runtime) throw new Error("STORAGE_UNAVAILABLE");
-              await runtime.resetDemo();
+              if (!runtime || !repository) throw new Error("STORAGE_UNAVAILABLE");
+              // Clear the small onboarding key first so a known adapter
+              // failure cannot erase the larger IndexedDB journal. If the
+              // IndexedDB reset then fails, restore the prior strict state.
+              if (!repository.clear().ok) throw new Error("STORAGE_UNAVAILABLE");
+              try {
+                await runtime.resetDemo();
+              } catch (error) {
+                if (onboarding) repository.save(onboarding);
+                throw error;
+              }
+              onboardingLocaleRef.current = false;
+              setOnboarding(null);
               setLocale("en-SG");
               setToday(await runtime.query.loadToday());
               setStack([{ screen: "TODAY" }]);
+              setPhase({ kind: "ONBOARDING", initial: null });
             }}
+          />
+        );
+      case "MY_MEDICINES":
+        if (!onboarding) return <p role="status">{messages.shared.loading}</p>;
+        return (
+          <MyMedicinesScreen
+            key={`${entry.params?.view ?? "list"}:${entry.params?.medicineId ?? ""}`}
+            messages={messages}
+            locale={locale}
+            state={onboarding}
+            view={(entry.params?.view as MyMedicinesView | undefined) ?? "list"}
+            medicineId={entry.params?.medicineId}
+            save={saveOnboarding}
+            navigate={navigate}
+            showView={showMedicinesView}
           />
         );
       case "HELP_INFORMATION":
@@ -244,6 +374,32 @@ export function JagaOnApp({
           <p className="app-status">{messages.shared.demoBoundary}</p>
         </main>
       </>
+    );
+  }
+
+  if (phase.kind === "LOADING") {
+    return (
+      <>
+        <DemoBoundaryNotice />
+        <main className="app-main">
+          <p role="status">{messages.shared.loading}</p>
+        </main>
+      </>
+    );
+  }
+
+  if (phase.kind === "ONBOARDING" && repository) {
+    // Bottom navigation stays hidden until setup is completed or skipped.
+    return (
+      <OnboardingFlow
+        key={phase.initial?.updatedAt ?? "fresh"}
+        messages={messages}
+        locale={locale}
+        onLocaleChange={setLocale}
+        repository={repository}
+        initialState={phase.initial}
+        onExit={finishOnboarding}
+      />
     );
   }
 

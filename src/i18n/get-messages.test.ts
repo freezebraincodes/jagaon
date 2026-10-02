@@ -36,6 +36,11 @@ describe("getMessages", () => {
     expect(getMessages("zh-SG").today.greeting("陈先生")).toBe("陈先生，您好");
   });
 
+  it("names the field on each unknown toggle with locale punctuation", () => {
+    expect(getMessages("en-SG").onboarding.iDontKnowNamed("Strength")).toBe("I don’t know — add later (Strength)");
+    expect(getMessages("zh-SG").onboarding.iDontKnowNamed("浓度")).toBe("我不知道——稍后添加（浓度）");
+  });
+
   it("interpolates resultsCount with a number", () => {
     expect(getMessages("en-SG").food.resultsCount(3)).toBe("3 places found");
     expect(getMessages("zh-SG").food.resultsCount(3)).toBe("找到 3 个地点");

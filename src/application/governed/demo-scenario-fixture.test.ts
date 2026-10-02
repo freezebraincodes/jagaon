@@ -1,62 +1,102 @@
 import { describe, it, expect } from "vitest";
-import {
-  createDemoScenarioFixture,
-  DEMO_DISPLAY_NAME,
-  DEMO_DISPLAY_NAME_ZH,
-} from "./demo-scenario-fixture";
+import { createDemoScenarioFixture } from "./demo-scenario-fixture";
+import { createPreparedOnboardingState } from "@/application/onboarding/prepared-onboarding-fixture";
+import type { DemoOnboardingStateV1 } from "@/application/onboarding/demo-onboarding-contracts";
+
+const NOW = "2026-10-02T08:00:00.000Z";
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 describe("demo-scenario-fixture", () => {
   const fixture = createDemoScenarioFixture();
 
-  it("provides a synthetic display name", () => {
-    expect(fixture.displayName).toBe(DEMO_DISPLAY_NAME);
-    expect(fixture.displayNameZh).toBe(DEMO_DISPLAY_NAME_ZH);
-  });
-
-  it("defaults to en-SG locale", () => {
+  it("defaults to the prepared synthetic profile", () => {
+    expect(fixture.displayName).toBe("Mdm Tan (demo)");
+    expect(fixture.displayNameZh).toBe("Mdm Tan (demo)");
     expect(fixture.defaultLocale).toBe("en-SG");
+    expect(fixture.recordedPrescriptions.map((p) => p.displayName)).toEqual([
+      "Nocturin pen (demo)",
+      "Veltora pen (demo)",
+    ]);
   });
 
-  it("has exactly two recorded prescriptions (glargine + aspart)", () => {
-    expect(fixture.recordedPrescriptions).toHaveLength(2);
-    expect(
-      fixture.recordedPrescriptions.some(
-        (p) => p.medicationId === "insulin-glargine",
-      ),
-    ).toBe(true);
-    expect(
-      fixture.recordedPrescriptions.some(
-        (p) => p.medicationId === "insulin-aspart",
-      ),
-    ).toBe(true);
+  it("uses governed content keys only for the exact catalogue mappings", () => {
+    const [nocturin, veltora] = fixture.recordedPrescriptions;
+    expect(nocturin).toMatchObject({ medicationId: "insulin-glargine", genericName: "insulin glargine", hasReviewedInfo: true });
+    expect(veltora).toMatchObject({ medicationId: "insulin-aspart", genericName: "insulin aspart", hasReviewedInfo: true });
   });
 
-  it("recorded directions are verbatim patient-entered text", () => {
-    const glargine = fixture.recordedPrescriptions.find(
-      (p) => p.medicationId === "insulin-glargine",
-    )!;
-    expect(glargine.recordedDirection).toContain("12 units");
-    expect(glargine.recordedDirection).not.toContain("Translate");
+  it("projects a completed setup verbatim, leaving unknown facts null", () => {
+    const state: DemoOnboardingStateV1 = {
+      ...createPreparedOnboardingState("zh-SG", NOW),
+      preferredName: "陈女士（示例）",
+      medicines: [
+        {
+          id: "55555555-5555-4555-8555-555555555555",
+          catalogueKey: null,
+          enteredName: "Oxatril (demo)",
+          displayName: "Oxatril (demo)",
+          genericName: null,
+          form: null,
+          strength: null,
+          amountAndUnit: null,
+          scheduleOrTiming: null,
+          effectiveDate: null,
+          verbatimDirections: "Take as written on my label",
+          source: "PATIENT_ENTERED",
+          reviewedContentKey: null,
+        },
+      ],
+    };
+    const projected = createDemoScenarioFixture(state);
+    expect(projected.displayName).toBe("陈女士（示例）");
+    expect(projected.displayNameZh).toBe("陈女士（示例）");
+    expect(projected.defaultLocale).toBe("zh-SG");
+    const [oxatril] = projected.recordedPrescriptions;
+    expect(oxatril).toMatchObject({
+      displayName: "Oxatril (demo)",
+      genericName: null,
+      amountText: null,
+      timingText: null,
+      scheduledTime: null,
+      recordedDirection: "Take as written on my label",
+      source: "PATIENT_ENTERED",
+      hasReviewedInfo: false,
+    });
+    // Never resolves to governed content for free text.
+    expect(oxatril!.medicationId).not.toMatch(/^insulin-/);
+    expect(oxatril!.medicationRecordId).toMatch(UUID_V4);
+    expect(oxatril!.medicationRevisionId).toMatch(UUID_V4);
+    expect(oxatril!.medicationRevisionId).not.toBe(oxatril!.medicationRecordId);
   });
 
-  it("keeps usual foods, activity and care dates as synthetic data only", () => {
+  it("projects a skipped setup with no medicines and no greeting name", () => {
+    const projected = createDemoScenarioFixture({
+      schemaVersion: 1,
+      status: "SKIPPED",
+      lastCompletedStep: null,
+      locale: "en-SG",
+      preferredName: null,
+      medicines: [],
+      updatedAt: NOW,
+    });
+    expect(projected.recordedPrescriptions).toEqual([]);
+    expect(projected.displayName).toBeNull();
+  });
+
+  it("keeps the unrelated synthetic meal, activity and care-date fixtures unchanged", () => {
+    const skipped = createDemoScenarioFixture({ ...createPreparedOnboardingState("en-SG", NOW), status: "SKIPPED" });
+    expect(skipped.usualFoods).toBe(fixture.usualFoods);
+    expect(skipped.activity).toBe(fixture.activity);
+    expect(skipped.careDates).toBe(fixture.careDates);
     expect(fixture.usualFoods.map((food) => food.label)).toContain("Kaya toast");
     for (const food of fixture.usualFoods) {
-      // A usual only carries the text the person would type; no nutrition data.
       expect(Object.keys(food).sort()).toEqual(["id", "kind", "label", "quantityText"]);
     }
     expect(fixture.activity.place).toContain("(demo)");
-    for (const date of fixture.careDates) {
-      expect(Object.keys(date).sort()).toEqual(["enteredDateText", "id", "kind", "label"]);
-    }
   });
 
-  it("does not provide a zh-SG translation of recorded directions", () => {
-    // Recorded text is not automatically translated
-    const glargine = fixture.recordedPrescriptions.find(
-      (p) => p.medicationId === "insulin-glargine",
-    )!;
-    // The direction should be English (not translated to Chinese)
-    expect(glargine.recordedDirection).toMatch(/Inject.*units/);
+  it("does not translate recorded directions", () => {
+    const zh = createDemoScenarioFixture(createPreparedOnboardingState("zh-SG", NOW));
+    expect(zh.recordedPrescriptions[0]!.recordedDirection).toBe("Inject 12 units every night at 9 pm (demo label)");
   });
 });
