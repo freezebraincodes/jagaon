@@ -6,14 +6,17 @@ import Home from "@/app/page";
 describe("Home page", () => {
   afterEach(() => cleanup());
 
-  it("renders the JagaOn heading and foundation status", () => {
+  it("renders the Packet 6 Today experience", () => {
     render(<Home />);
 
-    const heading = screen.getByRole("heading", { level: 1, name: "JagaOn" });
-    const status = screen.getByText("Project foundation is running");
+    const heading = screen.getByRole("heading", {
+      level: 1,
+      name: "Hello, Alex",
+    });
+    const action = screen.getByRole("button", { name: "Record a reading" });
 
     expect(heading).toBeInTheDocument();
-    expect(status).toBeInTheDocument();
+    expect(action).toBeInTheDocument();
   });
 
   it("shows the English demo boundary notice", () => {

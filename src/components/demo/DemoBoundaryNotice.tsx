@@ -10,8 +10,8 @@ export function DemoBoundaryNotice(): React.JSX.Element {
       aria-label="Public demo boundary notice"
       className="demo-boundary-notice"
     >
-      <p lang="en-SG">{en.demoBoundary}</p>
-      <p lang="zh-SG">{zh.demoBoundary}</p>
+      <p lang="en-SG">{en.shared.demoBoundary}</p>
+      <p lang="zh-SG">{zh.shared.demoBoundary}</p>
     </aside>
   );
 }
