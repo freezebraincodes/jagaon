@@ -8,6 +8,7 @@ import { ChoiceGroup } from "../primitives/ChoiceGroup";
 import { InputField } from "../primitives/Field";
 import { ClockIcon, DropIcon, HistoryIcon, SaveIcon } from "../primitives/Icons";
 import { Notice, ScreenHeader } from "../primitives/ScreenHeader";
+import { TimeWheel } from "../primitives/TimeWheel";
 import type {
   GlucoseRecordViewModel,
   JournalCommandService,
@@ -37,23 +38,9 @@ type ReadingTimeScreenProps = {
 
 type DayChoice = "TODAY" | "YESTERDAY" | "OTHER";
 
-const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
-const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, "0"));
-
 function storedContextCode(record: GlucoseRecordViewModel): string {
   const context = record.payload.context;
   return context.kind === "PATIENT_SELECTED_SLOT" ? context.slot : context.kind;
-}
-
-/** 24-hour "HH:mm" ↔ 12-hour wheel parts. */
-function toWheel(time: string) {
-  const [h = 0, m = 0] = time.split(":").map(Number);
-  return { hour: String(h % 12 === 0 ? 12 : h % 12), minute: String(m).padStart(2, "0"), pm: h >= 12 };
-}
-
-function fromWheel(hour: string, minute: string, pm: boolean): string {
-  const h = (Number(hour) % 12) + (pm ? 12 : 0);
-  return `${String(h).padStart(2, "0")}:${minute}`;
 }
 
 export function ReadingTimeScreen({
@@ -110,7 +97,6 @@ export function ReadingTimeScreen({
       : date === yesterday
         ? "YESTERDAY"
         : "OTHER";
-  const wheel = toWheel(time);
   const instant = singaporeWallClockToInstant(date, time);
 
   function changed(nextDate: string, nextTime: string) {
@@ -215,59 +201,13 @@ export function ReadingTimeScreen({
           />
         ) : null}
 
-        <fieldset className="time-wheel">
-          <legend className="eyebrow">{msg.whatTime}</legend>
-          <div className="time-wheel-band">
-            <label className="time-wheel-column">
-              <span className="sr-only">{msg.hourLabel}</span>
-              <select
-                className="time-wheel-select"
-                value={wheel.hour}
-                onChange={(e) => changed(date, fromWheel(e.target.value, wheel.minute, wheel.pm))}
-              >
-                {HOURS.map((hour) => (
-                  <option key={hour} value={hour}>
-                    {hour}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <span className="time-wheel-colon" aria-hidden="true">
-              :
-            </span>
-            <label className="time-wheel-column">
-              <span className="sr-only">{msg.minuteLabel}</span>
-              <select
-                className="time-wheel-select"
-                value={wheel.minute}
-                onChange={(e) => changed(date, fromWheel(wheel.hour, e.target.value, wheel.pm))}
-              >
-                {MINUTES.map((minute) => (
-                  <option key={minute} value={minute}>
-                    {minute}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="time-wheel-column">
-              <span className="sr-only">{msg.periodLabel}</span>
-              <select
-                className="time-wheel-select time-wheel-select--period"
-                value={wheel.pm ? "pm" : "am"}
-                onChange={(e) => changed(date, fromWheel(wheel.hour, wheel.minute, e.target.value === "pm"))}
-              >
-                <option value="am">{msg.am}</option>
-                <option value="pm">{msg.pm}</option>
-              </select>
-            </label>
-          </div>
-          <p className="time-wheel-hint">{msg.wheelHint}</p>
-          {timeError ? (
-            <p className="field-error" role="alert">
-              {timeError}
-            </p>
-          ) : null}
-        </fieldset>
+        <TimeWheel
+          legend={msg.whatTime}
+          value={time}
+          onChange={(nextTime) => changed(date, nextTime)}
+          messages={msg}
+          error={timeError ?? undefined}
+        />
 
         <details className="entry-details">
           <summary>{msg.typeInstead}</summary>

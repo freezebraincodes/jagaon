@@ -317,6 +317,7 @@ export function MealEntryScreen({
           label={msg.timeLabel}
           summary={timeText}
           editLabel={messages.readingTime.editTime}
+          editorMessages={messages.readingTime}
           type="time"
           value={time}
           onChange={(next) => {

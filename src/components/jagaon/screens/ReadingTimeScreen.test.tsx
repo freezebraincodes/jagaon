@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   GlucoseRecordViewModel,
@@ -93,9 +93,9 @@ describe("ReadingTimeScreen", () => {
     expect(screen.getByText("6.2")).toBeInTheDocument();
     expect(screen.getByText(en.glucose.contextBeforeBreakfast)).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: en.readingTime.dayToday })).toBeChecked();
-    expect(screen.getByLabelText(en.readingTime.hourLabel)).toHaveValue("7");
-    expect(screen.getByLabelText(en.readingTime.minuteLabel)).toHaveValue("48");
-    expect(screen.getByLabelText(en.readingTime.periodLabel)).toHaveValue("am");
+    expect(within(screen.getByRole("listbox", { name: en.readingTime.hourLabel })).getByRole("option", { selected: true })).toHaveTextContent("7");
+    expect(within(screen.getByRole("listbox", { name: en.readingTime.minuteLabel })).getByRole("option", { selected: true })).toHaveTextContent("48");
+    expect(within(screen.getByRole("listbox", { name: en.readingTime.periodLabel })).getByRole("option", { selected: true })).toHaveTextContent(en.readingTime.am);
     expect(screen.getByText(en.readingTime.sameAsCurrent)).toBeInTheDocument();
     expect(screen.getByText(en.readingTime.historyNote)).toBeInTheDocument();
   });
@@ -104,8 +104,10 @@ describe("ReadingTimeScreen", () => {
     const commandService = renderScreen();
     await loaded();
     fireEvent.click(screen.getByRole("radio", { name: en.readingTime.dayYesterday }));
-    fireEvent.change(screen.getByLabelText(en.readingTime.minuteLabel), { target: { value: "15" } });
-    fireEvent.change(screen.getByLabelText(en.readingTime.periodLabel), { target: { value: "pm" } });
+    const minute = screen.getByRole("listbox", { name: en.readingTime.minuteLabel });
+    fireEvent.keyDown(minute, { key: "Home" });
+    for (let index = 0; index < 15; index += 1) fireEvent.keyDown(minute, { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("listbox", { name: en.readingTime.periodLabel }), { key: "End" });
     expect(screen.getByLabelText(en.readingTime.newTime)).toHaveValue("19:15");
     expect(screen.queryByText(en.readingTime.sameAsCurrent)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: en.readingTime.saveOccurrence }));
@@ -140,9 +142,9 @@ describe("ReadingTimeScreen", () => {
     expect(dateInputs).toHaveLength(2);
     fireEvent.change(dateInputs[0]!, { target: { value: "2026-09-20" } });
     fireEvent.change(screen.getByLabelText(en.readingTime.newTime), { target: { value: "21:05" } });
-    expect(screen.getByLabelText(en.readingTime.hourLabel)).toHaveValue("9");
-    expect(screen.getByLabelText(en.readingTime.minuteLabel)).toHaveValue("05");
-    expect(screen.getByLabelText(en.readingTime.periodLabel)).toHaveValue("pm");
+    expect(within(screen.getByRole("listbox", { name: en.readingTime.hourLabel })).getByRole("option", { selected: true })).toHaveTextContent("9");
+    expect(within(screen.getByRole("listbox", { name: en.readingTime.minuteLabel })).getByRole("option", { selected: true })).toHaveTextContent("05");
+    expect(within(screen.getByRole("listbox", { name: en.readingTime.periodLabel })).getByRole("option", { selected: true })).toHaveTextContent(en.readingTime.pm);
     expect(screen.getByRole("radio", { name: en.readingTime.dayOther })).toBeChecked();
   });
 
@@ -159,7 +161,7 @@ describe("ReadingTimeScreen", () => {
   it("keeps the correction unsaved when the command fails", async () => {
     renderScreen(commands("FAILED"));
     await loaded();
-    fireEvent.change(screen.getByLabelText(en.readingTime.hourLabel), { target: { value: "8" } });
+    fireEvent.keyDown(screen.getByRole("listbox", { name: en.readingTime.hourLabel }), { key: "ArrowDown" });
     fireEvent.click(screen.getByRole("button", { name: en.readingTime.saveOccurrence }));
     expect(await screen.findByText(en.shared.notSaved)).toBeInTheDocument();
     expect(screen.queryByText(en.readingTime.saved)).not.toBeInTheDocument();

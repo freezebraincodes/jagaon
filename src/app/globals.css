@@ -2265,50 +2265,94 @@ button.summary-tile:hover:not(:disabled) {
 
 .time-wheel-band {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  max-width: 100%;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   padding: 28px 14px;
   background-image: linear-gradient(
-    transparent calc(50% - 2.25rem),
-    var(--terracotta-tint) calc(50% - 2.25rem),
-    var(--terracotta-tint) calc(50% + 2.25rem),
-    transparent calc(50% + 2.25rem)
+    transparent calc(50% - 1.75rem),
+    var(--terracotta-tint) calc(50% - 1.75rem),
+    var(--terracotta-tint) calc(50% + 1.75rem),
+    transparent calc(50% + 1.75rem)
   );
 }
 
-.time-wheel-column {
-  display: inline-flex;
-}
-
-.time-wheel-select {
-  appearance: none;
-  min-height: 4rem;
-  min-width: 4.5rem;
-  padding: 4px 12px;
+/* Keen Slider moves the wheel; these rules refine its base container styles. */
+.keen-slider.time-wheel-column {
+  --time-wheel-row: 3.5rem;
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  width: 4.5rem;
+  height: calc(var(--time-wheel-row) * 3);
+  overflow: hidden;
+  /* The wheel owns vertical drags; the page still scrolls from anywhere else. */
+  touch-action: none;
+  cursor: grab;
+  /* Rows fade towards the upper and lower edges, as on a physical wheel. */
+  -webkit-mask-image: linear-gradient(transparent, #000 30%, #000 70%, transparent);
+  mask-image: linear-gradient(transparent, #000 30%, #000 70%, transparent);
   border: 2px solid transparent;
   border-radius: var(--radius-sm);
-  background: transparent;
-  text-align: center;
-  text-align-last: center;
-  font: inherit;
-  font-family: var(--font-display);
-  font-size: 2.25rem;
-  font-weight: 800;
-  color: var(--ink);
-  cursor: pointer;
+  outline: none;
 }
 
-.time-wheel-select:hover {
+.keen-slider.time-wheel-column:active {
+  cursor: grabbing;
+}
+
+.keen-slider.time-wheel-column:last-child {
+  width: 5rem;
+}
+
+.time-wheel-column:hover {
   border-color: var(--terracotta-soft);
 }
 
-.time-wheel-select--period {
-  min-width: 5rem;
+.time-wheel-column:focus-visible {
+  border-color: var(--terracotta);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--terracotta) 22%, transparent);
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.time-wheel-option {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: var(--time-wheel-row);
+  padding: 0 0.25rem;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--ink-3);
+  text-align: center;
+  cursor: inherit;
+  will-change: transform, opacity;
+}
+
+.time-wheel-option[data-centred="true"],
+.time-wheel-option--current {
+  color: var(--ink);
+  font-size: 2.25rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .time-wheel-option {
+    will-change: auto;
+    transition: none;
+  }
 }
 
 .time-wheel-colon {

@@ -163,6 +163,7 @@ export function GlucoseEntryScreen({
           summary={whenText}
           hint={msg.timeNowHint}
           editLabel={messages.readingTime.editTime}
+          editorMessages={messages.readingTime}
           type="datetime-local"
           value={occurredAt}
           onChange={(next) => {

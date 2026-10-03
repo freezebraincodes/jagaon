@@ -88,10 +88,53 @@ function chooseContext(label: string) {
   fireEvent.click(screen.getByRole("radio", { name: label }));
 }
 
+function openTimeEditor(editLabel = en.readingTime.editTime) {
+  const edit = screen.getByRole("button", { name: editLabel });
+  if (edit.getAttribute("aria-expanded") !== "true") fireEvent.click(edit);
+}
+
+function setWheelTime(value: string) {
+  const [hour24Text = "0", minute = "00"] = value.split(":");
+  const hour24 = Number(hour24Text);
+  const setColumn = (label: string, steps: number) => {
+    const column = screen.getByRole("listbox", { name: label });
+    fireEvent.keyDown(column, { key: "Home" });
+    for (let index = 0; index < steps; index += 1) fireEvent.keyDown(column, { key: "ArrowDown" });
+  };
+  setColumn(en.readingTime.hourLabel, (hour24 % 12 === 0 ? 12 : hour24 % 12) - 1);
+  setColumn(en.readingTime.minuteLabel, Number(minute));
+  setColumn(en.readingTime.periodLabel, hour24 >= 12 ? 1 : 0);
+}
+
+function expectWheelTime(value: string) {
+  const [hour24Text = "0", minute = "00"] = value.split(":");
+  const hour24 = Number(hour24Text);
+  const selected = (label: string) =>
+    within(screen.getByRole("listbox", { name: label })).getByRole("option", { selected: true });
+  expect(selected(en.readingTime.hourLabel)).toHaveTextContent(
+    String(hour24 % 12 === 0 ? 12 : hour24 % 12),
+  );
+  expect(selected(en.readingTime.minuteLabel)).toHaveTextContent(minute);
+  expect(selected(en.readingTime.periodLabel)).toHaveTextContent(hour24 >= 12 ? en.readingTime.pm : en.readingTime.am);
+}
+
 function setGlucoseTime(value: string) {
-  fireEvent.change(screen.getByLabelText(en.glucose.occurrenceTime), {
-    target: { value },
-  });
+  openTimeEditor();
+  const [date = "", time = ""] = value.split("T");
+  const today = singaporeNowParts().date;
+  const yesterday = new Date(`${today}T12:00:00+08:00`);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const yesterdayDate = yesterday.toLocaleDateString("en-CA", { timeZone: "Asia/Singapore" });
+
+  if (date === today) {
+    fireEvent.click(screen.getByRole("radio", { name: en.readingTime.dayToday }));
+  } else if (date === yesterdayDate) {
+    fireEvent.click(screen.getByRole("radio", { name: en.readingTime.dayYesterday }));
+  } else {
+    fireEvent.click(screen.getByRole("radio", { name: en.readingTime.dayOther }));
+    fireEvent.change(screen.getByLabelText(en.readingTime.newDate), { target: { value: date } });
+  }
+  if (time) setWheelTime(time);
 }
 
 describe("glucose entry", () => {
@@ -226,6 +269,18 @@ describe("glucose entry", () => {
     expect(screen.getByText(/^Goes in your booklet as Before breakfast · /)).toBeInTheDocument();
   });
 
+  it("uses an in-app day and time wheel instead of a browser date-time picker", () => {
+    const { container } = renderGlucose();
+    fireEvent.click(screen.getByRole("button", { name: en.readingTime.editTime }));
+
+    expect(container.querySelector('input[type="datetime-local"]')).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: en.readingTime.dayToday })).toBeChecked();
+    expect(screen.getByRole("radio", { name: en.readingTime.dayYesterday })).not.toBeChecked();
+    expect(within(screen.getByRole("listbox", { name: en.readingTime.hourLabel })).getAllByRole("option")).toHaveLength(12);
+    expect(within(screen.getByRole("listbox", { name: en.readingTime.minuteLabel })).getAllByRole("option")).toHaveLength(60);
+    expect(within(screen.getByRole("listbox", { name: en.readingTime.periodLabel })).getAllByRole("option")).toHaveLength(2);
+  });
+
   it("rejects an occurrence time that is not a real date", async () => {
     const { commands } = renderGlucose();
     chooseContext(en.glucose.contextBedtime);
@@ -234,7 +289,7 @@ describe("glucose entry", () => {
     fireEvent.click(screen.getByRole("button", { name: en.glucose.saveAction }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(en.shared.requiredField);
-    expect(screen.getByLabelText(en.glucose.occurrenceTime)).toBeVisible();
+    expect(screen.getByRole("group", { name: en.glucose.occurrenceTime })).toBeVisible();
     expect(commands.recordGlucose).not.toHaveBeenCalled();
   });
 
@@ -270,7 +325,8 @@ describe("glucose entry", () => {
     expect(glucoseValueInput()).toHaveValue("6.8");
     expect(screen.getByRole("radio", { name: en.glucose.contextBeforeDinner })).toBeChecked();
     expect(screen.getByLabelText(en.glucose.methodLabel)).toHaveValue("FLASH_SENSOR");
-    expect(screen.getByLabelText(en.glucose.occurrenceTime)).toHaveValue("2026-10-02T12:10");
+    expect(screen.getByRole("radio", { name: en.readingTime.dayYesterday })).toBeChecked();
+    expectWheelTime("12:10");
     expect(
       screen.getByLabelText(`${en.glucose.noteLabel} (${en.shared.optional})`),
     ).toHaveValue("felt fine");
@@ -299,7 +355,9 @@ describe("glucose entry", () => {
   it("labels every control in zh-SG", () => {
     renderGlucose(serviceWith(), "zh-SG");
     expect(screen.getByLabelText(new RegExp(`${zh.glucose.valueLabel}`))).toBeInTheDocument();
-    expect(screen.getByLabelText(zh.glucose.occurrenceTime)).toBeInTheDocument();
+    openTimeEditor(zh.readingTime.editTime);
+    expect(screen.getByRole("group", { name: zh.glucose.occurrenceTime })).toBeInTheDocument();
+    expect(screen.getByRole("listbox", { name: zh.readingTime.hourLabel })).toBeInTheDocument();
     expect(screen.getByLabelText(zh.glucose.methodLabel)).toBeInTheDocument();
     expect(screen.getByRole("group", { name: zh.glucose.whenQuestion })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: zh.glucose.keypadLabel })).toBeInTheDocument();
@@ -384,9 +442,8 @@ describe("insulin entry", () => {
     const { commands } = renderInsulin();
     fireEvent.click(screen.getByRole("radio", { name: named(veltora.displayName) }));
     fireEvent.change(insulinAmountInput(), { target: { value: "6.5" } });
-    fireEvent.change(screen.getByLabelText(en.insulin.timeLabel), {
-      target: { value: "12:05" },
-    });
+    openTimeEditor();
+    setWheelTime("12:05");
     fireEvent.change(screen.getByLabelText(`${en.insulin.noteLabel} (${en.shared.optional})`), {
       target: { value: "left arm" },
     });
@@ -483,14 +540,15 @@ describe("insulin entry", () => {
     renderInsulin(serviceWith({ recordInsulin }));
     fireEvent.click(screen.getByRole("radio", { name: named(veltora.displayName) }));
     fireEvent.change(insulinAmountInput(), { target: { value: "4" } });
-    fireEvent.change(screen.getByLabelText(en.insulin.timeLabel), { target: { value: "11:55" } });
+    openTimeEditor();
+    setWheelTime("11:55");
     fireEvent.click(screen.getByRole("button", { name: en.insulin.saveAction }));
 
     expect(await screen.findByText(en.shared.notSaved)).toBeInTheDocument();
     expect(screen.queryByText(en.insulin.saved)).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: named(veltora.displayName) })).toBeChecked();
     expect(insulinAmountInput()).toHaveValue("4");
-    expect(screen.getByLabelText(en.insulin.timeLabel)).toHaveValue("11:55");
+    expectWheelTime("11:55");
 
     fireEvent.click(screen.getByRole("button", { name: en.insulin.saveAction }));
     expect(await screen.findByText(en.insulin.saved)).toBeInTheDocument();
@@ -585,8 +643,8 @@ describe("meal entry", () => {
     fireEvent.click(eggs);
     expect(kaya).toHaveAttribute("aria-pressed", "true");
     expect(eggs).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(screen.getByLabelText(en.meal.timeLabel));
-    fireEvent.change(screen.getByLabelText(en.meal.timeLabel), { target: { value: "08:10" } });
+    openTimeEditor();
+    setWheelTime("08:10");
     fireEvent.click(screen.getByRole("button", { name: en.meal.saveIntake }));
 
     await waitFor(() => expect(commands.recordMeal).toHaveBeenCalledTimes(1));
