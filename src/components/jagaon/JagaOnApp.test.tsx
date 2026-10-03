@@ -10,6 +10,7 @@ import type { JagaOnRuntime } from "@/application/journal/browser-journal-runtim
 import { getMessages } from "@/i18n/get-messages";
 import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-fixture";
 import { JagaOnApp } from "./JagaOnApp";
+import { APPOINTMENT_NOTE_SELECTION_KEY } from "@/application/history/appointment-note-selection";
 import {
   createDemoOnboardingRepository,
   createMemoryOnboardingStorage,
@@ -140,6 +141,7 @@ function fakeRuntime(): JagaOnRuntime {
       });
       return committed;
     }),
+    recordActivity: vi.fn(async () => committed),
   };
 
   const resetDemo = vi.fn(async () => {
@@ -155,6 +157,14 @@ function fakeRuntime(): JagaOnRuntime {
       loadGlucose: vi.fn(async (recordId) =>
         glucose?.recordId === recordId ? glucose : null,
       ),
+    },
+    history: {
+      load: vi.fn(async ({ period }: { period: "THIS_WEEK" | "LAST_WEEK" | "THIRTY_DAYS" }) => ({
+        status: "EMPTY" as const,
+        period,
+        range: { startDate: "2026-09-28" as never, endDate: "2026-10-04" as never },
+        unavailableFamilies: [],
+      })),
     },
     resolveLocale: vi.fn(async () => "en-SG" as const),
     persistLocale: vi.fn(async () => undefined),
@@ -397,7 +407,7 @@ describe("JagaOnApp journal integration", () => {
     // Today was never re-queried for a write that did not commit.
     expect(runtime.query.loadToday).toHaveBeenCalledTimes(1);
   });
-  it("shows Booklet and History as disabled later-packet tabs that never navigate", async () => {
+  it("keeps Booklet disabled and opens Recorded history as a top-level destination", async () => {
     const en = getMessages("en-SG");
     const runtime = fakeRuntime();
     render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} />);
@@ -411,13 +421,44 @@ describe("JagaOnApp journal integration", () => {
       en.shared.navHistory,
       en.shared.navMore,
     ]);
-    for (const label of [en.shared.navBooklet, en.shared.navHistory]) {
-      const tab = within(nav).getByRole("button", { name: label });
-      expect(tab).toHaveAttribute("aria-disabled", "true");
-      expect(tab).toHaveAccessibleDescription(en.today.futureFeature);
-      fireEvent.click(tab);
-      expect(within(nav).getByRole("button", { name: en.shared.navToday })).toHaveAttribute("aria-current", "page");
-    }
+    const booklet = within(nav).getByRole("button", { name: en.shared.navBooklet });
+    expect(booklet).toHaveAttribute("aria-disabled", "true");
+    expect(booklet).toHaveAccessibleDescription(en.today.futureFeature);
+    fireEvent.click(booklet);
+    expect(within(nav).getByRole("button", { name: en.shared.navToday })).toHaveAttribute("aria-current", "page");
+
+    const historyTab = within(nav).getByRole("button", { name: en.shared.navHistory });
+    expect(historyTab).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(historyTab);
+    expect(await screen.findByRole("heading", { level: 1, name: en.history.title })).toBeInTheDocument();
+    expect(await screen.findByText(en.history.emptyTitle)).toBeInTheDocument();
+    expect(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navHistory })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.queryByRole("button", { name: en.shared.back })).not.toBeInTheDocument();
+    expect(runtime.history.load).toHaveBeenCalledWith({ period: "THIS_WEEK" });
+  });
+
+  it("clears the local appointment-note selection on demo reset", async () => {
+    const en = getMessages("en-SG");
+    const runtime = fakeRuntime();
+    const selectionStorage = createMemoryOnboardingStorage({
+      [APPOINTMENT_NOTE_SELECTION_KEY]: JSON.stringify({ schemaVersion: 1, selections: [] }),
+    });
+    render(
+      <JagaOnApp
+        runtimeFactory={async () => runtime}
+        onboardingRepositoryFactory={completed()}
+        appointmentNoteStorageFactory={() => selectionStorage}
+      />,
+    );
+    await screen.findByRole("button", { name: en.today.recordReading });
+    fireEvent.click(screen.getByRole("button", { name: en.shared.navMore }));
+    fireEvent.click(screen.getByRole("button", { name: en.settings.resetAction }));
+    fireEvent.click(screen.getByRole("button", { name: en.settings.resetConfirm }));
+    await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle });
+    expect(selectionStorage.getItem(APPOINTMENT_NOTE_SELECTION_KEY)).toBeNull();
   });
 });
 

@@ -7,7 +7,12 @@ import type {
   CorrectGlucoseTimeInput,
   RecordInsulinInput,
   RecordMealInput,
+  RecordActivityInput,
 } from "./journal-contracts";
+import { createWorkItemId } from "@/application/contracts/event-work";
+import { intelligenceWorkItemsFor } from "@/application/intelligence/intelligence-subscriptions";
+import { activityEventPayloadSchema } from "@/domain/health-records/activity-event";
+import { activityTemporalSchema } from "@/domain/health-records/observation-temporal";
 import type { JagaOnDatabase } from "@/storage/database";
 import {
   createAuthoritativeCommandStore,
@@ -17,11 +22,13 @@ import {
   glucoseReadingRevisionCodec,
   medicationEventRevisionCodec,
   intakeEventRevisionCodec,
+  activityEventRevisionCodec,
   rejectingReverseDependencyCodec,
   rejectingEvaluationAuditCodec,
   type GlucoseReadingRevision,
   type MedicationEventRevision,
   type IntakeEventRevision,
+  type ActivityEventRevision,
   type Packet6JournalRevision,
 } from "./journal-row-codecs";
 import {
@@ -49,6 +56,7 @@ import { hashCommandEnvelope } from "@/application/contracts/canonical-json";
 import type { RecordHead } from "@/domain/shared/revision";
 import { CommandTransactionError } from "@/storage/authoritative-command-transaction";
 import { StorageRowValidationError } from "@/storage/storage-row-codec";
+import { committedDomainEventRowCodec } from "@/storage/committed-domain-event-row";
 
 // ---------------------------------------------------------------------------
 // Patient-entry provenance
@@ -77,8 +85,9 @@ type PersistedRevisionRow = {
   revisionCreatedAt: Instant;
   transactionId: TransactionId;
   auditEventId: AuditEventId;
-  temporalKind: "POINT";
+  temporalKind: "POINT" | "INTERVAL";
   occurrenceSortInstant?: Instant;
+  effectiveStartSortInstant?: Instant;
   localDateSortKey?: string;
   revision: Packet6JournalRevision;
 };
@@ -146,6 +155,9 @@ const persistedRevisionCodec = {
     if (revision.recordType === "INTAKE_EVENT") {
       return intakeEventRevisionCodec.validateForWrite(row) as unknown as PersistedRevisionRow;
     }
+    if (revision.recordType === "ACTIVITY_EVENT") {
+      return activityEventRevisionCodec.validateForWrite(row) as unknown as PersistedRevisionRow;
+    }
     throw new StorageRowValidationError(
       "STORAGE_VALIDATION_FAILED",
       "recordRevisions",
@@ -163,6 +175,9 @@ const persistedRevisionCodec = {
     if (row.recordType === "INTAKE_EVENT") {
       return intakeEventRevisionCodec.validateAfterRead(row) as unknown as PersistedRevisionRow;
     }
+    if (row.recordType === "ACTIVITY_EVENT") {
+      return activityEventRevisionCodec.validateAfterRead(row) as unknown as PersistedRevisionRow;
+    }
     throw new StorageRowValidationError(
       "STORAGE_INTEGRITY_FAILED",
       "recordRevisions",
@@ -178,7 +193,7 @@ const persistedAuditCodec = {
         auditEventId: z.string().uuid(),
         transactionId: z.string().uuid(),
         recordId: z.string().uuid(),
-        recordType: z.enum(["GLUCOSE_READING", "MEDICATION_EVENT", "INTAKE_EVENT"]),
+        recordType: z.enum(["GLUCOSE_READING", "MEDICATION_EVENT", "INTAKE_EVENT", "ACTIVITY_EVENT"]),
         previousRevisionId: z.string().uuid().nullable(),
         resultingRevisionId: z.string().uuid(),
         action: z.enum(["CREATE", "CORRECT"]),
@@ -219,7 +234,7 @@ const persistedEventCodec = {
           z
             .object({
               kind: z.literal("REVISION_CREATED"),
-              recordType: z.enum(["GLUCOSE_READING", "MEDICATION_EVENT", "INTAKE_EVENT"]),
+              recordType: z.enum(["GLUCOSE_READING", "MEDICATION_EVENT", "INTAKE_EVENT", "ACTIVITY_EVENT"]),
               recordId: z.string().uuid(),
               action: z.enum(["CREATE", "CORRECT"]),
               previousRevisionId: z.string().uuid().nullable(),
@@ -230,7 +245,7 @@ const persistedEventCodec = {
           z
             .object({
               kind: z.literal("RECORD_DELETED"),
-              recordType: z.enum(["GLUCOSE_READING", "MEDICATION_EVENT", "INTAKE_EVENT"]),
+              recordType: z.enum(["GLUCOSE_READING", "MEDICATION_EVENT", "INTAKE_EVENT", "ACTIVITY_EVENT"]),
               recordId: z.string().uuid(),
               previousRevisionId: z.string().uuid(),
               resultingRevisionId: z.null(),
@@ -250,8 +265,9 @@ const persistedEventCodec = {
     }
     return result.data as unknown as PersistedDomainEventRow;
   },
+  // The shared event log also holds other owners' events (Packet 7A).
   validateAfterRead(value: unknown): PersistedDomainEventRow {
-    return persistedEventCodec.validateForWrite(value);
+    return committedDomainEventRowCodec.validateAfterRead(value) as unknown as PersistedDomainEventRow;
   },
 };
 
@@ -314,6 +330,21 @@ export function createJournalCommandService(
       }
       return { kind: "FAILED", code: "STORAGE_UNAVAILABLE" };
     }
+  }
+
+  // Packet 7A: the static subscription registry schedules ordinary
+  // intelligence work in the same authoritative transaction as the event.
+  function workItemsFor(
+    event: { eventId: DomainEventId; eventName: string; change: { recordType: string } },
+    createdAt: Instant,
+  ) {
+    return intelligenceWorkItemsFor({
+      eventId: event.eventId,
+      eventName: event.eventName,
+      recordType: event.change.recordType as Packet6JournalRevision["recordType"],
+      createdAt,
+      workItemId: dependencies.ids.workItemId ?? createWorkItemId,
+    });
   }
 
   return Object.freeze({
@@ -437,7 +468,7 @@ export function createJournalCommandService(
           deletionTombstones: [],
           auditEvents: [auditEvent],
           domainEvents: [domainEvent as any],
-          eventWorkItems: [],
+          eventWorkItems: workItemsFor(domainEvent, now),
           reverseDependencies: [],
           evaluationAudits: [],
           appPreference: null,
@@ -581,7 +612,7 @@ export function createJournalCommandService(
           deletionTombstones: [],
           auditEvents: [auditEvent],
           domainEvents: [domainEvent as any],
-          eventWorkItems: [],
+          eventWorkItems: workItemsFor(domainEvent, now),
           reverseDependencies: [],
           evaluationAudits: [],
           appPreference: null,
@@ -719,7 +750,7 @@ export function createJournalCommandService(
           deletionTombstones: [],
           auditEvents: [auditEvent],
           domainEvents: [domainEvent as any],
-          eventWorkItems: [],
+          eventWorkItems: workItemsFor(domainEvent, now),
           reverseDependencies: [],
           evaluationAudits: [],
           appPreference: null,
@@ -857,7 +888,145 @@ export function createJournalCommandService(
           deletionTombstones: [],
           auditEvents: [auditEvent],
           domainEvents: [domainEvent as any],
-          eventWorkItems: [],
+          eventWorkItems: workItemsFor(domainEvent, now),
+          reverseDependencies: [],
+          evaluationAudits: [],
+          appPreference: null,
+          safety: { kind: "NOT_REQUIRED" },
+        };
+
+        return executePlan(plan);
+      } catch (error) {
+        if (error instanceof StorageRowValidationError) {
+          return { kind: "FAILED", code: "VALIDATION_FAILED" };
+        }
+        if (error instanceof z.ZodError) {
+          return { kind: "FAILED", code: "VALIDATION_FAILED" };
+        }
+        return { kind: "FAILED", code: "STORAGE_UNAVAILABLE" };
+      }
+    },
+
+    async recordActivity(input: RecordActivityInput): Promise<JournalCommitResult> {
+      try {
+        const payload = activityEventPayloadSchema.parse(input.payload);
+        const temporal = activityTemporalSchema.parse(input.temporal);
+
+        const recordId = dependencies.ids.recordId();
+        const revisionId = dependencies.ids.revisionId();
+        const auditEventId = dependencies.ids.auditEventId();
+        const transactionId = dependencies.ids.transactionId();
+        const commandId = dependencies.ids.commandId();
+        const correlationId = dependencies.ids.correlationId();
+        const domainEventId = dependencies.ids.domainEventId();
+        const now = dependencies.now();
+
+        const revision: ActivityEventRevision = {
+          schemaVersion: 1,
+          recordType: "ACTIVITY_EVENT",
+          recordId,
+          revisionId,
+          revisionNumber: 1,
+          previousRevisionId: null,
+          action: "CREATE",
+          recordedAt: input.recordedAt,
+          revisionCreatedAt: now,
+          temporal,
+          provenance: PATIENT_ENTRY_PROVENANCE,
+          auditEventId,
+          transactionId,
+          payload,
+        } as unknown as ActivityEventRevision;
+
+        const commandEnvelope = {
+          schemaVersion: 1,
+          commandId,
+          commandName: "RECORD_ACTIVITY_EVENT" as const,
+          issuedAt: now,
+          initiator: "PATIENT" as const,
+          assistance: "NONE" as const,
+          origin: "PATIENT_UI" as const,
+          correlationId,
+          cause: { kind: "DIRECT_PATIENT_ACTION" as const },
+          headExpectations: [
+            {
+              kind: "MUST_NOT_EXIST" as const,
+              recordType: "ACTIVITY_EVENT" as const,
+              proposedRecordId: recordId,
+            },
+          ],
+          payload,
+        };
+
+        const commandHash = await hashCommandEnvelope(commandEnvelope);
+        const storedRevision = activityEventRevisionCodec.create(revision);
+
+        const head: RecordHead = {
+          recordId,
+          recordType: "ACTIVITY_EVENT",
+          headRevisionId: revisionId,
+          headRevisionNumber: 1,
+          state: "ACTIVE",
+          updatedAt: now,
+        };
+
+        const auditEvent: PersistedAuditRow = {
+          auditEventId,
+          transactionId,
+          recordId,
+          recordType: "ACTIVITY_EVENT",
+          previousRevisionId: null,
+          resultingRevisionId: revisionId,
+          action: "CREATE",
+          initiator: "PATIENT",
+          assistance: "NONE",
+          occurredAt: now,
+          reasonCode: "PATIENT_LOGGED",
+        };
+
+        const domainEvent: Omit<PersistedDomainEventRow, "localSequence" | "transactionIndex" | "committedAt"> = {
+          eventId: domainEventId,
+          eventName: "ACTIVITY_EVENT_RECORDED",
+          transactionId,
+          commandId,
+          correlationId,
+          change: {
+            kind: "REVISION_CREATED",
+            recordType: "ACTIVITY_EVENT",
+            recordId,
+            action: "CREATE",
+            previousRevisionId: null,
+            resultingRevisionId: revisionId,
+            resultingRevisionNumber: 1,
+          },
+          payload,
+        };
+
+        const plan: AuthoritativeCommandPlan<
+          PersistedRevisionRow,
+          PersistedAuditRow,
+          PersistedDomainEventRow,
+          never,
+          never
+        > = {
+          kind: "COMMIT",
+          commandId,
+          commandHash,
+          completedAt: now,
+          transactionId,
+          headExpectations: [
+            {
+              kind: "MUST_NOT_EXIST",
+              recordType: "ACTIVITY_EVENT",
+              proposedRecordId: recordId,
+            },
+          ],
+          recordRevisions: [storedRevision as unknown as PersistedRevisionRow],
+          recordHeads: [head],
+          deletionTombstones: [],
+          auditEvents: [auditEvent],
+          domainEvents: [domainEvent as any],
+          eventWorkItems: workItemsFor(domainEvent, now),
           reverseDependencies: [],
           evaluationAudits: [],
           appPreference: null,

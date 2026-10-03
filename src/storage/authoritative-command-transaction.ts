@@ -46,6 +46,19 @@ import {
   type StorageRowCodec,
 } from "./storage-row-codec";
 
+/**
+ * Derived intelligence records whose historical payloads may disclose
+ * permanently deleted source material (domain Section 8.10). A tombstone for
+ * one of these types purges the record's stored revisions and its reverse
+ * dependency edges in the same transaction; other record types keep their
+ * existing tombstone semantics.
+ */
+const PURGED_DERIVED_RECORD_TYPES: ReadonlySet<RecordType> = new Set<RecordType>([
+  "LEARNED_KNOWLEDGE",
+  "PATTERN_OBSERVATION",
+  "PATTERN_EVIDENCE_SNAPSHOT",
+]);
+
 export type CommandTransactionErrorCode =
   | "INVALID_TRANSACTION_PLAN"
   | "COMMAND_REPLAY_MISMATCH"
@@ -773,6 +786,11 @@ export function createAuthoritativeCommandStore<
             }
             if (validated.deletionTombstones.length > 0) {
               await tombstones.bulkAdd(validated.deletionTombstones);
+              for (const tombstone of validated.deletionTombstones) {
+                if (!PURGED_DERIVED_RECORD_TYPES.has(tombstone.recordType)) continue;
+                await revisions.where("recordId").equals(tombstone.recordId).delete();
+                await dependencies.where("dependentRecordId").equals(tombstone.recordId).delete();
+              }
             }
             if (validated.recordHeads.length > 0) {
               await heads.bulkPut(validated.recordHeads);

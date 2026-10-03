@@ -519,6 +519,67 @@ export type OnboardingMessages = {
 };
 
 /** The complete typed bilingual application message catalogue. */
+/**
+ * Packet 7A Recorded history (07a copy matrix). Parameters are identical in
+ * both locales; patient-entered labels are passed through verbatim.
+ */
+export type HistoryMessages = {
+  title: string;
+  periodThisWeek: string;
+  periodLastWeek: string;
+  periodThirtyDays: string;
+  loading: string;
+  unavailableTitle: string;
+  unavailableBody: string;
+  retry: string;
+  emptyTitle: string;
+  emptyBody: string;
+  insufficientTitle: string;
+  insufficientBody: string;
+  readingsTitle: (unit: string) => string;
+  recordedLegend: string;
+  notRecordedLegend: string;
+  chartDescription: (recorded: number, positions: number, unit: string) => string;
+  chartSlotsNote: string;
+  recordedDataTag: string;
+  factsTitle: string;
+  periodRange: (range: string) => string;
+  readingCount: (count: number, range: string) => string;
+  valueRange: (minimum: string, maximum: string, unit: string) => string;
+  slotCount: (slot: string, count: number) => string;
+  comparisonHigher: (slot: string, recent: string, reference: string, unit: string) => string;
+  comparisonLower: (slot: string, recent: string, reference: string, unit: string) => string;
+  comparisonVariability: (slot: string, recent: string, reference: string, unit: string) => string;
+  noMaterialComparison: (slot: string) => string;
+  repeatedItem: (label: string, count: number, days: number) => string;
+  repeatedContext: (label: string, count: number, days: number) => string;
+  notRecordedPosition: (position: string) => string;
+  notRecordedPositions: (positions: string) => string;
+  sourceSummary: (source: string) => string;
+  sourcePatientEntered: string;
+  correctionSummary: (count: number) => string;
+  correctionUpdated: string;
+  evidenceWindow: (recent: string, reference: string) => string;
+  nonCausalLimitation: string;
+  loggingLimitation: string;
+  bookletTitle: string;
+  bookletOnly: string;
+  bookletExplanation: string;
+  completeStamp: (date: string) => string;
+  incompleteStamp: (date: string, count: number) => string;
+  actionsTag: string;
+  addFacts: string;
+  selectFacts: string;
+  factSelected: string;
+  factNotSelected: string;
+  selectionSaved: string;
+  familyUnavailable: string;
+  disabledFamily: (family: string) => string;
+  slotLabels: Record<"BEFORE_BREAKFAST" | "BEFORE_LUNCH" | "BEFORE_DINNER" | "BEDTIME", string>;
+  positionLabels: Record<"MORNING" | "EVENING", string>;
+  periodLabels: Record<"THIS_WEEK" | "LAST_WEEK" | "THIRTY_DAYS", string>;
+};
+
 export type AppMessages = {
   shared: SharedMessages;
   today: TodayMessages;
@@ -532,4 +593,5 @@ export type AppMessages = {
   settings: SettingsMessages;
   help: HelpMessages;
   onboarding: OnboardingMessages;
+  history: HistoryMessages;
 };

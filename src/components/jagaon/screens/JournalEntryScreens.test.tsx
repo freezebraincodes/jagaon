@@ -43,6 +43,7 @@ function serviceWith(
     correctGlucoseTime: vi.fn().mockResolvedValue(committed),
     recordInsulin: vi.fn().mockResolvedValue(committed),
     recordMeal: vi.fn().mockResolvedValue(committed),
+    recordActivity: vi.fn().mockResolvedValue(committed),
     ...overrides,
   };
 }

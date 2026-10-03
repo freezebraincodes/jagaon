@@ -342,3 +342,68 @@ describe("journal-command-service", () => {
     expect(evals).toHaveLength(0);
   });
 });
+
+describe("Packet 7A subscription work and activity recording", () => {
+  async function consumersFor(db: JagaOnDatabase) {
+    const items = (await db.table("eventWorkItems").toArray()) as Array<{ consumer: string; handlerVersion: string }>;
+    return items.map((item) => `${item.consumer}@${item.handlerVersion}`).sort();
+  }
+
+  it("creates comparable-slot Pattern work in the same transaction as a glucose reading", async () => {
+    const db = await openDatabase();
+    const service = createJournalCommandService(db, makeDependencies());
+    const result = await service.recordGlucose({
+      payload: VALID_GLUCOSE_PAYLOAD,
+      temporal: VALID_GLUCOSE_TEMPORAL,
+      recordedAt: "2026-10-02T08:00:00Z" as Instant,
+    });
+    expect(result.kind).toBe("COMMITTED");
+    expect(await consumersFor(db)).toEqual(["PATTERN_REEVALUATION@pattern-reevaluation.7a.1"]);
+  });
+
+  it("creates Pattern and Learning work for a meal and none for a medicine event", async () => {
+    const db = await openDatabase();
+    const service = createJournalCommandService(db, makeDependencies());
+    await service.recordMeal({ payload: VALID_MEAL_PAYLOAD, temporal: VALID_MEAL_TEMPORAL, recordedAt: "2026-10-02T08:00:00Z" as Instant });
+    expect(await consumersFor(db)).toEqual([
+      "LEARNING_REEVALUATION@learning-reevaluation.7a.1",
+      "PATTERN_REEVALUATION@pattern-reevaluation.7a.1",
+    ]);
+    const second = await openDatabase();
+    await createJournalCommandService(second, makeDependencies()).recordInsulin({
+      payload: VALID_INSULIN_PAYLOAD,
+      temporal: VALID_INSULIN_TEMPORAL,
+      recordedAt: "2026-10-02T08:00:00Z" as Instant,
+    });
+    expect(await consumersFor(second)).toEqual([]);
+  });
+
+  it("records an activity through the authoritative transaction", async () => {
+    const db = await openDatabase();
+    const service = createJournalCommandService(db, makeDependencies());
+    const result = await service.recordActivity({
+      payload: { activityCategory: "WALKING", patientLabel: "Morning walk", reportedDurationMinutes: 28 },
+      temporal: VALID_GLUCOSE_TEMPORAL as never,
+      recordedAt: "2026-10-02T08:00:00Z" as Instant,
+    });
+    expect(result.kind).toBe("COMMITTED");
+    const events = (await db.table("domainEvents").toArray()) as Array<{ eventName: string }>;
+    expect(events.map((event) => event.eventName)).toEqual(["ACTIVITY_EVENT_RECORDED"]);
+    expect(await consumersFor(db)).toEqual([
+      "LEARNING_REEVALUATION@learning-reevaluation.7a.1",
+      "PATTERN_REEVALUATION@pattern-reevaluation.7a.1",
+    ]);
+  });
+
+  it("rejects an invalid activity without writing", async () => {
+    const db = await openDatabase();
+    const service = createJournalCommandService(db, makeDependencies());
+    const result = await service.recordActivity({
+      payload: { activityCategory: "WALKING", patientLabel: "" } as never,
+      temporal: VALID_GLUCOSE_TEMPORAL as never,
+      recordedAt: "2026-10-02T08:00:00Z" as Instant,
+    });
+    expect(result).toEqual({ kind: "FAILED", code: "VALIDATION_FAILED" });
+    expect(await db.table("recordRevisions").count()).toBe(0);
+  });
+});

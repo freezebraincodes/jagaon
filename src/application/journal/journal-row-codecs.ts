@@ -21,7 +21,16 @@ import {
   intakeEventPayloadSchema,
   type IntakeEventPayload,
 } from "@/domain/health-records/intake-event";
-import { intakeTemporalSchema, type IntakeTemporal } from "@/domain/health-records/observation-temporal";
+import {
+  activityTemporalSchema,
+  intakeTemporalSchema,
+  type ActivityTemporal,
+  type IntakeTemporal,
+} from "@/domain/health-records/observation-temporal";
+import {
+  activityEventPayloadSchema,
+  type ActivityEventPayload,
+} from "@/domain/health-records/activity-event";
 import {
   createStoredRecordRevisionCodec,
   type StoredRecordRevision,
@@ -54,10 +63,18 @@ export type IntakeEventRevision = RecordRevision<
   ProvenanceCore
 >;
 
+export type ActivityEventRevision = RecordRevision<
+  "ACTIVITY_EVENT",
+  ActivityEventPayload,
+  ActivityTemporal,
+  ProvenanceCore
+>;
+
 export type Packet6JournalRevision =
   | GlucoseReadingRevision
   | MedicationEventRevision
-  | IntakeEventRevision;
+  | IntakeEventRevision
+  | ActivityEventRevision;
 
 // ---------------------------------------------------------------------------
 // Strict revision schemas composed from domain contracts
@@ -84,10 +101,19 @@ const intakeEventRevisionSchema = createRecordRevisionSchema(
   provenanceCoreSchema,
 );
 
+// Packet 7A: activity events seed the synthetic recorded history.
+const activityEventRevisionSchema = createRecordRevisionSchema(
+  z.literal("ACTIVITY_EVENT"),
+  activityEventPayloadSchema,
+  activityTemporalSchema,
+  provenanceCoreSchema,
+);
+
 export const packet6JournalRevisionSchema = z.union([
   glucoseReadingRevisionSchema,
   medicationEventRevisionSchema,
   intakeEventRevisionSchema,
+  activityEventRevisionSchema,
 ]);
 
 // ---------------------------------------------------------------------------
@@ -95,10 +121,11 @@ export const packet6JournalRevisionSchema = z.union([
 // ---------------------------------------------------------------------------
 
 function resolveOccurrenceInstant(
-  temporal: ReadingTemporal | MedicationEventTemporal | IntakeTemporal,
+  temporal: ReadingTemporal | MedicationEventTemporal | IntakeTemporal | ActivityTemporal,
 ): Instant | null {
-  if (temporal.kind !== "POINT") return null;
-  const occ = temporal.occurrence;
+  const occ =
+    temporal.kind === "POINT" ? temporal.occurrence : temporal.kind === "INTERVAL" ? temporal.start : null;
+  if (occ === null) return null;
   switch (occ.kind) {
     case "EXACT":
       return occ.instantUtc;
@@ -111,10 +138,11 @@ function resolveOccurrenceInstant(
 }
 
 function resolveLocalDate(
-  temporal: ReadingTemporal | MedicationEventTemporal | IntakeTemporal,
+  temporal: ReadingTemporal | MedicationEventTemporal | IntakeTemporal | ActivityTemporal,
 ): LocalDate | null {
-  if (temporal.kind !== "POINT") return null;
-  const occ = temporal.occurrence;
+  const occ =
+    temporal.kind === "POINT" ? temporal.occurrence : temporal.kind === "INTERVAL" ? temporal.start : null;
+  if (occ === null) return null;
   if (occ.kind === "DATE_ONLY") return occ.localDate;
   return null;
 }
@@ -122,23 +150,23 @@ function resolveLocalDate(
 function deriveTemporalIndexFields(
   revision: Packet6JournalRevision,
 ): StoredTemporalIndexFields {
+  const temporalKind = revision.temporal.kind === "INTERVAL" ? ("INTERVAL" as const) : ("POINT" as const);
   const occurrenceSortInstant = resolveOccurrenceInstant(revision.temporal);
   const localDateSortKey = resolveLocalDate(revision.temporal);
 
   if (occurrenceSortInstant !== null) {
-    return {
-      temporalKind: "POINT" as const,
-      occurrenceSortInstant,
-    };
+    return temporalKind === "INTERVAL"
+      ? { temporalKind, effectiveStartSortInstant: occurrenceSortInstant }
+      : { temporalKind, occurrenceSortInstant };
   }
   if (localDateSortKey !== null) {
     return {
-      temporalKind: "POINT" as const,
+      temporalKind,
       localDateSortKey,
     };
   }
   return {
-    temporalKind: "POINT" as const,
+    temporalKind,
   };
 }
 
@@ -185,6 +213,19 @@ export const intakeEventRevisionCodec = createStoredRecordRevisionCodec<
   deriveTemporalIndexFields,
 });
 
+export const activityEventRevisionCodec = createStoredRecordRevisionCodec<
+  "ACTIVITY_EVENT",
+  ActivityEventRevision
+>({
+  recordTypeSchema: z.literal("ACTIVITY_EVENT"),
+  revisionSchema: activityEventRevisionSchema as z.ZodType<
+    ActivityEventRevision,
+    z.ZodTypeDef,
+    unknown
+  >,
+  deriveTemporalIndexFields,
+});
+
 // ---------------------------------------------------------------------------
 // Rejecting codecs for unused reverse-dependency and engine-evaluation rows
 // ---------------------------------------------------------------------------
@@ -224,7 +265,8 @@ export const rejectingEvaluationAuditCodec: StorageRowCodec<never> = Object.free
 export type Packet6StoredRevision =
   | StoredRecordRevision<GlucoseReadingRevision>
   | StoredRecordRevision<MedicationEventRevision>
-  | StoredRecordRevision<IntakeEventRevision>;
+  | StoredRecordRevision<IntakeEventRevision>
+  | StoredRecordRevision<ActivityEventRevision>;
 
 export function validatePacket6StoredRevision(
   row: unknown,
@@ -235,6 +277,7 @@ export function validatePacket6StoredRevision(
     glucoseReadingRevisionCodec,
     medicationEventRevisionCodec,
     intakeEventRevisionCodec,
+    activityEventRevisionCodec,
   ]) {
     try {
       attempts.push(codec.validateAfterRead(row));

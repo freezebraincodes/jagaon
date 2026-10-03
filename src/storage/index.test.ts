@@ -200,7 +200,7 @@ describe("storage barrel Packet 4F2 completion exports", () => {
     const codecs: ImplementedStorageRowCodecs = implementedStorageRowCodecs;
     expect(table).toBe("recordHeads");
     expect(rows).toBeUndefined();
-    expect(IMPLEMENTED_STORAGE_ROW_TABLES).toHaveLength(6);
+    expect(IMPLEMENTED_STORAGE_ROW_TABLES).toHaveLength(8);
     expect(codecs.recordHeads).toBeDefined();
   });
 

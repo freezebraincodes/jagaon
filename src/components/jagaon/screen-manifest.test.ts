@@ -5,13 +5,20 @@ import {
   PACKET_6_CHILD_SCREENS,
   PACKET_6_ENABLED_SCREENS,
   PACKET_6A_CHILD_SCREENS,
+  PACKET_7A_TOP_LEVEL_SCREENS,
   ONBOARDING_ROUTES,
   type ScreenId,
 } from "./screen-manifest";
 
 describe("screen-manifest", () => {
-  it("has exactly two top-level screens: TODAY and MORE", () => {
-    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MORE"]);
+  it("has exactly three top-level screens in navigation order: TODAY, HISTORY and MORE", () => {
+    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "HISTORY", "MORE"]);
+    expect(PACKET_7A_TOP_LEVEL_SCREENS).toEqual(["HISTORY"]);
+    expect(Object.isFrozen(PACKET_7A_TOP_LEVEL_SCREENS)).toBe(true);
+  });
+
+  it("keeps Booklet absent: it is not authorised by any accepted packet", () => {
+    expect(ALL_SCREENS.has("BOOKLET" as ScreenId)).toBe(false);
   });
 
   it("lists every Packet 6 child exactly once", () => {
@@ -60,16 +67,21 @@ describe("screen-manifest", () => {
     }
   });
 
-  it("has the 11 Packet 6 screens plus the Packet 6A My medicines screen", () => {
+  it("has the 11 Packet 6 screens, Packet 6A My medicines and Packet 7A Recorded history", () => {
     expect(PACKET_6A_CHILD_SCREENS).toEqual(["MY_MEDICINES"]);
-    expect(ALL_SCREENS.size).toBe(12);
+    expect(ALL_SCREENS.size).toBe(13);
+    expect(ALL_SCREENS.has("HISTORY")).toBe(true);
     expect(ALL_SCREENS.has("MY_MEDICINES")).toBe(true);
     expect(ALL_SCREENS.has("SETTINGS" as ScreenId)).toBe(false);
   });
 
-  it("no Packet 7-9 route exists", () => {
+  it("no Packet 7B-9 route exists", () => {
     const deferred = [
       "TRENDS",
+      "ROUTINE_SHIFT",
+      "PATTERN_INSIGHTS",
+      "APPOINTMENT_NOTES",
+      "CARE_SUMMARY",
       "WEEKLY_TRENDS",
       "REMINDERS",
       "CREATE_REMINDER",

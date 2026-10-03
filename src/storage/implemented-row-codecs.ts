@@ -22,12 +22,21 @@ import {
   createStorageRowCodec,
   type StorageRowCodec,
 } from "./storage-row-codec";
+import {
+  reverseDependencyRowSchema,
+  type StoredReverseDependency,
+} from "./reverse-dependency-row";
+import {
+  engineEvaluationAuditRowSchema,
+  type StoredEngineEvaluationAudit,
+} from "./engine-evaluation-audit-row";
 
 /**
- * Tables whose exact owning row schema exists after Packet 4F2.
+ * Tables whose exact owning row schema exists after Packet 7A.
  *
- * The remaining ten physical tables stay intentionally unregistered until
- * their owning packets supply exact closed row contracts.
+ * Packet 7A adds the reverse-dependency and engine-evaluation audit rows. The
+ * remaining eight physical tables stay intentionally unregistered until their
+ * owning packets supply exact closed row contracts.
  */
 export const IMPLEMENTED_STORAGE_ROW_TABLES = Object.freeze([
   "appPreferences",
@@ -36,6 +45,8 @@ export const IMPLEMENTED_STORAGE_ROW_TABLES = Object.freeze([
   "commandReceipts",
   "eventWorkItems",
   "eventConsumerReceipts",
+  "reverseDependencies",
+  "engineEvaluationAudits",
 ] as const);
 
 export type ImplementedStorageRowTable =
@@ -48,6 +59,8 @@ export type ImplementedStorageRowByTable = {
   commandReceipts: CommandReceipt;
   eventWorkItems: StoredEventWorkItem;
   eventConsumerReceipts: EventConsumerReceipt;
+  reverseDependencies: StoredReverseDependency;
+  engineEvaluationAudits: StoredEngineEvaluationAudit;
 };
 
 export type ImplementedStorageRowCodecs = {
@@ -81,5 +94,13 @@ export const implementedStorageRowCodecs: ImplementedStorageRowCodecs =
     eventConsumerReceipts: createStorageRowCodec<EventConsumerReceipt>(
       "eventConsumerReceipts",
       eventConsumerReceiptSchema,
+    ),
+    reverseDependencies: createStorageRowCodec<StoredReverseDependency>(
+      "reverseDependencies",
+      reverseDependencyRowSchema,
+    ),
+    engineEvaluationAudits: createStorageRowCodec<StoredEngineEvaluationAudit>(
+      "engineEvaluationAudits",
+      engineEvaluationAuditRowSchema,
     ),
   });

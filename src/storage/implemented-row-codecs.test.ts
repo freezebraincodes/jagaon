@@ -29,6 +29,8 @@ import {
   type StoredEventWorkItem,
 } from "./stored-event-work-item";
 import { StorageRowValidationError } from "./storage-row-codec";
+import type { StoredReverseDependency } from "./reverse-dependency-row";
+import type { StoredEngineEvaluationAudit } from "./engine-evaluation-audit-row";
 import { JAGAON_TABLE_NAMES } from "./table-catalogue";
 
 const instant = (value: string): Instant => instantSchema.parse(value);
@@ -99,6 +101,39 @@ const consumerReceipt: EventConsumerReceipt = eventConsumerReceiptSchema.parse({
   outcome: { kind: "NO_ACTION_REQUIRED" },
 });
 
+const reverseDependency = {
+  sourceRevisionId: ID.revision,
+  dependentRecordType: "PATTERN_EVIDENCE_SNAPSHOT",
+  dependentRecordId: "00000000-0000-4000-8000-000000000008",
+  dependentRevisionId: "00000000-0000-4000-8000-000000000009",
+  dependencyRole: "RECENT_EVIDENCE",
+  owner: "PATTERN_ENGINE",
+  evaluatorKey: "pattern.comparable-slot-trend",
+  evaluatorVersion: "7a.1",
+  createdAt: "2026-09-30T10:00:00Z",
+} as unknown as StoredReverseDependency;
+
+const evaluationAudit = {
+  evaluationId: "00000000-0000-4000-8000-00000000000a",
+  engine: "PATTERN",
+  evaluatorKey: "pattern.comparable-slot-trend",
+  evaluatorVersion: "7a.1",
+  configurationVersion: "comparable-slot-trend-config.v1",
+  runtimeManifestId: "jagaon-hackathon-intelligence",
+  runtimeManifestVersion: "7a.1",
+  evaluatedAt: "2026-09-30T10:00:00Z",
+  inputSequenceCutoff: 4,
+  candidateKey: "COMPARABLE_SLOT_TREND:PATIENT_SELECTED_SLOT:BEFORE_BREAKFAST",
+  triggeringRevisions: [{ recordType: "GLUCOSE_READING", recordId: ID.record, revisionId: ID.revision }],
+  consideredRevisions: [{ recordType: "GLUCOSE_READING", recordId: ID.record, revisionId: ID.revision }],
+  inputFingerprint: "b".repeat(64),
+  resultFingerprint: "c".repeat(64),
+  dispositionKind: "RESULT",
+  reasonCodes: ["PATTERN_OBSERVATION_CREATED"],
+  limitationCodes: ["UNKNOWN_NEGATIVE_STATUS"],
+  proposedEffectKeys: ["pattern:COMPARABLE_SLOT_TREND:PATIENT_SELECTED_SLOT:BEFORE_BREAKFAST"],
+} as unknown as StoredEngineEvaluationAudit;
+
 const validRows: ImplementedStorageRowByTable = {
   appPreferences: appPreference,
   recordHeads: recordHead,
@@ -106,10 +141,12 @@ const validRows: ImplementedStorageRowByTable = {
   commandReceipts: commandReceipt,
   eventWorkItems: storedWorkItem,
   eventConsumerReceipts: consumerReceipt,
+  reverseDependencies: reverseDependency,
+  engineEvaluationAudits: evaluationAudit,
 };
 
 describe("IMPLEMENTED_STORAGE_ROW_TABLES", () => {
-  it("contains exactly the six currently implemented row tables", () => {
+  it("contains exactly the eight currently implemented row tables", () => {
     expect(IMPLEMENTED_STORAGE_ROW_TABLES).toEqual([
       "appPreferences",
       "recordHeads",
@@ -117,12 +154,14 @@ describe("IMPLEMENTED_STORAGE_ROW_TABLES", () => {
       "commandReceipts",
       "eventWorkItems",
       "eventConsumerReceipts",
+      "reverseDependencies",
+      "engineEvaluationAudits",
     ]);
-    expect(new Set(IMPLEMENTED_STORAGE_ROW_TABLES).size).toBe(6);
+    expect(new Set(IMPLEMENTED_STORAGE_ROW_TABLES).size).toBe(8);
     expect(Object.isFrozen(IMPLEMENTED_STORAGE_ROW_TABLES)).toBe(true);
   });
 
-  it("leaves the ten incomplete row tables outside the codec registry", () => {
+  it("leaves the eight incomplete row tables outside the codec registry", () => {
     const deferred = JAGAON_TABLE_NAMES.filter(
       (table) => !IMPLEMENTED_STORAGE_ROW_TABLES.includes(table as never),
     );
@@ -130,8 +169,6 @@ describe("IMPLEMENTED_STORAGE_ROW_TABLES", () => {
       "recordRevisions",
       "auditEvents",
       "domainEvents",
-      "reverseDependencies",
-      "engineEvaluationAudits",
       "aiInvocationAudits",
       "runtimeManifests",
       "governedAssets",
@@ -142,7 +179,7 @@ describe("IMPLEMENTED_STORAGE_ROW_TABLES", () => {
 });
 
 describe("implementedStorageRowCodecs", () => {
-  it("is a frozen exact six-codec map", () => {
+  it("is a frozen exact eight-codec map", () => {
     expect(Object.keys(implementedStorageRowCodecs)).toEqual(
       IMPLEMENTED_STORAGE_ROW_TABLES,
     );

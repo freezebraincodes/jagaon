@@ -15,6 +15,8 @@
 export type ScreenId =
   /** Top-level: Today dashboard (frame 01) */
   | "TODAY"
+  /** Top-level (Packet 7A): Recorded history (v1 frame 06) */
+  | "HISTORY"
   /** Top-level: More screen (frame 12) */
   | "MORE"
   /** Child: Log glucose reading (frame 02) */
@@ -42,9 +44,17 @@ export type ScreenId =
 
 // --- Section: Frozen navigation arrays ------------------------------------
 
-/** Bottom-navigation destinations — the only two top-level tabs. */
+/**
+ * Packet 7A top-level destination, enabled only now that the validated
+ * Recorded-history query path exists. Booklet stays a disabled later-packet
+ * tab with no route.
+ */
+export const PACKET_7A_TOP_LEVEL_SCREENS: readonly ScreenId[] = Object.freeze(["HISTORY"]);
+
+/** Bottom-navigation destinations in navigation order. */
 export const TOP_LEVEL_SCREENS: readonly ScreenId[] = Object.freeze([
   "TODAY",
+  ...PACKET_7A_TOP_LEVEL_SCREENS,
   "MORE",
 ]);
 

@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import Dexie from "dexie";
 import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
+import type { Instant } from "@/domain/shared/time";
 import { createBrowserJournalRuntime } from "./browser-journal-runtime";
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;
@@ -19,32 +20,78 @@ afterAll(() => {
 const runtimes: Awaited<ReturnType<typeof createBrowserJournalRuntime>>[] = [];
 
 afterEach(async () => {
-  const names = runtimes.map((runtime) => runtime.databaseName);
+  const names = [...new Set(runtimes.map((runtime) => runtime.databaseName))];
   for (const runtime of runtimes) runtime.close();
   runtimes.length = 0;
   for (const name of names) await Dexie.delete(name);
 });
 
+// Seeding through real journal commands and evaluation is an integration path.
+const INTEGRATION_TIMEOUT_MS = 60_000;
+
+// Sunday 4 Oct 2026, 10:00 in Singapore.
+const NOW = "2026-10-04T02:00:00.000Z" as Instant;
+
+async function open(name = `packet-7a-runtime-${crypto.randomUUID()}`) {
+  const runtime = await createBrowserJournalRuntime(name, { now: () => NOW });
+  runtimes.push(runtime);
+  return runtime;
+}
+
 describe("browser journal runtime", () => {
-  it("opens storage and bootstraps the synthetic scenario through journal commands", async () => {
-    const runtime = await createBrowserJournalRuntime(
-      `packet-6-runtime-${crypto.randomUUID()}`,
-    );
-    runtimes.push(runtime);
-
+  it("bootstraps the synthetic scenario through journal commands and evaluates it", async () => {
+    const runtime = await open();
     const today = await runtime.query.loadToday();
-
     expect(today.unavailable).toBe(false);
-    expect(today.entries).toHaveLength(1);
-    expect(today.entries[0]?.recordType).toBe("GLUCOSE_READING");
-    expect(today.entries[0]?.summary).toContain("6.2 mmol/L");
-  });
+    expect(today.entries[0]?.recordType).toBeDefined();
+
+    const view = await runtime.history.load({ period: "THIS_WEEK" });
+    expect(view.status).toBe("READY");
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.comparisons.map((fact) => [fact.factId, fact.kind])).toEqual([
+      ["COMPARISON:BEFORE_BREAKFAST", "HIGHER"],
+      ["NO_MATERIAL:BEFORE_DINNER", "NO_MATERIAL"],
+    ]);
+    // Chicken rice recurs every third day and never passes the familiar-item gate.
+    expect(view.projection.repeated.map((fact) => [fact.kind, fact.label])).toEqual([
+      ["ITEM", "Kaya toast"],
+      ["CONTEXT", "Morning walk"],
+    ]);
+    expect(view.projection.notRecordedPositions.length).toBeGreaterThan(0);
+    expect(view.comparisons[0]?.correctionUpdated).toBe(true);
+    expect(view.projection.correctedRecordCount).toBe(1);
+  }, INTEGRATION_TIMEOUT_MS);
+
+  it("seeds only an empty database and reevaluates after a new journal entry", async () => {
+    const name = `packet-7a-runtime-${crypto.randomUUID()}`;
+    const first = await open(name);
+    const before = await first.history.load({ period: "THIS_WEEK" });
+    first.close();
+    const second = await open(name);
+    const again = await second.history.load({ period: "THIS_WEEK" });
+    expect(again).toEqual(before);
+
+    await second.commands.recordGlucose({
+      payload: {
+        measurement: { enteredValue: "6.6" as never, enteredUnit: "MMOL_L", normalization: null },
+        measurementMethod: "FINGERSTICK_METER",
+        context: { kind: "PATIENT_SELECTED_SLOT", slot: "BEDTIME" },
+      },
+      temporal: {
+        kind: "POINT",
+        occurrence: { kind: "EXACT", instantUtc: "2026-10-04T01:50:00.000Z" as Instant, timeZoneId: "Asia/Singapore", utcOffsetMinutes: 480 },
+      },
+      recordedAt: NOW,
+    });
+    const after = await second.history.load({ period: "THIS_WEEK" });
+    if (after.status !== "READY" || before.status !== "READY") throw new Error("ready");
+    expect(after.projection.readingCount).toBe(before.projection.readingCount + 1);
+    expect(after.projection.slotCounts).toContainEqual({ slot: "BEDTIME", count: 1 });
+  }, INTEGRATION_TIMEOUT_MS);
 
   it("persists an explicit locale and restores a clean synthetic scenario after reset", async () => {
-    const runtime = await createBrowserJournalRuntime(
-      `packet-6-runtime-${crypto.randomUUID()}`,
-    );
-    runtimes.push(runtime);
+    const runtime = await open();
+    const seeded = await runtime.history.load({ period: "THIRTY_DAYS" });
 
     await runtime.persistLocale("zh-SG");
     expect(await runtime.resolveLocale()).toBe("zh-SG");
@@ -52,6 +99,6 @@ describe("browser journal runtime", () => {
     await runtime.resetDemo();
 
     expect(await runtime.resolveLocale()).toBe("en-SG");
-    expect((await runtime.query.loadToday()).entries).toHaveLength(1);
-  });
+    expect(await runtime.history.load({ period: "THIRTY_DAYS" })).toEqual(seeded);
+  }, INTEGRATION_TIMEOUT_MS);
 });

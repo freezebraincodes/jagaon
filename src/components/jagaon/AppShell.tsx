@@ -40,12 +40,12 @@ export function AppShell({
     }
   }, [currentScreen]);
 
-  // Booklet and History belong to later packets: shown as in frame 01 but
-  // disabled, with no route behind them.
+  // Booklet belongs to a later packet: shown as in frame 01 but disabled,
+  // with no route behind it. History is enabled by Packet 7A.
   const tabs: Array<{ screen: ScreenId | null; label: string; icon: ReactNode }> = [
     { screen: "TODAY", label: messages.shared.navToday, icon: <HomeIcon size={26} /> },
     { screen: null, label: messages.shared.navBooklet, icon: <BookletIcon size={26} /> },
-    { screen: null, label: messages.shared.navHistory, icon: <ChartIcon size={26} /> },
+    { screen: "HISTORY", label: messages.shared.navHistory, icon: <ChartIcon size={26} /> },
     { screen: "MORE", label: messages.shared.navMore, icon: <MoreIcon size={26} /> },
   ];
 

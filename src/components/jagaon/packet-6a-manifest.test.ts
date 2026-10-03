@@ -26,10 +26,11 @@ const files = sourceFiles().map((path) => ({
 }));
 
 describe("Packet 6A storage and screen manifest", () => {
-  it("uses exactly one versioned local-storage key", () => {
+  it("uses exactly the 6A onboarding key and the 7A appointment-note selection key", () => {
     expect(DEMO_ONBOARDING_STORAGE_KEY).toBe("jagaon:demo-onboarding:v1");
     const keyLiterals = files.filter((file) => /["'`]jagaon:[^"'`]*["'`]/.test(file.text));
     expect(keyLiterals.map((file) => file.path)).toEqual([
+      "src/application/history/appointment-note-selection.ts",
       "src/application/onboarding/demo-onboarding-repository.ts",
     ]);
   });
@@ -57,7 +58,7 @@ describe("Packet 6A storage and screen manifest", () => {
   it("keeps the onboarding routes closed and outside the journal screens and tabs", () => {
     expect(ONBOARDING_ROUTES).toBe(DEMO_ONBOARDING_ROUTES);
     expect(PACKET_6A_CHILD_SCREENS).toEqual(["MY_MEDICINES"]);
-    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MORE"]);
+    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "HISTORY", "MORE"]);
     for (const route of ONBOARDING_ROUTES) expect([...ALL_SCREENS]).not.toContain(route);
   });
 });

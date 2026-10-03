@@ -109,8 +109,9 @@ describe("bilingual evidence — en-SG and zh-SG parity", () => {
     expect(zh.today.futureFeature).toContain("后续演示阶段");
   });
 
-  it("all 11 Packet 6 screens plus My medicines are enabled (no Packet 7-9 routes)", () => {
-    expect(ALL_SCREENS.size).toBe(12);
+  it("the 11 Packet 6 screens, My medicines and Packet 7A Recorded history are enabled (no Packet 7B-9 routes)", () => {
+    expect(ALL_SCREENS.size).toBe(13);
+    expect(PACKET_6_ENABLED_SCREENS).toContain("HISTORY");
     const deferred = [
       "TRENDS", "WEEKLY_TRENDS", "REMINDERS", "CREATE_REMINDER",
       "PREVENTIVE_CARE", "APPOINTMENTS", "SCHEDULE_APPOINTMENT",

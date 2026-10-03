@@ -63,6 +63,7 @@ function commands(resultKind: "COMMITTED" | "FAILED" = "COMMITTED"): JournalComm
     correctGlucoseTime: vi.fn().mockResolvedValue(result),
     recordInsulin: vi.fn(),
     recordMeal: vi.fn(),
+    recordActivity: vi.fn(),
   };
 }
 

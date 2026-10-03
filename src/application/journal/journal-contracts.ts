@@ -15,7 +15,9 @@ import type { ReadingTemporal } from "@/domain/health-records/reading-temporal";
 import type { MedicationEventPayload } from "@/domain/health-records/medication-event";
 import type { MedicationEventTemporal } from "@/domain/health-records/medication-event";
 import type { IntakeEventPayload } from "@/domain/health-records/intake-event";
-import type { IntakeTemporal } from "@/domain/health-records/observation-temporal";
+import type { ActivityTemporal, IntakeTemporal } from "@/domain/health-records/observation-temporal";
+import type { ActivityEventPayload } from "@/domain/health-records/activity-event";
+import type { WorkItemId } from "@/application/contracts/event-work";
 import type { JagaOnDatabase } from "@/storage/database";
 
 // ---------------------------------------------------------------------------
@@ -68,6 +70,12 @@ export type RecordMealInput = {
   recordedAt: Instant;
 };
 
+export type RecordActivityInput = {
+  payload: ActivityEventPayload;
+  temporal: ActivityTemporal;
+  recordedAt: Instant;
+};
+
 // ---------------------------------------------------------------------------
 // JournalCommandDependencies — injectable clock and ID factories
 // ---------------------------------------------------------------------------
@@ -82,6 +90,8 @@ export type JournalCommandDependencies = {
     auditEventId(): AuditEventId;
     transactionId(): TransactionId;
     domainEventId(): DomainEventId;
+    /** Packet 7A: subscription work identities (defaults to UUID v4). */
+    workItemId?(): WorkItemId;
   };
 };
 
@@ -96,6 +106,7 @@ export type JournalCommandService = {
   ): Promise<JournalCommitResult>;
   recordInsulin(input: RecordInsulinInput): Promise<JournalCommitResult>;
   recordMeal(input: RecordMealInput): Promise<JournalCommitResult>;
+  recordActivity(input: RecordActivityInput): Promise<JournalCommitResult>;
 };
 
 export type { JagaOnDatabase };

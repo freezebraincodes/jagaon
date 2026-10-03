@@ -18,8 +18,14 @@ import {
   DEMO_STORAGE_RESET_CONFIRMATION,
   resetSyntheticDemoStorage,
 } from "@/storage/demo-storage-reset";
+import { createWorkItemId } from "@/application/contracts/event-work";
+import { createIntelligenceCoordinator } from "@/application/intelligence/intelligence-coordinator";
+import { createRecordedHistoryQuery } from "@/application/history/recorded-history-query";
+import type { RecordedHistoryQueryPort } from "@/application/history/recorded-history-contracts";
+import { seedSyntheticHistory } from "@/application/history/synthetic-history-seed";
 import type {
   JournalCommandService,
+  JournalCommitResult,
   JournalQueryPort,
 } from "./journal-contracts";
 import { createJournalCommandService } from "./journal-command-service";
@@ -29,81 +35,108 @@ export type JagaOnRuntime = {
   databaseName: string;
   commands: JournalCommandService;
   query: JournalQueryPort;
+  /** Packet 7A: validated descriptive Recorded-history view models. */
+  history: RecordedHistoryQueryPort;
   resolveLocale(): Promise<SupportedLocale>;
   persistLocale(locale: SupportedLocale): Promise<void>;
   resetDemo(): Promise<void>;
   close(): void;
 };
 
+export type BrowserJournalRuntimeOptions = {
+  /** Injectable clock for deterministic tests; defaults to the device clock. */
+  now?: () => Instant;
+};
+
 export async function createBrowserJournalRuntime(
   databaseName?: string,
+  options: BrowserJournalRuntimeOptions = {},
 ): Promise<JagaOnRuntime> {
   const database = createJagaOnDatabase(databaseName);
   await database.open();
 
-  const now = () => new Date().toISOString() as Instant;
-  const commands = createJournalCommandService(database, {
-    now,
-    ids: {
-      commandId: createCommandId,
-      correlationId: createCorrelationId,
-      recordId: createRecordId,
-      revisionId: createRevisionId,
-      auditEventId: createAuditEventId,
-      transactionId: createTransactionId,
-      domainEventId: createDomainEventId,
-    },
-  });
+  const now = options.now ?? (() => new Date().toISOString() as Instant);
+  const ids = {
+    commandId: createCommandId,
+    correlationId: createCorrelationId,
+    recordId: createRecordId,
+    revisionId: createRevisionId,
+    auditEventId: createAuditEventId,
+    transactionId: createTransactionId,
+    domainEventId: createDomainEventId,
+    workItemId: createWorkItemId,
+  };
+  const journalCommands = createJournalCommandService(database, { now, ids });
   const query = createJournalQueryService(database);
   const localeRepository = createBootstrapLocaleRepository(database);
+  const coordinator = createIntelligenceCoordinator(database, {
+    now,
+    ids: { ...ids, evaluationId: () => crypto.randomUUID(), leaseToken: () => crypto.randomUUID() },
+    instanceId: "browser",
+  });
+  const historyQuery = createRecordedHistoryQuery(database, { now });
 
+  // Ordinary intelligence runs after the journal transaction commits and is
+  // serialised; history reads wait for it so they reflect committed records.
+  let intelligence: Promise<unknown> = Promise.resolve();
+  function scheduleIntelligence(refresh = false): Promise<unknown> {
+    intelligence = intelligence
+      .then(() => coordinator.processPending())
+      .then(() => (refresh ? coordinator.refreshAll() : undefined))
+      .catch(() => undefined);
+    return intelligence;
+  }
+
+  function afterCommit<TInput>(
+    command: (input: TInput) => Promise<JournalCommitResult>,
+  ): (input: TInput) => Promise<JournalCommitResult> {
+    return async (input) => {
+      const result = await command(input);
+      if (result.kind === "COMMITTED") void scheduleIntelligence();
+      return result;
+    };
+  }
+
+  const commands: JournalCommandService = Object.freeze({
+    recordGlucose: afterCommit(journalCommands.recordGlucose),
+    correctGlucoseTime: afterCommit(journalCommands.correctGlucoseTime),
+    recordInsulin: afterCommit(journalCommands.recordInsulin),
+    recordMeal: afterCommit(journalCommands.recordMeal),
+    recordActivity: afterCommit(journalCommands.recordActivity),
+  });
+
+  /** Seed only an empty demo database, never over user-created records. */
   async function seedSyntheticScenarioWhenEmpty(): Promise<void> {
-    const current = await query.loadToday();
-    if (current.unavailable || current.entries.length > 0) return;
-
-    const result = await commands.recordGlucose({
-      payload: {
-        measurement: {
-          enteredValue: "6.2" as never,
-          enteredUnit: "MMOL_L",
-          normalization: null,
-        },
-        measurementMethod: "FINGERSTICK_METER",
-        context: { kind: "PATIENT_SELECTED_SLOT", slot: "BEFORE_BREAKFAST" },
-      },
-      temporal: {
-        kind: "POINT",
-        occurrence: {
-          kind: "EXACT",
-          instantUtc: "2026-10-01T23:48:00Z" as Instant,
-          timeZoneId: "Asia/Singapore",
-          utcOffsetMinutes: 480,
-        },
-      },
-      recordedAt: "2026-10-02T00:00:00Z" as Instant,
-    });
-    if (result.kind !== "COMMITTED") {
-      throw new Error("SYNTHETIC_SCENARIO_BOOTSTRAP_FAILED");
-    }
+    if ((await database.table("recordHeads").count()) > 0) return;
+    await seedSyntheticHistory(journalCommands, now());
   }
 
   await seedSyntheticScenarioWhenEmpty();
+  void scheduleIntelligence(true);
 
   return Object.freeze({
     databaseName: database.name,
     commands,
     query,
+    history: Object.freeze({
+      async load(request: Parameters<RecordedHistoryQueryPort["load"]>[0]) {
+        await intelligence;
+        return historyQuery.load(request);
+      },
+    }),
     resolveLocale: () => localeRepository.resolve(null, now()),
     async persistLocale(locale: SupportedLocale) {
       await localeRepository.resolve(locale, now());
     },
     async resetDemo() {
+      await intelligence;
       await resetSyntheticDemoStorage(database, {
         releaseProfile: CURRENT_RELEASE_PROFILE,
         confirmation: DEMO_STORAGE_RESET_CONFIRMATION,
         resetAt: now(),
       });
       await seedSyntheticScenarioWhenEmpty();
+      await scheduleIntelligence(true);
     },
     close() {
       database.close();

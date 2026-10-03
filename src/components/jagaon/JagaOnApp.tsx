@@ -7,7 +7,13 @@ import type { AppMessages } from "@/i18n/types";
 import { CURRENT_RELEASE_PROFILE } from "@/config/release-profile";
 import { DemoBoundaryNotice } from "@/components/demo/DemoBoundaryNotice";
 import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-fixture";
-import type { ScreenId } from "./screen-manifest";
+import { TOP_LEVEL_SCREENS, type ScreenId } from "./screen-manifest";
+import { RecordedHistoryScreen } from "./screens/RecordedHistoryScreen";
+import {
+  createAppointmentNoteSelectionRepository,
+  type AppointmentNoteSelectionRepository,
+} from "@/application/history/appointment-note-selection";
+import type { DemoOnboardingStoragePort } from "@/application/onboarding/demo-onboarding-repository";
 import { AppShell } from "./AppShell";
 import { TodayScreen } from "./screens/TodayScreen";
 import { GlucoseEntryScreen } from "./screens/GlucoseEntryScreen";
@@ -45,6 +51,8 @@ type JagaOnAppProps = {
   runtimeFactory?: () => Promise<JagaOnRuntime>;
   /** Injected for tests; defaults to the single versioned browser storage key. */
   onboardingRepositoryFactory?: () => DemoOnboardingRepository;
+  /** Packet 7A: storage port for the local appointment-note selection. */
+  appointmentNoteStorageFactory?: () => DemoOnboardingStoragePort;
 };
 
 /** Startup gate: onboarding until setup is completed or explicitly skipped. */
@@ -65,7 +73,16 @@ const EMPTY_TODAY: TodayJournalViewModel = Object.freeze({
 export function JagaOnApp({
   runtimeFactory = createBrowserJournalRuntime,
   onboardingRepositoryFactory = browserOnboardingRepository,
+  appointmentNoteStorageFactory = createBrowserOnboardingStorage,
 }: JagaOnAppProps = {}) {
+  const appointmentNotes = useMemo<AppointmentNoteSelectionRepository>(
+    () =>
+      createAppointmentNoteSelectionRepository(
+        appointmentNoteStorageFactory(),
+        () => new Date().toISOString() as never,
+      ),
+    [appointmentNoteStorageFactory],
+  );
   const [repository, setRepository] = useState<DemoOnboardingRepository | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "LOADING" });
   const [onboarding, setOnboarding] = useState<DemoOnboardingStateV1 | null>(null);
@@ -146,7 +163,7 @@ export function JagaOnApp({
   }, [locale]);
 
   const current = stack[stack.length - 1]!;
-  const isTopLevel = current.screen === "TODAY" || current.screen === "MORE";
+  const isTopLevel = TOP_LEVEL_SCREENS.includes(current.screen);
 
   const navigate = useCallback((screen: ScreenId, params?: Record<string, string>) => {
     setStack((prev) => [...prev, { screen, params }]);
@@ -328,6 +345,8 @@ export function JagaOnApp({
                 if (onboarding) repository.save(onboarding);
                 throw error;
               }
+              // The local appointment-note selection is demo data too.
+              appointmentNotes.clear();
               onboardingLocaleRef.current = false;
               setOnboarding(null);
               setLocale("en-SG");
@@ -350,6 +369,15 @@ export function JagaOnApp({
             save={saveOnboarding}
             navigate={navigate}
             showView={showMedicinesView}
+          />
+        );
+      case "HISTORY":
+        return (
+          <RecordedHistoryScreen
+            messages={messages}
+            locale={locale}
+            history={runtime?.history ?? null}
+            selection={appointmentNotes}
           />
         );
       case "HELP_INFORMATION":
