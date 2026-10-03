@@ -15,10 +15,22 @@ import {
  * an edge never copies evidence.
  */
 
+export const REVERSE_DEPENDENCY_OWNERS = Object.freeze(["PATTERN_ENGINE", "LEARNING_ENGINE", "INQUIRY", "CARE_PLAN"] as const);
+
+export const REVERSE_DEPENDENT_RECORD_TYPES = Object.freeze([
+  "PATTERN_EVIDENCE_SNAPSHOT",
+  "LEARNED_KNOWLEDGE",
+  "INQUIRY",
+  "REMINDER",
+] as const);
+
+type ReverseDependencyOwner = (typeof REVERSE_DEPENDENCY_OWNERS)[number];
+type ReverseDependentRecordType = (typeof REVERSE_DEPENDENT_RECORD_TYPES)[number];
+
 type EvaluatorRegistration = {
   versions: readonly string[];
-  owner: "PATTERN_ENGINE" | "LEARNING_ENGINE";
-  dependentRecordType: "PATTERN_EVIDENCE_SNAPSHOT" | "LEARNED_KNOWLEDGE";
+  owner: ReverseDependencyOwner;
+  dependentRecordType: ReverseDependentRecordType;
   roles: readonly string[];
 };
 
@@ -41,15 +53,29 @@ export const REVERSE_DEPENDENCY_EVALUATORS: Readonly<Record<string, EvaluatorReg
     dependentRecordType: "LEARNED_KNOWLEDGE",
     roles: ["SUPPORTING_EVIDENCE", "CONTRADICTING_EVIDENCE"],
   },
+  // Packet 8: the exact medication-event revision an Inquiry asks about.
+  "inquiry.medication-occasion-barrier": {
+    versions: ["8.1"],
+    owner: "INQUIRY",
+    dependentRecordType: "INQUIRY",
+    roles: ["INQUIRY_BASIS"],
+  },
+  // Packet 8: the exact prescription revision a medication reminder relays.
+  "care-plan.reminder-target": {
+    versions: ["8.1"],
+    owner: "CARE_PLAN",
+    dependentRecordType: "REMINDER",
+    roles: ["REMINDER_TARGET"],
+  },
 });
 
 export type StoredReverseDependency = {
   sourceRevisionId: RevisionId;
-  dependentRecordType: "PATTERN_EVIDENCE_SNAPSHOT" | "LEARNED_KNOWLEDGE";
+  dependentRecordType: ReverseDependentRecordType;
   dependentRecordId: RecordId;
   dependentRevisionId: RevisionId;
   dependencyRole: string;
-  owner: "PATTERN_ENGINE" | "LEARNING_ENGINE";
+  owner: ReverseDependencyOwner;
   evaluatorKey: string;
   evaluatorVersion: string;
   createdAt: Instant;
@@ -58,11 +84,11 @@ export type StoredReverseDependency = {
 export const reverseDependencyRowSchema = z
   .strictObject({
     sourceRevisionId: revisionIdSchema,
-    dependentRecordType: z.enum(["PATTERN_EVIDENCE_SNAPSHOT", "LEARNED_KNOWLEDGE"]),
+    dependentRecordType: z.enum(REVERSE_DEPENDENT_RECORD_TYPES),
     dependentRecordId: recordIdSchema,
     dependentRevisionId: revisionIdSchema,
     dependencyRole: z.string().min(1).max(64),
-    owner: z.enum(["PATTERN_ENGINE", "LEARNING_ENGINE"]),
+    owner: z.enum(REVERSE_DEPENDENCY_OWNERS),
     evaluatorKey: z.string().min(1).max(96),
     evaluatorVersion: z.string().min(1).max(32),
     createdAt: instantSchema,

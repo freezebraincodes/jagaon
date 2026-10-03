@@ -512,6 +512,8 @@ export function createIntelligenceCoordinator(
         leaseExpiresAt: new Date(Date.parse(now) + LEASE_MS).toISOString() as Instant,
         leaseToken,
         claimedByInstance: dependencies.instanceId,
+        // Claim only Learning and Pattern work; Packet 8 owners claim their own.
+        consumers: ["PATTERN_REEVALUATION", "LEARNING_REEVALUATION"],
       });
       if (!item) break;
       const supported =

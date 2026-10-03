@@ -57,6 +57,16 @@ const PACKET_7A_ENGINE_MODULES = [
   "src/patterns/pattern-evaluator-support.ts",
 ];
 
+/** The only Inquiry engine modules Packet 8 may compose into the runtime. */
+const PACKET_8_INQUIRY_MODULES = [
+  "src/inquiry/barrier-response.ts",
+  "src/inquiry/barrier-template.ts",
+  "src/inquiry/inquiry-arbiter.ts",
+  "src/inquiry/inquiry-capability-manifest.ts",
+  "src/inquiry/inquiry-lifecycle-rules.ts",
+  "src/inquiry/medication-occasion-barrier.ts",
+];
+
 function graphOf(entrypoints: string[]): string[] {
   const graph = new Set<string>();
   for (const entry of entrypoints) {
@@ -68,15 +78,15 @@ function graphOf(entrypoints: string[]): string[] {
 }
 
 describe("Packet 7A runtime import boundary", () => {
-  it("reaches only the enabled Learning and Pattern evaluators, never Safety, Inquiry or live providers", () => {
+  it("reaches only the enabled Learning, Pattern and Packet 8 Inquiry modules, never Safety or live providers", () => {
     const graph = graphOf(["src/app/page.tsx"]);
     const engines = graph.filter((file) => file.startsWith("src/learning/") || file.startsWith("src/patterns/"));
     expect(engines).toEqual(PACKET_7A_ENGINE_MODULES);
+    expect(graph.filter((file) => file.startsWith("src/inquiry/"))).toEqual(PACKET_8_INQUIRY_MODULES);
 
     const forbidden = graph.filter((file) =>
       file.startsWith("src/domain/safety/") ||
       file.startsWith("src/safety/") ||
-      file.startsWith("src/inquiry/") ||
       file.startsWith("src/ai/") ||
       /(?:^|\/)(?:live|google|onemap)[^/]*(?:provider|places|maps?)[^/]*\.[jt]sx?$/.test(file),
     );
@@ -162,5 +172,85 @@ describe("Packet 6A onboarding import boundary", () => {
     );
     expect(forbidden, `Forbidden onboarding imports:\n${forbidden.join("\n")}`).toEqual([]);
     expect(graph).toContain("src/application/onboarding/demo-onboarding-repository.ts");
+  });
+});
+
+describe("Packet 8 import boundary", () => {
+  const PACKET_8_ENTRYPOINTS = [
+    "src/application/inquiry/inquiry-service.ts",
+    "src/application/inquiry/inquiry-persistence.ts",
+    "src/application/care-plan/care-plan-command-service.ts",
+    "src/application/care-plan/reminder-reconciliation.ts",
+    "src/application/medication-schedule/medication-schedule-service.ts",
+    "src/application/medication-schedule/synthetic-care-plan-seed.ts",
+    ...PACKET_8_INQUIRY_MODULES,
+  ];
+
+  it("cannot reach Packet 5A Safety, a Safety policy pack, AI, Packet 7B or a live provider", () => {
+    const graph = graphOf(PACKET_8_ENTRYPOINTS);
+    const forbidden = graph.filter(
+      (file) =>
+        file.startsWith("src/domain/safety/") ||
+        file.startsWith("src/safety/") ||
+        file.startsWith("src/ai/") ||
+        /routine-shift|recurring-barrier|prescribed-timing|barrier-learning/.test(file) ||
+        /(?:^|\/)(?:live|google|onemap)[^/]*(?:provider|places|maps?)[^/]*\.[jt]sx?$/.test(file),
+    );
+    expect(forbidden, `Forbidden Packet 8 imports:\n${forbidden.join("\n")}`).toEqual([]);
+    // The domain schema keeps the capability-discriminated SCREENED variant;
+    // no Packet 8 producer may construct it, route Safety or name a policy pack.
+    const producers = graph.filter(
+      (file) =>
+        file.startsWith("src/inquiry/") ||
+        file.startsWith("src/application/inquiry/") ||
+        file.startsWith("src/application/care-plan/") ||
+        file.startsWith("src/application/medication-schedule/"),
+    );
+    expect(producers.length).toBeGreaterThan(10);
+    for (const file of producers) {
+      const code = readFileSync(join(PROJECT_ROOT, file), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      expect(code, file).not.toMatch(/SAFETY_EVENT|NO_SAFETY_ROUTE|"SCREENED"|SAFETY_ROUTED|policyPack|PolicyPack/);
+    }
+  });
+
+  it("keeps the Medication schedule UI on the narrow port: no storage, engine, Inquiry service or record writer", () => {
+    const graph = graphOf([
+      "src/components/jagaon/screens/MedicationScheduleScreen.tsx",
+      "src/components/jagaon/primitives/ModalDialog.tsx",
+    ]);
+    const forbidden = graph.filter(
+      (file) =>
+        file.startsWith("src/storage/") ||
+        file.startsWith("src/inquiry/") ||
+        file.startsWith("src/safety/") ||
+        file.startsWith("src/domain/safety/") ||
+        file.startsWith("src/application/journal/") ||
+        file.startsWith("src/application/care-plan/") ||
+        file === "src/application/inquiry/inquiry-service.ts" ||
+        file === "src/application/medication-schedule/medication-schedule-service.ts",
+    );
+    expect(forbidden, `Forbidden UI imports:\n${forbidden.join("\n")}`).toEqual([]);
+  });
+
+  it("keeps pure Inquiry engine modules free of storage, React, network, clock and randomness", () => {
+    for (const file of PACKET_8_INQUIRY_MODULES) {
+      const graph = graphOf([file]);
+      // Only the pure canonical hash helper and its type-level contracts are shared.
+      expect(
+        graph.filter(
+          (path) =>
+            path.startsWith("src/storage/") ||
+            path.startsWith("src/components/") ||
+            (path.startsWith("src/application/") &&
+              path !== "src/application/intelligence/metrics.ts" &&
+              !path.startsWith("src/application/contracts/")),
+        ),
+        file,
+      ).toEqual([]);
+      const code = readFileSync(join(PROJECT_ROOT, file), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      for (const forbidden of [/from "dexie"/, /from "react"/, /\bfetch\(/, /Date\.now\(/, /new Date\(\)/, /Math\.random/, /crypto\.randomUUID/]) {
+        expect(code, `${file} ${forbidden}`).not.toMatch(forbidden);
+      }
+    }
   });
 });

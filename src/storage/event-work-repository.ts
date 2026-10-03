@@ -5,6 +5,8 @@ import {
   eventConsumerReceiptSchema,
 } from "@/application/contracts/event-consumer-receipt";
 import {
+  consumerKeySchema,
+  type ConsumerKey,
   type EventWorkState,
   type WorkItemId,
   type WorkErrorCode,
@@ -51,6 +53,11 @@ export type WorkClaimRequest = {
   leaseExpiresAt: Instant;
   leaseToken: string;
   claimedByInstance: string;
+  /**
+   * Optional closed consumer filter. A coordinator claims only the work it
+   * owns, so independent owners never claim, fail or delay each other's items.
+   */
+  consumers?: readonly ConsumerKey[];
 };
 
 export type PlannedCommandInput = {
@@ -105,6 +112,7 @@ const claimRequestSchema = z
     leaseExpiresAt: instantSchema,
     leaseToken: nonEmptyString,
     claimedByInstance: nonEmptyString,
+    consumers: z.array(consumerKeySchema).min(1).optional(),
   })
   .strict();
 
@@ -310,6 +318,7 @@ export function createEventWorkRepository(
         return await database.transaction("rw", work, receipts, async () => {
           const candidates = await readEligibleWork(work, request.now);
           for (const candidate of candidates) {
+            if (request.consumers && !request.consumers.includes(candidate.consumer)) continue;
             const existingReceipt = await receipts.get(receiptKey(candidate));
             if (existingReceipt !== undefined) {
               const receipt =

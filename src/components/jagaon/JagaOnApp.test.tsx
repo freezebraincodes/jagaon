@@ -166,6 +166,33 @@ function fakeRuntime(): JagaOnRuntime {
         unavailableFamilies: [],
       })),
     },
+    medicationSchedule: {
+      load: vi.fn(async () => ({
+        status: "READY" as const,
+        today: "2026-10-04",
+        yesterday: "2026-10-03",
+        occasions: [],
+        withoutFixedTime: [],
+        window: { startDate: "2026-09-21", endDate: "2026-10-04" },
+        counts: [],
+        excludedCorrected: 0,
+        unrecordedCount: 0,
+        reminders: [],
+        careQuestions: [],
+      })),
+      recordOccasion: vi.fn(),
+      correctOccasion: vi.fn(),
+      openBarrierQuestion: vi.fn(),
+      answerBarrier: vi.fn(),
+      snoozeBarrier: vi.fn(),
+      dismissBarrier: vi.fn(),
+      correctBarrier: vi.fn(),
+      removeBarrier: vi.fn(),
+      saveReminder: vi.fn(),
+      saveCareQuestion: vi.fn(),
+      editCareQuestion: vi.fn(),
+      dismissCareQuestion: vi.fn(),
+    },
     resolveLocale: vi.fn(async () => "en-SG" as const),
     persistLocale: vi.fn(async () => undefined),
     resetDemo,
@@ -407,7 +434,7 @@ describe("JagaOnApp journal integration", () => {
     // Today was never re-queried for a write that did not commit.
     expect(runtime.query.loadToday).toHaveBeenCalledTimes(1);
   });
-  it("keeps Booklet disabled and opens Recorded history as a top-level destination", async () => {
+  it("opens the Medication schedule from Booklet and Recorded history as top-level destinations", async () => {
     const en = getMessages("en-SG");
     const runtime = fakeRuntime();
     render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} />);
@@ -422,10 +449,16 @@ describe("JagaOnApp journal integration", () => {
       en.shared.navMore,
     ]);
     const booklet = within(nav).getByRole("button", { name: en.shared.navBooklet });
-    expect(booklet).toHaveAttribute("aria-disabled", "true");
-    expect(booklet).toHaveAccessibleDescription(en.today.futureFeature);
+    expect(booklet).not.toHaveAttribute("aria-disabled");
     fireEvent.click(booklet);
-    expect(within(nav).getByRole("button", { name: en.shared.navToday })).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { level: 1, name: en.schedule.title })).toBeInTheDocument();
+    expect(await screen.findByText(en.schedule.emptyTitle)).toBeInTheDocument();
+    expect(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navBooklet })).toHaveAttribute("aria-current", "page");
+    // Scoped to the medicines recorded in the current setup only.
+    expect(runtime.medicationSchedule.load).toHaveBeenCalledWith({
+      locale: "en-SG",
+      medicationRecordIds: expect.arrayContaining(["00000000-0000-4000-8000-000000000101"]),
+    });
 
     const historyTab = within(nav).getByRole("button", { name: en.shared.navHistory });
     expect(historyTab).not.toHaveAttribute("aria-disabled");

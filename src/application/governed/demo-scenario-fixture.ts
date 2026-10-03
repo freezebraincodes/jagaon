@@ -143,7 +143,7 @@ const UNCHANGED_FIXTURES = Object.freeze({
  * A second stable UUID for the synthetic revision reference: each hex digit
  * of the last block is complemented, keeping the v4 version/variant digits.
  */
-function demoRevisionId(id: string): RevisionId {
+export function demoRevisionId(id: string): RevisionId {
   const head = id.slice(0, 24);
   const tail = [...id.slice(24)].map((digit) => (15 - parseInt(digit, 16)).toString(16)).join("");
   return `${head}${tail}` as RevisionId;

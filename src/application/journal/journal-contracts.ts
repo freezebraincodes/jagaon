@@ -109,6 +109,25 @@ export type JournalCommandService = {
   recordActivity(input: RecordActivityInput): Promise<JournalCommitResult>;
 };
 
+/** Packet 8: a medication event for one exact occasion, with an optional retry identity. */
+export type RecordMedicationEventInput = RecordInsulinInput & { commandId?: CommandId };
+
+export type CorrectMedicationEventInput = {
+  recordId: RecordId;
+  expectedRevisionId: RevisionId;
+  expectedRevisionNumber: number;
+  payload: MedicationEventPayload;
+  temporal: MedicationEventTemporal;
+  recordedAt: Instant;
+  commandId?: CommandId;
+};
+
+/** Packet 8 medication-event commands on the existing authoritative journal path. */
+export type MedicationEventCommands = {
+  recordMedicationEvent(input: RecordMedicationEventInput): Promise<JournalCommitResult>;
+  correctMedicationEvent(input: CorrectMedicationEventInput): Promise<JournalCommitResult>;
+};
+
 export type { JagaOnDatabase };
 
 // ---------------------------------------------------------------------------

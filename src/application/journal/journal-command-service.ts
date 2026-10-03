@@ -3,6 +3,9 @@ import type {
   JournalCommandService,
   JournalCommandDependencies,
   JournalCommitResult,
+  MedicationEventCommands,
+  RecordMedicationEventInput,
+  CorrectMedicationEventInput,
   RecordGlucoseInput,
   CorrectGlucoseTimeInput,
   RecordInsulinInput,
@@ -11,6 +14,8 @@ import type {
 } from "./journal-contracts";
 import { createWorkItemId } from "@/application/contracts/event-work";
 import { intelligenceWorkItemsFor } from "@/application/intelligence/intelligence-subscriptions";
+import { packet8WorkItemsFor } from "@/application/packet8-subscriptions";
+import { fingerprint } from "@/application/intelligence/metrics";
 import { activityEventPayloadSchema } from "@/domain/health-records/activity-event";
 import { activityTemporalSchema } from "@/domain/health-records/observation-temporal";
 import type { JagaOnDatabase } from "@/storage/database";
@@ -278,7 +283,7 @@ const persistedEventCodec = {
 export function createJournalCommandService(
   database: JagaOnDatabase,
   dependencies: JournalCommandDependencies,
-): JournalCommandService {
+): JournalCommandService & MedicationEventCommands {
   const store = createAuthoritativeCommandStore<
     PersistedRevisionRow,
     PersistedAuditRow,
@@ -335,19 +340,23 @@ export function createJournalCommandService(
   // Packet 7A: the static subscription registry schedules ordinary
   // intelligence work in the same authoritative transaction as the event.
   function workItemsFor(
-    event: { eventId: DomainEventId; eventName: string; change: { recordType: string } },
+    event: { eventId: DomainEventId; eventName: string; change: { recordType: string }; payload?: unknown },
     createdAt: Instant,
   ) {
-    return intelligenceWorkItemsFor({
+    const state = (event.payload as { state?: unknown } | undefined)?.state;
+    const source = {
       eventId: event.eventId,
       eventName: event.eventName,
       recordType: event.change.recordType as Packet6JournalRevision["recordType"],
       createdAt,
       workItemId: dependencies.ids.workItemId ?? createWorkItemId,
-    });
+      medicationEventState: typeof state === "string" ? state : undefined,
+    };
+    // Packet 8: an explicitly recorded medication event schedules Inquiry eligibility.
+    return [...intelligenceWorkItemsFor(source), ...packet8WorkItemsFor(source)];
   }
 
-  return Object.freeze({
+  const service: JournalCommandService & MedicationEventCommands = Object.freeze({
     async recordGlucose(input: RecordGlucoseInput): Promise<JournalCommitResult> {
       try {
         const payload = glucoseReadingPayloadSchema.parse(input.payload);
@@ -631,7 +640,7 @@ export function createJournalCommandService(
       }
     },
 
-    async recordInsulin(input: RecordInsulinInput): Promise<JournalCommitResult> {
+    async recordInsulin(input: RecordMedicationEventInput): Promise<JournalCommitResult> {
       try {
         const payload = medicationEventPayloadSchema.parse(input.payload);
         const temporal = medicationEventTemporalSchema.parse(input.temporal);
@@ -640,7 +649,7 @@ export function createJournalCommandService(
         const revisionId = dependencies.ids.revisionId();
         const auditEventId = dependencies.ids.auditEventId();
         const transactionId = dependencies.ids.transactionId();
-        const commandId = dependencies.ids.commandId();
+        const commandId = input.commandId ?? dependencies.ids.commandId();
         const correlationId = dependencies.ids.correlationId();
         const domainEventId = dependencies.ids.domainEventId();
         const now = dependencies.now();
@@ -765,6 +774,113 @@ export function createJournalCommandService(
         if (error instanceof z.ZodError) {
           return { kind: "FAILED", code: "VALIDATION_FAILED" };
         }
+        return { kind: "FAILED", code: "STORAGE_UNAVAILABLE" };
+      }
+    },
+
+    /** Packet 8: an explicit medication-event record for one exact scheduled occasion. */
+    async recordMedicationEvent(input: RecordMedicationEventInput): Promise<JournalCommitResult> {
+      return service.recordInsulin(input);
+    },
+
+    /** Packet 8: a recorded-error correction of a medication event; history is kept. */
+    async correctMedicationEvent(input: CorrectMedicationEventInput): Promise<JournalCommitResult> {
+      try {
+        const payload = medicationEventPayloadSchema.parse(input.payload);
+        const temporal = medicationEventTemporalSchema.parse(input.temporal);
+        const revisionId = dependencies.ids.revisionId();
+        const auditEventId = dependencies.ids.auditEventId();
+        const transactionId = dependencies.ids.transactionId();
+        const commandId = input.commandId ?? dependencies.ids.commandId();
+        const correlationId = dependencies.ids.correlationId();
+        const domainEventId = dependencies.ids.domainEventId();
+        const now = dependencies.now();
+        const nextNumber = input.expectedRevisionNumber + 1;
+
+        const revision = {
+          schemaVersion: 1,
+          recordType: "MEDICATION_EVENT",
+          recordId: input.recordId,
+          revisionId,
+          revisionNumber: nextNumber,
+          previousRevisionId: input.expectedRevisionId,
+          action: "CORRECT",
+          recordedAt: input.recordedAt,
+          revisionCreatedAt: now,
+          temporal,
+          provenance: PATIENT_ENTRY_PROVENANCE,
+          auditEventId,
+          transactionId,
+          payload,
+        } as unknown as MedicationEventRevision;
+        const expectation = {
+          kind: "MUST_MATCH" as const,
+          recordType: "MEDICATION_EVENT" as const,
+          recordId: input.recordId,
+          expectedRevisionId: input.expectedRevisionId,
+          expectedRevisionNumber: input.expectedRevisionNumber,
+        };
+        // Semantic content only, so an exact retry with the same command ID replays.
+        const commandHash = fingerprint({
+          commandName: "CORRECT_HEALTH_RECORD",
+          target: expectation,
+          payload,
+          temporal,
+        });
+        const storedRevision = medicationEventRevisionCodec.create(revision);
+        const domainEvent: Omit<PersistedDomainEventRow, "localSequence" | "transactionIndex" | "committedAt"> = {
+          eventId: domainEventId,
+          eventName: "MEDICATION_EVENT_CORRECTED",
+          transactionId,
+          commandId,
+          correlationId,
+          change: {
+            kind: "REVISION_CREATED",
+            recordType: "MEDICATION_EVENT",
+            recordId: input.recordId,
+            action: "CORRECT",
+            previousRevisionId: input.expectedRevisionId,
+            resultingRevisionId: revisionId,
+            resultingRevisionNumber: nextNumber,
+          },
+          payload,
+        };
+        return executePlan({
+          kind: "COMMIT",
+          commandId,
+          commandHash,
+          completedAt: now,
+          transactionId,
+          headExpectations: [expectation],
+          recordRevisions: [storedRevision as unknown as PersistedRevisionRow],
+          recordHeads: [
+            { recordId: input.recordId, recordType: "MEDICATION_EVENT", headRevisionId: revisionId, headRevisionNumber: nextNumber, state: "ACTIVE", updatedAt: now },
+          ],
+          deletionTombstones: [],
+          auditEvents: [
+            {
+              auditEventId,
+              transactionId,
+              recordId: input.recordId,
+              recordType: "MEDICATION_EVENT",
+              previousRevisionId: input.expectedRevisionId,
+              resultingRevisionId: revisionId,
+              action: "CORRECT",
+              initiator: "PATIENT",
+              assistance: "NONE",
+              occurredAt: now,
+              reasonCode: "PATIENT_CORRECTED",
+            },
+          ],
+          domainEvents: [domainEvent as never],
+          eventWorkItems: workItemsFor(domainEvent, now),
+          reverseDependencies: [],
+          evaluationAudits: [],
+          appPreference: null,
+          safety: { kind: "NOT_REQUIRED" },
+        });
+      } catch (error) {
+        if (error instanceof StorageRowValidationError || error instanceof z.ZodError) return { kind: "FAILED", code: "VALIDATION_FAILED" };
         return { kind: "FAILED", code: "STORAGE_UNAVAILABLE" };
       }
     },
@@ -1045,6 +1161,7 @@ export function createJournalCommandService(
       }
     },
   });
+  return service;
 }
 
 // Re-export for tests

@@ -6,19 +6,23 @@ import {
   PACKET_6_ENABLED_SCREENS,
   PACKET_6A_CHILD_SCREENS,
   PACKET_7A_TOP_LEVEL_SCREENS,
+  PACKET_8_TOP_LEVEL_SCREENS,
   ONBOARDING_ROUTES,
   type ScreenId,
 } from "./screen-manifest";
 
 describe("screen-manifest", () => {
-  it("has exactly three top-level screens in navigation order: TODAY, HISTORY and MORE", () => {
-    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "HISTORY", "MORE"]);
+  it("has exactly four top-level screens in navigation order: TODAY, MEDICATION_SCHEDULE, HISTORY and MORE", () => {
+    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MEDICATION_SCHEDULE", "HISTORY", "MORE"]);
     expect(PACKET_7A_TOP_LEVEL_SCREENS).toEqual(["HISTORY"]);
+    expect(PACKET_8_TOP_LEVEL_SCREENS).toEqual(["MEDICATION_SCHEDULE"]);
     expect(Object.isFrozen(PACKET_7A_TOP_LEVEL_SCREENS)).toBe(true);
+    expect(Object.isFrozen(PACKET_8_TOP_LEVEL_SCREENS)).toBe(true);
   });
 
-  it("keeps Booklet absent: it is not authorised by any accepted packet", () => {
+  it("routes the Booklet tab only to the Packet 8 Medication schedule, with no duplicate destination", () => {
     expect(ALL_SCREENS.has("BOOKLET" as ScreenId)).toBe(false);
+    expect([...ALL_SCREENS].filter((screen) => /SCHEDULE|REMINDER|BOOKLET|CARE_QUESTION/.test(screen))).toEqual(["MEDICATION_SCHEDULE"]);
   });
 
   it("lists every Packet 6 child exactly once", () => {
@@ -67,15 +71,16 @@ describe("screen-manifest", () => {
     }
   });
 
-  it("has the 11 Packet 6 screens, Packet 6A My medicines and Packet 7A Recorded history", () => {
+  it("has the 11 Packet 6 screens, Packet 6A My medicines, Packet 7A Recorded history and Packet 8 Medication schedule", () => {
     expect(PACKET_6A_CHILD_SCREENS).toEqual(["MY_MEDICINES"]);
-    expect(ALL_SCREENS.size).toBe(13);
+    expect(ALL_SCREENS.size).toBe(14);
+    expect(ALL_SCREENS.has("MEDICATION_SCHEDULE")).toBe(true);
     expect(ALL_SCREENS.has("HISTORY")).toBe(true);
     expect(ALL_SCREENS.has("MY_MEDICINES")).toBe(true);
     expect(ALL_SCREENS.has("SETTINGS" as ScreenId)).toBe(false);
   });
 
-  it("no Packet 7B-9 route exists", () => {
+  it("no Packet 7B, 9 or later route exists", () => {
     const deferred = [
       "TRENDS",
       "ROUTINE_SHIFT",

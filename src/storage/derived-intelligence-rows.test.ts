@@ -38,11 +38,13 @@ const audit = {
 const ok = (schema: { safeParse(v: unknown): { success: boolean } }, value: unknown) => schema.safeParse(value).success;
 
 describe("reverse-dependency rows", () => {
-  it("registers exactly the three Packet 7A evaluators", () => {
+  it("registers exactly the three Packet 7A evaluators and the two Packet 8 dependency owners", () => {
     expect(Object.keys(REVERSE_DEPENDENCY_EVALUATORS)).toEqual([
       "pattern.comparable-slot-trend",
       "pattern.familiar-or-frequent-item",
       "learning.familiar-item",
+      "inquiry.medication-occasion-barrier",
+      "care-plan.reminder-target",
     ]);
   });
 

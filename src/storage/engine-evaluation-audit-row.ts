@@ -89,7 +89,10 @@ export const engineEvaluationAuditRowSchema = z
     const fail = (message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, message });
     const registration = REVERSE_DEPENDENCY_EVALUATORS[row.evaluatorKey];
     if (!registration || !registration.versions.includes(row.evaluatorVersion)) fail("UNKNOWN_EVALUATOR");
-    else if (ENGINE_BY_OWNER[registration.owner] !== row.engine) fail("ENGINE_DISAGREES_WITH_EVALUATOR");
+    // Only Learning and Pattern evaluations are audited here; Packet 8 edge owners never are.
+    else if ((ENGINE_BY_OWNER as Readonly<Record<string, string | undefined>>)[registration.owner] !== row.engine) {
+      fail("ENGINE_DISAGREES_WITH_EVALUATOR");
+    }
     if (!RUNTIME_MANIFESTS[row.runtimeManifestId]?.includes(row.runtimeManifestVersion)) fail("UNKNOWN_RUNTIME_MANIFEST");
   })
   .transform((row): StoredEngineEvaluationAudit => row as StoredEngineEvaluationAudit);

@@ -40,11 +40,10 @@ export function AppShell({
     }
   }, [currentScreen]);
 
-  // Booklet belongs to a later packet: shown as in frame 01 but disabled,
-  // with no route behind it. History is enabled by Packet 7A.
-  const tabs: Array<{ screen: ScreenId | null; label: string; icon: ReactNode }> = [
+  // Booklet is the Packet 8 Medication schedule; History is Packet 7A.
+  const tabs: Array<{ screen: ScreenId; label: string; icon: ReactNode }> = [
     { screen: "TODAY", label: messages.shared.navToday, icon: <HomeIcon size={26} /> },
-    { screen: null, label: messages.shared.navBooklet, icon: <BookletIcon size={26} /> },
+    { screen: "MEDICATION_SCHEDULE", label: messages.shared.navBooklet, icon: <BookletIcon size={26} /> },
     { screen: "HISTORY", label: messages.shared.navHistory, icon: <ChartIcon size={26} /> },
     { screen: "MORE", label: messages.shared.navMore, icon: <MoreIcon size={26} /> },
   ];
@@ -71,34 +70,18 @@ export function AppShell({
       {isTopLevel ? (
         <nav className="app-nav">
           <div className="app-nav-inner">
-            {tabs.map((tab) =>
-              tab.screen ? (
-                <button
-                  key={tab.label}
-                  type="button"
-                  className="app-nav-button"
-                  aria-current={currentScreen === tab.screen ? "page" : undefined}
-                  onClick={() => onSwitchTab(tab.screen!)}
-                >
-                  {tab.icon}
-                  <span>{tab.label}</span>
-                </button>
-              ) : (
-                <button
-                  key={tab.label}
-                  type="button"
-                  className="app-nav-button app-nav-button--future"
-                  aria-disabled="true"
-                  aria-describedby="app-nav-later"
-                >
-                  {tab.icon}
-                  <span>{tab.label}</span>
-                </button>
-              ),
-            )}
-            <span className="sr-only" id="app-nav-later">
-              {messages.today.futureFeature}
-            </span>
+            {tabs.map((tab) => (
+              <button
+                key={tab.screen}
+                type="button"
+                className="app-nav-button"
+                aria-current={currentScreen === tab.screen ? "page" : undefined}
+                onClick={() => onSwitchTab(tab.screen)}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            ))}
           </div>
         </nav>
       ) : null}

@@ -15,6 +15,8 @@
 export type ScreenId =
   /** Top-level: Today dashboard (frame 01) */
   | "TODAY"
+  /** Top-level (Packet 8): Medication schedule, the Booklet tab (v1 frame 11) */
+  | "MEDICATION_SCHEDULE"
   /** Top-level (Packet 7A): Recorded history (v1 frame 06) */
   | "HISTORY"
   /** Top-level: More screen (frame 12) */
@@ -46,14 +48,20 @@ export type ScreenId =
 
 /**
  * Packet 7A top-level destination, enabled only now that the validated
- * Recorded-history query path exists. Booklet stays a disabled later-packet
- * tab with no route.
+ * Recorded-history query path exists.
  */
 export const PACKET_7A_TOP_LEVEL_SCREENS: readonly ScreenId[] = Object.freeze(["HISTORY"]);
+
+/**
+ * Packet 8 top-level destination: the existing Booklet tab is enabled as the
+ * authorised Medication schedule route. It is the only Booklet destination.
+ */
+export const PACKET_8_TOP_LEVEL_SCREENS: readonly ScreenId[] = Object.freeze(["MEDICATION_SCHEDULE"]);
 
 /** Bottom-navigation destinations in navigation order. */
 export const TOP_LEVEL_SCREENS: readonly ScreenId[] = Object.freeze([
   "TODAY",
+  ...PACKET_8_TOP_LEVEL_SCREENS,
   ...PACKET_7A_TOP_LEVEL_SCREENS,
   "MORE",
 ]);

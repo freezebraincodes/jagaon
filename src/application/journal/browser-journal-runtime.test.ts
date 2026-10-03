@@ -101,4 +101,38 @@ describe("browser journal runtime", () => {
     expect(await runtime.resolveLocale()).toBe("en-SG");
     expect(await runtime.history.load({ period: "THIRTY_DAYS" })).toEqual(seeded);
   }, INTEGRATION_TIMEOUT_MS);
+
+  it("seeds the Packet 8 care plan once and restores the Medication schedule after reset", async () => {
+    const runtime = await open();
+    const scope = ["00000000-0000-4000-8000-000000000101", "00000000-0000-4000-8000-000000000103"];
+    const seeded = await runtime.medicationSchedule.load({ locale: "en-SG", medicationRecordIds: scope });
+    if (seeded.status !== "READY") throw new Error("ready");
+    expect(seeded.occasions.map((entry) => [entry.section, entry.medicineName, entry.scheduledTime])).toEqual([
+      ["YESTERDAY", "Nocturin pen (demo)", "21:00"],
+      ["TODAY", "Nocturin pen (demo)", "21:00"],
+    ]);
+    expect(seeded.withoutFixedTime).toEqual([{ medicineName: "Veltora pen (demo)" }]);
+    expect(seeded.counts.map((count) => [count.optionKey, count.occasionCount])).toEqual([
+      ["ROUTINE_CHANGED", 2],
+      ["AWAY_FROM_HOME", 1],
+    ]);
+    expect(seeded.reminders.map((reminder) => reminder.state)).toContain("REVIEW_REQUIRED");
+
+    const yesterday = seeded.occasions.find((entry) => entry.section === "YESTERDAY")!;
+    const saved = await runtime.medicationSchedule.recordOccasion({ occasion: yesterday.occasion, state: "SKIPPED", amount: null, locale: "en-SG", commandId: crypto.randomUUID() as never });
+    expect(saved.kind === "SAVED" && saved.offer !== null).toBe(true);
+
+    await runtime.resetDemo();
+    // Record identifiers are regenerated; the restored meaning is identical.
+    const semantic = (view: typeof seeded) => ({
+      occasions: view.occasions.map((entry) => [entry.section, entry.localDate, entry.scheduledTime, entry.record, entry.barrier]),
+      counts: view.counts,
+      unrecordedCount: view.unrecordedCount,
+      reminders: view.reminders.map((reminder) => [reminder.label, reminder.state, reminder.times]),
+      careQuestions: view.careQuestions,
+    });
+    const restored = await runtime.medicationSchedule.load({ locale: "en-SG", medicationRecordIds: scope });
+    if (restored.status !== "READY") throw new Error("ready");
+    expect(semantic(restored)).toEqual(semantic(seeded));
+  }, INTEGRATION_TIMEOUT_MS);
 });

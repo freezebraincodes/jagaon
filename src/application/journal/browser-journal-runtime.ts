@@ -23,6 +23,13 @@ import { createIntelligenceCoordinator } from "@/application/intelligence/intell
 import { createRecordedHistoryQuery } from "@/application/history/recorded-history-query";
 import type { RecordedHistoryQueryPort } from "@/application/history/recorded-history-contracts";
 import { seedSyntheticHistory } from "@/application/history/synthetic-history-seed";
+import { createCarePlanCommandService } from "@/application/care-plan/care-plan-command-service";
+import { createReminderReconciliation } from "@/application/care-plan/reminder-reconciliation";
+import { createInquiryService } from "@/application/inquiry/inquiry-service";
+import { barrierPresentationCopyFor } from "@/application/medication-schedule/barrier-presentation-copy";
+import type { MedicationSchedulePort } from "@/application/medication-schedule/medication-schedule-contracts";
+import { createMedicationScheduleService } from "@/application/medication-schedule/medication-schedule-service";
+import { seedSyntheticCarePlan } from "@/application/medication-schedule/synthetic-care-plan-seed";
 import type {
   JournalCommandService,
   JournalCommitResult,
@@ -37,6 +44,8 @@ export type JagaOnRuntime = {
   query: JournalQueryPort;
   /** Packet 7A: validated descriptive Recorded-history view models. */
   history: RecordedHistoryQueryPort;
+  /** Packet 8: Medication schedule view models and patient-confirmed commands. */
+  medicationSchedule: MedicationSchedulePort;
   resolveLocale(): Promise<SupportedLocale>;
   persistLocale(locale: SupportedLocale): Promise<void>;
   resetDemo(): Promise<void>;
@@ -75,6 +84,15 @@ export async function createBrowserJournalRuntime(
     instanceId: "browser",
   });
   const historyQuery = createRecordedHistoryQuery(database, { now });
+  const leaseToken = () => crypto.randomUUID();
+  const carePlan = createCarePlanCommandService(database, { now, ids });
+  const reminders = createReminderReconciliation(database, { now, newCommandId: createCommandId, leaseToken, instanceId: "browser", carePlan });
+  const inquiry = createInquiryService(database, {
+    now,
+    ids: { ...ids, presentationKey: () => crypto.randomUUID(), leaseToken },
+    instanceId: "browser",
+    copy: barrierPresentationCopyFor,
+  });
 
   // Ordinary intelligence runs after the journal transaction commits and is
   // serialised; history reads wait for it so they reflect committed records.
@@ -105,10 +123,35 @@ export async function createBrowserJournalRuntime(
     recordActivity: afterCommit(journalCommands.recordActivity),
   });
 
+  // Packet 8 owned work (Inquiry eligibility, reminder review) is serialised
+  // the same way and settles before a schedule read or a barrier offer.
+  let packet8: Promise<unknown> = Promise.resolve();
+  function settlePacket8(): Promise<void> {
+    packet8 = packet8
+      .then(() => inquiry.processPending())
+      .then(() => reminders.processPending())
+      .then(() => inquiry.maintain())
+      .catch(() => undefined);
+    return packet8.then(() => undefined);
+  }
+
+  const schedule = createMedicationScheduleService(database, {
+    now,
+    journal: journalCommands,
+    carePlan,
+    inquiry,
+    settle: async () => {
+      void scheduleIntelligence();
+      await settlePacket8();
+    },
+  });
+
   /** Seed only an empty demo database, never over user-created records. */
   async function seedSyntheticScenarioWhenEmpty(): Promise<void> {
     if ((await database.table("recordHeads").count()) > 0) return;
-    await seedSyntheticHistory(journalCommands, now());
+    const seedAt = now();
+    await seedSyntheticHistory(journalCommands, seedAt);
+    await seedSyntheticCarePlan({ database, seedAt, ids, copy: barrierPresentationCopyFor("en-SG") });
   }
 
   await seedSyntheticScenarioWhenEmpty();
@@ -124,12 +167,20 @@ export async function createBrowserJournalRuntime(
         return historyQuery.load(request);
       },
     }),
+    medicationSchedule: Object.freeze({
+      ...schedule,
+      async load(request: Parameters<MedicationSchedulePort["load"]>[0]) {
+        await settlePacket8();
+        return schedule.load(request);
+      },
+    }),
     resolveLocale: () => localeRepository.resolve(null, now()),
     async persistLocale(locale: SupportedLocale) {
       await localeRepository.resolve(locale, now());
     },
     async resetDemo() {
       await intelligence;
+      await packet8;
       await resetSyntheticDemoStorage(database, {
         releaseProfile: CURRENT_RELEASE_PROFILE,
         confirmation: DEMO_STORAGE_RESET_CONFIRMATION,

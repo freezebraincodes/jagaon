@@ -99,7 +99,10 @@ describe("Packet 7A public exports and manifests", () => {
       ...Object.values(INTELLIGENCE_ACTIVATION_MANIFEST.pattern),
       ...Object.values(INTELLIGENCE_ACTIVATION_MANIFEST.learning),
     ].flatMap((disposition) => (disposition.kind === "ENABLED" ? [[disposition.evaluatorKey, disposition.evaluatorVersion]] : []));
-    expect(Object.entries(REVERSE_DEPENDENCY_EVALUATORS).map(([key, value]) => [key, value.versions[0]]).sort()).toEqual(enabled.sort());
+    const intelligenceEdges = Object.entries(REVERSE_DEPENDENCY_EVALUATORS).filter(
+      ([, value]) => value.owner === "PATTERN_ENGINE" || value.owner === "LEARNING_ENGINE",
+    );
+    expect(intelligenceEdges.map(([key, value]) => [key, value.versions[0]]).sort()).toEqual(enabled.sort());
   });
 
   it("gates every reviewed Evidence Gate version to an enabled family", () => {
@@ -118,8 +121,8 @@ describe("Packet 7A public exports and manifests", () => {
   it("keeps the 16-table storage catalogue and the closed screen manifest", () => {
     expect(JAGAON_TABLE_NAMES).toHaveLength(16);
     expect(JAGAON_DEXIE_VERSION).toBe(1);
-    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "HISTORY", "MORE"]);
-    expect(ALL_SCREENS.size).toBe(13);
+    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MEDICATION_SCHEDULE", "HISTORY", "MORE"]);
+    expect(ALL_SCREENS.size).toBe(14);
     expect(HISTORY_PERIODS).toEqual(["THIS_WEEK", "LAST_WEEK", "THIRTY_DAYS"]);
   });
 

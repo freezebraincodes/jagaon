@@ -47,16 +47,19 @@ import {
 } from "./storage-row-codec";
 
 /**
- * Derived intelligence records whose historical payloads may disclose
- * permanently deleted source material (domain Section 8.10). A tombstone for
- * one of these types purges the record's stored revisions and its reverse
- * dependency edges in the same transaction; other record types keep their
- * existing tombstone semantics.
+ * Records whose historical payloads may disclose permanently deleted source
+ * material or patient answers (domain Sections 8.10, 9.7 and 9.16). A
+ * tombstone for one of these types purges the record's stored revisions and
+ * its reverse dependency edges in the same transaction; other record types
+ * keep their existing tombstone semantics.
  */
 const PURGED_DERIVED_RECORD_TYPES: ReadonlySet<RecordType> = new Set<RecordType>([
   "LEARNED_KNOWLEDGE",
   "PATTERN_OBSERVATION",
   "PATTERN_EVIDENCE_SNAPSHOT",
+  // Packet 8: a deleted inquiry or answer keeps no identifiable wording or raw answer.
+  "INQUIRY",
+  "INQUIRY_RESPONSE",
 ]);
 
 export type CommandTransactionErrorCode =

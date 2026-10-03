@@ -9,6 +9,7 @@ import { DemoBoundaryNotice } from "@/components/demo/DemoBoundaryNotice";
 import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-fixture";
 import { TOP_LEVEL_SCREENS, type ScreenId } from "./screen-manifest";
 import { RecordedHistoryScreen } from "./screens/RecordedHistoryScreen";
+import { MedicationScheduleScreen } from "./screens/MedicationScheduleScreen";
 import {
   createAppointmentNoteSelectionRepository,
   type AppointmentNoteSelectionRepository,
@@ -378,6 +379,15 @@ export function JagaOnApp({
             locale={locale}
             history={runtime?.history ?? null}
             selection={appointmentNotes}
+          />
+        );
+      case "MEDICATION_SCHEDULE":
+        return (
+          <MedicationScheduleScreen
+            messages={messages}
+            locale={locale}
+            schedule={runtime?.medicationSchedule ?? null}
+            medicationRecordIds={fixture.recordedPrescriptions.map((prescription) => prescription.medicationRecordId)}
           />
         );
       case "HELP_INFORMATION":
