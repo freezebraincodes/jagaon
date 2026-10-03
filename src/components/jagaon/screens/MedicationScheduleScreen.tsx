@@ -308,23 +308,6 @@ export function MedicationScheduleScreen({ messages, locale, schedule, medicatio
             </div>
           </dl>
           <p className="source-attr">{copy.sourceFixture(formatScheduleDay(locale, occasion.scheduleSource.date))}</p>
-          {barrier.kind === "ANSWERED" && occasion.record ? (
-            <div className="schedule-answer">
-              <p>{copy.answerRecordedAs(answerLabel(copy, barrier.answer))}</p>
-              <div className="card-links">
-                <button type="button" className="text-link" onClick={() => open({ kind: "BARRIER_CORRECT", occasion, responseRecordId: barrier.responseRecordId })}>
-                  <PencilIcon size={20} />
-                  {copy.barrierCorrect}
-                  <span className="sr-only"> · {occasion.medicineName} · {occasionLabel(occasion)}</span>
-                </button>
-                <button type="button" className="text-link text-link--quiet" onClick={() => open({ kind: "BARRIER_REMOVE", occasion, responseRecordId: barrier.responseRecordId })}>
-                  <TrashIcon size={20} />
-                  {copy.barrierRemove}
-                  <span className="sr-only"> · {occasion.medicineName} · {occasionLabel(occasion)}</span>
-                </button>
-              </div>
-            </div>
-          ) : null}
           <div className="card-links">
             <button
               type="button"
@@ -344,6 +327,23 @@ export function MedicationScheduleScreen({ messages, locale, schedule, medicatio
               </button>
             ) : null}
           </div>
+          {barrier.kind === "ANSWERED" && occasion.record ? (
+            <div className="schedule-answer">
+              <p>{copy.answerRecordedAs(answerLabel(copy, barrier.answer))}</p>
+              <div className="card-links">
+                <button type="button" className="text-link" onClick={() => open({ kind: "BARRIER_CORRECT", occasion, responseRecordId: barrier.responseRecordId })}>
+                  <PencilIcon size={20} />
+                  {copy.barrierCorrect}
+                  <span className="sr-only"> · {occasion.medicineName} · {occasionLabel(occasion)}</span>
+                </button>
+                <button type="button" className="text-link text-link--quiet" onClick={() => open({ kind: "BARRIER_REMOVE", occasion, responseRecordId: barrier.responseRecordId })}>
+                  <TrashIcon size={20} />
+                  {copy.barrierRemove}
+                  <span className="sr-only"> · {occasion.medicineName} · {occasionLabel(occasion)}</span>
+                </button>
+              </div>
+            </div>
+          ) : null}
         </article>
       </li>
     );
