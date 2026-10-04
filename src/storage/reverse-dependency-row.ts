@@ -15,13 +15,14 @@ import {
  * an edge never copies evidence.
  */
 
-export const REVERSE_DEPENDENCY_OWNERS = Object.freeze(["PATTERN_ENGINE", "LEARNING_ENGINE", "INQUIRY", "CARE_PLAN"] as const);
+export const REVERSE_DEPENDENCY_OWNERS = Object.freeze(["PATTERN_ENGINE", "LEARNING_ENGINE", "INQUIRY", "CARE_PLAN", "CARE_PREPARATION"] as const);
 
 export const REVERSE_DEPENDENT_RECORD_TYPES = Object.freeze([
   "PATTERN_EVIDENCE_SNAPSHOT",
   "LEARNED_KNOWLEDGE",
   "INQUIRY",
   "REMINDER",
+  "CARE_SUMMARY_SNAPSHOT",
 ] as const);
 
 type ReverseDependencyOwner = (typeof REVERSE_DEPENDENCY_OWNERS)[number];
@@ -66,6 +67,13 @@ export const REVERSE_DEPENDENCY_EVALUATORS: Readonly<Record<string, EvaluatorReg
     owner: "CARE_PLAN",
     dependentRecordType: "REMINDER",
     roles: ["REMINDER_TARGET"],
+  },
+  // Packet 9C: every exact source revision a care-summary snapshot was built from.
+  "care-preparation.summary-source": {
+    versions: ["9c.1"],
+    owner: "CARE_PREPARATION",
+    dependentRecordType: "CARE_SUMMARY_SNAPSHOT",
+    roles: ["CARE_SUMMARY_SOURCE"],
   },
 });
 

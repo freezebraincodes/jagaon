@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "snapshotVersion": "hpb-nearby-food.1",
+  "transformVersion": "transform-hpb-nearby-food.1",
+  "sources": [
+    {
+      "role": "CRITERIA",
+      "datasetId": "d_c475b9170c08f90580f4041bffd51639",
+      "name": "Healthier Dining Partners - F&B Partners",
+      "publisher": "Health Promotion Board",
+      "sourceUrl": "https://data.gov.sg/datasets/d_c475b9170c08f90580f4041bffd51639/view",
+      "format": "CSV",
+      "sourcePublishedAt": "2026-10-02T19:01:41+08:00",
+      "retrievedAt": "2026-10-03T15:58:18Z",
+      "sha256": "2052ef28572d39c3067385765bff7675c8f2d460646120ed28cf086becec63af",
+      "byteLength": 704705
+    },
+    {
+      "role": "COORDINATES",
+      "datasetId": "d_2925c2ccf75d1c135c2d469e0de3cee6",
+      "name": "Healthier Eateries",
+      "publisher": "Health Promotion Board",
+      "sourceUrl": "https://data.gov.sg/datasets/d_2925c2ccf75d1c135c2d469e0de3cee6/view",
+      "format": "GEOJSON",
+      "sourcePublishedAt": "2026-01-04T10:06:47+08:00",
+      "retrievedAt": "2026-10-03T15:58:43Z",
+      "sha256": "0611cdc814a4e8a31888d27e615d151f52b87fa6fcb60563d53efb91c8b03ffb",
+      "byteLength": 1467826
+    }
+  ],
+  "licence": {
+    "name": "Singapore Open Data Licence version 1.0",
+    "url": "https://data.gov.sg/open-data-licence"
+  },
+  "snapshot": {
+    "path": "data/hpb-nearby-food-v1.json",
+    "sha256": "773138dd584a62f47197d9ef8861c803232847da680947bbccce12533e9e333f",
+    "byteLength": 496799
+  },
+  "counts": {
+    "criteriaInputRows": 3762,
+    "criteriaAccepted": 731,
+    "criteriaRejected": 95,
+    "criteriaUnmatched": 2645,
+    "criteriaAmbiguous": 291,
+    "coordinateInputFeatures": 1829,
+    "coordinateAccepted": 1828,
+    "coordinateRejected": 1,
+    "venuesWithGovernedCriteria": 731,
+    "venuesWithoutGovernedCriteria": 1097
+  },
+  "matchingRules": [
+    "R1_SINGLE_POSTAL",
+    "R2_SINGLE_UNIT",
+    "R3_UNIQUE_POSTAL_FLOOR_UNIT",
+    "R3B_SINGLE_POSTAL_NO_UNIT",
+    "R4_OTHERWISE_UNBADGED"
+  ]
+}

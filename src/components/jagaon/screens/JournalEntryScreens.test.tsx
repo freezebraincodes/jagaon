@@ -137,6 +137,20 @@ function setGlucoseTime(value: string) {
   if (time) setWheelTime(time);
 }
 
+/** Asserts the day choice that `setGlucoseTime` made for a date, on any test date. */
+function expectGlucoseDate(date: string) {
+  const today = singaporeNowParts().date;
+  const yesterday = new Date(`${today}T12:00:00+08:00`);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const yesterdayDate = yesterday.toLocaleDateString("en-CA", { timeZone: "Asia/Singapore" });
+  if (date === today) expect(screen.getByRole("radio", { name: en.readingTime.dayToday })).toBeChecked();
+  else if (date === yesterdayDate) expect(screen.getByRole("radio", { name: en.readingTime.dayYesterday })).toBeChecked();
+  else {
+    expect(screen.getByRole("radio", { name: en.readingTime.dayOther })).toBeChecked();
+    expect(screen.getByLabelText(en.readingTime.newDate)).toHaveValue(date);
+  }
+}
+
 describe("glucose entry", () => {
   it("uses the frame 02 title and the five context chips", () => {
     renderGlucose();
@@ -325,7 +339,7 @@ describe("glucose entry", () => {
     expect(glucoseValueInput()).toHaveValue("6.8");
     expect(screen.getByRole("radio", { name: en.glucose.contextBeforeDinner })).toBeChecked();
     expect(screen.getByLabelText(en.glucose.methodLabel)).toHaveValue("FLASH_SENSOR");
-    expect(screen.getByRole("radio", { name: en.readingTime.dayYesterday })).toBeChecked();
+    expectGlucoseDate("2026-10-02");
     expectWheelTime("12:10");
     expect(
       screen.getByLabelText(`${en.glucose.noteLabel} (${en.shared.optional})`),

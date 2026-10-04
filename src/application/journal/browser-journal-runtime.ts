@@ -30,6 +30,15 @@ import { barrierPresentationCopyFor } from "@/application/medication-schedule/ba
 import type { MedicationSchedulePort } from "@/application/medication-schedule/medication-schedule-contracts";
 import { createMedicationScheduleService } from "@/application/medication-schedule/medication-schedule-service";
 import { seedSyntheticCarePlan } from "@/application/medication-schedule/synthetic-care-plan-seed";
+import type { CareOrganisationCommandPort, CareOrganisationCommitResult } from "@/application/care-organisation/care-organisation-contracts";
+import type { CareOrganisationQueryPort } from "@/application/care-organisation/care-organisation-query";
+import { createCareOrganisationQuery } from "@/application/care-organisation/care-organisation-query";
+import { createCareOrganisationService } from "@/application/care-organisation/care-organisation-service";
+import { seedSyntheticCareOrganisation } from "@/application/care-organisation/synthetic-care-organisation-seed";
+import type { CarePreparationCommandPort, CarePreparationQueryPort } from "@/application/care-preparation/care-preparation-contracts";
+import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
+import { createCarePreparationQuery } from "@/application/care-preparation/care-preparation-query";
+import { createCareSummaryInvalidation } from "@/application/care-preparation/care-summary-invalidation";
 import type {
   JournalCommandService,
   JournalCommitResult,
@@ -46,6 +55,10 @@ export type JagaOnRuntime = {
   history: RecordedHistoryQueryPort;
   /** Packet 8: Medication schedule view models and patient-confirmed commands. */
   medicationSchedule: MedicationSchedulePort;
+  /** Packet 9B: patient-maintained health checks, appointments and questions (Screens 09–10). */
+  careOrganisation: { commands: CareOrganisationCommandPort; query: CareOrganisationQueryPort };
+  /** Packet 9C: patient-controlled care-summary snapshots and one-attempt local printing. */
+  carePreparation: { commands: CarePreparationCommandPort; query: CarePreparationQueryPort };
   resolveLocale(): Promise<SupportedLocale>;
   persistLocale(locale: SupportedLocale): Promise<void>;
   resetDemo(): Promise<void>;
@@ -123,14 +136,20 @@ export async function createBrowserJournalRuntime(
     recordActivity: afterCommit(journalCommands.recordActivity),
   });
 
-  // Packet 8 owned work (Inquiry eligibility, reminder review) is serialised
-  // the same way and settles before a schedule read or a barrier offer.
+  const carePreparationService = createCarePreparationService(database, { now, ids });
+  const carePreparationQuery = createCarePreparationQuery(database);
+  const careSummaryInvalidation = createCareSummaryInvalidation(database, { now, newCommandId: createCommandId, leaseToken, instanceId: "browser", service: carePreparationService });
+
+  // Packet 8 owned work (Inquiry eligibility, reminder review) and Packet 9C
+  // summary invalidation are serialised the same way and settle before a
+  // schedule read, a barrier offer or a summary read.
   let packet8: Promise<unknown> = Promise.resolve();
   function settlePacket8(): Promise<void> {
     packet8 = packet8
       .then(() => inquiry.processPending())
       .then(() => reminders.processPending())
       .then(() => inquiry.maintain())
+      .then(() => careSummaryInvalidation.processPending())
       .catch(() => undefined);
     return packet8.then(() => undefined);
   }
@@ -146,6 +165,32 @@ export async function createBrowserJournalRuntime(
     },
   });
 
+  const careOrganisationService = createCareOrganisationService(database, { now, ids, carePlan });
+  const careOrganisationQuery = createCareOrganisationQuery(database, { now });
+
+  /** Reminder review work from a care-organisation commit settles like Packet 8 work. */
+  function settlingAfterCommit<TInput>(command: (input: TInput) => Promise<CareOrganisationCommitResult>): (input: TInput) => Promise<CareOrganisationCommitResult> {
+    return async (input) => {
+      const result = await command(input);
+      if (result.kind === "COMMITTED") void settlePacket8();
+      return result;
+    };
+  }
+
+  const careOrganisationCommands: CareOrganisationCommandPort = Object.freeze({
+    createPreventiveItem: settlingAfterCommit(careOrganisationService.createPreventiveItem),
+    revisePreventiveItem: settlingAfterCommit(careOrganisationService.revisePreventiveItem),
+    recordPreventiveOutcome: settlingAfterCommit(careOrganisationService.recordPreventiveOutcome),
+    correctPreventiveOutcome: settlingAfterCommit(careOrganisationService.correctPreventiveOutcome),
+    undoPreventiveOutcome: settlingAfterCommit(careOrganisationService.undoPreventiveOutcome),
+    scheduleAppointment: settlingAfterCommit(careOrganisationService.scheduleAppointment),
+    reviseAppointment: settlingAfterCommit(careOrganisationService.reviseAppointment),
+    recordContextWindow: settlingAfterCommit(careOrganisationService.recordContextWindow),
+    reviseContextWindow: settlingAfterCommit(careOrganisationService.reviseContextWindow),
+    createCareQuestion: settlingAfterCommit(careOrganisationService.createCareQuestion),
+    reviseCareQuestion: settlingAfterCommit(careOrganisationService.reviseCareQuestion),
+  });
+
   /** Seed only an empty demo database, never over user-created records. */
   async function seedSyntheticScenarioWhenEmpty(): Promise<void> {
     if ((await database.table("recordHeads").count()) > 0) return;
@@ -154,7 +199,18 @@ export async function createBrowserJournalRuntime(
     await seedSyntheticCarePlan({ database, seedAt, ids, copy: barrierPresentationCopyFor("en-SG") });
   }
 
+  /**
+   * Packet 9B fixture heads are added once, including to an existing Packet 8
+   * demo database; any existing health-check item or appointment skips it.
+   */
+  async function seedCareOrganisationWhenMissing(): Promise<void> {
+    await seedSyntheticCareOrganisation({ database, seedAt: now(), ids });
+  }
+
   await seedSyntheticScenarioWhenEmpty();
+  await seedCareOrganisationWhenMissing();
+  // A print attempt interrupted by a closed tab becomes OUTCOME_UNKNOWN; it is never replayed.
+  await carePreparationService.recoverInterruptedExports().catch(() => 0);
   void scheduleIntelligence(true);
 
   return Object.freeze({
@@ -174,6 +230,41 @@ export async function createBrowserJournalRuntime(
         return schedule.load(request);
       },
     }),
+    carePreparation: Object.freeze({
+      // Only the patient-facing port; the worker's system effects stay internal.
+      commands: Object.freeze({
+        async prepare(input: Parameters<CarePreparationCommandPort["prepare"]>[0]) {
+          await settlePacket8();
+          return carePreparationService.prepare(input);
+        },
+        markPreviewed: carePreparationService.markPreviewed,
+        approve: carePreparationService.approve,
+        invalidate: carePreparationService.invalidate,
+        supersede: carePreparationService.supersede,
+        requestPrintExport: carePreparationService.requestPrintExport,
+        completePrintExport: carePreparationService.completePrintExport,
+        recoverInterruptedExports: carePreparationService.recoverInterruptedExports,
+      } satisfies CarePreparationCommandPort),
+      query: Object.freeze({
+        async loadSummary(recordId: Parameters<CarePreparationQueryPort["loadSummary"]>[0]) {
+          await settlePacket8();
+          return carePreparationQuery.loadSummary(recordId);
+        },
+      }),
+    }),
+    careOrganisation: Object.freeze({
+      commands: careOrganisationCommands,
+      query: Object.freeze({
+        async loadPreventiveCare() {
+          await packet8;
+          return careOrganisationQuery.loadPreventiveCare();
+        },
+        async loadVisitPreparation() {
+          await packet8;
+          return careOrganisationQuery.loadVisitPreparation();
+        },
+      }),
+    }),
     resolveLocale: () => localeRepository.resolve(null, now()),
     async persistLocale(locale: SupportedLocale) {
       await localeRepository.resolve(locale, now());
@@ -187,6 +278,7 @@ export async function createBrowserJournalRuntime(
         resetAt: now(),
       });
       await seedSyntheticScenarioWhenEmpty();
+      await seedCareOrganisationWhenMissing();
       await scheduleIntelligence(true);
     },
     close() {

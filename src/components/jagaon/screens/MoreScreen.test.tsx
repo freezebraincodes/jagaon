@@ -44,9 +44,20 @@ describe("MoreScreen", () => {
     expect(screen.getByRole("button", { name: messages.settings.resetAction })).toBeInTheDocument();
   });
 
+  it("opens the Packet 9B health-check and visit-preparation screens", () => {
+    const navigate = renderMore();
+    fireEvent.click(screen.getByRole("button", { name: messages.more.healthChecks }));
+    expect(navigate).toHaveBeenLastCalledWith("PREVENTIVE_CARE");
+    fireEvent.click(screen.getByRole("button", { name: messages.more.prepareVisit }));
+    expect(navigate).toHaveBeenLastCalledWith("CARE_PREPARATION");
+    for (const label of [messages.more.healthChecks, messages.more.prepareVisit]) {
+      expect(screen.getByRole("button", { name: label })).not.toHaveAttribute("aria-disabled");
+    }
+  });
+
   it("shows later-packet destinations as disabled placeholders that do nothing", () => {
     const navigate = renderMore();
-    for (const label of [messages.more.healthChecks, messages.more.prepareVisit, messages.more.reminders]) {
+    for (const label of [messages.more.reminders]) {
       const tile = screen.getByRole("button", { name: label });
       expect(tile).toHaveAttribute("aria-disabled", "true");
       expect(tile).toHaveAccessibleDescription(messages.today.futureFeature);

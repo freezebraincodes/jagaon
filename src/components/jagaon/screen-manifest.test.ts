@@ -7,6 +7,8 @@ import {
   PACKET_6A_CHILD_SCREENS,
   PACKET_7A_TOP_LEVEL_SCREENS,
   PACKET_8_TOP_LEVEL_SCREENS,
+  PACKET_9B_CHILD_SCREENS,
+  PACKET_9C_CHILD_SCREENS,
   ONBOARDING_ROUTES,
   type ScreenId,
 } from "./screen-manifest";
@@ -48,6 +50,8 @@ describe("screen-manifest", () => {
       ...TOP_LEVEL_SCREENS,
       ...PACKET_6_CHILD_SCREENS,
       ...PACKET_6A_CHILD_SCREENS,
+      ...PACKET_9B_CHILD_SCREENS,
+      ...PACKET_9C_CHILD_SCREENS,
     ]);
   });
 
@@ -71,16 +75,19 @@ describe("screen-manifest", () => {
     }
   });
 
-  it("has the 11 Packet 6 screens, Packet 6A My medicines, Packet 7A Recorded history and Packet 8 Medication schedule", () => {
+  it("has the 11 Packet 6 screens, Packet 6A My medicines, Packet 7A Recorded history, Packet 8 Medication schedule and the two Packet 9B child screens", () => {
     expect(PACKET_6A_CHILD_SCREENS).toEqual(["MY_MEDICINES"]);
-    expect(ALL_SCREENS.size).toBe(14);
+    expect(PACKET_9B_CHILD_SCREENS).toEqual(["PREVENTIVE_CARE", "CARE_PREPARATION"]);
+    expect(Object.isFrozen(PACKET_9B_CHILD_SCREENS)).toBe(true);
+    expect(PACKET_9C_CHILD_SCREENS).toEqual(["CARE_SUMMARY_PREVIEW"]);
+    expect(ALL_SCREENS.size).toBe(17);
     expect(ALL_SCREENS.has("MEDICATION_SCHEDULE")).toBe(true);
     expect(ALL_SCREENS.has("HISTORY")).toBe(true);
     expect(ALL_SCREENS.has("MY_MEDICINES")).toBe(true);
     expect(ALL_SCREENS.has("SETTINGS" as ScreenId)).toBe(false);
   });
 
-  it("no Packet 7B, 9 or later route exists", () => {
+  it("no Packet 7B, 9C or later route exists", () => {
     const deferred = [
       "TRENDS",
       "ROUTINE_SHIFT",
@@ -90,7 +97,6 @@ describe("screen-manifest", () => {
       "WEEKLY_TRENDS",
       "REMINDERS",
       "CREATE_REMINDER",
-      "PREVENTIVE_CARE",
       "APPOINTMENTS",
       "SCHEDULE_APPOINTMENT",
       "LIVE_FOOD_PROVIDER",

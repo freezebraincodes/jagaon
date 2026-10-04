@@ -333,3 +333,36 @@ export const DOMAIN_EVENT_NAMES = [
 export type DomainEventName = (typeof DOMAIN_EVENT_NAMES)[number];
 
 export const domainEventNameSchema = z.enum(DOMAIN_EVENT_NAMES);
+
+// --- Packet 9B record-event ownership (event-contracts 8.2–8.3) -------------
+
+/**
+ * Closed producer and target record type for each Packet 9B care-organisation
+ * event. Owner stores validate their event rows against this registry.
+ */
+export const PACKET_9B_EVENT_OWNERSHIP = Object.freeze({
+  PREVENTIVE_CARE_ITEM_CREATED: Object.freeze({ producedBy: "CARE_PLAN", recordType: "PREVENTIVE_CARE_ITEM" }),
+  PREVENTIVE_CARE_ITEM_REVISED: Object.freeze({ producedBy: "CARE_PLAN", recordType: "PREVENTIVE_CARE_ITEM" }),
+  APPOINTMENT_SCHEDULED: Object.freeze({ producedBy: "CARE_PLAN", recordType: "APPOINTMENT" }),
+  APPOINTMENT_REVISED: Object.freeze({ producedBy: "CARE_PLAN", recordType: "APPOINTMENT" }),
+  PREVENTIVE_CARE_OUTCOME_RECORDED: Object.freeze({ producedBy: "HEALTH_RECORDS", recordType: "PREVENTIVE_CARE_RECORD" }),
+  PREVENTIVE_CARE_OUTCOME_CORRECTED: Object.freeze({ producedBy: "HEALTH_RECORDS", recordType: "PREVENTIVE_CARE_RECORD" }),
+  CONTEXT_WINDOW_RECORDED: Object.freeze({ producedBy: "HEALTH_RECORDS", recordType: "CONTEXT_WINDOW" }),
+  CONTEXT_WINDOW_REVISED: Object.freeze({ producedBy: "HEALTH_RECORDS", recordType: "CONTEXT_WINDOW" }),
+} as const);
+
+// --- Packet 9C care-preparation event ownership (event-contracts 9.4) -------
+
+/**
+ * Closed producer and target record type for each Packet 9C event. No
+ * delivered, reviewed or clinician-confirmed event exists in the MVP.
+ */
+export const PACKET_9C_EVENT_OWNERSHIP = Object.freeze({
+  CARE_SUMMARY_SNAPSHOT_PREPARED: Object.freeze({ producedBy: "CARE_PREPARATION", recordType: "CARE_SUMMARY_SNAPSHOT" }),
+  CARE_SUMMARY_SNAPSHOT_PREVIEWED: Object.freeze({ producedBy: "CARE_PREPARATION", recordType: "CARE_SUMMARY_SNAPSHOT" }),
+  CARE_SUMMARY_SNAPSHOT_APPROVED: Object.freeze({ producedBy: "CARE_PREPARATION", recordType: "CARE_SUMMARY_SNAPSHOT" }),
+  CARE_SUMMARY_SNAPSHOT_INVALIDATED: Object.freeze({ producedBy: "CARE_PREPARATION", recordType: "CARE_SUMMARY_SNAPSHOT" }),
+  CARE_SUMMARY_SNAPSHOT_SUPERSEDED: Object.freeze({ producedBy: "CARE_PREPARATION", recordType: "CARE_SUMMARY_SNAPSHOT" }),
+  CARE_SUMMARY_EXPORT_REQUESTED: Object.freeze({ producedBy: "CARE_PREPARATION", recordType: "CARE_SUMMARY_EXPORT" }),
+  CARE_SUMMARY_EXPORT_OUTCOME_RECORDED: Object.freeze({ producedBy: "CARE_PREPARATION", recordType: "CARE_SUMMARY_EXPORT" }),
+} as const);

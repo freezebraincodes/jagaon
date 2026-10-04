@@ -12,6 +12,7 @@
   "dependencies": {
     "dexie": "^4.0.10",
     "keen-slider": "6.8.6",
+    "leaflet": "1.9.4",
     "next": "16.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -21,6 +22,7 @@
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.1.0",
+    "@types/leaflet": "1.9.22",
     "@types/node": "^22.10.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",

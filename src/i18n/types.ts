@@ -325,6 +325,19 @@ export type FoodMessages = {
   viewDetails: string;
   aboutDistance: (distance: string) => string;
   youAreHere: string;
+  // Packet 9A additions (09-bilingual-copy-matrix.md Section 1)
+  locationNotSaved: string;
+  liveMapLoading: string;
+  oneMapAttribution: string;
+  oneMapPrivacy: string;
+  liveGeocoderUnavailable: string;
+  mapTilesUnavailable: string;
+  governedDatasetSource: string;
+  governedDatasetDate: (date: LocalDateText) => string;
+  governedDatasetStale: string;
+  syntheticFallbackActive: string;
+  locationTimedOut: string;
+  locationUnavailable: string;
 };
 
 /** More, settings, reset, and generic help messages (frames 12–13). */
@@ -703,6 +716,145 @@ export type ScheduleMessages = {
   barrierAnswerHeading: string;
 };
 
+/** Packet 9B Screen 09 copy (09-bilingual-copy-matrix.md Section 2 plus primary frame 09). */
+export type PreventiveCareMessages = {
+  title: string;
+  maintainedByYou: string;
+  statusScheduled: string;
+  statusRecorded: string;
+  statusNoDate: string;
+  dateEntered: string;
+  note: string;
+  source: string;
+  markRecorded: string;
+  undoRecorded: string;
+  edit: string;
+  history: string;
+  addItem: string;
+  recordLimitation: string;
+  generalHeading: string;
+  reviewedTag: string;
+  generalIntro: string;
+  generalNotAssessment: string;
+  emptyTitle: string;
+  emptyBody: string;
+  saveFailed: string;
+  // Primary-frame 09 wording (approved through the v1 frame)
+  topicEyeTitle: string;
+  topicEyeKind: string;
+  topicVaccinationTitle: string;
+  topicVaccinationKind: string;
+  topicLifestyleTitle: string;
+  topicLifestyleKind: string;
+  topicFollowUpTitle: string;
+  topicFollowUpKind: string;
+  // --- Packet 9B rendering additions (not in the matrix; reported for review) ---
+  itemNameLabel: string;
+  loading: string;
+  unavailableTitle: string;
+  historyEntered: string;
+  historyCorrected: string;
+  historyChanged: string;
+  historyRecorded: string;
+  historyRecordCorrected: string;
+  dateNotKnown: string;
+  saved: string;
+};
+
+/** Packet 9B Screen 10 copy (09-bilingual-copy-matrix.md Section 3 plus primary frame 10). */
+export type CarePreparationMessages = {
+  title: string;
+  appointmentEnteredByYou: string;
+  appointmentUnverified: string;
+  actionsTag: string;
+  includeHeading: string;
+  glucoseReadings: string;
+  insulinRecords: string;
+  mealNotes: string;
+  walks: string;
+  questionsHeading: string;
+  questionsIntro: string;
+  medicineInfoQuestions: string;
+  directionsQuestions: string;
+  routineQuestions: string;
+  trendQuestions: string;
+  preventiveQuestions: string;
+  noneSelected: string;
+  addOwnQuestion: string;
+  questionLabel: string;
+  questionHint: string;
+  selectionLimitation: string;
+  previewSummary: string;
+  exportOrPrint: string;
+  localOnly: string;
+  emptySelection: string;
+  saveFailed: string;
+  // Primary-frame 10 wording (approved through the v1 frame)
+  inDays: (count: number) => string;
+  glucoseDetail: (startDate: LocalDateText, endDate: LocalDateText, count: number) => string;
+  insulinDetail: string;
+  mealDetail: string;
+  walkDetail: string;
+  // --- Packet 9B rendering additions (not in the matrix; reported for review) ---
+  loading: string;
+  unavailableTitle: string;
+  noAppointmentTitle: string;
+  addAppointment: string;
+  changeAppointment: string;
+  appointmentWhoLabel: string;
+  appointmentDateLabel: string;
+  appointmentTimeLabel: string;
+  changeKindLabel: string;
+  changeCorrect: string;
+  changeRescheduled: string;
+  changeCancelled: string;
+  groupEmpty: string;
+  myQuestionsHeading: string;
+  includeQuestion: (text: string) => string;
+  recordsInPeriod: (count: number) => string;
+  saved: string;
+  editQuestion: string;
+  editQuestionNamed: (text: string) => string;
+  removeQuestion: string;
+  removeQuestionNamed: (text: string) => string;
+};
+
+/** Packet 9C care-summary preview and print copy (09-bilingual-copy-matrix.md Section 4). */
+export type CareSummaryMessages = {
+  title: string;
+  selectedOnly: string;
+  scopeHeading: string;
+  carePlanHeading: string;
+  organisationHeading: string;
+  measurementsHeading: string;
+  medicationHeading: string;
+  questionsHeading: string;
+  limitationsHeading: string;
+  patientReported: string;
+  missingLimitation: string;
+  approveAction: string;
+  approvalMeaning: string;
+  printAction: string;
+  printOpened: string;
+  printUnavailable: string;
+  sourceChanged: string;
+  hashMismatch: string;
+  backToPreparation: string;
+  // --- Packet 9C rendering additions (not in the matrix; reported for review) ---
+  intakeActivityHeading: string;
+  purposeAppointment: (label: string) => string;
+  purposeRoutine: string;
+  periodLine: (range: string) => string;
+  preparedOn: (dateTime: string) => string;
+  timeNotRecorded: string;
+  approximately: (time: string) => string;
+  loading: string;
+  unavailableTitle: string;
+  approvedNote: string;
+  printUnknown: string;
+  attemptsHeading: string;
+};
+
 export type AppMessages = {
   shared: SharedMessages;
   today: TodayMessages;
@@ -718,4 +870,7 @@ export type AppMessages = {
   onboarding: OnboardingMessages;
   history: HistoryMessages;
   schedule: ScheduleMessages;
+  preventiveCare: PreventiveCareMessages;
+  carePreparation: CarePreparationMessages;
+  careSummary: CareSummaryMessages;
 };

@@ -102,6 +102,94 @@ describe("browser journal runtime", () => {
     expect(await runtime.history.load({ period: "THIRTY_DAYS" })).toEqual(seeded);
   }, INTEGRATION_TIMEOUT_MS);
 
+  it("seeds the Packet 9B health checks and appointment once, keeps patient changes and restores them after reset", async () => {
+    const runtime = await open();
+    const view = await runtime.careOrganisation.query.loadPreventiveCare();
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.items.map((item) => [item.payload.identity.label, item.status])).toEqual([
+      ["Eye screening", "SCHEDULED"],
+      ["Blood test", "SCHEDULED"],
+      ["Foot check", "RECORDED"],
+      ["Flu vaccine", "NO_DATE"],
+    ]);
+    const visit = await runtime.careOrganisation.query.loadVisitPreparation();
+    if (visit.status !== "READY") throw new Error("ready");
+    expect(visit.appointment?.payload.appointmentLabel).toBe("Dr Lim, Bukit Merah Polyclinic");
+
+    expect(await runtime.careOrganisation.commands.createCareQuestion({ questionText: { text: "Bring my meter?", language: "en-SG" } })).toMatchObject({ kind: "COMMITTED" });
+    // Reopening the same database does not reseed over the patient's records.
+    const reopened = await open(runtime.databaseName);
+    const again = await reopened.careOrganisation.query.loadVisitPreparation();
+    if (again.status !== "READY") throw new Error("ready");
+    expect(again.questions.map((question) => question.text)).toEqual(["Bring my meter?"]);
+    const items = await reopened.careOrganisation.query.loadPreventiveCare();
+    expect(items.status === "READY" && items.items.length).toBe(4);
+
+    await reopened.resetDemo();
+    const restored = await reopened.careOrganisation.query.loadVisitPreparation();
+    if (restored.status !== "READY") throw new Error("ready");
+    expect(restored.questions).toEqual([]);
+    expect(restored.appointment?.payload.appointmentLabel).toBe("Dr Lim, Bukit Merah Polyclinic");
+  }, INTEGRATION_TIMEOUT_MS);
+
+  it("runs the Packet 9C journey: prepare, preview, approve, print, retry, reload and invalidate after a correction", async () => {
+    const runtime = await open();
+    const visit = await runtime.careOrganisation.query.loadVisitPreparation();
+    if (visit.status !== "READY" || !visit.appointment) throw new Error("visit");
+    const glucose = visit.factGroups.find((group) => group.key === "GLUCOSE")!;
+    expect(glucose.sources.length).toBeGreaterThan(0);
+    const prepared = await runtime.carePreparation.commands.prepare({
+      locale: "zh-SG",
+      period: visit.period,
+      appointment: { recordType: "APPOINTMENT", recordId: visit.appointment.recordId, revisionId: visit.appointment.revisionId },
+      groups: [{ key: "GLUCOSE", sources: glucose.sources }],
+      questions: [],
+      notSelected: visit.factGroups.filter((group) => group.key !== "GLUCOSE").flatMap((group) => group.sources),
+    });
+    if (prepared.kind !== "COMMITTED") throw new Error(JSON.stringify(prepared));
+    let view = await runtime.carePreparation.query.loadSummary(prepared.recordId);
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.payload.locale).toBe("zh-SG");
+    const hash = view.payload.rendering.contentHash;
+    const commands = runtime.carePreparation.commands;
+    const previewed = await commands.markPreviewed({ recordId: prepared.recordId, expectedRevisionId: prepared.revisionId, expectedRevisionNumber: 1, contentHash: hash });
+    if (previewed.kind !== "COMMITTED") throw new Error("previewed");
+    const approved = await commands.approve({ recordId: prepared.recordId, expectedRevisionId: previewed.revisionId, expectedRevisionNumber: 2, contentHash: hash });
+    if (approved.kind !== "COMMITTED") throw new Error("approved");
+    for (const observation of ["UNAVAILABLE", "OUTCOME_UNKNOWN"] as const) {
+      const requested = await commands.requestPrintExport({ recordId: prepared.recordId, expectedRevisionId: approved.revisionId, expectedRevisionNumber: 3, approvedContentHash: hash });
+      if (requested.kind !== "COMMITTED") throw new Error("requested");
+      await commands.completePrintExport({ recordId: requested.recordId, expectedRevisionId: requested.revisionId, expectedRevisionNumber: 1, observation, artifact: null });
+    }
+
+    // A reload of the same database keeps the snapshot and both attempts.
+    const reopened = await open(runtime.databaseName);
+    view = await reopened.carePreparation.query.loadSummary(prepared.recordId);
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.snapshotStatus).toBe("APPROVED");
+    expect(view.exports.map((entry) => entry.outcome.state).sort()).toEqual(["FAILED", "OUTCOME_UNKNOWN"]);
+
+    // Correcting a selected reading invalidates the snapshot before any new export.
+    const reading = glucose.sources[0]!;
+    const current = await reopened.query.loadGlucose(reading.recordId as never);
+    if (!current) throw new Error("reading");
+    await reopened.commands.correctGlucoseTime({
+      recordId: reading.recordId as never,
+      expectedRevisionId: reading.revisionId as never,
+      expectedRevisionNumber: current.revisionNumber,
+      payload: current.payload,
+      temporal: { kind: "POINT", occurrence: { kind: "EXACT", instantUtc: "2026-10-03T11:00:00.000Z" as Instant, timeZoneId: "Asia/Singapore" as never, utcOffsetMinutes: 480 } },
+      recordedAt: NOW,
+    });
+    view = await reopened.carePreparation.query.loadSummary(prepared.recordId);
+    if (view.status !== "READY") throw new Error("ready");
+    expect([view.snapshotStatus, view.payload.invalidation?.reason, view.sourcesCurrent]).toEqual(["INVALIDATED", "SOURCE_CORRECTED", false]);
+    expect(await reopened.carePreparation.commands.requestPrintExport({ recordId: prepared.recordId, expectedRevisionId: view.revisionId, expectedRevisionNumber: view.revisionNumber, approvedContentHash: hash })).toEqual({
+      kind: "REJECTED",
+      code: "SUMMARY_INVALIDATED_FOR_EXPORT",
+    });
+  }, INTEGRATION_TIMEOUT_MS);
+
   it("seeds the Packet 8 care plan once and restores the Medication schedule after reset", async () => {
     const runtime = await open();
     const scope = ["00000000-0000-4000-8000-000000000101", "00000000-0000-4000-8000-000000000103"];

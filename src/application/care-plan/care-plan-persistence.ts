@@ -34,6 +34,8 @@ import {
 } from "@/domain/care-plan/care-plan-revisions";
 import { reminderRevisionSchema, type ReminderRevision } from "@/domain/care-plan/reminder";
 import { careQuestionRevisionSchema, type CareQuestionRevision } from "@/domain/care-plan/care-question";
+import { preventiveCareItemRevisionSchema, type PreventiveCareItemRevision } from "@/domain/care-plan/preventive-care";
+import { appointmentRevisionSchema, type AppointmentRevision } from "@/domain/care-plan/appointment";
 import {
   createAuthoritativeCommandStore,
   type AuthoritativeCommandPlan,
@@ -47,6 +49,7 @@ import { committedDomainEventRowCodec } from "@/storage/committed-domain-event-r
 import { createStoredRecordRevisionCodec, type StoredRecordRevision, type StoredTemporalIndexFields } from "@/storage/stored-record-revision";
 import type { StoredReverseDependency } from "@/storage/reverse-dependency-row";
 import { packet8WorkItemsFor } from "@/application/packet8-subscriptions";
+import { packet9WorkItemsFor } from "@/application/packet9-subscriptions";
 import {
   OwnerPlanError,
   activeHeadFor,
@@ -63,11 +66,25 @@ import {
  * audit and event rows, exact reverse dependencies and subscription work.
  */
 
-export const CARE_PLAN_RECORD_TYPES = Object.freeze(["MEDICATION", "PRESCRIPTION_VERSION", "REMINDER", "CARE_QUESTION"] as const);
+export const CARE_PLAN_RECORD_TYPES = Object.freeze([
+  "MEDICATION",
+  "PRESCRIPTION_VERSION",
+  "REMINDER",
+  "CARE_QUESTION",
+  // Packet 9B
+  "PREVENTIVE_CARE_ITEM",
+  "APPOINTMENT",
+] as const);
 
 export type CarePlanRecordType = (typeof CARE_PLAN_RECORD_TYPES)[number];
 
-export type CarePlanRevision = MedicationRevision | PrescriptionVersionRevision | ReminderRevision | CareQuestionRevision;
+export type CarePlanRevision =
+  | MedicationRevision
+  | PrescriptionVersionRevision
+  | ReminderRevision
+  | CareQuestionRevision
+  | PreventiveCareItemRevision
+  | AppointmentRevision;
 
 export type StoredCarePlanRevision = StoredRecordRevision<CarePlanRevision>;
 
@@ -101,6 +118,26 @@ export const reminderRevisionCodec = createStoredRecordRevisionCodec<"REMINDER",
   deriveTemporalIndexFields: atemporalIndex,
 });
 
+function appointmentIndex(revision: AppointmentRevision): StoredTemporalIndexFields {
+  const at = revision.temporal.occurrence;
+  if (at.kind === "EXACT") return { temporalKind: "POINT", occurrenceSortInstant: at.instantUtc };
+  if (at.kind === "APPROXIMATE") return { temporalKind: "POINT", occurrenceSortInstant: at.approximateInstantUtc };
+  if (at.kind === "DATE_ONLY") return { temporalKind: "POINT", localDateSortKey: at.localDate };
+  return { temporalKind: "POINT" };
+}
+
+export const preventiveCareItemRevisionCodec = createStoredRecordRevisionCodec<"PREVENTIVE_CARE_ITEM", PreventiveCareItemRevision>({
+  recordTypeSchema: z.literal("PREVENTIVE_CARE_ITEM"),
+  revisionSchema: preventiveCareItemRevisionSchema,
+  deriveTemporalIndexFields: atemporalIndex,
+});
+
+export const appointmentRevisionCodec = createStoredRecordRevisionCodec<"APPOINTMENT", AppointmentRevision>({
+  recordTypeSchema: z.literal("APPOINTMENT"),
+  revisionSchema: appointmentRevisionSchema,
+  deriveTemporalIndexFields: appointmentIndex,
+});
+
 export const careQuestionRevisionCodec = createStoredRecordRevisionCodec<"CARE_QUESTION", CareQuestionRevision>({
   recordTypeSchema: z.literal("CARE_QUESTION"),
   revisionSchema: careQuestionRevisionSchema,
@@ -117,6 +154,10 @@ function codecFor(recordType: unknown): StorageRowCodec<StoredCarePlanRevision> 
       return reminderRevisionCodec as unknown as StorageRowCodec<StoredCarePlanRevision>;
     case "CARE_QUESTION":
       return careQuestionRevisionCodec as unknown as StorageRowCodec<StoredCarePlanRevision>;
+    case "PREVENTIVE_CARE_ITEM":
+      return preventiveCareItemRevisionCodec as unknown as StorageRowCodec<StoredCarePlanRevision>;
+    case "APPOINTMENT":
+      return appointmentRevisionCodec as unknown as StorageRowCodec<StoredCarePlanRevision>;
     default:
       return null;
   }
@@ -145,6 +186,10 @@ export function storeCarePlanRevision(revision: CarePlanRevision): StoredCarePla
       return reminderRevisionCodec.create(revision) as StoredCarePlanRevision;
     case "CARE_QUESTION":
       return careQuestionRevisionCodec.create(revision) as StoredCarePlanRevision;
+    case "PREVENTIVE_CARE_ITEM":
+      return preventiveCareItemRevisionCodec.create(revision) as StoredCarePlanRevision;
+    case "APPOINTMENT":
+      return appointmentRevisionCodec.create(revision) as StoredCarePlanRevision;
   }
 }
 
@@ -200,6 +245,10 @@ const EVENT_TARGET: Readonly<Record<string, CarePlanRecordType | null>> = Object
   REMINDER_REVISED: "REMINDER",
   CARE_QUESTION_CREATED: "CARE_QUESTION",
   CARE_QUESTION_REVISED: "CARE_QUESTION",
+  PREVENTIVE_CARE_ITEM_CREATED: "PREVENTIVE_CARE_ITEM",
+  PREVENTIVE_CARE_ITEM_REVISED: "PREVENTIVE_CARE_ITEM",
+  APPOINTMENT_SCHEDULED: "APPOINTMENT",
+  APPOINTMENT_REVISED: "APPOINTMENT",
   PATIENT_RECORD_DELETED: null,
 });
 
@@ -218,6 +267,12 @@ export const CARE_PLAN_EVENT_REASONS = Object.freeze([
   "QUESTION_EDITED",
   "QUESTION_DISMISSED",
   "DELETED",
+  // Packet 9B appointment and preventive-care reasons (event-contracts 8.2)
+  "RESCHEDULED",
+  "CANCELLED",
+  "OUTCOME_REPORTED",
+  "ORGANISATIONAL_DETAILS_CHANGED",
+  "PLAN_CHANGED",
 ] as const);
 
 export type CarePlanEventReason = (typeof CARE_PLAN_EVENT_REASONS)[number];
@@ -373,6 +428,7 @@ export function buildCarePlanCommitPlan(input: {
       };
       events.push(event);
       work.push(...packet8WorkItemsFor({ eventId: event.eventId, eventName: event.eventName, recordType: revision.recordType, createdAt: completedAt, workItemId: input.workItemId }));
+      work.push(...packet9WorkItemsFor({ eventId: event.eventId, eventName: event.eventName, recordType: revision.recordType, createdAt: completedAt, workItemId: input.workItemId }));
     } else {
       const head = change.head;
       const pieces = deletionPieces({
@@ -410,6 +466,7 @@ export function buildCarePlanCommitPlan(input: {
       };
       events.push(event);
       work.push(...packet8WorkItemsFor({ eventId: event.eventId, eventName: event.eventName, recordType: head.recordType, createdAt: change.deletedAt, workItemId: input.workItemId }));
+      work.push(...packet9WorkItemsFor({ eventId: event.eventId, eventName: event.eventName, recordType: head.recordType, createdAt: change.deletedAt, workItemId: input.workItemId }));
     }
   }
 

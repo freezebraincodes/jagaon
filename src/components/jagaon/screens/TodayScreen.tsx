@@ -355,19 +355,10 @@ export function TodayScreen({
           ))}
         </ul>
         <p className="provenance-line">{msg.careDatesNote}</p>
-        <button
-          type="button"
-          className="text-link text-link--large"
-          disabled
-          aria-disabled="true"
-          aria-describedby="care-planning-later"
-        >
+        <button type="button" className="text-link text-link--large" onClick={() => navigate("CARE_PREPARATION")}>
           {msg.prepareAppointment}
           <ChevronRightIcon size={20} />
         </button>
-        <p className="sr-only" id="care-planning-later">
-          {msg.futureFeature}
-        </p>
       </section>
     </div>
   );

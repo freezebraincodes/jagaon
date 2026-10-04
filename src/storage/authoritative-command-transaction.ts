@@ -60,6 +60,11 @@ const PURGED_DERIVED_RECORD_TYPES: ReadonlySet<RecordType> = new Set<RecordType>
   // Packet 8: a deleted inquiry or answer keeps no identifiable wording or raw answer.
   "INQUIRY",
   "INQUIRY_RESPONSE",
+  // Packet 9B: a patient-deleted occurrence or context keeps no reported content (domain 1.10).
+  "PREVENTIVE_CARE_RECORD",
+  "CONTEXT_WINDOW",
+  // Packet 9C: a deleted snapshot duplicates patient content, so none is kept (domain 11.12).
+  "CARE_SUMMARY_SNAPSHOT",
 ]);
 
 export type CommandTransactionErrorCode =

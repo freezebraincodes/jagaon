@@ -601,3 +601,49 @@ describe("combined DomainEventName", () => {
     ).toThrow();
   });
 });
+
+describe("Packet 9B event ownership", () => {
+  it("maps every Packet 9B event to one canonical producer and record type", async () => {
+    const { PACKET_9B_EVENT_OWNERSHIP, DOMAIN_EVENT_NAMES, COMMAND_NAMES } = await import("./command-event-names");
+    for (const name of Object.keys(PACKET_9B_EVENT_OWNERSHIP)) expect(DOMAIN_EVENT_NAMES as readonly string[]).toContain(name);
+    expect(Object.values(PACKET_9B_EVENT_OWNERSHIP).map((entry) => `${entry.producedBy}:${entry.recordType}`).sort()).toEqual([
+      "CARE_PLAN:APPOINTMENT",
+      "CARE_PLAN:APPOINTMENT",
+      "CARE_PLAN:PREVENTIVE_CARE_ITEM",
+      "CARE_PLAN:PREVENTIVE_CARE_ITEM",
+      "HEALTH_RECORDS:CONTEXT_WINDOW",
+      "HEALTH_RECORDS:CONTEXT_WINDOW",
+      "HEALTH_RECORDS:PREVENTIVE_CARE_RECORD",
+      "HEALTH_RECORDS:PREVENTIVE_CARE_RECORD",
+    ]);
+    for (const command of ["CREATE_PREVENTIVE_CARE_ITEM", "REVISE_PREVENTIVE_CARE_ITEM", "SCHEDULE_APPOINTMENT", "REVISE_APPOINTMENT", "RECORD_PREVENTIVE_CARE_OUTCOME", "RECORD_CONTEXT_WINDOW", "REVISE_CONTEXT_WINDOW", "CORRECT_HEALTH_RECORD"]) {
+      expect(COMMAND_NAMES as readonly string[]).toContain(command);
+    }
+  });
+
+  it("agrees with the owner stores' closed event targets", async () => {
+    const { PACKET_9B_EVENT_OWNERSHIP } = await import("./command-event-names");
+    const { CARE_ORGANISATION_EVENT_TARGETS } = await import("@/application/care-organisation/care-organisation-persistence");
+    for (const [name, entry] of Object.entries(PACKET_9B_EVENT_OWNERSHIP)) {
+      if (entry.producedBy === "HEALTH_RECORDS") expect(CARE_ORGANISATION_EVENT_TARGETS[name]).toBe(entry.recordType);
+    }
+  });
+});
+
+describe("Packet 9C event ownership", () => {
+  it("maps every canonical care-preparation event to the Care Preparation owner and adds no delivery claim", async () => {
+    const { PACKET_9C_EVENT_OWNERSHIP, CARE_PREPARATION_EVENT_NAMES, CARE_PREPARATION_COMMAND_NAMES, DOMAIN_EVENT_NAMES } = await import("./command-event-names");
+    expect(Object.keys(PACKET_9C_EVENT_OWNERSHIP)).toEqual([...CARE_PREPARATION_EVENT_NAMES]);
+    for (const entry of Object.values(PACKET_9C_EVENT_OWNERSHIP)) expect(entry.producedBy).toBe("CARE_PREPARATION");
+    expect(CARE_PREPARATION_COMMAND_NAMES).toEqual([
+      "PREPARE_CARE_SUMMARY",
+      "MARK_CARE_SUMMARY_PREVIEWED",
+      "APPROVE_CARE_SUMMARY",
+      "INVALIDATE_CARE_SUMMARY",
+      "SUPERSEDE_CARE_SUMMARY",
+      "REQUEST_CARE_SUMMARY_EXPORT",
+      "COMPLETE_CARE_SUMMARY_EXPORT",
+    ]);
+    expect((DOMAIN_EVENT_NAMES as readonly string[]).filter((name) => /DELIVERED|(?<!P)REVIEWED|CLINICIAN_CONFIRMED/.test(name))).toEqual([]);
+  });
+});

@@ -9,6 +9,11 @@ import type { PrescriptionVersionPayload } from "@/domain/care-plan/prescription
 import type { MedicationRevision, PrescriptionVersionRevision } from "@/domain/care-plan/care-plan-revisions";
 import type { ReminderPayload, ReminderRevision } from "@/domain/care-plan/reminder";
 import type { CareQuestionPayload, CareQuestionRevision } from "@/domain/care-plan/care-question";
+import type { PreventiveCareItemPayload, PreventiveCareItemRevision } from "@/domain/care-plan/preventive-care";
+import type { AppointmentPayload, AppointmentRevision } from "@/domain/care-plan/appointment";
+import type { TimePoint } from "@/domain/shared/temporal";
+import type { RecordType } from "@/domain/shared/record-catalogue";
+import type { TypedRevisionRef } from "@/domain/shared/typed-revision-ref";
 import { CommandTransactionError } from "@/storage/authoritative-command-transaction";
 import { StorageRowValidationError } from "@/storage/storage-row-codec";
 import type { JagaOnDatabase } from "@/storage/database";
@@ -87,21 +92,38 @@ export function createCarePlanCommandService(database: JagaOnDatabase, dependenc
     };
   }
 
+  /** Exact source revisions a reminder references: its subject target and any appointment anchor. */
+  function reminderSources(payload: ReminderPayload): TypedRevisionRef<"PRESCRIPTION_VERSION" | "APPOINTMENT" | "PREVENTIVE_CARE_ITEM" | "CARE_QUESTION">[] {
+    const sources: TypedRevisionRef<"PRESCRIPTION_VERSION" | "APPOINTMENT" | "PREVENTIVE_CARE_ITEM" | "CARE_QUESTION">[] = [];
+    if ("target" in payload.subject) sources.push(payload.subject.target);
+    const schedule = payload.schedule;
+    if (schedule.kind === "RELATIVE_TO_APPOINTMENT" && !sources.some((ref) => ref.revisionId === schedule.appointment.revisionId)) {
+      sources.push(schedule.appointment);
+    }
+    return sources;
+  }
+
   function reminderEdges(revision: ReminderRevision, createdAt: Instant): StoredReverseDependency[] {
-    if (revision.payload.subject.kind !== "MEDICATION") return [];
-    return [
-      {
-        sourceRevisionId: revision.payload.subject.target.revisionId,
-        dependentRecordType: "REMINDER",
-        dependentRecordId: revision.recordId,
-        dependentRevisionId: revision.revisionId,
-        dependencyRole: REMINDER_DEPENDENCY_EVALUATOR.role,
-        owner: "CARE_PLAN",
-        evaluatorKey: REMINDER_DEPENDENCY_EVALUATOR.key,
-        evaluatorVersion: REMINDER_DEPENDENCY_EVALUATOR.version,
-        createdAt,
-      },
-    ];
+    return reminderSources(revision.payload).map((source) => ({
+      sourceRevisionId: source.revisionId,
+      dependentRecordType: "REMINDER",
+      dependentRecordId: revision.recordId,
+      dependentRevisionId: revision.revisionId,
+      dependencyRole: REMINDER_DEPENDENCY_EVALUATOR.role,
+      owner: "CARE_PLAN",
+      evaluatorKey: REMINDER_DEPENDENCY_EVALUATOR.key,
+      evaluatorVersion: REMINDER_DEPENDENCY_EVALUATOR.version,
+      createdAt,
+    }));
+  }
+
+  /** Every referenced source must be the current active head of its record. */
+  async function sourcesAreCurrent(refs: readonly TypedRevisionRef<RecordType>[]): Promise<boolean> {
+    for (const ref of refs) {
+      const head = await readHead(ref.recordId);
+      if (!head || head.state !== "ACTIVE" || head.recordType !== ref.recordType || head.headRevisionId !== ref.revisionId) return false;
+    }
+    return true;
   }
 
   async function commit(input: {
@@ -174,7 +196,7 @@ export function createCarePlanCommandService(database: JagaOnDatabase, dependenc
     return { kind: "REVISION", revision, expectedHead, eventId: ids.domainEventId(), eventName, eventReason, auditReason };
   }
 
-  async function revise<TRevision extends ReminderRevision | CareQuestionRevision | PrescriptionVersionRevision>(input: {
+  async function revise<TRevision extends ReminderRevision | CareQuestionRevision | PrescriptionVersionRevision | PreventiveCareItemRevision | AppointmentRevision>(input: {
     expected: ExpectedHead;
     recordType: TRevision["recordType"];
     build: (previous: TRevision, base: ReturnType<typeof envelope>) => TRevision;
@@ -283,12 +305,7 @@ export function createCarePlanCommandService(database: JagaOnDatabase, dependenc
       if (input.patientConfirmed !== true) return { kind: "FAILED", code: "CONFIRMATION_REQUIRED" } as const;
       const now = dependencies.now();
       const transactionId = ids.transactionId();
-      if (input.payload.subject.kind === "MEDICATION") {
-        const target = await readHead(input.payload.subject.target.recordId);
-        if (!target || target.state !== "ACTIVE" || target.headRevisionId !== input.payload.subject.target.revisionId) {
-          return { kind: "FAILED", code: "VALIDATION_FAILED" } as const;
-        }
-      }
+      if (!(await sourcesAreCurrent(reminderSources(input.payload)))) return { kind: "FAILED", code: "VALIDATION_FAILED" } as const;
       const revision = {
         ...envelope({ recordType: "REMINDER", recordId: ids.recordId(), revisionNumber: 1, previousRevisionId: null, action: "CREATE", recordedAt: now, now, provenance: PATIENT_ENTRY, transactionId }),
         temporal: { kind: "ATEMPORAL" },
@@ -318,12 +335,9 @@ export function createCarePlanCommandService(database: JagaOnDatabase, dependenc
     ) {
       if (input.patientConfirmed !== true) return { kind: "FAILED", code: "CONFIRMATION_REQUIRED" } as const;
       if (input.payload.state === "REVIEW_REQUIRED") return { kind: "FAILED", code: "VALIDATION_FAILED" } as const;
-      if (input.payload.subject.kind === "MEDICATION" && input.payload.state === "ACTIVE") {
-        // Activation relays only the current recorded prescription revision.
-        const target = await readHead(input.payload.subject.target.recordId);
-        if (!target || target.state !== "ACTIVE" || target.headRevisionId !== input.payload.subject.target.revisionId) {
-          return { kind: "FAILED", code: "VALIDATION_FAILED" } as const;
-        }
+      // Activation relays only the current revision of every referenced source.
+      if (input.payload.state === "ACTIVE" && !(await sourcesAreCurrent(reminderSources(input.payload)))) {
+        return { kind: "FAILED", code: "VALIDATION_FAILED" } as const;
       }
       return revise<ReminderRevision>({
         expected: input,
@@ -357,15 +371,22 @@ export function createCarePlanCommandService(database: JagaOnDatabase, dependenc
       });
     },
 
-    async createCareQuestion(input: { questionText: CareQuestionPayload["questionText"]; commandId?: CommandId }) {
+    async createCareQuestion(input: {
+      questionText: CareQuestionPayload["questionText"];
+      /** Packet 9B: an organisational link only; it never means the clinic received it. */
+      relatedAppointment?: TypedRevisionRef<"APPOINTMENT">;
+      commandId?: CommandId;
+    }) {
       const now = dependencies.now();
       const transactionId = ids.transactionId();
+      if (input.relatedAppointment && !(await sourcesAreCurrent([input.relatedAppointment]))) return { kind: "FAILED", code: "VALIDATION_FAILED" } as const;
       const payload: CareQuestionPayload = {
         questionText: input.questionText,
         origin: { kind: "PATIENT_AUTHORED" },
         intendedRecipient: "UNSPECIFIED",
         // Saving is the patient's own explicit intent to keep the question.
         state: "READY_TO_ASK",
+        ...(input.relatedAppointment ? { relatedAppointment: input.relatedAppointment } : {}),
       };
       const revision = {
         ...envelope({ recordType: "CARE_QUESTION", recordId: ids.recordId(), revisionNumber: 1, previousRevisionId: null, action: "CREATE", recordedAt: now, now, provenance: PATIENT_ENTRY, transactionId }),
@@ -403,6 +424,114 @@ export function createCarePlanCommandService(database: JagaOnDatabase, dependenc
         provenance: PATIENT_ENTRY,
         build: (previous, base) =>
           ({ ...base, temporal: { kind: "ATEMPORAL" }, payload: { ...previous.payload, questionText: input.questionText, state: input.state } }) as CareQuestionRevision,
+      });
+    },
+
+    // --- Packet 9B: preventive-care items (domain 7.2–7.4) ------------------------------
+
+    async createPreventiveItem(input: { payload: PreventiveCareItemPayload; commandId?: CommandId; seeded?: boolean }) {
+      const now = dependencies.now();
+      const transactionId = ids.transactionId();
+      const revision = {
+        ...envelope({ recordType: "PREVENTIVE_CARE_ITEM", recordId: ids.recordId(), revisionNumber: 1, previousRevisionId: null, action: "CREATE", recordedAt: now, now, provenance: PATIENT_ENTRY, transactionId }),
+        temporal: { kind: "ATEMPORAL" },
+        payload: input.payload,
+      } as PreventiveCareItemRevision;
+      return commit({
+        commandName: "CREATE_PREVENTIVE_CARE_ITEM",
+        hashMaterial: { payload: input.payload },
+        commandId: input.commandId,
+        transactionId,
+        now,
+        changes: [change(revision, null, "PREVENTIVE_CARE_ITEM_CREATED", "RECORDED", input.seeded ? "SYNTHETIC_DEMO_SEEDED" : "PATIENT_RECORDED")],
+      });
+    },
+
+    /** A mistyped item corrects; a genuinely new plan or tracking state supersedes. */
+    async revisePreventiveItem(input: ExpectedHead & { payload: PreventiveCareItemPayload; intent: "CORRECT" | "SUPERSEDE"; commandId?: CommandId }) {
+      return revise<PreventiveCareItemRevision>({
+        expected: input,
+        recordType: "PREVENTIVE_CARE_ITEM",
+        commandName: "REVISE_PREVENTIVE_CARE_ITEM",
+        hashMaterial: { target: input.recordId, expected: input.expectedRevisionId, payload: input.payload, intent: input.intent },
+        commandId: input.commandId,
+        eventName: "PREVENTIVE_CARE_ITEM_REVISED",
+        eventReason: input.intent === "CORRECT" ? "RECORDED_ERROR_CORRECTED" : "PLAN_CHANGED",
+        auditReason: input.intent === "CORRECT" ? "PATIENT_CORRECTED" : "PATIENT_CONFIRMED_CHANGE",
+        action: input.intent,
+        provenance: PATIENT_ENTRY,
+        build: (_previous, base) => ({ ...base, temporal: { kind: "ATEMPORAL" }, payload: input.payload }) as PreventiveCareItemRevision,
+      });
+    },
+
+    // --- Packet 9B: appointments (domain 7.6–7.8) ---------------------------------------
+
+    async scheduleAppointment(input: { payload: AppointmentPayload; scheduledAt: TimePoint; commandId?: CommandId; seeded?: boolean }) {
+      const now = dependencies.now();
+      const transactionId = ids.transactionId();
+      const links = input.payload.relatedPreventiveCareItems ?? [];
+      if (!(await sourcesAreCurrent(links))) return { kind: "FAILED", code: "VALIDATION_FAILED" } as const;
+      const revision = {
+        ...envelope({ recordType: "APPOINTMENT", recordId: ids.recordId(), revisionNumber: 1, previousRevisionId: null, action: "CREATE", recordedAt: now, now, provenance: PATIENT_ENTRY, transactionId }),
+        temporal: { kind: "POINT", occurrence: input.scheduledAt },
+        payload: input.payload,
+      } as AppointmentRevision;
+      return commit({
+        commandName: "SCHEDULE_APPOINTMENT",
+        hashMaterial: { payload: input.payload, scheduledAt: input.scheduledAt },
+        commandId: input.commandId,
+        transactionId,
+        now,
+        changes: [change(revision, null, "APPOINTMENT_SCHEDULED", "RECORDED", input.seeded ? "SYNTHETIC_DEMO_SEEDED" : "PATIENT_RECORDED")],
+      });
+    },
+
+    /**
+     * Correction, reschedule, cancellation, reported outcome or organisational
+     * change. A passed time never changes status here; only the patient does.
+     */
+    async reviseAppointment(
+      input: ExpectedHead & {
+        payload: AppointmentPayload;
+        scheduledAt: TimePoint;
+        reason: Extract<CarePlanEventReason, "RECORDED_ERROR_CORRECTED" | "RESCHEDULED" | "CANCELLED" | "OUTCOME_REPORTED" | "ORGANISATIONAL_DETAILS_CHANGED">;
+        commandId?: CommandId;
+      },
+    ) {
+      let previous: CarePlanRevision | null;
+      try {
+        previous = await readRevision(input.expectedRevisionId);
+      } catch {
+        return { kind: "FAILED", code: "STORAGE_UNAVAILABLE" } as const;
+      }
+      if (!previous || previous.recordType !== "APPOINTMENT" || previous.recordId !== input.recordId) return { kind: "FAILED", code: "NOT_FOUND" } as const;
+      const sameTime = JSON.stringify(previous.temporal.occurrence) === JSON.stringify(input.scheduledAt);
+      const status = input.payload.status;
+      const consistent =
+        input.reason === "RESCHEDULED"
+          ? !sameTime && status === "SCHEDULED"
+          : input.reason === "CANCELLED"
+            ? sameTime && status === "CANCELLED"
+            : input.reason === "OUTCOME_REPORTED"
+              ? sameTime && (status === "PATIENT_REPORTED_ATTENDED" || status === "PATIENT_REPORTED_MISSED" || status === "UNSURE")
+              : input.reason === "ORGANISATIONAL_DETAILS_CHANGED"
+                ? sameTime && status === previous.payload.status
+                : true;
+      if (!consistent) return { kind: "FAILED", code: "VALIDATION_FAILED" } as const;
+      if (!(await sourcesAreCurrent(input.payload.relatedPreventiveCareItems ?? []))) return { kind: "FAILED", code: "VALIDATION_FAILED" } as const;
+      const intent = input.reason === "RECORDED_ERROR_CORRECTED" ? "CORRECT" : "SUPERSEDE";
+      return revise<AppointmentRevision>({
+        expected: input,
+        recordType: "APPOINTMENT",
+        commandName: "REVISE_APPOINTMENT",
+        hashMaterial: { target: input.recordId, expected: input.expectedRevisionId, payload: input.payload, scheduledAt: input.scheduledAt, reason: input.reason },
+        commandId: input.commandId,
+        eventName: "APPOINTMENT_REVISED",
+        eventReason: input.reason,
+        auditReason: intent === "CORRECT" ? "PATIENT_CORRECTED" : "PATIENT_CONFIRMED_CHANGE",
+        action: intent,
+        provenance: PATIENT_ENTRY,
+        build: (_previous, base) => ({ ...base, temporal: { kind: "POINT", occurrence: input.scheduledAt }, payload: input.payload }) as AppointmentRevision,
       });
     },
   });

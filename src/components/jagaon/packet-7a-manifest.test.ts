@@ -122,7 +122,8 @@ describe("Packet 7A public exports and manifests", () => {
     expect(JAGAON_TABLE_NAMES).toHaveLength(16);
     expect(JAGAON_DEXIE_VERSION).toBe(1);
     expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MEDICATION_SCHEDULE", "HISTORY", "MORE"]);
-    expect(ALL_SCREENS.size).toBe(14);
+    // Packet 9B adds PREVENTIVE_CARE and CARE_PREPARATION; 9C adds CARE_SUMMARY_PREVIEW.
+    expect(ALL_SCREENS.size).toBe(17);
     expect(HISTORY_PERIODS).toEqual(["THIS_WEEK", "LAST_WEEK", "THIRTY_DAYS"]);
   });
 

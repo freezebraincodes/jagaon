@@ -1,19 +1,24 @@
 "use client";
 
-import { useSyncExternalStore, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { ScreenId } from "../screen-manifest";
 import {
-  createNearbyFoodAdapter,
+  HPB_FNB_PARTNERS_DATASET_ID,
+  HPB_HEALTHIER_EATERIES_DATASET_ID,
   NO_FOOD_FILTERS,
   type CuisineGroup,
-  type FoodVenue,
-  type GovernedFoodAttribute,
+  type DirectoryDescriptor,
+  type FilterableFoodAttribute,
+  type NearbyFoodDiscoveryPort,
   type NearbyFoodFilters,
-  type NearbyFoodState,
-  type NearbyFoodAdapter,
+  type NearbyFoodPlace,
   type VenueType,
-} from "@/application/governed/nearby-food-adapter";
+} from "@/application/nearby-food/nearby-food-contracts";
+import { createBrowserNearbyFood } from "@/application/nearby-food/browser-nearby-food";
+import { SYNTHETIC_SNAPSHOT_DATE } from "@/application/nearby-food/synthetic-nearby-food";
+import { createNearbyFoodController, type NearbyFoodController, type NearbyFoodScreenState, type ResultSet } from "../nearby-food/nearby-food-controller";
+import { OneMapView } from "../nearby-food/OneMapView";
 import { Banner, ToggleGroup } from "../primitives/Card";
 import { Button } from "../primitives/Button";
 import { InputField } from "../primitives/Field";
@@ -36,17 +41,14 @@ import { ToggleChips } from "../primitives/ToggleChips";
 import { Notice, ScreenHeader } from "../primitives/ScreenHeader";
 import { labelAndValue } from "../locale-format";
 
-// --- Section: External store subscription ---
+/** Exact licence and dataset names are source names and are never translated. */
+const LICENCE_NAME = "Singapore Open Data Licence version 1.0";
+const DATASET_LINKS = [
+  { id: HPB_FNB_PARTNERS_DATASET_ID, name: "Healthier Dining Partners - F&B Partners" },
+  { id: HPB_HEALTHIER_EATERIES_DATASET_ID, name: "Healthier Eateries" },
+] as const;
 
-function subscribe(adapter: NearbyFoodAdapter, callback: () => void) {
-  return adapter.subscribe(callback);
-}
-
-function getSnapshot(adapter: NearbyFoodAdapter): NearbyFoodState {
-  return adapter.getState();
-}
-
-/** Distances are synthetic directory facts; only their unit is formatted. */
+/** Distances are directory facts; only their unit is formatted. */
 function formatDistance(metres: number): string {
   return metres < 1000 ? `${metres} m` : `${(metres / 1000).toFixed(1)} km`;
 }
@@ -65,17 +67,14 @@ function venueTypeLabel(messages: AppMessages, type: VenueType): string {
   }
 }
 
+function venueMeta(messages: AppMessages, place: NearbyFoodPlace): string | null {
+  const parts = [place.venueType ? venueTypeLabel(messages, place.venueType) : null, ...place.cuisineLabels].filter((part): part is string => !!part);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 // --- Section: Filters (user choices only; never health data) ---
 
-function FoodFilters({
-  messages,
-  filters,
-  onChange,
-}: {
-  messages: AppMessages;
-  filters: NearbyFoodFilters;
-  onChange: (filters: NearbyFoodFilters) => void;
-}) {
+function FoodFilters({ messages, filters, onChange }: { messages: AppMessages; filters: NearbyFoodFilters; onChange: (filters: NearbyFoodFilters) => void }) {
   const msg = messages.food;
   const ANY = "ANY" as const;
   return (
@@ -104,11 +103,7 @@ function FoodFilters({
         ]}
         selected={filters.maxDistanceMetres ? [String(filters.maxDistanceMetres) as "500"] : []}
         onToggle={(value) =>
-          onChange({
-            ...filters,
-            maxDistanceMetres:
-              String(filters.maxDistanceMetres) === value ? null : (Number(value) as 500 | 1000 | 2000),
-          })
+          onChange({ ...filters, maxDistanceMetres: String(filters.maxDistanceMetres) === value ? null : (Number(value) as 500 | 1000 | 2000) })
         }
       />
       <ToggleChips<CuisineGroup | typeof ANY>
@@ -147,7 +142,7 @@ function FoodFilters({
         selected={[filters.venueType ?? ANY]}
         onToggle={(value) => onChange({ ...filters, venueType: value === ANY ? null : value })}
       />
-      <ToggleChips<GovernedFoodAttribute>
+      <ToggleChips<FilterableFoodAttribute>
         label={msg.attributesLabel}
         heading={
           <p className="filter-heading">
@@ -162,9 +157,7 @@ function FoodFilters({
           { value: "LOWER_IN_CALORIES", label: msg.attrLowerCalories },
         ]}
         selected={filters.attribute ? [filters.attribute] : []}
-        onToggle={(value) =>
-          onChange({ ...filters, attribute: filters.attribute === value ? null : value })
-        }
+        onToggle={(value) => onChange({ ...filters, attribute: filters.attribute === value ? null : value })}
       />
       <p className="provenance-line">{msg.attributesNote}</p>
     </section>
@@ -176,55 +169,37 @@ function FoodFilters({
 type NearbyFoodScreenProps = {
   messages: AppMessages;
   locale: SupportedLocale;
-  adapter?: NearbyFoodAdapter;
+  /** Injected discovery port; defaults to the browser hybrid profile. */
+  discovery?: NearbyFoodDiscoveryPort;
   goBack: () => void;
   navigate: (screen: ScreenId, params?: Record<string, string>) => void;
 };
 
-export function NearbyFoodScreen({
-  messages,
-  locale,
-  adapter: providedAdapter,
-  navigate,
-}: NearbyFoodScreenProps) {
+export function NearbyFoodScreen({ messages, locale, discovery, navigate }: NearbyFoodScreenProps) {
   const msg = messages.food;
-  const adapter = useMemo(
-    () => providedAdapter ?? createNearbyFoodAdapter(),
-    [providedAdapter],
-  );
-  const state = useSyncExternalStore(
-    (cb) => subscribe(adapter, cb),
-    () => getSnapshot(adapter),
-    () => getSnapshot(adapter),
-  );
+  const port = useMemo(() => discovery ?? createBrowserNearbyFood(), [discovery]);
+  const controller = useMemo<NearbyFoodController>(() => createNearbyFoodController(port), [port]);
+  // Closing the screen cancels the active request; StrictMode remounts stay usable.
+  useEffect(() => () => controller.abortActive(), [controller]);
+  const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
 
   const [query, setQuery] = useState("");
-  const [filters, setFilters] = useState<NearbyFoodFilters>(() => adapter.getFilters());
+  const [filters, setFilters] = useState<NearbyFoodFilters>(() => controller.getFilters());
   const manualInputRef = useRef<HTMLInputElement>(null);
+
+  // A refused, timed-out or unavailable location returns the person to manual search.
+  useEffect(() => {
+    if (state.kind === "LOCATION_PROBLEM") manualInputRef.current?.focus();
+  }, [state]);
 
   function changeFilters(next: NearbyFoodFilters) {
     setFilters(next);
-    adapter.dispatch({ kind: "SET_FILTERS", filters: next });
+    controller.setFilters(next);
   }
 
-  function handleDenyGps() {
-    adapter.dispatch({ kind: "DENY_GPS" });
-    manualInputRef.current?.focus();
-  }
-
-  const handlers: StateHandlers = {
-    grantGps: () => adapter.dispatch({ kind: "GRANT_GPS" }),
-    denyGps: handleDenyGps,
-    cancelGps: () => adapter.dispatch({ kind: "CANCEL_GPS" }),
-    selectVenue: (venueId) => adapter.dispatch({ kind: "SELECT_VENUE", venueId }),
-    backFromDetails: () => adapter.dispatch({ kind: "BACK_FROM_DETAILS" }),
-    switchView: (view) =>
-      adapter.dispatch({ kind: view === "map" ? "SWITCH_TO_MAP" : "SWITCH_TO_LIST" }),
-  };
-
-  function handleSearch(e: FormEvent) {
-    e.preventDefault();
-    adapter.dispatch({ kind: "SEARCH_BY_TEXT", query });
+  function handleSearch(event: FormEvent) {
+    event.preventDefault();
+    controller.searchManual(query);
   }
 
   return (
@@ -239,7 +214,7 @@ export function NearbyFoodScreen({
           type="text"
           placeholder={msg.locationPlaceholder}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(event) => setQuery(event.target.value)}
           autoComplete="off"
         />
         <div className="food-search-actions">
@@ -247,22 +222,19 @@ export function NearbyFoodScreen({
             <SearchIcon size={20} />
             {msg.searchAction}
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => adapter.dispatch({ kind: "REQUEST_GPS" })}
-          >
+          <Button type="button" variant="outline" onClick={controller.requestGps}>
             <TargetIcon size={20} />
             {msg.useCurrentLocation}
           </Button>
         </div>
         <p className="provenance-line">{msg.locationNote}</p>
+        <p className="provenance-line">{msg.locationNotSaved}</p>
       </form>
 
       <FoodFilters messages={messages} filters={filters} onChange={changeFilters} />
 
       <div className="food-state">
-        <FoodStateView state={state} messages={messages} locale={locale} handlers={handlers} />
+        <FoodStateView state={state} messages={messages} locale={locale} port={port} controller={controller} />
       </div>
 
       <section className="general-food-card" aria-labelledby="general-food-heading">
@@ -272,11 +244,7 @@ export function NearbyFoodScreen({
         </h2>
         <p className="tag tag--reviewed">{msg.generalInfoLimit}</p>
         <p className="medication-text">{msg.reviewedInfoUnavailable}</p>
-        <button
-          type="button"
-          className="more-row food-general-link"
-          onClick={() => navigate("GENERAL_FOOD_INFORMATION")}
-        >
+        <button type="button" className="more-row food-general-link" onClick={() => navigate("GENERAL_FOOD_INFORMATION")}>
           <BookIcon size={28} className="icon more-row-icon" />
           <span className="more-row-label">{msg.generalInfoAction}</span>
           <ChevronRightIcon size={22} className="icon more-row-chevron" />
@@ -286,26 +254,9 @@ export function NearbyFoodScreen({
   );
 }
 
-// --- Section: State renderer ---
+// --- Section: Views ---
 
-type StateHandlers = {
-  grantGps: () => void;
-  denyGps: () => void;
-  cancelGps: () => void;
-  selectVenue: (venueId: string) => void;
-  backFromDetails: () => void;
-  switchView: (view: "map" | "list") => void;
-};
-
-function ViewToggle({
-  messages,
-  view,
-  onChange,
-}: {
-  messages: AppMessages;
-  view: "map" | "list";
-  onChange: (view: "map" | "list") => void;
-}) {
+function ViewToggle({ messages, view, onChange }: { messages: AppMessages; view: "map" | "list"; onChange: (view: "map" | "list") => void }) {
   return (
     <div className="view-toggle">
       <ToggleGroup
@@ -320,15 +271,8 @@ function ViewToggle({
   );
 }
 
-function ProviderMap({
-  messages,
-  venues,
-  onSelect,
-}: {
-  messages: AppMessages;
-  venues: readonly FoodVenue[];
-  onSelect: (venueId: string) => void;
-}) {
+/** Static synthetic map used by the synthetic profile and the demo fallback. */
+function StaticDemoMap({ messages, places, onSelect }: { messages: AppMessages; places: readonly NearbyFoodPlace[]; onSelect: (placeId: string) => void }) {
   return (
     <div className="provider-map" role="region" aria-label={messages.food.viewMap}>
       <div className="provider-map-canvas">
@@ -337,14 +281,8 @@ function ProviderMap({
         <span className="provider-map-you" aria-hidden="true">
           {messages.food.youAreHere}
         </span>
-        {venues.map((venue, index) => (
-          <button
-            key={venue.id}
-            type="button"
-            className={`provider-marker provider-marker--${index + 1}`}
-            aria-label={`${index + 1} ${venue.name}`}
-            onClick={() => onSelect(venue.id)}
-          >
+        {places.slice(0, 5).map((place, index) => (
+          <button key={place.id} type="button" className={`provider-marker provider-marker--${index + 1}`} aria-label={`${index + 1} ${place.name}`} onClick={() => onSelect(place.id)}>
             <span className="provider-marker-number">{index + 1}</span>
           </button>
         ))}
@@ -354,23 +292,89 @@ function ProviderMap({
   );
 }
 
+/** Source, dataset date, limitation and licence for the active directory. */
+function DirectorySources({ messages, directory }: { messages: AppMessages; directory: DirectoryDescriptor }) {
+  const msg = messages.food;
+  if (directory.kind === "SYNTHETIC") return <p className="source-attr">{msg.syntheticDirectorySource}</p>;
+  return (
+    <div className="governed-sources">
+      <p className="source-attr">
+        <ShieldIcon size={16} />
+        {msg.governedDatasetSource}
+      </p>
+      <ul className="governed-source-list">
+        <li>
+          <a href={`https://data.gov.sg/datasets/${DATASET_LINKS[0].id}/view`} target="_blank" rel="noopener noreferrer" lang="en">
+            {DATASET_LINKS[0].name}
+          </a>{" "}
+          · {msg.governedDatasetDate(directory.criteriaDatasetDate)}
+        </li>
+        <li>
+          <a href={`https://data.gov.sg/datasets/${DATASET_LINKS[1].id}/view`} target="_blank" rel="noopener noreferrer" lang="en">
+            {DATASET_LINKS[1].name}
+          </a>{" "}
+          · {msg.governedDatasetDate(directory.coordinatesDatasetDate)}
+        </li>
+        <li>
+          <a href={directory.licenceUrl} target="_blank" rel="noopener noreferrer" lang="en">
+            {LICENCE_NAME}
+          </a>
+        </li>
+      </ul>
+      <p className="source-attr">{msg.governedDatasetStale}</p>
+    </div>
+  );
+}
+
+function GovernedAttributes({ messages, place, directory }: { messages: AppMessages; place: NearbyFoodPlace; directory: DirectoryDescriptor }) {
+  const msg = messages.food;
+  if (place.governedAttributes.length === 0) {
+    return place.venueSource.kind === "SYNTHETIC_FIXTURE" ? (
+      <p className="provenance-line venue-provenance">
+        <ShieldIcon size={16} />
+        {msg.noGovernedAttribute}
+      </p>
+    ) : null;
+  }
+  return (
+    <div className="governed-attribute-block">
+      <p className="tag tag--reviewed">
+        <ShieldIcon size={16} />
+        {msg.hpbWording}
+      </p>
+      <ul className="governed-attribute-list" lang="en">
+        {place.governedAttributes.map((attribute) => (
+          <li key={attribute.criterion} className="governed-attribute">
+            {attribute.criterion}
+          </li>
+        ))}
+      </ul>
+      {directory.kind === "HPB_SNAPSHOT" ? (
+        <p className="provenance-line venue-provenance">
+          {msg.governedDatasetSource} · {msg.governedDatasetDate(directory.criteriaDatasetDate)}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function VenueList({
   messages,
   locale,
-  venues,
+  results,
   onSelect,
 }: {
   messages: AppMessages;
   locale: SupportedLocale;
-  venues: readonly FoodVenue[];
-  onSelect: (venueId: string) => void;
+  results: ResultSet;
+  onSelect: (placeId: string) => void;
 }) {
   const msg = messages.food;
   return (
     <>
       <div className="results-header">
         <h2 className="eyebrow" id="venue-results-heading">
-          {msg.resultsCount(venues.length)}
+          {msg.resultsCount(results.places.length)}
         </h2>
         <p className="results-sort">{msg.sortedByDistance}</p>
       </div>
@@ -389,90 +393,107 @@ function VenueList({
         </li>
       </ul>
       <ol className="venue-list" aria-labelledby="venue-results-heading">
-        {venues.map((venue, index) => (
-          <li key={venue.id} className="venue-card">
-            <div className="venue-head">
-              <span className="venue-number" aria-hidden="true">
-                {index + 1}
-              </span>
-              <div className="venue-body">
-                <h3 className="venue-name">{venue.name}</h3>
-                <p className="venue-address">{venue.address}</p>
-                <p className="venue-meta">
-                  {msg.aboutDistance(formatDistance(venue.distanceMetres))}
-                </p>
-                <p className="venue-meta">
-                  {`${venueTypeLabel(messages, venue.venueType)} · ${venue.cuisine}`}
-                </p>
-                <p className="provenance-line venue-provenance">
-                  <MapIcon size={16} />
-                  {msg.providerFacts}
-                </p>
+        {results.places.map((place, index) => {
+          const meta = venueMeta(messages, place);
+          return (
+            <li key={place.id} className="venue-card">
+              <div className="venue-head">
+                <span className="venue-number" aria-hidden="true">
+                  {index + 1}
+                </span>
+                <div className="venue-body">
+                  <h3 className="venue-name">{place.name}</h3>
+                  <p className="venue-address">{place.address}</p>
+                  <p className="venue-meta">{msg.aboutDistance(formatDistance(place.distanceMetres))}</p>
+                  {meta ? <p className="venue-meta">{meta}</p> : null}
+                  <p className="provenance-line venue-provenance">
+                    <MapIcon size={16} />
+                    {msg.providerFacts}
+                  </p>
+                </div>
               </div>
-            </div>
-            {venue.badge ? (
-              <p className="governed-attribute">
-                <ShieldIcon size={20} />
-                {venue.badge}
-              </p>
-            ) : (
+              <GovernedAttributes messages={messages} place={place} directory={results.directory} />
               <p className="provenance-line venue-provenance">
-                <ShieldIcon size={16} />
-                {msg.noGovernedAttribute}
+                <PhoneIcon size={16} />
+                {msg.checkAvailability}
               </p>
-            )}
-            <p className="provenance-line venue-provenance">
-              <PhoneIcon size={16} />
-              {msg.checkAvailability}
-            </p>
-            <div className="venue-actions">
-              <Button
-                variant="outline"
-                aria-label={labelAndValue(locale, msg.viewDetails, venue.name)}
-                onClick={() => onSelect(venue.id)}
-              >
-                <ListIcon size={18} />
-                {msg.viewDetails}
-              </Button>
-              <Button
-                variant="outline"
-                aria-disabled="true"
-                aria-describedby="directions-unavailable"
-                className="btn--inert"
-              >
-                <MapIcon size={18} />
-                {msg.openDirections}
-              </Button>
-            </div>
-          </li>
-        ))}
+              <div className="venue-actions">
+                <Button variant="outline" aria-label={labelAndValue(locale, msg.viewDetails, place.name)} onClick={() => onSelect(place.id)}>
+                  <ListIcon size={18} />
+                  {msg.viewDetails}
+                </Button>
+                {/* Directions exist only as the labelled synthetic demo control; real
+                    results omit it until a reviewed provider target exists. */}
+                {place.venueSource.kind === "SYNTHETIC_FIXTURE" ? (
+                  <Button variant="outline" aria-disabled="true" aria-describedby="directions-unavailable" className="btn--inert">
+                    <MapIcon size={18} />
+                    {msg.openDirections}
+                  </Button>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
       </ol>
-      <p className="sr-only" id="directions-unavailable">
-        {msg.directionsUnavailable}
-      </p>
-      <p className="source-attr">{msg.syntheticDirectorySource}</p>
+      {results.places.some((place) => place.venueSource.kind === "SYNTHETIC_FIXTURE") ? (
+        <p className="sr-only" id="directions-unavailable">
+          {msg.directionsUnavailable}
+        </p>
+      ) : null}
+      <DirectorySources messages={messages} directory={results.directory} />
     </>
   );
+}
+
+function ResultsMap({
+  messages,
+  port,
+  results,
+  onSelect,
+  onUnavailable,
+}: {
+  messages: AppMessages;
+  port: NearbyFoodDiscoveryPort;
+  results: ResultSet;
+  onSelect: (placeId: string) => void;
+  onUnavailable: () => void;
+}) {
+  const map = port.profile.map;
+  if (map.kind === "ONEMAP_TILES" && results.source === "LIVE") {
+    return (
+      <OneMapView
+        messages={messages}
+        descriptor={map}
+        origin={results.origin}
+        places={results.places.map((place, index) => ({ id: place.id, name: place.name, number: index + 1, coordinates: place.coordinates }))}
+        onSelect={onSelect}
+        onUnavailable={onUnavailable}
+      />
+    );
+  }
+  return <StaticDemoMap messages={messages} places={results.places} onSelect={onSelect} />;
 }
 
 function FoodStateView({
   state,
   messages,
   locale,
-  handlers,
+  port,
+  controller,
 }: {
-  state: NearbyFoodState;
+  state: NearbyFoodScreenState;
   messages: AppMessages;
   locale: SupportedLocale;
-  handlers: StateHandlers;
+  port: NearbyFoodDiscoveryPort;
+  controller: NearbyFoodController;
 }) {
   const msg = messages.food;
   switch (state.kind) {
-    // State 1: IDLE — the search form above is the whole initial state.
+    // State 1: initial manual location — the search form is the whole state.
     case "IDLE":
       return null;
 
-    // State 2: PRE_PERMISSION — explain before the browser prompt.
+    // State 2: explain before the browser prompt.
     case "PRE_PERMISSION":
       return (
         <section className="permission-card" aria-labelledby="pre-permission-title">
@@ -481,80 +502,114 @@ function FoodStateView({
             {msg.prePermissionTitle}
           </h2>
           <p className="permission-body">{msg.prePermissionBody}</p>
+          <p className="permission-body">{msg.locationNotSaved}</p>
           <div className="button-stack">
-            <Button variant="primary" onClick={handlers.grantGps}>
+            <Button variant="primary" onClick={controller.grantGps}>
               {messages.shared.continue}
             </Button>
-            <Button variant="outline" onClick={handlers.denyGps}>
+            <Button variant="outline" onClick={controller.declineGps}>
               {msg.usePostalInstead}
             </Button>
-            <Button variant="ghost" onClick={handlers.cancelGps}>
+            <Button variant="ghost" onClick={controller.cancelGps}>
               {messages.shared.cancel}
             </Button>
           </div>
         </section>
       );
 
-    // State 3: LOCATING
+    // State 3: locating.
     case "LOCATING":
       return <Banner variant="info">{msg.locating}</Banner>;
 
-    // State 4: RESULTS_MAP — map plus the equivalent list.
-    case "RESULTS_MAP":
+    // States 4, 5, 9 and 11: results as map or list; map failure and offline keep the list.
+    case "RESULTS": {
+      const { results } = state;
+      const syntheticFallback = results.source === "SYNTHETIC_FALLBACK";
       return (
         <>
-          <ViewToggle messages={messages} view="map" onChange={handlers.switchView} />
-          <ProviderMap messages={messages} venues={state.venues} onSelect={handlers.selectVenue} />
-          <VenueList messages={messages} locale={locale} venues={state.venues} onSelect={handlers.selectVenue} />
+          {state.offline ? (
+            <Banner variant="warning" title={msg.offlineTitle}>
+              {msg.offlineBody(results.directory.kind === "HPB_SNAPSHOT" ? results.directory.criteriaDatasetDate : SYNTHETIC_SNAPSHOT_DATE)}
+            </Banner>
+          ) : null}
+          {state.mapFailed ? (
+            <>
+              <Banner variant="warning" title={msg.mapUnavailableTitle}>
+                {port.profile.map.kind === "ONEMAP_TILES" && !syntheticFallback ? msg.mapTilesUnavailable : msg.mapUnavailableBody}
+              </Banner>
+              <p className="source-attr">{port.profile.map.kind === "ONEMAP_TILES" && !syntheticFallback ? msg.oneMapAttribution : msg.syntheticMapAttribution}</p>
+            </>
+          ) : (
+            <ViewToggle messages={messages} view={state.view} onChange={controller.switchView} />
+          )}
+          {state.view === "map" && !state.mapFailed ? (
+            <ResultsMap messages={messages} port={port} results={results} onSelect={controller.selectPlace} onUnavailable={controller.reportMapUnavailable} />
+          ) : null}
+          <VenueList messages={messages} locale={locale} results={results} onSelect={controller.selectPlace} />
         </>
       );
+    }
 
-    // State 5: RESULTS_LIST
-    case "RESULTS_LIST":
-      return (
-        <>
-          <ViewToggle messages={messages} view="list" onChange={handlers.switchView} />
-          <VenueList messages={messages} locale={locale} venues={state.venues} onSelect={handlers.selectVenue} />
-        </>
-      );
-
-    // State 6: PERMISSION_DENIED — manual search already has focus.
-    case "PERMISSION_DENIED":
-      return (
+    // State 6: location refused, timed out or unavailable — manual search has focus.
+    case "LOCATION_PROBLEM":
+      return state.reason === "DENIED" ? (
         <Banner variant="warning" title={msg.permissionDeniedTitle}>
           {msg.permissionDeniedBody}
         </Banner>
+      ) : (
+        <Banner variant="warning">{state.reason === "TIMEOUT" ? msg.locationTimedOut : msg.locationUnavailable}</Banner>
       );
 
-    // State 7: AMBIGUOUS
+    // State 7: ask the person to choose a resolved location.
     case "AMBIGUOUS":
       return (
-        <Banner variant="info" title={msg.ambiguousTitle}>
-          {msg.ambiguousBody(state.query)}
-        </Banner>
+        <section className="ambiguous-card" aria-labelledby="ambiguous-title">
+          <Banner variant="info" title={msg.ambiguousTitle}>
+            {msg.ambiguousBody(state.query)}
+          </Banner>
+          <ul className="ambiguous-candidates" id="ambiguous-title">
+            {state.candidates.map((candidate) => (
+              <li key={`${candidate.label}-${candidate.coordinates.latitude}-${candidate.coordinates.longitude}`}>
+                <button type="button" className="more-row" onClick={() => controller.chooseCandidate(candidate)}>
+                  <PinIcon size={22} className="icon more-row-icon" />
+                  <span className="more-row-label">{candidate.label}</span>
+                  <ChevronRightIcon size={20} className="icon more-row-chevron" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       );
 
-    // State 8: NO_RESULTS
+    // State 8: no place matched the person's filters or location.
     case "NO_RESULTS":
       return (
-        <Banner variant="info" title={msg.noResultsTitle}>
-          {msg.noResultsBody}
-        </Banner>
-      );
-
-    // State 9: MAP_UNAVAILABLE — the list stays usable.
-    case "MAP_UNAVAILABLE":
-      return (
         <>
-          <Banner variant="warning" title={msg.mapUnavailableTitle}>
-            {msg.mapUnavailableBody}
+          <Banner variant="info" title={msg.noResultsTitle}>
+            {msg.noResultsBody}
           </Banner>
-          <p className="source-attr">{msg.syntheticMapAttribution}</p>
-          <VenueList messages={messages} locale={locale} venues={state.venues} onSelect={handlers.selectVenue} />
+          <DirectorySources messages={messages} directory={state.results.directory} />
         </>
       );
 
-    // State 10: DIRECTORY_UNAVAILABLE
+    case "LOCATION_NOT_FOUND":
+      return <Banner variant="info">{msg.noResultsTitle}</Banner>;
+
+    // Live search unavailable: say so, and show only clearly labelled demo places.
+    case "GEOCODER_UNAVAILABLE":
+      return (
+        <>
+          <Banner variant="warning">{msg.liveGeocoderUnavailable}</Banner>
+          {state.fallback ? (
+            <>
+              <Banner variant="info">{msg.syntheticFallbackActive}</Banner>
+              <VenueList messages={messages} locale={locale} results={state.fallback} onSelect={controller.selectPlace} />
+            </>
+          ) : null}
+        </>
+      );
+
+    // State 10: the directory cannot be used; no venue is invented.
     case "DIRECTORY_UNAVAILABLE":
       return (
         <Banner variant="error" title={msg.directoryUnavailableTitle}>
@@ -562,67 +617,55 @@ function FoodStateView({
         </Banner>
       );
 
-    // State 11: OFFLINE — dated snapshot, never current availability.
-    case "OFFLINE":
-      return (
-        <>
-          <Banner variant="warning" title={msg.offlineTitle}>
-            {msg.offlineBody(state.snapshotDate)}
-          </Banner>
-          <VenueList messages={messages} locale={locale} venues={state.venues} onSelect={handlers.selectVenue} />
-        </>
-      );
-
-    // State 12: VENUE_DETAILS
-    case "VENUE_DETAILS":
+    // State 12: venue details after a deliberate selection.
+    case "VENUE_DETAILS": {
+      const { place, results } = state;
+      const synthetic = place.venueSource.kind === "SYNTHETIC_FIXTURE";
       return (
         <article className="venue-details" aria-labelledby="venue-details-name">
           <p className="eyebrow">{msg.detailsTitle}</p>
           <h2 id="venue-details-name" className="venue-details-name">
-            {state.venue.name}
+            {place.name}
           </h2>
           <dl className="venue-facts">
             <div>
               <dt className="sr-only">{msg.locationLabel}</dt>
               <dd className="venue-address">
                 <PinIcon size={18} />
-                {state.venue.address}
+                {place.address}
               </dd>
             </div>
             <div>
               <dt>{msg.distanceLabel}</dt>
-              <dd>{formatDistance(state.venue.distanceMetres)}</dd>
+              <dd>{formatDistance(place.distanceMetres)}</dd>
             </div>
-            <div>
-              <dt>{msg.venueTypeLabel}</dt>
-              <dd>{venueTypeLabel(messages, state.venue.venueType)}</dd>
-            </div>
-            <div>
-              <dt>{msg.cuisineLabel}</dt>
-              <dd>{state.venue.cuisine}</dd>
-            </div>
+            {place.venueType ? (
+              <div>
+                <dt>{msg.venueTypeLabel}</dt>
+                <dd>{venueTypeLabel(messages, place.venueType)}</dd>
+              </div>
+            ) : null}
+            {place.cuisineLabels.length > 0 ? (
+              <div>
+                <dt>{msg.cuisineLabel}</dt>
+                <dd>{place.cuisineLabels.join(" · ")}</dd>
+              </div>
+            ) : null}
           </dl>
           <p className="provenance-line venue-provenance">
             <PhoneIcon size={16} />
             {msg.checkAvailability}
           </p>
-          {state.venue.badge ? (
-            <p className="tag tag--reviewed">
-              <ShieldIcon size={16} />
-              {state.venue.badge}
-            </p>
-          ) : null}
-          <Notice>{msg.directionsUnavailable}</Notice>
-          <p className="source-attr">{msg.syntheticMapAttribution}</p>
-          <p className="source-attr">{msg.syntheticDirectorySource}</p>
-          <Button variant="outline" onClick={handlers.backFromDetails}>
+          <GovernedAttributes messages={messages} place={place} directory={results.directory} />
+          {synthetic ? <Notice>{msg.directionsUnavailable}</Notice> : null}
+          <p className="source-attr">{synthetic || port.profile.map.kind !== "ONEMAP_TILES" ? msg.syntheticMapAttribution : msg.oneMapAttribution}</p>
+          <DirectorySources messages={messages} directory={results.directory} />
+          <Button variant="outline" onClick={controller.backFromDetails}>
             <ListIcon size={20} />
             {msg.viewList}
           </Button>
         </article>
       );
-
-    default:
-      return null;
+    }
   }
 }

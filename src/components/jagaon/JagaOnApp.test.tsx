@@ -193,6 +193,44 @@ function fakeRuntime(): JagaOnRuntime {
       editCareQuestion: vi.fn(),
       dismissCareQuestion: vi.fn(),
     },
+    carePreparation: {
+      commands: {
+        prepare: vi.fn(async () => ({ kind: "REJECTED" as const, code: "SUMMARY_SELECTION_EMPTY" as const })),
+        markPreviewed: vi.fn(),
+        approve: vi.fn(),
+        invalidate: vi.fn(),
+        supersede: vi.fn(),
+        requestPrintExport: vi.fn(),
+        completePrintExport: vi.fn(),
+        recoverInterruptedExports: vi.fn(async () => 0),
+      },
+      query: { loadSummary: vi.fn(async () => ({ status: "NOT_FOUND" as const })) },
+    },
+    careOrganisation: {
+      query: {
+        loadPreventiveCare: vi.fn(async () => ({ status: "READY" as const, items: [] })),
+        loadVisitPreparation: vi.fn(async () => ({
+          status: "READY" as const,
+          appointment: null,
+          questions: [],
+          period: { startAt: "2026-09-04T16:00:00.000Z" as never, endAtExclusive: "2026-10-04T16:00:00.000Z" as never, startDate: "2026-09-05", endDate: "2026-10-04" },
+          factGroups: (["GLUCOSE", "INSULIN", "MEALS", "WALKS"] as const).map((key) => ({ key, sources: [] })),
+        })),
+      },
+      commands: {
+        createPreventiveItem: vi.fn(),
+        revisePreventiveItem: vi.fn(),
+        recordPreventiveOutcome: vi.fn(),
+        correctPreventiveOutcome: vi.fn(),
+        undoPreventiveOutcome: vi.fn(),
+        scheduleAppointment: vi.fn(),
+        reviseAppointment: vi.fn(),
+        recordContextWindow: vi.fn(),
+        reviseContextWindow: vi.fn(),
+        createCareQuestion: vi.fn(),
+        reviseCareQuestion: vi.fn(),
+      },
+    },
     resolveLocale: vi.fn(async () => "en-SG" as const),
     persistLocale: vi.fn(async () => undefined),
     resetDemo,
@@ -471,6 +509,68 @@ describe("JagaOnApp journal integration", () => {
     );
     expect(screen.queryByRole("button", { name: en.shared.back })).not.toBeInTheDocument();
     expect(runtime.history.load).toHaveBeenCalledWith({ period: "THIS_WEEK" });
+  });
+
+  it("opens My health checks and Prepare for my visit as child screens without changing the bottom tabs", async () => {
+    const en = getMessages("en-SG");
+    const runtime = fakeRuntime();
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} />);
+    await screen.findByRole("button", { name: en.today.recordReading });
+
+    fireEvent.click(screen.getByRole("button", { name: en.today.prepareAppointment }));
+    expect(await screen.findByRole("heading", { level: 1, name: en.carePreparation.title })).toBeInTheDocument();
+    expect(await screen.findByText(en.carePreparation.noAppointmentTitle)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
+    expect(await screen.findByRole("button", { name: en.today.recordReading })).toBeInTheDocument();
+
+    fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navMore }));
+    fireEvent.click(screen.getByRole("button", { name: en.more.healthChecks }));
+    expect(await screen.findByRole("heading", { level: 1, name: en.preventiveCare.title })).toBeInTheDocument();
+    expect(await screen.findByText(en.preventiveCare.emptyTitle)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
+    fireEvent.click(await screen.findByRole("button", { name: en.more.prepareVisit }));
+    expect(await screen.findByRole("heading", { level: 1, name: en.carePreparation.title })).toBeInTheDocument();
+    expect(runtime.careOrganisation.query.loadVisitPreparation).toHaveBeenCalled();
+
+    // Child screens use Back; the four bottom tabs are unchanged.
+    fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
+    await screen.findByRole("button", { name: en.more.prepareVisit });
+    expect(within(screen.getByRole("navigation")).getAllByRole("button").map((tab) => tab.textContent)).toEqual([
+      en.shared.navToday,
+      en.shared.navBooklet,
+      en.shared.navHistory,
+      en.shared.navMore,
+    ]);
+  });
+
+  it("prepares a summary from the ticked Screen 10 selection and opens its preview route", async () => {
+    const en = getMessages("en-SG");
+    const runtime = fakeRuntime();
+    runtime.careOrganisation.query.loadVisitPreparation = vi.fn(async () => ({
+      status: "READY" as const,
+      appointment: null,
+      questions: [],
+      period: { startAt: "2026-09-04T16:00:00.000Z" as never, endAtExclusive: "2026-10-04T16:00:00.000Z" as never, startDate: "2026-09-05", endDate: "2026-10-04" },
+      factGroups: [
+        { key: "GLUCOSE" as const, sources: [{ recordType: "GLUCOSE_READING" as const, recordId: "00000000-0000-4000-8000-000000000301" as never, revisionId: "00000000-0000-4000-8000-000000000302" as never }] },
+        { key: "INSULIN" as const, sources: [] },
+        { key: "MEALS" as const, sources: [] },
+        { key: "WALKS" as const, sources: [] },
+      ],
+    }));
+    runtime.carePreparation.commands.prepare = vi.fn(async () => ({ kind: "COMMITTED" as const, recordId: "00000000-0000-4000-8000-000000000401" as never, revisionId: "00000000-0000-4000-8000-000000000402" as never, revisionNumber: 1 }));
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} printPortFactory={() => ({ print: vi.fn() })} />);
+    await screen.findByRole("button", { name: en.today.recordReading });
+    fireEvent.click(screen.getByRole("button", { name: en.today.prepareAppointment }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: new RegExp(en.carePreparation.glucoseReadings) }));
+    fireEvent.click(screen.getByRole("button", { name: en.carePreparation.previewSummary }));
+    expect(await screen.findByRole("heading", { level: 1, name: en.careSummary.title })).toBeInTheDocument();
+    expect(runtime.carePreparation.commands.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ locale: "en-SG", appointment: null, groups: [{ key: "GLUCOSE", sources: [expect.objectContaining({ recordType: "GLUCOSE_READING" })] }], questions: [], notSelected: [] }),
+    );
+    expect(runtime.carePreparation.query.loadSummary).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000401");
+    fireEvent.click(await screen.findByRole("button", { name: en.careSummary.backToPreparation }));
+    expect(await screen.findByRole("heading", { level: 1, name: en.carePreparation.title })).toBeInTheDocument();
   });
 
   it("clears the local appointment-note selection on demo reset", async () => {

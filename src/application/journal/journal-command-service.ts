@@ -15,6 +15,7 @@ import type {
 import { createWorkItemId } from "@/application/contracts/event-work";
 import { intelligenceWorkItemsFor } from "@/application/intelligence/intelligence-subscriptions";
 import { packet8WorkItemsFor } from "@/application/packet8-subscriptions";
+import { packet9WorkItemsFor } from "@/application/packet9-subscriptions";
 import { fingerprint } from "@/application/intelligence/metrics";
 import { activityEventPayloadSchema } from "@/domain/health-records/activity-event";
 import { activityTemporalSchema } from "@/domain/health-records/observation-temporal";
@@ -353,7 +354,8 @@ export function createJournalCommandService(
       medicationEventState: typeof state === "string" ? state : undefined,
     };
     // Packet 8: an explicitly recorded medication event schedules Inquiry eligibility.
-    return [...intelligenceWorkItemsFor(source), ...packet8WorkItemsFor(source)];
+    // Packet 9C: a correction of an exact summary source queues summary invalidation.
+    return [...intelligenceWorkItemsFor(source), ...packet8WorkItemsFor(source), ...packet9WorkItemsFor(source)];
   }
 
   const service: JournalCommandService & MedicationEventCommands = Object.freeze({

@@ -1,0 +1,184 @@
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import Dexie from "dexie";
+import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
+import type { Instant } from "@/domain/shared";
+import { createJagaOnDatabase, type JagaOnDatabase } from "@/storage/database";
+import { createCarePlanCommandService } from "@/application/care-plan/care-plan-command-service";
+import { createJournalCommandService } from "@/application/journal/journal-command-service";
+import { createCareOrganisationService } from "./care-organisation-service";
+import { createCareOrganisationQuery } from "./care-organisation-query";
+import { seedSyntheticCareOrganisation } from "./synthetic-care-organisation-seed";
+import { seedSyntheticCarePlan } from "@/application/medication-schedule/synthetic-care-plan-seed";
+import { barrierPresentationCopyFor } from "@/application/medication-schedule/barrier-presentation-copy";
+
+const originalIndexedDB = Dexie.dependencies.indexedDB;
+const originalKeyRange = Dexie.dependencies.IDBKeyRange;
+beforeAll(() => {
+  Dexie.dependencies.indexedDB = fakeIndexedDB;
+  Dexie.dependencies.IDBKeyRange = FDBKeyRange;
+});
+afterAll(() => {
+  Dexie.dependencies.indexedDB = originalIndexedDB;
+  Dexie.dependencies.IDBKeyRange = originalKeyRange;
+});
+const open: JagaOnDatabase[] = [];
+afterEach(async () => {
+  for (const database of open.splice(0)) {
+    database.close();
+    await Dexie.delete(database.name);
+  }
+});
+
+const uuid = () => crypto.randomUUID() as never;
+// Sunday 4 Oct 2026, 10:00 in Singapore.
+const NOW = "2026-10-04T02:00:00.000Z" as Instant;
+const ids = { commandId: uuid, correlationId: uuid, recordId: uuid, revisionId: uuid, auditEventId: uuid, transactionId: uuid, domainEventId: uuid, workItemId: uuid };
+
+async function setup(now = NOW) {
+  const database = createJagaOnDatabase(`packet9b-query-${crypto.randomUUID()}`);
+  open.push(database);
+  await database.open();
+  let clock = now;
+  const carePlan = createCarePlanCommandService(database, { now: () => clock, ids });
+  const service = createCareOrganisationService(database, { now: () => clock, ids, carePlan });
+  const query = createCareOrganisationQuery(database, { now: () => clock });
+  return { database, service, query, setClock: (value: string) => (clock = value as Instant) };
+}
+
+describe("Screen 09 preventive-care projection", () => {
+  it("projects the four fixture items with entered dates, notes, source text and status — never due or overdue", async () => {
+    const h = await setup();
+    expect(await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids })).toBe("SEEDED");
+    const view = await h.query.loadPreventiveCare();
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.items.map((item) => [item.payload.identity.kind === "PATIENT_DEFINED" ? item.payload.identity.label : item.payload.identity.catalogueEntryKey, item.status, item.dateEntered])).toEqual([
+      ["EYE_SCREENING", "SCHEDULED", { kind: "TARGET", localDate: "2026-11-03" }],
+      ["BLOOD_TEST", "SCHEDULED", { kind: "TARGET", localDate: "2026-10-14" }],
+      ["FOOT_CHECK", "RECORDED", { kind: "OCCURRENCE", occurrence: { kind: "DATE_ONLY", localDate: "2026-09-14", timeZoneId: "Asia/Singapore" } }],
+      ["FLU_VACCINE", "NO_DATE", null],
+    ]);
+    expect(view.items[0]!.payload.patientReportedPlanText?.text).toBe("Appointment letter, 2 Sep 2026");
+    expect(view.items[3]!.payload.patientNote?.text).toBe("Want to ask the clinic");
+    expect(JSON.stringify(view)).not.toMatch(/due|overdue|eligib|missed|complete[ds]?\b/i);
+  });
+
+  it("does not treat a passed entered date as overdue or a missing record as missed", async () => {
+    const h = await setup();
+    await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids });
+    h.setClock("2027-06-01T00:00:00.000Z");
+    const view = await h.query.loadPreventiveCare();
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.items.map((item) => item.status)).toEqual(["SCHEDULED", "SCHEDULED", "RECORDED", "NO_DATE"]);
+  });
+
+  it("returns to scheduled after the patient undoes the report, and records history", async () => {
+    const h = await setup();
+    await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids });
+    let view = await h.query.loadPreventiveCare();
+    if (view.status !== "READY") throw new Error("ready");
+    const foot = view.items[2]!;
+    expect(foot.history.map((entry) => entry.kind)).toEqual(["ITEM", "RECORD"]);
+    const record = foot.currentRecord!;
+    expect((await h.service.undoPreventiveOutcome({ recordId: record.recordId, expectedRevisionId: record.revisionId, expectedRevisionNumber: record.revisionNumber })).kind).toBe("COMMITTED");
+    view = await h.query.loadPreventiveCare();
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.items[2]!.status).toBe("SCHEDULED");
+  });
+
+  it("keeps a report through a correction but not through a superseding new plan", async () => {
+    const h = await setup();
+    await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids });
+    let view = await h.query.loadPreventiveCare();
+    if (view.status !== "READY") throw new Error("ready");
+    const foot = view.items[2]!;
+    const target = { recordId: foot.recordId, expectedRevisionId: foot.revisionId, expectedRevisionNumber: foot.revisionNumber };
+    const corrected = await h.service.revisePreventiveItem({ ...target, payload: { ...foot.payload, patientNote: { text: "Left foot", language: "en-SG" } }, intent: "CORRECT" });
+    if (corrected.kind !== "COMMITTED") throw new Error("committed");
+    view = await h.query.loadPreventiveCare();
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.items[2]!.status).toBe("RECORDED");
+    await h.service.revisePreventiveItem({
+      recordId: foot.recordId,
+      expectedRevisionId: corrected.revisionId,
+      expectedRevisionNumber: 2,
+      payload: { ...foot.payload, schedule: { kind: "TARGET_DATE", targetDate: "2027-09-14" as never } },
+      intent: "SUPERSEDE",
+    });
+    view = await h.query.loadPreventiveCare();
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.items[2]!.status).toBe("SCHEDULED");
+  });
+
+  it("places a medication record with an unknown time by the occasion it was recorded for", async () => {
+    const h = await setup();
+    // The Packet 8 fixture records missed and unsure occasions with no known time.
+    await seedSyntheticCarePlan({ database: h.database, seedAt: NOW, ids, copy: barrierPresentationCopyFor("en-SG") });
+    const view = await h.query.loadVisitPreparation();
+    if (view.status !== "READY") throw new Error("ready");
+    const insulin = view.factGroups.find((group) => group.key === "INSULIN")!;
+    expect(insulin.sources.length).toBeGreaterThan(0);
+    expect(insulin.sources.every((source) => source.recordType === "MEDICATION_EVENT")).toBe(true);
+  });
+
+  it("reports unavailable storage instead of an empty list", async () => {
+    const h = await setup();
+    h.database.close();
+    expect(await h.query.loadPreventiveCare()).toEqual({ status: "UNAVAILABLE" });
+    expect(await h.query.loadVisitPreparation()).toEqual({ status: "UNAVAILABLE" });
+  });
+});
+
+describe("Screen 10 visit-preparation projection", () => {
+  it("shows the next recorded appointment, the patient's own questions and in-period fact sources only", async () => {
+    const h = await setup();
+    await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids });
+    const journal = createJournalCommandService(h.database, { now: () => NOW, ids });
+    const glucose = (instantUtc: string) =>
+      journal.recordGlucose({
+        payload: { measurement: { enteredValue: "6.6" as never, enteredUnit: "MMOL_L", normalization: null }, measurementMethod: "FINGERSTICK_METER", context: { kind: "PATIENT_SELECTED_SLOT", slot: "BEDTIME" } },
+        temporal: { kind: "POINT", occurrence: { kind: "EXACT", instantUtc: instantUtc as Instant, timeZoneId: "Asia/Singapore", utcOffsetMinutes: 480 } },
+        recordedAt: NOW,
+      });
+    await glucose("2026-10-03T13:00:00.000Z");
+    await glucose("2026-08-01T13:00:00.000Z"); // outside the 30-day period
+    const initial = await h.query.loadVisitPreparation();
+    if (initial.status !== "READY" || !initial.appointment) throw new Error("ready");
+    const appointment = initial.appointment;
+    expect(appointment.payload.appointmentLabel).toBe("Dr Lim, Bukit Merah Polyclinic");
+    expect(appointment.scheduledAt).toMatchObject({ kind: "EXACT", instantUtc: "2026-10-14T01:40:00.000Z" });
+    expect(await h.service.createCareQuestion({
+      questionText: { text: "可以把笔放在包里吗？", language: "zh-SG" },
+      relatedAppointment: { recordType: "APPOINTMENT", recordId: appointment.recordId, revisionId: appointment.revisionId },
+    })).toMatchObject({ kind: "COMMITTED" });
+    const view = await h.query.loadVisitPreparation();
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.period).toMatchObject({ startDate: "2026-09-05", endDate: "2026-10-04" });
+    expect(view.questions).toEqual([expect.objectContaining({ text: "可以把笔放在包里吗？", language: "zh-SG", relatedAppointment: appointment.recordId })]);
+    expect(view.factGroups.map((group) => [group.key, group.sources.length])).toEqual([
+      ["GLUCOSE", 1],
+      ["INSULIN", 0],
+      ["MEALS", 0],
+      ["WALKS", 0],
+    ]);
+  });
+
+  it("keeps a passed appointment unchanged and simply shows no upcoming appointment", async () => {
+    const h = await setup("2026-12-01T00:00:00.000Z" as Instant);
+    await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids });
+    const view = await h.query.loadVisitPreparation();
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.appointment).toBeNull();
+    const [head] = (await h.database.table("recordHeads").where("recordType").equals("APPOINTMENT").toArray()) as Array<{ headRevisionNumber: number }>;
+    expect(head!.headRevisionNumber).toBe(1);
+  });
+});
+
+describe("synthetic care-organisation seed", () => {
+  it("adds fixture heads only when none exist", async () => {
+    const h = await setup();
+    expect(await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids })).toBe("SEEDED");
+    expect(await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids })).toBe("SKIPPED");
+    expect(await h.database.table("recordHeads").where("recordType").equals("PREVENTIVE_CARE_ITEM").count()).toBe(4);
+    expect(await h.database.table("recordHeads").where("recordType").equals("APPOINTMENT").count()).toBe(1);
+  });
+});

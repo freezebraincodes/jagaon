@@ -109,13 +109,16 @@ describe("bilingual evidence — en-SG and zh-SG parity", () => {
     expect(zh.today.futureFeature).toContain("后续演示阶段");
   });
 
-  it("the 11 Packet 6 screens, My medicines, Packet 7A Recorded history and Packet 8 Medication schedule are enabled (no Packet 7B or 9+ routes)", () => {
-    expect(ALL_SCREENS.size).toBe(14);
+  it("the 11 Packet 6 screens, My medicines, Packet 7A Recorded history, Packet 8 Medication schedule and the Packet 9B care screens are enabled (no Packet 7B or later routes)", () => {
+    expect(ALL_SCREENS.size).toBe(17);
+    expect(PACKET_6_ENABLED_SCREENS).toContain("CARE_SUMMARY_PREVIEW");
+    expect(PACKET_6_ENABLED_SCREENS).toContain("PREVENTIVE_CARE");
+    expect(PACKET_6_ENABLED_SCREENS).toContain("CARE_PREPARATION");
     expect(PACKET_6_ENABLED_SCREENS).toContain("HISTORY");
     expect(PACKET_6_ENABLED_SCREENS).toContain("MEDICATION_SCHEDULE");
     const deferred = [
       "TRENDS", "WEEKLY_TRENDS", "REMINDERS", "CREATE_REMINDER",
-      "PREVENTIVE_CARE", "APPOINTMENTS", "SCHEDULE_APPOINTMENT",
+      "APPOINTMENTS", "SCHEDULE_APPOINTMENT",
       "LIVE_FOOD_PROVIDER",
     ];
     for (const route of deferred) {
@@ -143,6 +146,9 @@ describe("catalogue wording boundaries", () => {
     "today.noMedicinesNotMissed",
   ]);
 
+  // Exact governed source names (Packet 9A matrix); the programme name is not a product claim.
+  const SOURCE_NAME_KEYS = new Set(["food.governedDatasetSource"]);
+
   it("contains no diagnosis, risk, urgency, missed-dose or take-now wording in either locale", () => {
     const englishProhibited = [
       /\bmissed\b/i, /take now/i, /take it now/i, /\boverdue\b/i, /\brisk\b/i, /diagnos/i,
@@ -151,13 +157,16 @@ describe("catalogue wording boundaries", () => {
     ];
     const chineseProhibited = [/漏服/, /漏用/, /立即服用/, /过期未/, /风险/, /诊断/, /您应该/, /偏高了/, /偏低了/, /低GI/i, /较健康/];
     for (const [key, text] of entries(getMessages("en-SG"))) {
-      if (DENIAL_SENTENCES.has(key)) continue;
+      if (DENIAL_SENTENCES.has(key) || SOURCE_NAME_KEYS.has(key)) continue;
       for (const pattern of englishProhibited) expect(text, key).not.toMatch(pattern);
     }
     for (const [key, text] of entries(getMessages("zh-SG"))) {
-      if (DENIAL_SENTENCES.has(key)) continue;
+      if (DENIAL_SENTENCES.has(key) || SOURCE_NAME_KEYS.has(key)) continue;
       for (const pattern of chineseProhibited) expect(text, key).not.toMatch(pattern);
     }
+    // The exempted source name is pinned exactly so it cannot drift into a claim.
+    expect(getMessages("en-SG").food.governedDatasetSource).toBe("HPB Healthier Dining Partners \u00b7 data.gov.sg");
+    expect(getMessages("zh-SG").food.governedDatasetSource).toBe("保健促进局较健康餐饮伙伴 · data.gov.sg");
   });
 
   it("keeps each denial sentence a denial in both locales", () => {

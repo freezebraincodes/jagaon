@@ -59,16 +59,14 @@ export function MoreScreen({ messages, navigate, ...settings }: MoreScreenProps)
             <PillIcon size={30} className="icon more-tile-icon" />
             <span className="more-tile-label">{messages.medication.screenTitle}</span>
           </button>
-          <FutureTile
-            icon={<CalendarCheckIcon size={30} className="icon more-tile-icon" />}
-            label={msg.healthChecks}
-            laterId={laterId}
-          />
-          <FutureTile
-            icon={<ClipboardIcon size={30} className="icon more-tile-icon" />}
-            label={msg.prepareVisit}
-            laterId={laterId}
-          />
+          <button type="button" className="more-tile" onClick={() => navigate("PREVENTIVE_CARE")}>
+            <CalendarCheckIcon size={30} className="icon more-tile-icon" />
+            <span className="more-tile-label">{msg.healthChecks}</span>
+          </button>
+          <button type="button" className="more-tile" onClick={() => navigate("CARE_PREPARATION")}>
+            <ClipboardIcon size={30} className="icon more-tile-icon" />
+            <span className="more-tile-label">{msg.prepareVisit}</span>
+          </button>
           <FutureTile
             icon={<BellIcon size={30} className="icon more-tile-icon" />}
             label={msg.reminders}

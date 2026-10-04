@@ -40,6 +40,10 @@ import {
 } from "@/application/onboarding/demo-onboarding-repository";
 import { OnboardingFlow, type OnboardingExit } from "./onboarding/OnboardingFlow";
 import { MyMedicinesScreen, type MyMedicinesView } from "./screens/MyMedicinesScreen";
+import { PreventiveCareScreen } from "./screens/PreventiveCareScreen";
+import { CarePreparationScreen, type CarePreparationSelection } from "./screens/CarePreparationScreen";
+import { CareSummaryPreviewScreen } from "./screens/CareSummaryPreviewScreen";
+import { createBrowserPrintPort, type PrintPort } from "./care-preparation/PrintPort";
 
 // --- Section: Navigation state --------------------------------------------
 
@@ -54,6 +58,8 @@ type JagaOnAppProps = {
   onboardingRepositoryFactory?: () => DemoOnboardingRepository;
   /** Packet 7A: storage port for the local appointment-note selection. */
   appointmentNoteStorageFactory?: () => DemoOnboardingStoragePort;
+  /** Packet 9C: injected browser printing (deterministic in tests). */
+  printPortFactory?: () => PrintPort;
 };
 
 /** Startup gate: onboarding until setup is completed or explicitly skipped. */
@@ -75,7 +81,9 @@ export function JagaOnApp({
   runtimeFactory = createBrowserJournalRuntime,
   onboardingRepositoryFactory = browserOnboardingRepository,
   appointmentNoteStorageFactory = createBrowserOnboardingStorage,
+  printPortFactory = createBrowserPrintPort,
 }: JagaOnAppProps = {}) {
+  const printPort = useMemo(() => printPortFactory(), [printPortFactory]);
   const appointmentNotes = useMemo<AppointmentNoteSelectionRepository>(
     () =>
       createAppointmentNoteSelectionRepository(
@@ -225,6 +233,25 @@ export function JagaOnApp({
           ],
     );
   }, []);
+
+  /** Prepares a snapshot from exactly what was ticked on Screen 10, then opens its preview. */
+  const prepareSummary = useCallback(
+    async (selection: CarePreparationSelection): Promise<boolean> => {
+      if (!runtime) return false;
+      const result = await runtime.carePreparation.commands.prepare({
+        locale,
+        period: selection.period,
+        appointment: selection.appointment ? { recordType: "APPOINTMENT", recordId: selection.appointment.recordId, revisionId: selection.appointment.revisionId } : null,
+        groups: selection.factGroups.map((group) => ({ key: group.key, sources: group.sources })),
+        questions: selection.questions.map((question) => ({ recordType: "CARE_QUESTION", recordId: question.recordId, revisionId: question.revisionId })),
+        notSelected: selection.notSelected,
+      });
+      if (result.kind !== "COMMITTED") return false;
+      navigate("CARE_SUMMARY_PREVIEW", { recordId: result.recordId });
+      return true;
+    },
+    [runtime, locale, navigate],
+  );
 
   const refreshToday = useCallback(async () => {
     if (!runtime) return;
@@ -388,6 +415,41 @@ export function JagaOnApp({
             locale={locale}
             schedule={runtime?.medicationSchedule ?? null}
             medicationRecordIds={fixture.recordedPrescriptions.map((prescription) => prescription.medicationRecordId)}
+          />
+        );
+      case "PREVENTIVE_CARE":
+        if (!runtime) return <p role="status">{messages.shared.loading}</p>;
+        return (
+          <PreventiveCareScreen
+            messages={messages}
+            locale={locale}
+            query={runtime.careOrganisation.query}
+            commands={runtime.careOrganisation.commands}
+          />
+        );
+      case "CARE_PREPARATION":
+        if (!runtime) return <p role="status">{messages.shared.loading}</p>;
+        return (
+          <CarePreparationScreen
+            messages={messages}
+            locale={locale}
+            query={runtime.careOrganisation.query}
+            commands={runtime.careOrganisation.commands}
+            onPreview={prepareSummary}
+          />
+        );
+      case "CARE_SUMMARY_PREVIEW":
+        if (!runtime) return <p role="status">{messages.shared.loading}</p>;
+        return (
+          <CareSummaryPreviewScreen
+            key={entry.params?.recordId ?? ""}
+            messages={messages}
+            locale={locale}
+            recordId={(entry.params?.recordId ?? "") as RecordId}
+            query={runtime.carePreparation.query}
+            commands={runtime.carePreparation.commands}
+            print={printPort}
+            onBack={goBack}
           />
         );
       case "HELP_INFORMATION":

@@ -134,3 +134,24 @@ export {
   type RecordedMedicationAmount,
   type MedicationSafetyConcern,
 } from "./medication-event";
+
+// Packet 9B: preventive-care occurrence and context windows (Sections 7.3, 7.15–7.17)
+export {
+  PREVENTIVE_CARE_RECORD_DELETION_POLICY,
+  PREVENTIVE_CARE_RECORD_REVISION_ACTIONS,
+  preventiveCareRecordPayloadSchema,
+  preventiveCareRecordRevisionSchema,
+  type PreventiveCareRecordPayload,
+  type PreventiveCareRecordRevision,
+} from "./preventive-care-record";
+
+export {
+  CONTEXT_WINDOW_DELETION_POLICY,
+  CONTEXT_WINDOW_REVISION_ACTIONS,
+  CONTEXT_WINDOW_STATES,
+  contextWindowIdentitySchema,
+  contextWindowPayloadSchema,
+  contextWindowRevisionSchema,
+  type ContextWindowPayload,
+  type ContextWindowRevision,
+} from "./context-window";

@@ -254,3 +254,106 @@ describe("Packet 8 import boundary", () => {
     }
   });
 });
+
+describe("Packet 9A nearby-food provider boundary", () => {
+  /** The only provider-facing modules Packet 9A composes into the runtime. */
+  const PACKET_9A_PROVIDER_MODULES = [
+    "src/app/api/onemap/search/onemap-search-handler.ts",
+    "src/app/api/onemap/search/route.ts",
+    "src/application/nearby-food/browser-map-descriptor.ts",
+    "src/application/nearby-food/browser-nearby-food.ts",
+    "src/application/nearby-food/hpb-snapshot-schema.ts",
+    "src/application/nearby-food/hpb-venue-directory.ts",
+    "src/application/nearby-food/nearby-food-contracts.ts",
+    "src/application/nearby-food/nearby-food-discovery-service.ts",
+    "src/application/nearby-food/onemap-geocoder.ts",
+    "src/application/nearby-food/synthetic-nearby-food.ts",
+  ];
+
+  it("reaches exactly the approved OneMap/HPB/synthetic modules and no Google adapter", () => {
+    const graph = graphOf(["src/app/page.tsx", "src/app/api/onemap/search/route.ts"]);
+    const providers = graph.filter((file) => file.startsWith("src/application/nearby-food/") || file.startsWith("src/app/api/"));
+    expect(providers).toEqual(PACKET_9A_PROVIDER_MODULES);
+    expect(graph.filter((file) => /google/i.test(file))).toEqual([]);
+  });
+});
+
+describe("Packet 9B care-organisation import boundary", () => {
+  const PACKET_9B_ENTRYPOINTS = [
+    "src/application/care-organisation/care-organisation-service.ts",
+    "src/application/care-organisation/care-organisation-query.ts",
+    "src/application/care-organisation/synthetic-care-organisation-seed.ts",
+    "src/application/packet9-subscriptions.ts",
+  ];
+
+  it("cannot reach Safety, AI, Packet 7B evaluators, Inquiry engines or location search", () => {
+    const graph = graphOf(PACKET_9B_ENTRYPOINTS);
+    const forbidden = graph.filter(
+      (file) =>
+        file.startsWith("src/domain/safety/") ||
+        file.startsWith("src/safety/") ||
+        file.startsWith("src/ai/") ||
+        file.startsWith("src/inquiry/") ||
+        file.startsWith("src/application/nearby-food/") ||
+        file.startsWith("src/app/api/") ||
+        /routine-shift|recurring-barrier|prescribed-timing|barrier-learning/.test(file),
+    );
+    expect(forbidden, `Forbidden Packet 9B imports:\n${forbidden.join("\n")}`).toEqual([]);
+  });
+
+  it("keeps Screens 09 and 10 on the narrow ports: no storage, services, journal or location modules", () => {
+    const graph = graphOf(["src/components/jagaon/screens/PreventiveCareScreen.tsx", "src/components/jagaon/screens/CarePreparationScreen.tsx"]);
+    const forbidden = graph.filter(
+      (file) =>
+        file.startsWith("src/storage/") ||
+        file.startsWith("src/application/journal/") ||
+        file.startsWith("src/application/care-plan/") ||
+        file.startsWith("src/application/nearby-food/") ||
+        (file.startsWith("src/application/care-organisation/") && file !== "src/application/care-organisation/care-organisation-contracts.ts"),
+    );
+    expect(forbidden, `Forbidden UI imports:\n${forbidden.join("\n")}`).toEqual([]);
+  });
+});
+
+describe("Packet 9C care-preparation import boundary", () => {
+  const PACKET_9C_ENTRYPOINTS = [
+    "src/application/care-preparation/care-preparation-service.ts",
+    "src/application/care-preparation/care-preparation-query.ts",
+    "src/application/care-preparation/care-summary-invalidation.ts",
+    "src/application/care-preparation/deterministic-care-summary-renderer.ts",
+    "src/application/care-preparation/care-summary-artifact.ts",
+  ];
+
+  it("cannot reach AI, Safety, Packet 7B evaluators, Packet 10 backup or restore, Inquiry engines or location search", () => {
+    const graph = graphOf(PACKET_9C_ENTRYPOINTS);
+    const forbidden = graph.filter(
+      (file) =>
+        file.startsWith("src/ai/") ||
+        file.startsWith("src/safety/") ||
+        file.startsWith("src/domain/safety/") ||
+        file.startsWith("src/inquiry/") ||
+        file.startsWith("src/application/nearby-food/") ||
+        file.startsWith("src/app/api/") ||
+        /backup|restore|import-export|routine-shift|recurring-barrier|prescribed-timing|barrier-learning/.test(file),
+    );
+    expect(forbidden, `Forbidden Packet 9C imports:\n${forbidden.join("\n")}`).toEqual([]);
+  });
+
+  it("keeps the preview screen on narrow ports: no storage, services, journal or location modules", () => {
+    const graph = graphOf(["src/components/jagaon/screens/CareSummaryPreviewScreen.tsx", "src/components/jagaon/care-preparation/PrintPort.ts"]);
+    const allowed = new Set([
+      "src/application/care-preparation/care-preparation-contracts.ts",
+      "src/application/care-preparation/care-summary-artifact.ts",
+      "src/application/care-preparation/care-summary-locale-pack.ts",
+    ]);
+    const forbidden = graph.filter(
+      (file) =>
+        file.startsWith("src/storage/") ||
+        file.startsWith("src/application/journal/") ||
+        file.startsWith("src/application/care-plan/") ||
+        file.startsWith("src/application/nearby-food/") ||
+        (file.startsWith("src/application/care-preparation/") && !allowed.has(file)),
+    );
+    expect(forbidden, `Forbidden UI imports:\n${forbidden.join("\n")}`).toEqual([]);
+  });
+});

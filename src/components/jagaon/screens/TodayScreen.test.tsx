@@ -239,8 +239,8 @@ describe("TodayScreen", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it("shows only the care dates the person entered, with a disabled later-packet link", () => {
-    const { messages, fixture, getByRole } = setup({ locale: "en-SG" });
+  it("shows only the care dates the person entered, with a link to Prepare for my visit", () => {
+    const { messages, fixture, getByRole, navigate } = setup({ locale: "en-SG" });
     const care = getByRole("region", { name: messages.today.careDatesHeading });
     for (const date of fixture.careDates) {
       expect(care).toHaveTextContent(date.label);
@@ -248,8 +248,9 @@ describe("TodayScreen", () => {
     }
     expect(care).toHaveTextContent(messages.today.careDatesNote);
     const prepare = within(care).getByRole("button", { name: messages.today.prepareAppointment });
-    expect(prepare).toBeDisabled();
-    expect(prepare).toHaveAccessibleDescription(messages.today.futureFeature);
+    expect(prepare).toBeEnabled();
+    fireEvent.click(prepare);
+    expect(navigate).toHaveBeenCalledWith("CARE_PREPARATION");
     // No due, overdue or urgency wording is derived from the dates.
     expect(care.textContent).not.toMatch(/due on|overdue|upcoming|urgent|soon/i);
   });

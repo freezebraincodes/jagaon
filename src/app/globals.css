@@ -4517,3 +4517,828 @@ button.summary-tile:hover:not(:disabled) {
   font-weight: 700;
   overflow-wrap: anywhere;
 }
+
+/* ------------------------------------------------------------------ */
+/* Packet 9A — OneMap view, governed HPB wording and sources            */
+/* ------------------------------------------------------------------ */
+
+.provider-map--onemap {
+  position: relative;
+}
+
+.onemap-canvas {
+  height: 18rem;
+  width: 100%;
+  background: #f1eadc;
+}
+
+.provider-map-loading {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 500;
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9375rem;
+  color: var(--ink-2);
+}
+
+.provider-map-attribution a {
+  color: var(--terracotta-dark);
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
+/* Numbered OneMap markers: a 36px circle with an upright numeral. */
+.onemap-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--terracotta);
+  border: 3px solid var(--card);
+  color: #fff;
+  font-weight: 800;
+  font-size: 1rem;
+  box-shadow: 0 1px 3px rgba(43, 38, 32, 0.35);
+}
+
+.onemap-marker:focus-visible {
+  outline: 3px solid var(--terracotta-dark);
+  outline-offset: 3px;
+}
+
+.governed-attribute-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.governed-attribute-block .tag {
+  align-self: flex-start;
+}
+
+.governed-attribute-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.governed-attribute-list .governed-attribute {
+  overflow-wrap: anywhere;
+}
+
+.governed-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.governed-source-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9375rem;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.governed-source-list a {
+  color: var(--terracotta-dark);
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
+.ambiguous-candidates {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ambiguous-candidates .more-row-label {
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------ */
+/* Packet 9B Screen 09 — My health checks                              */
+/* ------------------------------------------------------------------ */
+
+.preventive-care,
+.care-preparation {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.care-loading {
+  color: var(--ink-2);
+}
+
+.care-empty-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.care-item-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.care-item {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.care-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.care-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--card-2);
+  color: var(--ink);
+  flex-shrink: 0;
+}
+
+.care-item-title {
+  flex: 1 1 8rem;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.care-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  background: var(--card-2);
+  color: var(--ink-2);
+}
+
+.care-status--recorded {
+  background: var(--green-tint);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.care-status--scheduled {
+  background: var(--amber-tint);
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.care-item-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.care-item-facts > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+
+.care-item-facts dt {
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  min-width: 7.5rem;
+  padding-top: 2px;
+}
+
+.care-item-facts dd {
+  margin: 0;
+  flex: 1 1 10rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.care-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.care-item-actions .btn {
+  flex: 1 1 auto;
+  gap: 6px;
+}
+
+.care-history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.care-history-list li {
+  border-left: 3px solid var(--line-strong);
+  padding-left: 12px;
+  overflow-wrap: anywhere;
+}
+
+.care-history-action {
+  font-weight: 700;
+}
+
+.care-general {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--reviewed-line);
+  background: var(--reviewed-tint);
+  color: var(--reviewed);
+}
+
+.care-general .care-general-heading {
+  color: var(--reviewed);
+}
+
+.care-topic-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 10px;
+}
+
+.care-topic {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--card);
+  border: 1px solid var(--reviewed-line);
+  min-width: 0;
+}
+
+.care-topic-icon {
+  flex-shrink: 0;
+}
+
+.care-topic-kind {
+  font-size: 0.875rem;
+  color: var(--ink-2);
+}
+
+.care-topic-title {
+  font-weight: 800;
+  font-size: 1.0625rem;
+  overflow-wrap: anywhere;
+}
+
+.care-topic-note {
+  font-size: 0.875rem;
+  color: var(--ink-2);
+}
+
+/* ------------------------------------------------------------------ */
+/* Packet 9B Screen 10 — Prepare for my visit                          */
+/* ------------------------------------------------------------------ */
+
+.care-appointment {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  padding: 20px;
+  border-radius: var(--radius-lg);
+  background: var(--ink);
+  color: var(--card);
+  min-width: 0;
+}
+
+.care-appointment--none {
+  flex-direction: column;
+  background: var(--card);
+  color: var(--ink);
+  border: 2px dashed var(--line-strong);
+}
+
+.care-date-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 4rem;
+  padding: 8px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--ink);
+  flex-shrink: 0;
+}
+
+.care-date-tile-month {
+  font-size: 0.875rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.care-date-tile-day {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.care-appointment-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 12rem;
+}
+
+.care-appointment-head {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  padding-right: 3.5rem;
+}
+
+.care-appointment-title {
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  font-weight: 800;
+  overflow-wrap: break-word;
+  word-break: normal;
+  min-width: 0;
+}
+
+.care-appointment-meta {
+  font-size: 1.0625rem;
+}
+
+.care-appointment-provenance {
+  font-size: 0.9375rem;
+  opacity: 0.85;
+}
+
+.care-appointment-change {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(255, 253, 248, 0.16);
+  color: var(--card);
+  cursor: pointer;
+}
+
+.care-appointment-change:hover:not(:disabled) {
+  background: rgba(255, 253, 248, 0.28);
+}
+
+.care-appointment-change:focus-visible {
+  outline: 3px solid var(--card);
+  outline-offset: 2px;
+}
+
+.care-actions-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--terracotta-tint);
+  color: var(--terracotta-dark);
+  font-size: 0.875rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.care-facts {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.care-fact {
+  position: relative;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: var(--card);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.care-fact-input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.care-fact-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--line-strong);
+  color: transparent;
+  flex-shrink: 0;
+}
+
+.care-fact-input:checked + .care-fact-box {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--card);
+}
+
+.care-fact-input:focus-visible + .care-fact-box {
+  outline: 3px solid var(--terracotta);
+  outline-offset: 3px;
+}
+
+.care-fact-input:disabled + .care-fact-box {
+  border-style: dashed;
+}
+
+.care-fact:has(.care-fact-input:disabled) {
+  cursor: default;
+  color: var(--ink-2);
+  background: var(--card-2);
+}
+
+.care-fact-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 12rem;
+}
+
+.care-fact-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 800;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.care-fact-detail {
+  color: var(--ink-2);
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.care-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.care-questions-intro {
+  color: var(--ink-2);
+}
+
+.care-question-group {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: var(--card);
+}
+
+.care-question-group summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px;
+  min-height: var(--tap);
+  cursor: pointer;
+  list-style: none;
+}
+
+.care-question-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.care-question-group summary:focus-visible {
+  outline: 3px solid var(--terracotta);
+  outline-offset: 2px;
+  border-radius: var(--radius-lg);
+}
+
+.care-question-group-icon {
+  color: var(--ink-2);
+  flex-shrink: 0;
+}
+
+.care-question-group-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 12rem;
+}
+
+.care-question-group-title {
+  font-weight: 800;
+  font-size: 1.125rem;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.care-question-group-count {
+  color: var(--ink-2);
+}
+
+.care-question-group-chevron {
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.care-question-group[open] .care-question-group-chevron {
+  transform: rotate(-90deg);
+}
+
+.care-question-group-body {
+  padding: 0 16px 16px;
+  color: var(--ink-2);
+}
+
+.care-own-heading {
+  font-weight: 800;
+  font-size: 1.125rem;
+}
+
+.care-own-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.care-own {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: var(--card);
+}
+
+.care-own-include {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  cursor: pointer;
+}
+
+.care-own-include input {
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-top: 2px;
+  accent-color: var(--green);
+  flex-shrink: 0;
+}
+
+.care-own-text {
+  flex: 1 1 auto;
+  min-width: 12rem;
+  overflow-wrap: break-word;
+  word-break: normal;
+  font-size: 1.0625rem;
+}
+
+.care-own-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.care-own-actions .btn {
+  gap: 6px;
+}
+
+.care-add-question {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 4rem;
+  border-radius: var(--radius-lg);
+  border: 2px dashed var(--line-strong);
+  background: var(--card-2);
+  color: var(--ink-2);
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.care-add-question:focus-visible {
+  outline: 3px solid var(--terracotta);
+  outline-offset: 2px;
+}
+
+.care-limitation,
+.care-empty-selection {
+  color: var(--ink-2);
+}
+
+.care-empty-selection {
+  font-weight: 700;
+}
+
+.care-summary-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.care-summary-actions .btn {
+  gap: 8px;
+}
+
+.care-local-only {
+  text-align: center;
+  color: var(--ink-2);
+}
+
+/* ------------------------------------------------------------------ */
+/* Packet 9C care-summary preview and printable document               */
+/* ------------------------------------------------------------------ */
+
+.care-summary-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.printable-care-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.printable-care-summary-app {
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  font-weight: 800;
+  color: var(--ink-2);
+}
+
+.printable-care-summary-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.printable-care-summary-section h2 {
+  font-family: var(--font-display);
+  font-size: 1.1875rem;
+  font-weight: 800;
+}
+
+.printable-care-summary-label {
+  margin-top: 6px;
+  font-size: 1.0625rem;
+  font-weight: 800;
+}
+
+.printable-care-summary-section ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.care-summary-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.care-summary-actions .btn {
+  gap: 8px;
+}
+
+.care-summary-attempts ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.care-summary-attempts li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--card);
+}
+
+.care-summary-attempt-time {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .printable-care-summary,
+  .printable-care-summary * {
+    visibility: visible;
+  }
+
+  .printable-care-summary {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: #fff;
+    color: #000;
+    font-size: 12pt;
+  }
+
+  .printable-care-summary-section {
+    break-inside: avoid-page;
+    border-top-color: #999;
+  }
+}

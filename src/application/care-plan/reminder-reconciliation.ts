@@ -11,12 +11,25 @@ import type { CarePlanCommandService } from "./care-plan-command-service";
 /**
  * Reminder reconciliation (domain Section 7.14; event-contracts Section 10).
  *
- * A corrected, superseded or deleted prescription revision invalidates only
- * the reminders whose current head relays that exact revision. Each becomes
+ * A corrected, superseded or deleted source revision (prescription,
+ * appointment, preventive-care item or care question) invalidates only the
+ * reminders whose current head references that exact revision. Each becomes
  * `REVIEW_REQUIRED` and stops producing future occurrences until the patient
  * confirms or replaces it. Nothing here rewrites a reminder's time, creates a
  * medication fact or reactivates a reminder.
  */
+
+/** Record types whose revisions a reminder may reference. */
+export const REMINDER_SOURCE_RECORD_TYPES = Object.freeze(["PRESCRIPTION_VERSION", "APPOINTMENT", "PREVENTIVE_CARE_ITEM", "CARE_QUESTION"] as const);
+
+/** True when the reminder's subject target or schedule anchor is this exact revision. */
+export function reminderReferences(revision: ReminderRevision, sourceRevisionId: RevisionId): boolean {
+  const subject = revision.payload.subject;
+  const targetsSource = "target" in subject && subject.target.revisionId === sourceRevisionId;
+  const schedule = revision.payload.schedule;
+  const anchoredToSource = schedule.kind === "RELATIVE_TO_APPOINTMENT" && schedule.appointment.revisionId === sourceRevisionId;
+  return targetsSource || anchoredToSource;
+}
 
 export function createReminderReconciliation(
   database: JagaOnDatabase,
@@ -34,8 +47,7 @@ export function createReminderReconciliation(
       const head = (await database.table("recordHeads").get(recordId)) as RecordHead | undefined;
       if (!head || head.state !== "ACTIVE") continue;
       const revision = carePlanRevisionRowCodec.validateAfterRead(await database.table("recordRevisions").get(head.headRevisionId)).revision as ReminderRevision;
-      const subject = revision.payload.subject;
-      if (subject.kind !== "MEDICATION" || subject.target.revisionId !== sourceRevisionId) continue;
+      if (!reminderReferences(revision, sourceRevisionId)) continue;
       if (revision.payload.state !== "ACTIVE" && revision.payload.state !== "PAUSED") continue;
       effects.push({
         effectKey: `review:${recordId}`,
@@ -67,7 +79,7 @@ export function createReminderReconciliation(
         async plan(item) {
           const event = committedDomainEventRowCodec.validateAfterRead(await database.table("domainEvents").get(item.eventId));
           const change = event.change;
-          if (change.recordType !== "PRESCRIPTION_VERSION" || change.previousRevisionId === null) return [];
+          if (!(REMINDER_SOURCE_RECORD_TYPES as readonly string[]).includes(change.recordType) || change.previousRevisionId === null) return [];
           return reviewEffects(change.previousRevisionId as RevisionId);
         },
       });

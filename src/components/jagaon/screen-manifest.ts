@@ -40,7 +40,13 @@ export type ScreenId =
   /** Child: Help and emergency information (frame 13) */
   | "HELP_INFORMATION"
   /** Child (Packet 6A): post-setup My medicines management */
-  | "MY_MEDICINES";
+  | "MY_MEDICINES"
+  /** Child (Packet 9B): My health checks (v1 frame 09) */
+  | "PREVENTIVE_CARE"
+  /** Child (Packet 9B): Prepare for my visit (v1 frame 10) */
+  | "CARE_PREPARATION"
+  /** Child (Packet 9C): care-summary preview, approval and local print, reached from Screen 10 */
+  | "CARE_SUMMARY_PREVIEW";
 
 // Settings (language and demo reset) render inside More, as in frame 12.
 
@@ -82,11 +88,19 @@ export const PACKET_6_CHILD_SCREENS: readonly ScreenId[] = Object.freeze([
 /** Packet 6A post-setup management destination, reached from More/Today. */
 export const PACKET_6A_CHILD_SCREENS: readonly ScreenId[] = Object.freeze(["MY_MEDICINES"]);
 
-/** Every enabled journal screen (top-level + Packet 6 and 6A children). */
+/** Packet 9B care-organisation destinations, reached from More and Today. */
+export const PACKET_9B_CHILD_SCREENS: readonly ScreenId[] = Object.freeze(["PREVENTIVE_CARE", "CARE_PREPARATION"]);
+
+/** Packet 9C care-summary preview, reached only from Prepare for my visit. */
+export const PACKET_9C_CHILD_SCREENS: readonly ScreenId[] = Object.freeze(["CARE_SUMMARY_PREVIEW"]);
+
+/** Every enabled journal screen (top-level + Packet 6, 6A, 9B and 9C children). */
 export const PACKET_6_ENABLED_SCREENS: readonly ScreenId[] = Object.freeze([
   ...TOP_LEVEL_SCREENS,
   ...PACKET_6_CHILD_SCREENS,
   ...PACKET_6A_CHILD_SCREENS,
+  ...PACKET_9B_CHILD_SCREENS,
+  ...PACKET_9C_CHILD_SCREENS,
 ]);
 
 /**

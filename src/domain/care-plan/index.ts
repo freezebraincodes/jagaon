@@ -63,3 +63,34 @@ export {
   type PrescriptionChangeReconciliation,
   type PrescriptionChangeCandidatePayload,
 } from "./prescription-change-candidate";
+
+// Packet 9B: preventive-care items and appointments (Sections 7.2–7.8)
+export {
+  PREVENTIVE_CARE_CATALOGUE,
+  PREVENTIVE_CARE_ITEM_DELETION_POLICY,
+  PREVENTIVE_CARE_ITEM_REVISION_ACTIONS,
+  findPreventiveCareCatalogueEntry,
+  preventiveCareIdentitySchema,
+  preventiveCareItemPayloadSchema,
+  preventiveCareItemRevisionSchema,
+  preventiveCareScheduleSchema,
+  type PreventiveCareIdentity,
+  type PreventiveCareItemPayload,
+  type PreventiveCareItemRevision,
+  type PreventiveCareSchedule,
+} from "./preventive-care";
+
+export {
+  APPOINTMENT_DELETION_POLICY,
+  APPOINTMENT_REVISION_ACTIONS,
+  APPOINTMENT_SERVICE_CATALOGUE,
+  APPOINTMENT_SERVICE_GROUPS,
+  APPOINTMENT_STATUSES,
+  appointmentPayloadSchema,
+  appointmentRevisionSchema,
+  appointmentServiceIdentitySchema,
+  type AppointmentPayload,
+  type AppointmentRevision,
+  type AppointmentServiceIdentity,
+  type AppointmentStatus,
+} from "./appointment";
