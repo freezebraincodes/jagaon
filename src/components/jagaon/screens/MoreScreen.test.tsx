@@ -16,13 +16,21 @@ function renderMore(navigate = vi.fn()) {
       locale="en-SG"
       setLocale={vi.fn()}
       persistLocale={vi.fn()}
-      resetDemo={vi.fn()}
+      deleteAll={{ prepare: vi.fn(), confirm: vi.fn() }}
+      onDatasetDeleted={vi.fn()}
     />,
   );
   return navigate;
 }
 
 describe("MoreScreen", () => {
+  it("adds a distinct Data and backup destination and keeps Export to other apps unchanged", () => {
+    const navigate = renderMore();
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(messages.packet10.more.data) }));
+    expect(navigate).toHaveBeenCalledWith("DATA_BACKUP");
+    expect(screen.getByRole("group", { name: messages.more.exportApps })).toHaveAttribute("aria-disabled", "true");
+  });
+
   it("offers only enabled Packet 6 destinations", () => {
     const navigate = renderMore();
 
@@ -35,13 +43,14 @@ describe("MoreScreen", () => {
       "NEARBY_FOOD",
       "HELP_INFORMATION",
     ]);
-    // Language and reset live on More itself, as in frame 12.
+    // Language and whole-dataset deletion live on More itself, as in frame 12.
     expect(screen.getByRole("group", { name: messages.settings.language })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: messages.settings.english })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    expect(screen.getByRole("button", { name: messages.settings.resetAction })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: messages.packet10.hub.deleteAll })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: messages.settings.resetAction })).not.toBeInTheDocument();
   });
 
   it("opens the Packet 9B health-check and visit-preparation screens", () => {

@@ -120,10 +120,12 @@ describe("Packet 7A public exports and manifests", () => {
 
   it("keeps the 16-table storage catalogue and the closed screen manifest", () => {
     expect(JAGAON_TABLE_NAMES).toHaveLength(16);
-    expect(JAGAON_DEXIE_VERSION).toBe(1);
+    // Packet 10 freeze Section 5: Dexie 2 keeps the same 16 stores.
+    expect(JAGAON_DEXIE_VERSION).toBe(2);
     expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MEDICATION_SCHEDULE", "HISTORY", "MORE"]);
     // Packet 9B adds PREVENTIVE_CARE and CARE_PREPARATION; 9C adds CARE_SUMMARY_PREVIEW.
-    expect(ALL_SCREENS.size).toBe(17);
+    // Packet 10 adds exactly DATA_BACKUP.
+    expect(ALL_SCREENS.size).toBe(18);
     expect(HISTORY_PERIODS).toEqual(["THIS_WEEK", "LAST_WEEK", "THIRTY_DAYS"]);
   });
 

@@ -10,6 +10,7 @@ import {
   ChevronRightIcon,
   ClipboardIcon,
   LifebuoyIcon,
+  LockIcon,
   PillIcon,
   ShareIcon,
 } from "../primitives/Icons";
@@ -87,6 +88,15 @@ export function MoreScreen({ messages, navigate, ...settings }: MoreScreenProps)
           <span className="more-row-text">
             <span className="more-row-label">{msg.helpInfo}</span>
             <span className="more-row-body">{msg.helpBody}</span>
+          </span>
+          <ChevronRightIcon size={22} className="icon more-row-chevron" />
+        </button>
+        {/* Packet 10: a distinct destination above the untouched "Export to other apps" row. */}
+        <button type="button" className="more-row more-row--data" onClick={() => navigate("DATA_BACKUP")}>
+          <LockIcon size={30} className="icon more-row-icon" />
+          <span className="more-row-text">
+            <span className="more-row-label">{messages.packet10.more.data}</span>
+            <span className="more-row-body">{messages.packet10.more.dataSub}</span>
           </span>
           <ChevronRightIcon size={22} className="icon more-row-chevron" />
         </button>

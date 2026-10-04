@@ -66,6 +66,17 @@ export const REMINDER_DEPENDENCY_EVALUATOR = Object.freeze({ key: "care-plan.rem
 
 export type CarePlanCommandService = ReturnType<typeof createCarePlanCommandService>;
 
+/** Exact source revisions a reminder references: its subject target and any appointment anchor. */
+export function reminderSources(payload: ReminderPayload): TypedRevisionRef<"PRESCRIPTION_VERSION" | "APPOINTMENT" | "PREVENTIVE_CARE_ITEM" | "CARE_QUESTION">[] {
+  const sources: TypedRevisionRef<"PRESCRIPTION_VERSION" | "APPOINTMENT" | "PREVENTIVE_CARE_ITEM" | "CARE_QUESTION">[] = [];
+  if ("target" in payload.subject) sources.push(payload.subject.target);
+  const schedule = payload.schedule;
+  if (schedule.kind === "RELATIVE_TO_APPOINTMENT" && !sources.some((ref) => ref.revisionId === schedule.appointment.revisionId)) {
+    sources.push(schedule.appointment);
+  }
+  return sources;
+}
+
 export function createCarePlanCommandService(database: JagaOnDatabase, dependencies: CarePlanDependencies) {
   const store = createCarePlanCommandStore(database);
   const { ids } = dependencies;
@@ -90,17 +101,6 @@ export function createCarePlanCommandService(database: JagaOnDatabase, dependenc
       state: "ACTIVE",
       updatedAt: dependencies.now(),
     };
-  }
-
-  /** Exact source revisions a reminder references: its subject target and any appointment anchor. */
-  function reminderSources(payload: ReminderPayload): TypedRevisionRef<"PRESCRIPTION_VERSION" | "APPOINTMENT" | "PREVENTIVE_CARE_ITEM" | "CARE_QUESTION">[] {
-    const sources: TypedRevisionRef<"PRESCRIPTION_VERSION" | "APPOINTMENT" | "PREVENTIVE_CARE_ITEM" | "CARE_QUESTION">[] = [];
-    if ("target" in payload.subject) sources.push(payload.subject.target);
-    const schedule = payload.schedule;
-    if (schedule.kind === "RELATIVE_TO_APPOINTMENT" && !sources.some((ref) => ref.revisionId === schedule.appointment.revisionId)) {
-      sources.push(schedule.appointment);
-    }
-    return sources;
   }
 
   function reminderEdges(revision: ReminderRevision, createdAt: Instant): StoredReverseDependency[] {

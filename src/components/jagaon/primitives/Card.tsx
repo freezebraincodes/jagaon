@@ -18,12 +18,14 @@ type BannerProps = {
   variant?: "info" | "warning" | "error" | "success";
   title?: string;
   children: ReactNode;
+  /** Packet 10: failures that need attention announce as alerts (audit Section 3). */
+  role?: "status" | "alert";
 };
 
 /** Live status message for state changes (saved, not saved, provider states). */
-export function Banner({ variant = "info", title, children }: BannerProps) {
+export function Banner({ variant = "info", title, children, role = "status" }: BannerProps) {
   return (
-    <div className={`banner banner-${variant}`} role="status">
+    <div className={`banner banner-${variant}`} role={role}>
       <span className="banner-icon">
         {variant === "success" ? <CheckIcon size={22} /> : <InfoIcon size={22} />}
       </span>

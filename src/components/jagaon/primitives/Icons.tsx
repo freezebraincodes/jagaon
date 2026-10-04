@@ -190,3 +190,16 @@ export const SunIcon = (p: IconProps) => (
 export const LoaderIcon = (p: IconProps) => (
   <Icon {...p}><circle cx="12" cy="12" r="8" strokeDasharray="3 3" /></Icon>
 );
+// Packet 10 data and backup icons.
+export const FolderIcon = (p: IconProps) => (
+  <Icon {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></Icon>
+);
+export const OfflineIcon = (p: IconProps) => (
+  <Icon {...p}><path d="M2 8.8a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 20h.01M3 3l18 18" /></Icon>
+);
+export const TabsIcon = (p: IconProps) => (
+  <Icon {...p}><rect x="3" y="7" width="14" height="12" rx="2" /><path d="M7 7V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2" /></Icon>
+);
+export const UploadIcon = (p: IconProps) => (
+  <Icon {...p}><path d="M12 19V5M5 12l7-7 7 7" /></Icon>
+);

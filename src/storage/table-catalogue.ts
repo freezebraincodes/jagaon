@@ -21,13 +21,18 @@
 export const JAGAON_DATABASE_NAME = "jagaon" as const;
 
 /**
- * First Dexie physical schema version.
+ * Current Dexie physical schema version.
  *
  * A positive whole number owned by Dexie's monotonic upgrade counter. The
  * logical storage schema version is tracked separately (storageMetadata) so
  * backup/runtime compatibility does not depend on this library counter.
+ * Version 2 (Packet 10 freeze Section 5) keeps the version 1 stores exactly
+ * and adds only the registered legacy dataset-identity upgrade step.
  */
-export const JAGAON_DEXIE_VERSION = 1 as const;
+export const JAGAON_DEXIE_VERSION = 2 as const;
+
+/** The first physical schema version, kept so a Packet 9 database can upgrade. */
+export const JAGAON_LEGACY_DEXIE_VERSION = 1 as const;
 
 /**
  * Closed, spec-ordered, duplicate-free list of the 16 first-schema tables.

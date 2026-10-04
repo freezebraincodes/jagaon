@@ -45,6 +45,11 @@ import {
   StorageRowValidationError,
   type StorageRowCodec,
 } from "./storage-row-codec";
+import {
+  applyPermanentDeletion,
+  DeletionClosureChangedError,
+  type PermanentDeletionEffects,
+} from "./permanent-deletion-transaction";
 
 /**
  * Records whose historical payloads may disclose permanently deleted source
@@ -71,7 +76,9 @@ export type CommandTransactionErrorCode =
   | "INVALID_TRANSACTION_PLAN"
   | "COMMAND_REPLAY_MISMATCH"
   | "STORAGE_INTEGRITY_FAILED"
-  | "STORAGE_COMMIT_FAILED";
+  | "STORAGE_COMMIT_FAILED"
+  // Packet 10A: a permanent-deletion closure changed after planning.
+  | "DELETION_CLOSURE_CHANGED";
 
 /** A bounded transaction failure that never retains input rows or raw errors. */
 export class CommandTransactionError extends Error {
@@ -85,7 +92,9 @@ export class CommandTransactionError extends Error {
           ? "Authoritative transaction plan is invalid"
           : code === "STORAGE_INTEGRITY_FAILED"
             ? "Stored authoritative state failed integrity validation"
-            : "Authoritative storage transaction failed",
+            : code === "DELETION_CLOSURE_CHANGED"
+              ? "Permanent-deletion dependency closure changed"
+              : "Authoritative storage transaction failed",
     );
   }
 }
@@ -152,6 +161,8 @@ export type AuthoritativeCommitPlan<
   evaluationAudits: TEvaluationAudit[];
   appPreference: AppPreferenceRow | null;
   safety: SafetyTransactionParticipation;
+  /** Packet 10A: present only on a confirmed permanent-deletion plan. */
+  permanentDeletion?: PermanentDeletionEffects;
 };
 
 export type TerminalReceiptPlan =
@@ -408,7 +419,18 @@ function validateCommit<
   TReverseDependency,
   TEvaluationAudit
 > {
-  assertExactKeys(plan, COMMIT_KEYS);
+  assertExactKeys(
+    plan,
+    Object.prototype.hasOwnProperty.call(plan, "permanentDeletion") ? [...COMMIT_KEYS, "permanentDeletion"] : COMMIT_KEYS,
+  );
+  if (plan.permanentDeletion !== undefined) {
+    // Every purged record is tombstoned by this same plan.
+    const tombstoned = new Set(plan.deletionTombstones.map((row) => row.recordId as string));
+    assertUnique([...plan.permanentDeletion.purgedRecordIds]);
+    if (plan.permanentDeletion.purgedRecordIds.length === 0) failPlan();
+    for (const recordId of plan.permanentDeletion.purgedRecordIds) if (!tombstoned.has(recordId)) failPlan();
+    if (typeof plan.permanentDeletion.closureUnchanged !== "function") failPlan();
+  }
   commandIdSchema.parse(plan.commandId);
   sha256DigestSchema.parse(plan.commandHash);
   instantSchema.parse(plan.completedAt);
@@ -789,6 +811,23 @@ export function createAuthoritativeCommandStore<
                 updatedAt: validated.completedAt,
               });
 
+            if (validated.permanentDeletion !== undefined) {
+              await applyPermanentDeletion(
+                {
+                  heads: heads as Table<unknown>,
+                  revisions: revisions as Table<unknown>,
+                  dependencies: dependencies as Table<unknown>,
+                  evaluations: evaluations as Table<unknown>,
+                  receipts,
+                  events: events as Table<unknown>,
+                },
+                validated.permanentDeletion,
+                {
+                  eventCodec: codecs.eventCodec as StorageRowCodec<unknown>,
+                  receiptCodec: implementedStorageRowCodecs.commandReceipts,
+                },
+              );
+            }
             if (validated.recordRevisions.length > 0) {
               await revisions.bulkAdd(validated.recordRevisions);
             }
@@ -828,6 +867,9 @@ export function createAuthoritativeCommandStore<
           error instanceof StorageRowValidationError
         ) {
           throw error;
+        }
+        if (error instanceof DeletionClosureChangedError) {
+          throw new CommandTransactionError("DELETION_CLOSURE_CHANGED");
         }
         throw new CommandTransactionError("STORAGE_COMMIT_FAILED");
       }

@@ -50,6 +50,7 @@ import {
   type IntelligenceCommandPlan,
 } from "./intelligence-persistence";
 import { LEARNING_HANDLER_VERSION, PATTERN_HANDLER_VERSION } from "./intelligence-subscriptions";
+import { learnedKnowledgeDependencySources } from "./learning-dependencies";
 import { sortRevisionRefs } from "./metrics";
 import { IntelligenceIntegrityError, loadIntelligenceSnapshot, type IntelligenceSnapshot } from "./intelligence-snapshot";
 
@@ -343,12 +344,13 @@ export function createIntelligenceCoordinator(
       eventId: ids.domainEventId(),
       reasonCode: result.reasonCode,
       evaluation: evaluationAudit,
-      reverseDependencies: result.supportingRevisions.map((ref) => ({
-        sourceRevisionId: ref.revisionId,
+      // Edges come from the persisted evidence through the rule restore reconstruction also uses.
+      reverseDependencies: learnedKnowledgeDependencySources(revision.payload.evidence).map((source) => ({
+        sourceRevisionId: source.revisionId,
         dependentRecordType: "LEARNED_KNOWLEDGE",
         dependentRecordId: revision.recordId,
         dependentRevisionId: revision.revisionId,
-        dependencyRole: "SUPPORTING_EVIDENCE",
+        dependencyRole: source.role,
         owner: "LEARNING_ENGINE",
         evaluatorKey: evaluation.evaluatorKey,
         evaluatorVersion: evaluation.evaluatorVersion,

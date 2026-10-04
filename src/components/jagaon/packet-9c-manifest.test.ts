@@ -165,10 +165,11 @@ describe("Packet 9 permanent-deletion boundary (Corrective Pass B)", () => {
   });
 
   it("leaves deletion-plan confirmation and complete permanent deletion to Packet 10", () => {
-    // No deletion-plan, confirmation-token or dependency-closure machinery exists before Packet 10A.
+    // Deletion planning and confirmation exist only in Packet 10A's own modules.
     const everywhere = files("src");
-    expect(everywhere.filter((file) => /deletion-plan|confirmation-token|deletion-closure|delete-all/i.test(file))).toEqual([]);
-    for (const file of everywhere) {
+    const packet10 = /^src\/(application\/deletion|application\/storage|storage\/(delete-dataset|permanent-deletion-transaction)|components\/jagaon\/data)/;
+    expect(everywhere.filter((file) => /deletion-plan|confirmation-token|deletion-closure|delete-all/i.test(file) && !packet10.test(file))).toEqual([]);
+    for (const file of everywhere.filter((path) => !packet10.test(path))) {
       expect(strip(readFileSync(join(ROOT, file), "utf8")), file).not.toMatch(/confirmationToken|deletionPlanHash|DeletionParticipant|deletionParticipants/);
     }
     // The authoritative transaction has no owner-participation hook; Packet 9 queues no deletion purge.
@@ -220,12 +221,17 @@ describe("Packet 9 permanent-deletion boundary (Corrective Pass B)", () => {
     expect(afterRevision.status === "READY" && [afterRevision.snapshotStatus, afterRevision.payload.invalidation?.reason]).toEqual(["INVALIDATED", "SOURCE_SUPERSEDED"]);
   }, 60_000);
 
-  it("has no Packet 10, 11, 12 or 7B imports or routes", () => {
-    const forbidden = RUNTIME_GRAPH.filter((file) =>
-      /backup|restore|import-export|data-export|packet-?1[0-2]|(^|\/)ai\/|ai-assist|routine-shift|recurring-barrier|prescribed-timing|barrier-learning/i.test(file),
+  it("has no Packet 11, 12 or 7B imports or routes; Packet 10 adds only its own data paths", () => {
+    // Packet 10's encrypted portability and storage modules are the only backup/restore paths.
+    const packet10 = /^src\/(backup|storage|application\/(storage|deletion|restore)|components\/jagaon\/data|i18n\/(packet10-types|messages\/packet10-))/;
+    const forbidden = RUNTIME_GRAPH.filter(
+      (file) =>
+        !packet10.test(file) &&
+        /backup|restore|import-export|data-export|packet-?1[0-2]|(^|\/)ai\/|ai-assist|routine-shift|recurring-barrier|prescribed-timing|barrier-learning/i.test(file),
     );
     expect(forbidden, forbidden.join("\n")).toEqual([]);
+    expect(RUNTIME_GRAPH.filter((file) => /packet-?1[12]/i.test(file))).toEqual([]);
     expect(RUNTIME_GRAPH).toContain("src/components/jagaon/screens/CareSummaryPreviewScreen.tsx");
-    expect([...ALL_SCREENS].filter((screen) => /BACKUP|RESTORE|IMPORT|DATA_EXPORT|DELETE|AI_|ASSIST|TREND|ROUTINE_SHIFT/.test(screen))).toEqual([]);
+    expect([...ALL_SCREENS].filter((screen) => /BACKUP|RESTORE|IMPORT|DATA_EXPORT|DELETE|AI_|ASSIST|TREND|ROUTINE_SHIFT/.test(screen))).toEqual(["DATA_BACKUP"]);
   });
 });

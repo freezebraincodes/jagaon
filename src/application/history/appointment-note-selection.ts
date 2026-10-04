@@ -33,7 +33,8 @@ export type AppointmentNoteSaveResult = { ok: true } | { ok: false; reason: "INV
 export type AppointmentNoteSelectionRepository = {
   selectedFor(period: HistoryPeriod, startDate: string): string[];
   save(selection: AppointmentNoteSelection): AppointmentNoteSaveResult;
-  clear(): void;
+  /** Reports whether the stored selection is gone, so delete-all never over-claims. */
+  clear(): { ok: true } | { ok: false; reason: "STORAGE_UNAVAILABLE" };
 };
 
 export function createAppointmentNoteSelectionRepository(
@@ -84,11 +85,14 @@ export function createAppointmentNoteSelectionRepository(
         return { ok: false, reason: "STORAGE_UNAVAILABLE" };
       }
     },
-    clear(): void {
+    clear() {
       try {
         storage.removeItem(APPOINTMENT_NOTE_SELECTION_KEY);
+        // Corrective Pass C: success means the key is confirmed absent.
+        if (storage.getItem(APPOINTMENT_NOTE_SELECTION_KEY) !== null) return { ok: false as const, reason: "STORAGE_UNAVAILABLE" as const };
+        return { ok: true as const };
       } catch {
-        // Nothing stored or storage unavailable.
+        return { ok: false as const, reason: "STORAGE_UNAVAILABLE" as const };
       }
     },
   });

@@ -330,8 +330,8 @@ describe("table catalogue constants", () => {
     expect(JAGAON_DATABASE_NAME).toBe("jagaon");
   });
 
-  it("uses the positive integer 1 as the first Dexie physical version", () => {
-    expect(JAGAON_DEXIE_VERSION).toBe(1);
+  it("uses Dexie physical version 2 after the Packet 10 identity migration (freeze Section 5)", () => {
+    expect(JAGAON_DEXIE_VERSION).toBe(2);
   });
 
   it("declares exactly the 16 approved tables in spec order", () => {

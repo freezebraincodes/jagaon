@@ -1,17 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { type AppMessages, type SupportedLocale } from "@/i18n/types";
-import { Button } from "../primitives/Button";
 import { Banner, ToggleGroup } from "../primitives/Card";
+import type { DeleteAllPort } from "../data/data-ports";
+import { DeleteAllDialog } from "../data/DeleteAllDialog";
 import {
   ContrastIcon,
   DeviceIcon,
   FlaskIcon,
   LanguageIcon,
   LockIcon,
-  ResetIcon,
   RulerIcon,
+  TrashIcon,
 } from "../primitives/Icons";
 
 export type SettingsScreenProps = {
@@ -19,7 +20,9 @@ export type SettingsScreenProps = {
   locale: SupportedLocale;
   setLocale: (locale: SupportedLocale) => void;
   persistLocale: (locale: SupportedLocale) => Promise<void>;
-  resetDemo: () => Promise<void>;
+  /** Packet 10A: truthful whole-dataset deletion replaces the synthetic reseed. */
+  deleteAll: DeleteAllPort;
+  onDatasetDeleted: () => void;
   goBack?: () => void;
 };
 
@@ -32,15 +35,15 @@ export function SettingsScreen({
   locale,
   setLocale,
   persistLocale,
-  resetDemo,
+  deleteAll,
+  onDatasetDeleted,
 }: SettingsScreenProps) {
   const msg = messages.settings;
   const more = messages.more;
   const [savedVisible, setSavedVisible] = useState(false);
-  const [resetVisible, setResetVisible] = useState(false);
-  const [resetDone, setResetDone] = useState(false);
+  const [deleteVisible, setDeleteVisible] = useState(false);
+  const deleteButton = useRef<HTMLButtonElement>(null);
   const [storageError, setStorageError] = useState(false);
-  const [busy, setBusy] = useState(false);
 
   async function handleLocaleChange(value: string) {
     const nextLocale = value as SupportedLocale;
@@ -52,20 +55,6 @@ export function SettingsScreen({
       setSavedVisible(true);
     } catch {
       setStorageError(true);
-    }
-  }
-
-  async function handleReset() {
-    setBusy(true);
-    setStorageError(false);
-    try {
-      await resetDemo();
-      setResetDone(true);
-      setResetVisible(false);
-    } catch {
-      setStorageError(true);
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -143,36 +132,20 @@ export function SettingsScreen({
         {msg.dataHeading}
       </h2>
       <div className="setting-card" role="group" aria-labelledby="demo-data-heading">
-        {resetVisible ? (
-          <div className="reset-confirm" role="alertdialog" aria-labelledby="reset-title" aria-describedby="reset-body">
-            <p className="reset-title" id="reset-title">
-              {msg.resetTitle}
-            </p>
-            <p className="reset-body" id="reset-body">
-              {msg.resetBody}
-            </p>
-            <div className="button-row">
-              <Button variant="primary" onClick={handleReset} busy={busy}>
-                {msg.resetConfirm}
-              </Button>
-              <Button variant="ghost" onClick={() => setResetVisible(false)}>
-                {messages.shared.cancel}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setResetDone(false);
-              setResetVisible(true);
-            }}
-          >
-            <ResetIcon size={20} />
-            {msg.resetAction}
-          </Button>
-        )}
-        {resetDone ? <Banner variant="success">{msg.resetDone}</Banner> : null}
+        <button ref={deleteButton} type="button" className="btn btn-danger-outline btn-wide" onClick={() => setDeleteVisible(true)}>
+          <TrashIcon size={20} />
+          {messages.packet10.hub.deleteAll}
+        </button>
+        <p className="field-hint">{messages.packet10.hub.deleteAllHelp}</p>
+        {deleteVisible ? (
+          <DeleteAllDialog
+            messages={messages}
+            port={deleteAll}
+            onClose={() => setDeleteVisible(false)}
+            onDeleted={onDatasetDeleted}
+            returnFocusRef={deleteButton}
+          />
+        ) : null}
       </div>
 
       <h2 className="eyebrow" id="about-demo-heading">

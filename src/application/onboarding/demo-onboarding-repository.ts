@@ -1,3 +1,4 @@
+import { APPOINTMENT_NOTE_SELECTION_KEY } from "@/application/history/appointment-note-selection";
 import {
   parseDemoOnboardingState,
   type DemoOnboardingStateV1,
@@ -38,6 +39,8 @@ export function createDemoOnboardingRepository(
   function clear(): DemoOnboardingClearResult {
     try {
       storage.removeItem(DEMO_ONBOARDING_STORAGE_KEY);
+      // Corrective Pass C: success means the key is confirmed absent.
+      if (storage.getItem(DEMO_ONBOARDING_STORAGE_KEY) !== null) return { ok: false, reason: "STORAGE_UNAVAILABLE" };
       return { ok: true };
     } catch {
       return { ok: false, reason: "STORAGE_UNAVAILABLE" };
@@ -102,4 +105,14 @@ export function createMemoryOnboardingStorage(
     setItem: (key: string, value: string) => void store.set(key, value),
     removeItem: (key: string) => void store.delete(key),
   });
+}
+
+/**
+ * Packet 10A: every JagaOn key in browser local storage. Whole-dataset
+ * deletion removes them with the IndexedDB database (storage-backup-spec 6.8).
+ */
+export const JAGAON_LOCAL_STATE_KEYS = Object.freeze([DEMO_ONBOARDING_STORAGE_KEY, APPOINTMENT_NOTE_SELECTION_KEY] as const);
+
+export function clearJagaOnLocalState(storage: Pick<DemoOnboardingStoragePort, "removeItem">): void {
+  for (const key of JAGAON_LOCAL_STATE_KEYS) storage.removeItem(key);
 }

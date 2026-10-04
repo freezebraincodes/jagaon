@@ -13,7 +13,23 @@ import {
 } from "@/domain/shared/identifiers";
 import type { Instant } from "@/domain/shared/time";
 import { createBootstrapLocaleRepository } from "@/storage/bootstrap-locale-repository";
-import { createJagaOnDatabase } from "@/storage/database";
+import { storageFailure } from "@/storage/storage-failure";
+import { createStorageMetadataRepository, localStateCleanupPendingRow } from "@/storage/storage-metadata";
+import { acquireDatasetPresence } from "@/application/storage/browser-dataset-lifecycle";
+import type { ConfirmDeletionResult, DeletionConfirmation, DeletionPlan, DeletionTarget, PrepareDeletionResult } from "@/application/deletion/deletion-contracts";
+import { createPermanentDeletionService } from "@/application/deletion/permanent-deletion-service";
+import { createRestoreReconciler } from "@/application/restore/restore-reconciler";
+import { createBackupExportService, type BackupExportResult, type BackupExportStep } from "@/backup/backup-export-service";
+import { createBackupSnapshotRepository } from "@/backup/backup-snapshot-repository";
+import { createBrowserBackupFilePort } from "@/backup/browser-backup-file-port";
+import { createWebCryptoPort } from "@/backup/web-crypto-port";
+import {
+  createIntegrityGate,
+  IntegrityLockedError,
+  lockStateFor,
+  openVerifiedDataset,
+  type StorageLockState,
+} from "@/application/storage/integrity-gate";
 import {
   DEMO_STORAGE_RESET_CONFIRMATION,
   resetSyntheticDemoStorage,
@@ -62,22 +78,112 @@ export type JagaOnRuntime = {
   resolveLocale(): Promise<SupportedLocale>;
   persistLocale(locale: SupportedLocale): Promise<void>;
   resetDemo(): Promise<void>;
+  /** Packet 10A: exact, confirmed permanent deletion of one patient record. */
+  recordDeletion: {
+    prepare(target: DeletionTarget): Promise<PrepareDeletionResult>;
+    confirm(plan: DeletionPlan, confirmation: DeletionConfirmation): Promise<ConfirmDeletionResult>;
+  };
+  /** Packet 10B: local encrypted backup export (no network, no write). */
+  backup: {
+    export(request: { passphrase: string; confirmation: string }, events?: { onStepCompleted?(step: BackupExportStep): void }): Promise<BackupExportResult>;
+  };
+  /** Packet 10: whether this open created, migrated or reopened the dataset. */
+  datasetLifecycle: "CREATED" | "MIGRATED" | "EXISTING";
+  /**
+   * Corrective Pass C: the durable LOCAL_STATE_CLEANUP_PENDING marker. The
+   * shell reads it before trusting persisted setup and calls `complete` only
+   * after every local-state owner confirmed its keys are gone.
+   */
+  localStateCleanup: {
+    isPending(): Promise<boolean>;
+    complete(): Promise<void>;
+  };
+  /** Packet 10A: the in-memory integrity lock, if any operation hit one. */
+  integrityLock(): StorageLockState | null;
+  onIntegrityLock(listener: (lock: StorageLockState) => void): () => void;
   close(): void;
 };
 
 export type BrowserJournalRuntimeOptions = {
   /** Injectable clock for deterministic tests; defaults to the device clock. */
   now?: () => Instant;
+  /**
+   * Packet 10 freeze Section 6: the synthetic scenario is seeded only when this
+   * open creates a new dataset. Delete-all restarts pass `false` so the new
+   * dataset stays empty and restorable.
+   */
+  seedSyntheticScenarioOnCreate?: boolean;
+  /** Injectable dataset identity for deterministic tests. */
+  newDatasetIdentity?: () => string;
+  /** Packet 10C: the shell locale to rebuild as the bootstrap projection after a restore. */
+  bootstrapLocaleAfterRestore?: SupportedLocale;
+  /** Set only by an explicit patient recovery action: resume a `FAILED_BLOCKING` restore. */
+  resumeFailedRestore?: boolean;
+  /**
+   * Corrective Pass C: persist LOCAL_STATE_CLEANUP_PENDING. `IF_CREATED` writes
+   * it only when this open creates the dataset (atomically with the identity);
+   * `ALWAYS` also writes it into an existing dataset. If it cannot be
+   * persisted, the open fails with `LocalStateCleanupUnconfirmedError`.
+   */
+  localStateCleanup?: { requestedAt: Instant; when: "IF_CREATED" | "ALWAYS" };
 };
+
+/** The cleanup marker could not be persisted; carries no data. Callers must fail closed. */
+export class LocalStateCleanupUnconfirmedError extends Error {
+  readonly name = "LocalStateCleanupUnconfirmedError";
+  constructor() {
+    super("LOCAL_STATE_CLEANUP_UNCONFIRMED");
+  }
+}
+
+/** Thrown when the dataset cannot be opened safely; carries only the closed lock. */
+export { IntegrityLockedError as JagaOnStorageLockedError };
 
 export async function createBrowserJournalRuntime(
   databaseName?: string,
   options: BrowserJournalRuntimeOptions = {},
 ): Promise<JagaOnRuntime> {
-  const database = createJagaOnDatabase(databaseName);
-  await database.open();
-
   const now = options.now ?? (() => new Date().toISOString() as Instant);
+  const name = databaseName ?? "jagaon";
+  const gate = createIntegrityGate(now);
+  let closeDatabase: () => void = () => undefined;
+  // Another tab's delete-all holds the dataset exclusively; wait rather than recreate it.
+  const releasePresence = await acquireDatasetPresence(name, () => {
+    gate.lock(lockStateFor(storageFailure("OPEN", "DATABASE_OPEN_FAILED", now())));
+    closeDatabase();
+  });
+  const cleanupRequest = options.localStateCleanup;
+  const opened = await openVerifiedDataset(name, {
+    now,
+    newDatasetIdentity: options.newDatasetIdentity ?? (() => crypto.randomUUID()),
+    ...(cleanupRequest ? { localStateCleanupPendingOnCreate: cleanupRequest.requestedAt } : {}),
+  });
+  if (opened.kind === "LOCKED") {
+    releasePresence();
+    // A creation that could not also persist the requested marker created nothing.
+    if (cleanupRequest && opened.attemptedCreate) throw new LocalStateCleanupUnconfirmedError();
+    throw new IntegrityLockedError(opened.lock);
+  }
+  const database = opened.database;
+  closeDatabase = () => database.close();
+  const metadata = createStorageMetadataRepository(database);
+  if (cleanupRequest?.when === "ALWAYS" && opened.lifecycle !== "CREATED") {
+    try {
+      await metadata.writeLocalStateCleanupPending(localStateCleanupPendingRow(cleanupRequest.requestedAt));
+    } catch {
+      database.close();
+      releasePresence();
+      throw new LocalStateCleanupUnconfirmedError();
+    }
+  }
+  // Only RECONCILING resumes automatically; FAILED_BLOCKING stays locked until the
+  // patient explicitly chooses recovery (spec 8.8, 9.4).
+  if (opened.restoreState?.phase === "FAILED_BLOCKING" && !options.resumeFailedRestore) {
+    database.close();
+    releasePresence();
+    throw new IntegrityLockedError(lockStateFor(storageFailure("RESTORE_RECONCILE", "RESTORE_RECONCILIATION_FAILED", now())));
+  }
+  const restoreInProgress = opened.restoreState !== null && (opened.restoreState.phase === "RECONCILING" || opened.restoreState.phase === "FAILED_BLOCKING");
   const ids = {
     commandId: createCommandId,
     correlationId: createCorrelationId,
@@ -111,9 +217,10 @@ export async function createBrowserJournalRuntime(
   // serialised; history reads wait for it so they reflect committed records.
   let intelligence: Promise<unknown> = Promise.resolve();
   function scheduleIntelligence(refresh = false): Promise<unknown> {
+    // Background engines stop while integrity-locked (spec 9.4).
     intelligence = intelligence
-      .then(() => coordinator.processPending())
-      .then(() => (refresh ? coordinator.refreshAll() : undefined))
+      .then(() => gate.run(() => coordinator.processPending()))
+      .then(() => (refresh ? gate.run(() => coordinator.refreshAll()) : undefined))
       .catch(() => undefined);
     return intelligence;
   }
@@ -146,10 +253,10 @@ export async function createBrowserJournalRuntime(
   let packet8: Promise<unknown> = Promise.resolve();
   function settlePacket8(): Promise<void> {
     packet8 = packet8
-      .then(() => inquiry.processPending())
-      .then(() => reminders.processPending())
-      .then(() => inquiry.maintain())
-      .then(() => careSummaryInvalidation.processPending())
+      .then(() => gate.run(() => inquiry.processPending()))
+      .then(() => gate.run(() => reminders.processPending()))
+      .then(() => gate.run(() => inquiry.maintain()))
+      .then(() => gate.run(() => careSummaryInvalidation.processPending()))
       .catch(() => undefined);
     return packet8.then(() => undefined);
   }
@@ -191,6 +298,39 @@ export async function createBrowserJournalRuntime(
     reviseCareQuestion: settlingAfterCommit(careOrganisationService.reviseCareQuestion),
   });
 
+  // A committed restore finishes durable reconciliation before any port, seed
+  // or background work is available (spec 8.7–8.8); failure keeps it locked.
+  if (restoreInProgress) {
+    const reconciled = await createRestoreReconciler(database, {
+      now,
+      resumeFailedBlocking: options.resumeFailedRestore === true,
+      owners: {
+        async rebuildBootstrapLocale() {
+          await localeRepository.resolve(options.bootstrapLocaleAfterRestore ?? null, now());
+        },
+        async inquiryMaintenance() {
+          await inquiry.processPending();
+          await inquiry.maintain();
+        },
+        async patternLearningRefresh() {
+          await coordinator.processPending();
+          await coordinator.refreshAll();
+        },
+        async reminderReconciliation() {
+          await reminders.processPending();
+        },
+        async careSummaryInvalidation() {
+          await careSummaryInvalidation.processPending();
+        },
+      },
+    }).resume();
+    if (reconciled.kind === "FAILED") {
+      database.close();
+      releasePresence();
+      throw new IntegrityLockedError(lockStateFor(reconciled.failure));
+    }
+  }
+
   /** Seed only an empty demo database, never over user-created records. */
   async function seedSyntheticScenarioWhenEmpty(): Promise<void> {
     if ((await database.table("recordHeads").count()) > 0) return;
@@ -207,14 +347,44 @@ export async function createBrowserJournalRuntime(
     await seedSyntheticCareOrganisation({ database, seedAt: now(), ids });
   }
 
-  await seedSyntheticScenarioWhenEmpty();
-  await seedCareOrganisationWhenMissing();
+  if (opened.lifecycle === "CREATED" && options.seedSyntheticScenarioOnCreate !== false) {
+    await seedSyntheticScenarioWhenEmpty();
+    await seedCareOrganisationWhenMissing();
+  } else if (opened.lifecycle === "MIGRATED") {
+    // A Packet 8/9 database keeps its once-only Packet 9B fixture top-up.
+    await seedCareOrganisationWhenMissing();
+  }
   // A print attempt interrupted by a closed tab becomes OUTCOME_UNKNOWN; it is never replayed.
   await carePreparationService.recoverInterruptedExports().catch(() => 0);
   void scheduleIntelligence(true);
 
-  return Object.freeze({
-    databaseName: database.name,
+  // Every port runs through the integrity gate: once locked, no authoritative
+  // write, read-as-truth or engine work proceeds (spec 9.4).
+  const deletion = createPermanentDeletionService(database, { now, ids });
+  const backupExport = createBackupExportService({
+    snapshot: createBackupSnapshotRepository(database),
+    crypto: () => createWebCryptoPort(),
+    file: createBrowserBackupFilePort(),
+    now,
+  });
+  const ports = gate.guard({
+    backup: Object.freeze({ export: backupExport.export }),
+    recordDeletion: Object.freeze({
+      async prepare(target: DeletionTarget) {
+        await intelligence;
+        await packet8;
+        return deletion.prepare(target);
+      },
+      async confirm(plan: DeletionPlan, confirmation: DeletionConfirmation) {
+        const result = await deletion.confirm(plan, confirmation);
+        if (result.kind === "DELETED") {
+          // Owners reconcile the PATIENT_RECORD_DELETED work through their normal subscriptions.
+          void scheduleIntelligence();
+          void settlePacket8();
+        }
+        return result;
+      },
+    }),
     commands,
     query,
     history: Object.freeze({
@@ -281,8 +451,21 @@ export async function createBrowserJournalRuntime(
       await seedCareOrganisationWhenMissing();
       await scheduleIntelligence(true);
     },
+  });
+
+  return Object.freeze({
+    databaseName: database.name,
+    datasetLifecycle: opened.lifecycle,
+    localStateCleanup: Object.freeze({
+      isPending: async () => (await metadata.readLocalStateCleanupPending()) !== null,
+      complete: () => metadata.clearLocalStateCleanupPending(),
+    }),
+    ...ports,
+    integrityLock: gate.current,
+    onIntegrityLock: gate.subscribe,
     close() {
       database.close();
+      releasePresence();
     },
   });
 }

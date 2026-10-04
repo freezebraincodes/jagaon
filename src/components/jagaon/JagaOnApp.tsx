@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SupportedLocale } from "@/domain/patient-settings/locale";
+import type { Instant } from "@/domain/shared/time";
 import { getMessages } from "@/i18n/get-messages";
 import type { AppMessages } from "@/i18n/types";
 import { CURRENT_RELEASE_PROFILE } from "@/config/release-profile";
@@ -28,8 +29,25 @@ import { MoreScreen } from "./screens/MoreScreen";
 import { HelpScreen } from "./screens/HelpScreen";
 import {
   createBrowserJournalRuntime,
+  JagaOnStorageLockedError,
+  LocalStateCleanupUnconfirmedError,
+  type BrowserJournalRuntimeOptions,
   type JagaOnRuntime,
 } from "@/application/journal/browser-journal-runtime";
+import type { StorageLockState } from "@/application/storage/integrity-gate";
+import { createBrowserDatabaseDeletion, createBrowserDatasetCoordinator } from "@/application/storage/browser-dataset-lifecycle";
+import { JAGAON_DATABASE_NAME } from "@/storage/table-catalogue";
+import { createDeleteDatasetService } from "@/storage/delete-dataset";
+import { Banner } from "./primitives/Card";
+import { DataBackupScreen, type DataBackupView } from "./data/DataBackupScreen";
+import type { DeleteAllPort } from "./data/data-ports";
+import { IntegrityShell } from "./data/IntegrityShell";
+import { DeletionInProgress } from "./data/DeletionInProgress";
+import { CreateBackupPanel } from "./data/CreateBackupPanel";
+import { RestoreBackupPanel } from "./data/RestoreBackupPanel";
+import type { RestorePort } from "./data/data-ports";
+import { createRestoreService } from "@/application/restore/restore-service";
+import { createWebCryptoPort } from "@/backup/web-crypto-port";
 import type { TodayJournalViewModel } from "@/application/journal/journal-contracts";
 import type { RecordId } from "@/domain/shared/identifiers";
 import type { DemoOnboardingStateV1 } from "@/application/onboarding/demo-onboarding-contracts";
@@ -52,8 +70,39 @@ type NavigationEntry = {
   params?: Record<string, string>;
 };
 
+/** Packet 10A: delete-all is wired by the app because it owns the runtime lifecycle. */
+export type DeleteAllPortFactory = (hooks: { databaseName: string; closeRuntime: () => void; clearLocalState: () => void }) => DeleteAllPort;
+
+function browserDeleteAllPort(hooks: { databaseName: string; closeRuntime: () => void; clearLocalState: () => void }): DeleteAllPort {
+  return createDeleteDatasetService({
+    databaseName: hooks.databaseName,
+    now: () => new Date().toISOString() as never,
+    coordinator: createBrowserDatasetCoordinator(hooks.databaseName),
+    deletion: createBrowserDatabaseDeletion(),
+    closeOwnConnections: hooks.closeRuntime,
+    clearLocalState: hooks.clearLocalState,
+  });
+}
+
+/** Packet 10C: restore is wired by the app because it replaces the dataset under the runtime. */
+export type RestorePortFactory = (hooks: { databaseName: string; closeRuntime: () => void }) => RestorePort;
+
+function browserRestorePort(hooks: { databaseName: string; closeRuntime: () => void }): RestorePort {
+  return createRestoreService({
+    databaseName: hooks.databaseName,
+    now: () => new Date().toISOString() as never,
+    crypto: () => createWebCryptoPort(),
+    coordinator: createBrowserDatasetCoordinator(hooks.databaseName),
+    closeRuntime: hooks.closeRuntime,
+  });
+}
+
 type JagaOnAppProps = {
-  runtimeFactory?: () => Promise<JagaOnRuntime>;
+  /** Packet 10C: injected restore service (deterministic in tests). */
+  restorePortFactory?: RestorePortFactory;
+  runtimeFactory?: (databaseName?: string, options?: BrowserJournalRuntimeOptions) => Promise<JagaOnRuntime>;
+  /** Packet 10A: injected whole-dataset deletion (deterministic in tests). */
+  deleteAllPortFactory?: DeleteAllPortFactory;
   /** Injected for tests; defaults to the single versioned browser storage key. */
   onboardingRepositoryFactory?: () => DemoOnboardingRepository;
   /** Packet 7A: storage port for the local appointment-note selection. */
@@ -72,6 +121,9 @@ function browserOnboardingRepository(): DemoOnboardingRepository {
   return createDemoOnboardingRepository(createBrowserOnboardingStorage());
 }
 
+/** Completion of a delete-all is handled once, by the app-level port wrapper. */
+const noop = () => undefined;
+
 const EMPTY_TODAY: TodayJournalViewModel = Object.freeze({
   entries: [],
   unavailable: false,
@@ -82,6 +134,8 @@ export function JagaOnApp({
   onboardingRepositoryFactory = browserOnboardingRepository,
   appointmentNoteStorageFactory = createBrowserOnboardingStorage,
   printPortFactory = createBrowserPrintPort,
+  deleteAllPortFactory = browserDeleteAllPort,
+  restorePortFactory = browserRestorePort,
 }: JagaOnAppProps = {}) {
   const printPort = useMemo(() => printPortFactory(), [printPortFactory]);
   const appointmentNotes = useMemo<AppointmentNoteSelectionRepository>(
@@ -106,17 +160,133 @@ export function JagaOnApp({
     { screen: "TODAY" },
   ]);
   const [runtime, setRuntime] = useState<JagaOnRuntime | null>(null);
+  const runtimeRef = useRef<JagaOnRuntime | null>(null);
+  /** Packet 10A: bumping the epoch re-opens the dataset (retry, delete-all restart). */
+  const [runtimeEpoch, setRuntimeEpoch] = useState(0);
+  const runtimeOptions = useRef<BrowserJournalRuntimeOptions>({});
+  const [storageLock, setStorageLock] = useState<StorageLockState | null>(null);
+  const [datasetDeleted, setDatasetDeleted] = useState(false);
+  /** Packet 10C: resolves once a restored dataset finished reconciliation (or locked). */
+  const reconciliationWaiter = useRef<((outcome: "COMPLETED" | "LOCKED") => void) | null>(null);
+  const [lockRestoreOpen, setLockRestoreOpen] = useState(false);
+  /** Corrective Pass A item 3: an issued delete request is shown app-wide until it settles. */
+  const [deletionInFlight, setDeletionInFlight] = useState<{ waitingForTab: boolean } | null>(null);
+  /** True when a destructive operation closed this tab's runtime and must reopen it on failure. */
+  const runtimeClosedByOperation = useRef(false);
+  const onDatasetDeletedRef = useRef<(localStateCleared: boolean) => void>(() => undefined);
+  /**
+   * Corrective Pass B item 5 / Pass C: every local-state owner, attempted even
+   * when another fails; true only when all confirm their keys are gone.
+   */
+  const clearLocalStateOwnersRef = useRef<() => boolean>(() => false);
+  /**
+   * Corrective Pass C startup gate. Persisted setup is trusted only after the
+   * first runtime reported the durable LOCAL_STATE_CLEANUP_PENDING marker
+   * (`stale`: the marker was present, the dataset was newly created under a
+   * completed setup, or the marker could not be confirmed).
+   */
+  const startupSetupRef = useRef<DemoOnboardingStateV1 | null | undefined>(undefined);
+  const startupRuntimeRef = useRef<{ stale: boolean } | undefined>(undefined);
+  const startupResolved = useRef(false);
+  const repositoryRef = useRef<DemoOnboardingRepository | null>(null);
   const [today, setToday] = useState<TodayJournalViewModel>(EMPTY_TODAY);
   /** True once a saved setup supplied the locale; it then wins over IndexedDB. */
   const onboardingLocaleRef = useRef(false);
 
+  /** Local setup state that belongs to a deleted dataset is ignored: fresh setup, no profile. */
+  function enterFreshSetup() {
+    onboardingLocaleRef.current = false;
+    setOnboarding(null);
+    setStack([{ screen: "TODAY" }]);
+    setPhase({ kind: "ONBOARDING", initial: null });
+    // No success claim here: the banner follows confirmed cleanup only.
+    setDatasetDeleted(false);
+  }
+
+  /** Decides the first screen once both the persisted setup and the first runtime outcome are known. */
+  function resolveStartup() {
+    if (startupResolved.current || startupSetupRef.current === undefined || startupRuntimeRef.current === undefined) return;
+    startupResolved.current = true;
+    const saved = startupSetupRef.current;
+    if (startupRuntimeRef.current.stale) {
+      enterFreshSetup();
+      return;
+    }
+    setOnboarding(saved);
+    if (saved) {
+      onboardingLocaleRef.current = true;
+      setLocale(saved.locale);
+    }
+    setPhase(saved && (saved.status === "COMPLETED" || saved.status === "SKIPPED") ? { kind: "APP" } : { kind: "ONBOARDING", initial: saved });
+  }
+
+  /** Completed or skipped setup that a newly created dataset would otherwise inherit. */
+  function persistedSetupIsComplete(): boolean {
+    try {
+      const status = onboardingRepositoryFactory().load()?.status;
+      return status === "COMPLETED" || status === "SKIPPED";
+    } catch {
+      return false;
+    }
+  }
+
+  // Effects reach the startup helpers through a ref so their dependencies stay stable.
+  const startup = useRef({ enterFreshSetup, resolveStartup, persistedSetupIsComplete });
+  startup.current = { enterFreshSetup, resolveStartup, persistedSetupIsComplete };
+
   useEffect(() => {
     let active = true;
     let createdRuntime: JagaOnRuntime | null = null;
+    const { enterFreshSetup, resolveStartup, persistedSetupIsComplete } = startup.current;
 
-    void runtimeFactory()
+    let unsubscribe: () => void = () => undefined;
+
+    const firstOpen = startupRuntimeRef.current === undefined;
+    const completeSetupAtOpen = firstOpen && persistedSetupIsComplete();
+    // A dataset created under a completed setup is born with the cleanup marker
+    // (atomically with its identity), so the setup can never be trusted later.
+    if (completeSetupAtOpen && !runtimeOptions.current.localStateCleanup) {
+      runtimeOptions.current = { ...runtimeOptions.current, localStateCleanup: { requestedAt: new Date().toISOString() as Instant, when: "IF_CREATED" } };
+    }
+
+    void runtimeFactory(undefined, runtimeOptions.current)
       .then(async (nextRuntime) => {
         createdRuntime = nextRuntime;
+        runtimeRef.current = nextRuntime;
+        // A recovery permission and a cleanup-marker request apply to one successful open only.
+        const { localStateCleanup: _persisted, ...rest } = runtimeOptions.current;
+        void _persisted;
+        runtimeOptions.current = { ...rest, resumeFailedRestore: false };
+        // Corrective Pass C: the durable marker is read before any persisted setup is trusted.
+        const pending = await nextRuntime.localStateCleanup.isPending().catch(() => true);
+        if (!active) {
+          nextRuntime.close();
+          return;
+        }
+        if (firstOpen) {
+          // Corrective Pass A rule, kept as defence in depth: a newly created dataset
+          // never inherits a completed setup even if no marker was reported.
+          const inherited = !pending && completeSetupAtOpen && nextRuntime.datasetLifecycle === "CREATED";
+          if (inherited) clearLocalStateOwnersRef.current();
+          startupRuntimeRef.current = { stale: pending || inherited };
+          resolveStartup();
+        } else if (pending) {
+          enterFreshSetup();
+        }
+        // Every owner is retried; the marker goes only after all of them confirm,
+        // and "Local data deleted" only after the marker is gone.
+        if (pending && clearLocalStateOwnersRef.current()) {
+          const cleaned = await nextRuntime.localStateCleanup.complete().then(
+            () => true,
+            () => false,
+          );
+          if (cleaned && active) setDatasetDeleted(true);
+        }
+        unsubscribe = nextRuntime.onIntegrityLock((lock) => {
+          if (active) setStorageLock(lock);
+        });
+        reconciliationWaiter.current?.("COMPLETED");
+        reconciliationWaiter.current = null;
         const [resolvedLocale, todayView] = await Promise.all([
           nextRuntime.resolveLocale(),
           nextRuntime.query.loadToday(),
@@ -130,15 +300,32 @@ export function JagaOnApp({
         setLocale((current) => (onboardingLocaleRef.current ? current : resolvedLocale));
         setToday(todayView);
       })
-      .catch(() => {
-        if (active) setToday({ entries: [], unavailable: true });
+      .catch((error: unknown) => {
+        if (!active) return;
+        // A marker that could not be persisted fails closed: persisted setup is not trusted.
+        const unconfirmed = error instanceof LocalStateCleanupUnconfirmedError;
+        if (firstOpen) {
+          startupRuntimeRef.current = { stale: unconfirmed };
+          resolveStartup();
+        } else if (unconfirmed) {
+          enterFreshSetup();
+        }
+        // A locked dataset shows only the neutral recovery shell (spec 9.4). Browser
+        // storage that cannot open at all keeps the Packet 6 unavailable state.
+        if (error instanceof JagaOnStorageLockedError && error.lock.kind !== "STORAGE_UNAVAILABLE") {
+          setLockRestoreOpen(false);
+          setStorageLock(error.lock);
+        } else setToday({ entries: [], unavailable: true });
+        reconciliationWaiter.current?.("LOCKED");
+        reconciliationWaiter.current = null;
       });
 
     return () => {
       active = false;
+      unsubscribe();
       createdRuntime?.close();
     };
-  }, [runtimeFactory]);
+  }, [runtimeFactory, runtimeEpoch]);
 
   // Load the onboarding state on the client only (never during server
   // rendering). Malformed state has already been cleared by the repository.
@@ -146,19 +333,20 @@ export function JagaOnApp({
     let active = true;
     void Promise.resolve().then(() => {
       if (!active) return;
+      const { resolveStartup } = startup.current;
       const repo = onboardingRepositoryFactory();
       const saved = repo.load();
+      repositoryRef.current = repo;
+      startupSetupRef.current = saved;
       setRepository(repo);
-      setOnboarding(saved);
-      if (saved) {
-        onboardingLocaleRef.current = true;
-        setLocale(saved.locale);
+      // Nothing persisted: nothing to distrust, so fresh setup starts now and a later
+      // runtime outcome never replaces progress made meanwhile. Otherwise wait for the marker.
+      if (saved === null) {
+        startupResolved.current = true;
+        setPhase({ kind: "ONBOARDING", initial: null });
+        return;
       }
-      setPhase(
-        saved && (saved.status === "COMPLETED" || saved.status === "SKIPPED")
-          ? { kind: "APP" }
-          : { kind: "ONBOARDING", initial: saved },
-      );
+      resolveStartup();
     });
     return () => {
       active = false;
@@ -258,6 +446,137 @@ export function JagaOnApp({
     setToday(await runtime.query.loadToday());
   }, [runtime]);
 
+  /**
+   * Each local key is cleared by the repository that owns it
+   * (JAGAON_LOCAL_STATE_KEYS). Every owner is attempted even when another
+   * fails; the result is true only when all of them are gone.
+   */
+  const clearLocalStateOwners = useCallback(() => {
+    // An owner that is not loaded yet is still attempted, never assumed clear.
+    const onboardingOwner = repository ?? repositoryRef.current ?? onboardingRepositoryFactory();
+    const results = [onboardingOwner.clear().ok, appointmentNotes.clear().ok];
+    return results.every(Boolean);
+  }, [appointmentNotes, repository, onboardingRepositoryFactory]);
+  clearLocalStateOwnersRef.current = clearLocalStateOwners;
+
+  const createDeleteAllPort = useCallback(
+    () =>
+      deleteAllPortFactory({
+        databaseName: JAGAON_DATABASE_NAME,
+        closeRuntime: () => {
+          runtimeClosedByOperation.current = true;
+          runtimeRef.current?.close();
+          runtimeRef.current = null;
+        },
+        clearLocalState: () => {
+          if (!clearLocalStateOwners()) throw new Error("STORAGE_UNAVAILABLE");
+        },
+      }),
+    [deleteAllPortFactory, clearLocalStateOwners],
+  );
+  // The port is created on first use (an event), never during render.
+  const deleteAllPort = useMemo<DeleteAllPort>(() => {
+    let port: DeleteAllPort | null = null;
+    const current = () => (port ??= createDeleteAllPort());
+    return {
+      prepare: () => current().prepare(),
+      async confirm(plan, token, events) {
+        runtimeClosedByOperation.current = false;
+        const result = await current().confirm(plan, token, {
+          onRequestIssued: () => {
+            setDeletionInFlight({ waitingForTab: false });
+            events?.onRequestIssued?.();
+          },
+          onBlocked: () => {
+            setDeletionInFlight({ waitingForTab: true });
+            events?.onBlocked?.();
+          },
+        });
+        setDeletionInFlight(null);
+        if (result.kind === "DELETED") onDatasetDeletedRef.current(result.localStateCleared);
+        else if (runtimeClosedByOperation.current) reopenRuntime();
+        return result;
+      },
+    };
+  }, [createDeleteAllPort]);
+
+  /** A destructive operation closed this tab's runtime but did not complete: reopen it. */
+  function reopenRuntime() {
+    runtimeClosedByOperation.current = false;
+    setRuntime(null);
+    setRuntimeEpoch((value) => value + 1);
+  }
+
+  /** Whole dataset deleted: restart setup on a new, unseeded local dataset (spec 6.8). */
+  const onDatasetDeleted = useCallback((localStateCleared: boolean) => {
+    // Corrective Pass C: incomplete cleanup is recorded durably in the replacement dataset.
+    runtimeOptions.current = {
+      seedSyntheticScenarioOnCreate: false,
+      ...(localStateCleared ? {} : { localStateCleanup: { requestedAt: new Date().toISOString() as Instant, when: "ALWAYS" as const } }),
+    };
+    setRuntime(null);
+    setStorageLock(null);
+    setToday(EMPTY_TODAY);
+    onboardingLocaleRef.current = false;
+    setOnboarding(null);
+    // Preferences were deleted with the dataset: the neutral shell returns to en-SG.
+    setLocale("en-SG");
+    setStack([{ screen: "TODAY" }]);
+    // "Local data deleted" only when no local key remains.
+    setDatasetDeleted(localStateCleared);
+    setPhase({ kind: "ONBOARDING", initial: null });
+    setRuntimeEpoch((value) => value + 1);
+  }, []);
+  onDatasetDeletedRef.current = onDatasetDeleted;
+
+  const createRestorePort = useCallback(
+    () =>
+      restorePortFactory({
+        databaseName: JAGAON_DATABASE_NAME,
+        closeRuntime: () => {
+          runtimeClosedByOperation.current = true;
+          runtimeRef.current?.close();
+          runtimeRef.current = null;
+        },
+      }),
+    [restorePortFactory],
+  );
+  const restorePort = useMemo<RestorePort>(() => {
+    let port: RestorePort | null = null;
+    const current = () => (port ??= createRestorePort());
+    return {
+      inspect: (file, passphrase) => current().inspect(file, passphrase),
+      async confirm(plan, confirmation) {
+        runtimeClosedByOperation.current = false;
+        const result = await current().confirm(plan, confirmation);
+        // A committed restore reopens through reconciliation; any other outcome restores normal use.
+        if (result.kind !== "COMMITTED" && runtimeClosedByOperation.current) reopenRuntime();
+        return result;
+      },
+    };
+  }, [createRestorePort]);
+
+  /** Re-open the restored dataset; the runtime resumes reconciliation before any use. */
+  const awaitReconciliation = useCallback(
+    () =>
+      new Promise<"COMPLETED" | "LOCKED">((resolve) => {
+        reconciliationWaiter.current = resolve;
+        runtimeOptions.current = { bootstrapLocaleAfterRestore: locale };
+        setRuntime(null);
+        setStorageLock(null);
+        setRuntimeEpoch((value) => value + 1);
+      }),
+    [locale],
+  );
+
+  const retryStorage = useCallback(() => {
+    // "Try recovery again" is the explicit patient action that may resume a blocked restore.
+    runtimeOptions.current = { ...runtimeOptions.current, resumeFailedRestore: storageLock?.kind === "RECOVERY_REQUIRED" };
+    setStorageLock(null);
+    setRuntime(null);
+    setRuntimeEpoch((value) => value + 1);
+  }, [storageLock]);
+
   // --- Screen rendering ---
 
   function renderScreen() {
@@ -272,6 +591,8 @@ export function JagaOnApp({
             journal={today}
             actionsDisabled={!runtime}
             navigate={navigate}
+            recordDeletion={runtime?.recordDeletion}
+            onRecordDeleted={() => void refreshToday()}
           />
         );
       case "LOG_GLUCOSE":
@@ -361,27 +682,8 @@ export function JagaOnApp({
                 throw new Error("STORAGE_UNAVAILABLE");
               }
             }}
-            resetDemo={async () => {
-              if (!runtime || !repository) throw new Error("STORAGE_UNAVAILABLE");
-              // Clear the small onboarding key first so a known adapter
-              // failure cannot erase the larger IndexedDB journal. If the
-              // IndexedDB reset then fails, restore the prior strict state.
-              if (!repository.clear().ok) throw new Error("STORAGE_UNAVAILABLE");
-              try {
-                await runtime.resetDemo();
-              } catch (error) {
-                if (onboarding) repository.save(onboarding);
-                throw error;
-              }
-              // The local appointment-note selection is demo data too.
-              appointmentNotes.clear();
-              onboardingLocaleRef.current = false;
-              setOnboarding(null);
-              setLocale("en-SG");
-              setToday(await runtime.query.loadToday());
-              setStack([{ screen: "TODAY" }]);
-              setPhase({ kind: "ONBOARDING", initial: null });
-            }}
+            deleteAll={deleteAllPort}
+            onDatasetDeleted={noop}
           />
         );
       case "MY_MEDICINES":
@@ -452,6 +754,28 @@ export function JagaOnApp({
             onBack={goBack}
           />
         );
+      case "DATA_BACKUP":
+        return (
+          <DataBackupScreen
+            messages={messages}
+            view={(entry.params?.view as DataBackupView | undefined) ?? "hub"}
+            showView={(view) => navigate("DATA_BACKUP", { view })}
+            deleteAll={deleteAllPort}
+            onDeleted={noop}
+            createPanel={runtime ? <CreateBackupPanel messages={messages} locale={locale} port={runtime.backup} onDone={goBack} /> : undefined}
+            restorePanel={
+              <RestoreBackupPanel
+                messages={messages}
+                locale={locale}
+                port={restorePort}
+                awaitReconciliation={awaitReconciliation}
+                onCreateBackup={() => navigate("DATA_BACKUP", { view: "create" })}
+                onCancel={goBack}
+                onOpenToday={() => switchTab("TODAY")}
+              />
+            }
+          />
+        );
       case "HELP_INFORMATION":
         return (
           <HelpScreen
@@ -477,6 +801,57 @@ export function JagaOnApp({
     );
   }
 
+  if (deletionInFlight) {
+    return (
+      <>
+        <DemoBoundaryNotice />
+        <main className="app-main">
+          <DeletionInProgress messages={messages} waitingForTab={deletionInFlight.waitingForTab} />
+        </main>
+      </>
+    );
+  }
+
+  if (lockRestoreOpen) {
+    // Restore offered from the recovery shell (frames 09 and 12) without a runtime.
+    return (
+      <>
+        <DemoBoundaryNotice />
+        <main className="app-main app-main--child">
+          <RestoreBackupPanel
+            messages={messages}
+            locale={locale}
+            port={restorePort}
+            awaitReconciliation={awaitReconciliation}
+            onCancel={() => setLockRestoreOpen(false)}
+            onOpenToday={() => {
+              setLockRestoreOpen(false);
+              setStack([{ screen: "TODAY" }]);
+            }}
+          />
+        </main>
+      </>
+    );
+  }
+
+  if (storageLock) {
+    return (
+      <>
+        <DemoBoundaryNotice />
+        <main className="app-main app-main--child">
+          <IntegrityShell
+            messages={messages}
+            lock={storageLock}
+            onRetry={retryStorage}
+            onRestore={() => setLockRestoreOpen(true)}
+            deleteAll={deleteAllPort}
+            onDeleted={noop}
+          />
+        </main>
+      </>
+    );
+  }
+
   if (phase.kind === "LOADING") {
     return (
       <>
@@ -491,6 +866,12 @@ export function JagaOnApp({
   if (phase.kind === "ONBOARDING" && repository) {
     // Bottom navigation stays hidden until setup is completed or skipped.
     return (
+      <>
+      {datasetDeleted ? (
+        <div className="app-main">
+          <Banner variant="success">{messages.packet10.deletion.deleteAllDone}</Banner>
+        </div>
+      ) : null}
       <OnboardingFlow
         key={phase.initial?.updatedAt ?? "fresh"}
         messages={messages}
@@ -498,8 +879,12 @@ export function JagaOnApp({
         onLocaleChange={setLocale}
         repository={repository}
         initialState={phase.initial}
-        onExit={finishOnboarding}
+        onExit={(exit) => {
+          setDatasetDeleted(false);
+          finishOnboarding(exit);
+        }}
       />
+      </>
     );
   }
 

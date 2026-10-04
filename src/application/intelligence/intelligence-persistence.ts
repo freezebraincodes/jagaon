@@ -596,3 +596,15 @@ export function buildDerivedDeletionPlan(input: DerivedDeletionInput): Intellige
     safety: { kind: "NOT_REQUIRED" },
   };
 }
+
+/**
+ * Packet 10A: this owner's exact write-side row codecs, composed into the
+ * closed profile registry that validates every stored row (backup, restore,
+ * integrity verification). Reads through the registry never fall back to the
+ * permissive shared event reader.
+ */
+export const INTELLIGENCE_STORED_ROW_CODECS = Object.freeze({
+  revision: derivedRevisionRowCodec,
+  audit: auditCodec,
+  event: strictEventCodec,
+});

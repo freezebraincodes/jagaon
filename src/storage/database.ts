@@ -1,9 +1,30 @@
-import Dexie, { type Table } from "dexie";
+import Dexie, { type Table, type Transaction } from "dexie";
 import {
   JAGAON_DATABASE_NAME,
   JAGAON_DEXIE_VERSION,
+  JAGAON_LEGACY_DEXIE_VERSION,
   JAGAON_STORES_V1,
 } from "./table-catalogue";
+
+/**
+ * Packet 10A lifecycle hooks supplied only by the migration coordinator.
+ *
+ * `populate` runs inside the creation transaction of a brand-new database;
+ * `upgradeFromLegacy` runs inside the exclusive version-change transaction
+ * that upgrades a Dexie 1 database. Without the coordinator's hook a legacy
+ * database refuses to upgrade, so no ordinary open can migrate implicitly.
+ */
+export type JagaOnDatabaseLifecycle = {
+  populate?(transaction: Transaction): Promise<void> | void;
+  upgradeFromLegacy?(transaction: Transaction): Promise<void>;
+};
+
+export class LegacyUpgradeRefusedError extends Error {
+  readonly name = "LegacyUpgradeRefusedError";
+  constructor() {
+    super("A legacy database upgrades only through the registered migration");
+  }
+}
 
 /**
  * Server-safe Dexie database class for the first complete JagaOn schema.
@@ -69,13 +90,23 @@ export class JagaOnDatabase extends Dexie {
   // Section 2.9
   storageMetadata!: Table<never, string>;
 
-  constructor(databaseName: string = JAGAON_DATABASE_NAME) {
+  constructor(databaseName: string = JAGAON_DATABASE_NAME, lifecycle: JagaOnDatabaseLifecycle = {}) {
     // autoOpen: false keeps the instance unopened until a caller explicitly
     // opens it. This prevents any IndexedDB access at construction time and
     // makes the module safe to import during server build.
     super(databaseName, { autoOpen: false });
 
-    this.version(JAGAON_DEXIE_VERSION).stores(JAGAON_STORES_V1);
+    this.version(JAGAON_LEGACY_DEXIE_VERSION).stores(JAGAON_STORES_V1);
+    this.version(JAGAON_DEXIE_VERSION)
+      .stores(JAGAON_STORES_V1)
+      .upgrade(async (transaction) => {
+        if (!lifecycle.upgradeFromLegacy) throw new LegacyUpgradeRefusedError();
+        await lifecycle.upgradeFromLegacy(transaction);
+      });
+    if (lifecycle.populate) {
+      const populate = lifecycle.populate;
+      this.on("populate", (transaction) => populate(transaction));
+    }
   }
 }
 
@@ -89,6 +120,7 @@ export class JagaOnDatabase extends Dexie {
  */
 export function createJagaOnDatabase(
   databaseName: string = JAGAON_DATABASE_NAME,
+  lifecycle: JagaOnDatabaseLifecycle = {},
 ): JagaOnDatabase {
-  return new JagaOnDatabase(databaseName);
+  return new JagaOnDatabase(databaseName, lifecycle);
 }

@@ -26,8 +26,15 @@ const fixture = createDemoScenarioFixture();
 const recordId = "00000000-0000-4000-8000-000000000501" as never;
 const revisionId = "00000000-0000-4000-8000-000000000502" as never;
 const committed: JournalCommitResult = { kind: "COMMITTED", recordId, revisionId };
-const today = singaporeNowParts().date;
-const yesterday = shiftSingaporeDate(today, -1);
+/**
+ * Corrective Pass C: the wheel rightly refuses future occurrence times, so the
+ * expected dates come from one fixed instant (10:00 Singapore, 4 Oct 2026)
+ * rather than the host clock. Only `Date` is faked; animation frames, timers,
+ * `waitFor` and Keen Slider stay real.
+ */
+const FIXED_NOW = new Date("2026-10-04T02:00:00.000Z");
+let today: ReturnType<typeof singaporeNowParts>["date"];
+let yesterday: ReturnType<typeof singaporeNowParts>["date"];
 
 function service(): JournalCommandService {
   return {
@@ -90,8 +97,16 @@ const summary = (container: HTMLElement) => container.querySelector(".time-card-
 const occurrence = (input: unknown) =>
   (input as { temporal: { occurrence: { instantUtc: string } } }).temporal.occurrence.instantUtc;
 
-beforeEach(() => stubWheelGeometry());
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(FIXED_NOW);
+  today = singaporeNowParts().date;
+  yesterday = shiftSingaporeDate(today, -1);
+  stubWheelGeometry();
+});
 afterEach(() => {
+  // Restored first so a failed test never leaks the fixed clock.
+  vi.useRealTimers();
   cleanup();
   vi.restoreAllMocks();
 });

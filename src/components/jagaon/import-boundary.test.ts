@@ -357,3 +357,36 @@ describe("Packet 9C care-preparation import boundary", () => {
     expect(forbidden, `Forbidden UI imports:\n${forbidden.join("\n")}`).toEqual([]);
   });
 });
+
+describe("Packet 10 storage, deletion and portability import boundary", () => {
+  const PACKET_10_ENTRIES = [
+    "src/app/page.tsx",
+    "src/application/storage/integrity-gate.ts",
+    "src/application/storage/profile-row-codecs.ts",
+    "src/application/deletion/permanent-deletion-service.ts",
+    "src/storage/delete-dataset.ts",
+    "src/storage/migrations/migration-coordinator.ts",
+  ];
+
+  it("never reaches Packet 5A Safety records, policy, engine or delivery modules", () => {
+    const graph = graphOf(PACKET_10_ENTRIES);
+    expect(graph.filter((file) => /^src\/(safety|domain\/safety)\//.test(file) || /safety-(event|delivery|router)/i.test(file))).toEqual([]);
+  });
+
+  it("keeps Dexie table access out of Packet 10 UI modules (value imports; types are erased)", () => {
+    const VALUE_IMPORT = /^\s*(?:import|export)\s+(?!type\b)(?:[^"';]*?\s+from\s+)?["']([^"']+)["']/gm;
+    const visited = new Set<string>();
+    const pending = ["DataBackupScreen.tsx", "IntegrityShell.tsx", "RecordDeletionDialog.tsx", "DeleteAllDialog.tsx"].map((file) => join(SOURCE_ROOT, "components/jagaon/data", file));
+    while (pending.length > 0) {
+      const file = normalize(pending.pop()!);
+      if (visited.has(file)) continue;
+      visited.add(file);
+      for (const match of readFileSync(file, "utf8").matchAll(VALUE_IMPORT)) {
+        const imported = resolveSourceImport(file, match[1]!);
+        if (imported && !visited.has(imported)) pending.push(imported);
+      }
+    }
+    const graph = [...visited].map((file) => relative(PROJECT_ROOT, file).replaceAll("\\", "/"));
+    expect(graph.filter((file) => /^src\/storage\/(database|table-catalogue)\.ts$|dexie/.test(file))).toEqual([]);
+  });
+});

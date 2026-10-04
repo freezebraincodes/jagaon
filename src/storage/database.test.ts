@@ -349,11 +349,11 @@ describe("JagaOnDatabase construction", () => {
     db.close();
   });
 
-  it("registers exactly one Dexie version (version 1)", async () => {
+  it("opens at the current Dexie version (version 2; version 1 kept only for the registered upgrade)", async () => {
     const name = makeUniqueName("verno");
     const db = await openDatabase(name);
     expect(db.verno).toBe(JAGAON_DEXIE_VERSION);
-    expect(db.verno).toBe(1);
+    expect(db.verno).toBe(2);
   });
 
   it("is a JagaOnDatabase instance extending Dexie", () => {

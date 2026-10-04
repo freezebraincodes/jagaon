@@ -1,6 +1,8 @@
 import type { AppMessages } from "../types";
+import { packet10EnSG } from "./packet10-en-SG";
 
 export const enSGMessages: AppMessages = {
+  packet10: packet10EnSG,
   shared: {
     appName: "JagaOn",
     demoBoundary:

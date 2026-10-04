@@ -1,6 +1,9 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { type AppMessages, type SupportedLocale } from "@/i18n/types";
+import type { RecordDeletionPort } from "../data/data-ports";
+import { RecordDeletionDialog } from "../data/RecordDeletionDialog";
 import {
   isDemoInsulinPrescription,
   type DemoPatientProfile,
@@ -23,6 +26,7 @@ import {
   PencilIcon,
   PillIcon,
   PlusIcon,
+  TrashIcon,
   WalkIcon,
 } from "../primitives/Icons";
 import {
@@ -45,6 +49,9 @@ type TodayScreenProps = {
   navigate: (screen: ScreenId, params?: Record<string, string>) => void;
   /** Injected clock for deterministic tests; defaults to the device time. */
   now?: Date;
+  /** Packet 10A: permanent deletion of the latest recorded reading (frame 10). */
+  recordDeletion?: RecordDeletionPort;
+  onRecordDeleted?: () => void;
 };
 
 type BookletSlot = {
@@ -103,7 +110,11 @@ export function TodayScreen({
   actionsDisabled = false,
   navigate,
   now = new Date(),
+  recordDeletion,
+  onRecordDeleted,
 }: TodayScreenProps) {
+  const [deleting, setDeleting] = useState(false);
+  const deleteOpener = useRef<HTMLButtonElement>(null);
   const msg = messages.today;
   const greetingName = locale === "zh-SG" ? fixture.displayNameZh : fixture.displayName;
   const prescriptions = fixture.recordedPrescriptions;
@@ -219,11 +230,34 @@ export function TodayScreen({
               <PencilIcon size={18} />
               {messages.readingTime.editTime}
             </button>
+            {recordDeletion ? (
+              <button ref={deleteOpener} type="button" className="text-link text-link--danger" onClick={() => setDeleting(true)}>
+                <TrashIcon size={18} />
+                {messages.packet10.deletion.deleteRecordAction}
+              </button>
+            ) : null}
             <button type="button" className="text-link" disabled aria-disabled="true">
               {msg.viewHistory}
               <ChevronRightIcon size={18} />
             </button>
           </div>
+          {deleting && recordDeletion ? (
+            <RecordDeletionDialog
+              messages={messages}
+              locale={locale}
+              port={recordDeletion}
+              target={{ recordType: "GLUCOSE_READING", recordId: latestGlucose.recordId }}
+              recordLabel={`${messages.glucose.valueLabel} ${latestGlucose.displayValue ?? ""} ${latestGlucose.displayUnit ?? messages.glucose.unit}`.trim()}
+              recordWhen={formatSingaporeDateTime(locale, latestInstant)}
+              now={() => new Date().toISOString()}
+              onClose={() => setDeleting(false)}
+              onDeleted={() => {
+                setDeleting(false);
+                onRecordDeleted?.();
+              }}
+              returnFocusRef={deleteOpener}
+            />
+          ) : null}
         </section>
       ) : null}
 

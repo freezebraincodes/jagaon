@@ -152,9 +152,9 @@ function firstPairInput(): PatternCommitInput {
 }
 
 describe("Packet 7A derived persistence", () => {
-  it("keeps the 16-table Dexie catalogue and schema version unchanged", () => {
+  it("keeps the 16-table Dexie catalogue (schema version is Packet 10's frozen 2)", () => {
     expect(JAGAON_TABLE_NAMES).toHaveLength(16);
-    expect(JAGAON_DEXIE_VERSION).toBe(1);
+    expect(JAGAON_DEXIE_VERSION).toBe(2);
   });
 
   it("commits the snapshot before its observation with heads, edges, audit and events atomically", async () => {

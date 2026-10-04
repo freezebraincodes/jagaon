@@ -1,9 +1,11 @@
 import type { AppMessages } from "../types";
+import { packet10ZhSG } from "./packet10-zh-SG";
 
 // Rows present in internal-docs/implementation-plans/06-bilingual-copy-matrix.md
 // are transcribed exactly from the approved zh-SG column. Medicine, venue,
 // provider and source names are data and are never translated here.
 export const zhSGMessages: AppMessages = {
+  packet10: packet10ZhSG,
   shared: {
     appName: "JagaOn",
     demoBoundary:

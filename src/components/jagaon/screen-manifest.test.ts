@@ -9,6 +9,7 @@ import {
   PACKET_8_TOP_LEVEL_SCREENS,
   PACKET_9B_CHILD_SCREENS,
   PACKET_9C_CHILD_SCREENS,
+  PACKET_10_CHILD_SCREENS,
   ONBOARDING_ROUTES,
   type ScreenId,
 } from "./screen-manifest";
@@ -52,6 +53,7 @@ describe("screen-manifest", () => {
       ...PACKET_6A_CHILD_SCREENS,
       ...PACKET_9B_CHILD_SCREENS,
       ...PACKET_9C_CHILD_SCREENS,
+      ...PACKET_10_CHILD_SCREENS,
     ]);
   });
 
@@ -80,7 +82,9 @@ describe("screen-manifest", () => {
     expect(PACKET_9B_CHILD_SCREENS).toEqual(["PREVENTIVE_CARE", "CARE_PREPARATION"]);
     expect(Object.isFrozen(PACKET_9B_CHILD_SCREENS)).toBe(true);
     expect(PACKET_9C_CHILD_SCREENS).toEqual(["CARE_SUMMARY_PREVIEW"]);
-    expect(ALL_SCREENS.size).toBe(17);
+    // Packet 10: one distinct Data and backup destination.
+    expect(PACKET_10_CHILD_SCREENS).toEqual(["DATA_BACKUP"]);
+    expect(ALL_SCREENS.size).toBe(18);
     expect(ALL_SCREENS.has("MEDICATION_SCHEDULE")).toBe(true);
     expect(ALL_SCREENS.has("HISTORY")).toBe(true);
     expect(ALL_SCREENS.has("MY_MEDICINES")).toBe(true);

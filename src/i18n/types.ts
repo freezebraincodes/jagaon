@@ -1,4 +1,6 @@
 export type { SupportedLocale } from "../domain/patient-settings/locale";
+import type { Packet10Messages } from "./packet10-types";
+export type { Packet10Messages } from "./packet10-types";
 
 // ---------------------------------------------------------------------------
 // Packet 6 bilingual message catalogue
@@ -856,6 +858,8 @@ export type CareSummaryMessages = {
 };
 
 export type AppMessages = {
+  /** Packet 10 data, backup, restore, deletion and integrity copy. */
+  packet10: Packet10Messages;
   shared: SharedMessages;
   today: TodayMessages;
   glucose: GlucoseMessages;

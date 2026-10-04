@@ -7,7 +7,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
-    "build": "next build"
+    "build": "next build",
+    "test:e2e:packet10": "playwright test --config playwright.config.ts"
   },
   "dependencies": {
     "dexie": "^4.0.10",
@@ -19,6 +20,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.1.0",

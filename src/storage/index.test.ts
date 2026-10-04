@@ -67,10 +67,10 @@ describe("storage barrel Packet 4F1 exports", () => {
     expect(_v).toBe("jagaon");
   });
 
-  it("exports JAGAON_DEXIE_VERSION with the exact value 1", () => {
-    const _v: typeof JAGAON_DEXIE_VERSION = 1;
-    expect(JAGAON_DEXIE_VERSION).toBe(1);
-    expect(_v).toBe(1);
+  it("exports JAGAON_DEXIE_VERSION with the exact Packet 10 value 2", () => {
+    const _v: typeof JAGAON_DEXIE_VERSION = 2;
+    expect(JAGAON_DEXIE_VERSION).toBe(2);
+    expect(_v).toBe(2);
   });
 
   it("exports the 16-element JAGAON_TABLE_NAMES array", () => {

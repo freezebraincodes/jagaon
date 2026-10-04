@@ -6,10 +6,44 @@ import type {
   TodayJournalEntry,
   TodayJournalViewModel,
 } from "@/application/journal/journal-contracts";
-import type { JagaOnRuntime } from "@/application/journal/browser-journal-runtime";
+import type { BrowserJournalRuntimeOptions, JagaOnRuntime } from "@/application/journal/browser-journal-runtime";
 import { getMessages } from "@/i18n/get-messages";
 import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-fixture";
-import { JagaOnApp } from "./JagaOnApp";
+import { JagaOnApp, type DeleteAllPortFactory } from "./JagaOnApp";
+import { createDeleteDatasetService } from "@/storage/delete-dataset";
+import { JagaOnStorageLockedError, LocalStateCleanupUnconfirmedError } from "@/application/journal/browser-journal-runtime";
+import { lockStateFor } from "@/application/storage/integrity-gate";
+import { storageFailure } from "@/storage/storage-failure";
+
+/** Packet 10A: the real delete-all service over fake tab and IndexedDB ports. */
+function fakeDeleteAll(options: { otherTabOpen?: boolean } = {}) {
+  const calls = { deleted: 0, closed: 0 };
+  const factory: DeleteAllPortFactory = (hooks) =>
+    createDeleteDatasetService({
+      databaseName: hooks.databaseName,
+      now: () => new Date().toISOString() as never,
+      coordinator: { acquireExclusive: async () => (options.otherTabOpen ? null : () => undefined), announceDeleted: () => undefined },
+      deletion: {
+        deleteDatabase: async () => {
+          calls.deleted += 1;
+        },
+        exists: async () => false,
+      },
+      closeOwnConnections: () => {
+        calls.closed += 1;
+        hooks.closeRuntime();
+      },
+      clearLocalState: hooks.clearLocalState,
+    });
+  return { factory, calls };
+}
+
+function confirmDeleteAll(messages: ReturnType<typeof getMessages>) {
+  fireEvent.click(screen.getByRole("button", { name: messages.packet10.hub.deleteAll }));
+  const dialog = within(screen.getByRole("alertdialog"));
+  fireEvent.change(dialog.getByLabelText(messages.packet10.deletion.typeToConfirm), { target: { value: "DELETE" } });
+  fireEvent.click(dialog.getByRole("button", { name: messages.packet10.deletion.deleteAllAction }));
+}
 import { APPOINTMENT_NOTE_SELECTION_KEY } from "@/application/history/appointment-note-selection";
 import {
   createDemoOnboardingRepository,
@@ -43,7 +77,9 @@ const committed: JournalCommitResult = {
   revisionId: "00000000-0000-4000-8000-000000000202" as never,
 };
 
-function fakeRuntime(): JagaOnRuntime {
+/** `options` models the runtime marker contract: an explicit cleanup request leaves the marker pending. */
+function fakeRuntime(options?: BrowserJournalRuntimeOptions): JagaOnRuntime {
+  let markerPending = options?.localStateCleanup?.when === "ALWAYS";
   let today: TodayJournalViewModel = { entries: [], unavailable: false };
   let glucose: GlucoseRecordViewModel | null = null;
 
@@ -151,6 +187,8 @@ function fakeRuntime(): JagaOnRuntime {
 
   return {
     databaseName: "fake",
+    integrityLock: () => null,
+    onIntegrityLock: () => () => undefined,
     commands,
     query: {
       loadToday: vi.fn(async () => today),
@@ -234,12 +272,21 @@ function fakeRuntime(): JagaOnRuntime {
     resolveLocale: vi.fn(async () => "en-SG" as const),
     persistLocale: vi.fn(async () => undefined),
     resetDemo,
+    recordDeletion: { prepare: vi.fn(), confirm: vi.fn() },
+    backup: { export: vi.fn() },
+    datasetLifecycle: "EXISTING" as "CREATED" | "MIGRATED" | "EXISTING",
+    localStateCleanup: {
+      isPending: vi.fn(async () => markerPending),
+      complete: vi.fn(async () => {
+        markerPending = false;
+      }),
+    },
     close: vi.fn(),
   };
 }
 
 describe("JagaOnApp journal integration", () => {
-  it("does not erase IndexedDB when onboarding storage cannot be cleared", async () => {
+  it("finishes the database deletion truthfully even when the onboarding key cannot be cleared (Corrective Pass A item 5)", async () => {
     const messages = getMessages("en-SG");
     const runtime = fakeRuntime();
     const state = createPreparedOnboardingState("en-SG", NOW);
@@ -250,13 +297,137 @@ describe("JagaOnApp journal integration", () => {
         throw new Error("storage unavailable");
       },
     });
-    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={() => repository} />);
+    const deleteAll = fakeDeleteAll();
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={() => repository} appointmentNoteStorageFactory={() => createMemoryOnboardingStorage()} deleteAllPortFactory={deleteAll.factory} />);
     await screen.findByRole("button", { name: messages.today.recordReading });
     fireEvent.click(screen.getByRole("button", { name: messages.shared.navMore }));
-    fireEvent.click(screen.getByRole("button", { name: messages.settings.resetAction }));
-    fireEvent.click(screen.getByRole("button", { name: messages.settings.resetConfirm }));
-    expect(await screen.findByText(messages.shared.storageUnavailable)).toBeInTheDocument();
-    expect(runtime.resetDemo).not.toHaveBeenCalled();
+    confirmDeleteAll(messages);
+    // The database is deleted; setup restarts and nothing claims that nothing was deleted.
+    // Corrective Pass B item 5: nor that all local data was deleted while the key remains.
+    expect(await screen.findByRole("heading", { level: 1, name: messages.onboarding.welcomeTitle })).toBeInTheDocument();
+    expect(screen.queryByText(messages.packet10.deletion.deleteAllDone)).not.toBeInTheDocument();
+    expect(screen.queryByText(messages.packet10.deletion.deleteBlockedUnchanged)).not.toBeInTheDocument();
+    expect(screen.queryByText(messages.packet10.shared.recordsUnchanged)).not.toBeInTheDocument();
+    expect(deleteAll.calls).toEqual({ deleted: 1, closed: 1 });
+  });
+
+  describe("delete-all local-state cleanup outcome (Corrective Pass B item 5)", () => {
+    /** A storage port whose `removeItem` throws `failures` times (Infinity: always). */
+    function flakyStorage(initial: Record<string, string>, failures: number) {
+      const memory = createMemoryOnboardingStorage(initial);
+      let remaining = failures;
+      const port: DemoOnboardingStoragePort = {
+        getItem: (key) => memory.getItem(key),
+        setItem: (key, value) => memory.setItem(key, value),
+        removeItem: (key) => {
+          if (remaining > 0) {
+            remaining -= 1;
+            throw new Error("storage unavailable");
+          }
+          memory.removeItem(key);
+        },
+      };
+      return port;
+    }
+    const setup = createPreparedOnboardingState("en-SG", NOW);
+    const notes = { [APPOINTMENT_NOTE_SELECTION_KEY]: JSON.stringify({ schemaVersion: 1, selections: [] }) };
+
+    async function deleteEverything(onboarding: DemoOnboardingStoragePort, appointmentNotes: DemoOnboardingStoragePort) {
+      const messages = getMessages("en-SG");
+      const deleteAll = fakeDeleteAll();
+      render(
+        <JagaOnApp
+          runtimeFactory={async (_name, options) => fakeRuntime(options)}
+          onboardingRepositoryFactory={() => createDemoOnboardingRepository(onboarding)}
+          appointmentNoteStorageFactory={() => appointmentNotes}
+          deleteAllPortFactory={deleteAll.factory}
+        />,
+      );
+      await screen.findByRole("button", { name: messages.today.recordReading });
+      fireEvent.click(screen.getByRole("button", { name: messages.shared.navMore }));
+      confirmDeleteAll(messages);
+      expect(await screen.findByRole("heading", { level: 1, name: messages.onboarding.welcomeTitle })).toBeInTheDocument();
+      // The database deletion itself is never reported as unchanged.
+      expect(screen.queryByText(messages.packet10.deletion.deleteBlockedUnchanged)).not.toBeInTheDocument();
+      expect(deleteAll.calls.deleted).toBe(1);
+      return messages;
+    }
+
+    it("clears every local-state owner even when another owner's key cannot be removed", async () => {
+      const onboarding = flakyStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(setup) }, Infinity);
+      const appointmentNotes = flakyStorage(notes, 0);
+      await deleteEverything(onboarding, appointmentNotes);
+      await waitFor(() => expect(appointmentNotes.getItem(APPOINTMENT_NOTE_SELECTION_KEY)).toBeNull());
+    });
+
+    it("never claims local data was deleted while a local key remains", async () => {
+      const onboarding = flakyStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(setup) }, Infinity);
+      const messages = await deleteEverything(onboarding, flakyStorage(notes, 0));
+      await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: messages.onboarding.welcomeTitle })).toBeInTheDocument());
+      expect(onboarding.getItem(DEMO_ONBOARDING_STORAGE_KEY)).not.toBeNull();
+      expect(screen.queryByText(messages.packet10.deletion.deleteAllDone)).not.toBeInTheDocument();
+    });
+
+    it("reports a remaining appointment-note key as incomplete cleanup", async () => {
+      const appointmentNotes = flakyStorage(notes, Infinity);
+      const onboarding = flakyStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(setup) }, 0);
+      const messages = await deleteEverything(onboarding, appointmentNotes);
+      expect(appointmentNotes.getItem(APPOINTMENT_NOTE_SELECTION_KEY)).not.toBeNull();
+      expect(onboarding.getItem(DEMO_ONBOARDING_STORAGE_KEY)).toBeNull();
+      expect(screen.queryByText(messages.packet10.deletion.deleteAllDone)).not.toBeInTheDocument();
+    });
+
+    it("retries the cleanup when the replacement dataset opens and only then reports local data deleted", async () => {
+      const onboarding = flakyStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(setup) }, 1);
+      const messages = await deleteEverything(onboarding, flakyStorage(notes, 0));
+      expect(await screen.findByText(messages.packet10.deletion.deleteAllDone)).toBeInTheDocument();
+      expect(onboarding.getItem(DEMO_ONBOARDING_STORAGE_KEY)).toBeNull();
+    });
+  });
+
+  it("never shows a completed profile over a newly created empty dataset (stale local setup)", async () => {
+    const messages = getMessages("en-SG");
+    const runtime = { ...fakeRuntime(), datasetLifecycle: "CREATED" as const };
+    const storage = onboardingStorage(createPreparedOnboardingState("en-SG", NOW));
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={storage.factory} deleteAllPortFactory={fakeDeleteAll().factory} />);
+    expect(await screen.findByRole("heading", { level: 1, name: messages.onboarding.welcomeTitle })).toBeInTheDocument();
+    expect(storage.storage.getItem(DEMO_ONBOARDING_STORAGE_KEY)).toBeNull();
+  });
+
+  it("keeps an issued delete-all request visible and non-cancellable even if its dialog's screen unmounts (item 3)", async () => {
+    const messages = getMessages("en-SG");
+    const runtime = fakeRuntime();
+    let finish: () => void = () => undefined;
+    const factory: DeleteAllPortFactory = (hooks) =>
+      createDeleteDatasetService({
+        databaseName: hooks.databaseName,
+        now: () => new Date().toISOString() as never,
+        coordinator: { acquireExclusive: async () => () => undefined, announceDeleted: () => undefined },
+        deletion: {
+          deleteDatabase: (_name, onBlocked) =>
+            new Promise<void>((resolve) => {
+              onBlocked();
+              finish = resolve;
+            }),
+          exists: async () => false,
+        },
+        closeOwnConnections: hooks.closeRuntime,
+        clearLocalState: hooks.clearLocalState,
+      });
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} appointmentNoteStorageFactory={() => createMemoryOnboardingStorage()} deleteAllPortFactory={factory} />);
+    await screen.findByRole("button", { name: messages.today.recordReading });
+    fireEvent.click(screen.getByRole("button", { name: messages.shared.navMore }));
+    confirmDeleteAll(messages);
+    const blocker = await screen.findByRole("alertdialog", { name: messages.packet10.hub.deleteAll });
+    expect(blocker).toHaveAttribute("aria-busy", "true");
+    expect(within(blocker).getByRole("alert")).toHaveTextContent(messages.packet10.deletion.deleteBlocked);
+    expect(within(blocker).queryByRole("button")).toBeNull();
+    fireEvent.keyDown(blocker, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: messages.packet10.deletion.keepData })).toBeNull();
+    expect(screen.queryByRole("navigation")).toBeNull();
+    finish();
+    expect(await screen.findByText(messages.packet10.deletion.deleteAllDone)).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog", { name: messages.packet10.hub.deleteAll })).toBeNull();
   });
 
   it("refreshes Today from the query port after a committed glucose entry", async () => {
@@ -281,11 +452,13 @@ describe("JagaOnApp journal integration", () => {
     expect((await screen.findAllByText("6.8")).length).toBeGreaterThan(0);
   });
 
-  it("completes the Packet 6 bilingual journal journey and clears it on reset", async () => {
+  it("completes the Packet 6 bilingual journal journey and clears it with delete-all", async () => {
     const en = getMessages("en-SG");
     const zh = getMessages("zh-SG");
     const runtime = fakeRuntime();
-    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} />);
+    const runtimeFactory = vi.fn(async () => runtime);
+    const deleteAll = fakeDeleteAll();
+    render(<JagaOnApp runtimeFactory={runtimeFactory} onboardingRepositoryFactory={completed()} appointmentNoteStorageFactory={() => createMemoryOnboardingStorage()} deleteAllPortFactory={deleteAll.factory} />);
 
     await screen.findByRole("button", { name: en.today.recordReading });
     fireEvent.click(screen.getByRole("button", { name: en.today.recordReading }));
@@ -366,13 +539,15 @@ describe("JagaOnApp journal integration", () => {
     expect(screen.queryByText(/1777/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: zh.shared.back }));
 
-    fireEvent.click(screen.getByRole("button", { name: zh.settings.resetAction }));
-    fireEvent.click(screen.getByRole("button", { name: zh.settings.resetConfirm }));
+    confirmDeleteAll(zh);
 
-    // A full demo reset clears IndexedDB and the onboarding key: back to Welcome.
+    // Delete-all removes IndexedDB and the onboarding key: setup restarts on a new, unseeded dataset.
     expect(await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle })).toBeInTheDocument();
+    expect(screen.getByText(en.packet10.deletion.deleteAllDone)).toBeInTheDocument();
     expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
-    expect(runtime.resetDemo).toHaveBeenCalledTimes(1);
+    expect(deleteAll.calls).toEqual({ deleted: 1, closed: 1 });
+    await waitFor(() => expect(runtimeFactory).toHaveBeenLastCalledWith(undefined, { seedSyntheticScenarioOnCreate: false }));
+    expect(runtime.resetDemo).not.toHaveBeenCalled();
     expect(screen.queryByText("6.8")).not.toBeInTheDocument();
     expect(screen.queryByText("Brown rice")).not.toBeInTheDocument();
   });
@@ -573,7 +748,7 @@ describe("JagaOnApp journal integration", () => {
     expect(await screen.findByRole("heading", { level: 1, name: en.carePreparation.title })).toBeInTheDocument();
   });
 
-  it("clears the local appointment-note selection on demo reset", async () => {
+  it("clears the local appointment-note selection on delete-all", async () => {
     const en = getMessages("en-SG");
     const runtime = fakeRuntime();
     const selectionStorage = createMemoryOnboardingStorage({
@@ -584,12 +759,12 @@ describe("JagaOnApp journal integration", () => {
         runtimeFactory={async () => runtime}
         onboardingRepositoryFactory={completed()}
         appointmentNoteStorageFactory={() => selectionStorage}
+        deleteAllPortFactory={fakeDeleteAll().factory}
       />,
     );
     await screen.findByRole("button", { name: en.today.recordReading });
     fireEvent.click(screen.getByRole("button", { name: en.shared.navMore }));
-    fireEvent.click(screen.getByRole("button", { name: en.settings.resetAction }));
-    fireEvent.click(screen.getByRole("button", { name: en.settings.resetConfirm }));
+    confirmDeleteAll(en);
     await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle });
     expect(selectionStorage.getItem(APPOINTMENT_NOTE_SELECTION_KEY)).toBeNull();
   });
@@ -689,7 +864,7 @@ describe("JagaOnApp onboarding startup gate", () => {
     expect(screen.getByRole("navigation")).toBeInTheDocument();
   });
 
-  it("does not claim reset success when the onboarding key cannot be cleared", async () => {
+  it("restarts setup on the new dataset even when the onboarding key cannot be cleared", async () => {
     const storage = onboardingStorage(createPreparedOnboardingState("en-SG", NOW));
     const failing = {
       factory: () =>
@@ -702,13 +877,298 @@ describe("JagaOnApp onboarding startup gate", () => {
           },
         }),
     };
-    start({ ...storage, factory: failing.factory });
+    const runtime = fakeRuntime();
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={failing.factory} appointmentNoteStorageFactory={() => createMemoryOnboardingStorage()} deleteAllPortFactory={fakeDeleteAll().factory} />);
     await screen.findByRole("button", { name: en.today.recordReading });
     fireEvent.click(screen.getByRole("button", { name: en.shared.navMore }));
-    fireEvent.click(screen.getByRole("button", { name: en.settings.resetAction }));
-    fireEvent.click(screen.getByRole("button", { name: en.settings.resetConfirm }));
-    expect(await screen.findByText(en.shared.storageUnavailable)).toBeInTheDocument();
-    expect(screen.queryByText(en.settings.resetDone)).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { level: 1, name: en.onboarding.welcomeTitle })).not.toBeInTheDocument();
+    confirmDeleteAll(en);
+    expect(await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle })).toBeInTheDocument();
+    expect(screen.queryByText(en.packet10.deletion.deleteBlockedUnchanged)).not.toBeInTheDocument();
+    // Corrective Pass B item 5: the remaining key is never reported as deleted.
+    expect(screen.queryByText(en.packet10.deletion.deleteAllDone)).not.toBeInTheDocument();
+  });
+});
+
+describe("JagaOnApp Packet 10A integrity lock", () => {
+  const en = getMessages("en-SG");
+
+  it("shows only the neutral recovery shell when the dataset is integrity-locked, and retries", async () => {
+    const lock = lockStateFor(storageFailure("OPEN", "STORAGE_INTEGRITY_FAILED", "2026-10-04T02:00:00.000Z" as never));
+    const runtime = fakeRuntime();
+    const runtimeFactory = vi.fn().mockRejectedValueOnce(new JagaOnStorageLockedError(lock)).mockResolvedValue(runtime);
+    render(<JagaOnApp runtimeFactory={runtimeFactory} onboardingRepositoryFactory={completed()} deleteAllPortFactory={fakeDeleteAll().factory} />);
+    expect(await screen.findByRole("heading", { level: 1, name: en.packet10.integrity.integrityTitle })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(en.packet10.integrity.integrityBody);
+    expect(screen.getByText(en.packet10.shared.noHealthClaim)).toBeInTheDocument();
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: en.today.recordReading })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: en.packet10.integrity.retryRecovery }));
+    expect(await screen.findByRole("button", { name: en.today.recordReading })).toBeInTheDocument();
+    expect(runtimeFactory).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders the newer-database and blocked-update variants one at a time", async () => {
+    for (const [code, key, text] of [
+      ["DATABASE_VERSION_UNSUPPORTED", en.packet10.integrity.intVariantNewerK, en.packet10.integrity.newerDatabase],
+      ["MIGRATION_BLOCKED_BY_OTHER_TAB", en.packet10.integrity.intVariantMigrationK, en.packet10.integrity.migrationBlocked],
+    ] as const) {
+      const lock = lockStateFor(storageFailure("MIGRATE", code, "2026-10-04T02:00:00.000Z" as never));
+      render(<JagaOnApp runtimeFactory={vi.fn().mockRejectedValue(new JagaOnStorageLockedError(lock))} onboardingRepositoryFactory={completed()} deleteAllPortFactory={fakeDeleteAll().factory} />);
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(key);
+      expect(alert).toHaveTextContent(text);
+      expect(alert).not.toHaveTextContent(en.packet10.integrity.integrityBody);
+      cleanup();
+    }
+  });
+});
+
+describe("durable local-state cleanup across app instances (Corrective Pass C)", () => {
+  const en = getMessages("en-SG");
+  const prepared = createPreparedOnboardingState("en-SG", NOW);
+  const skipped: DemoOnboardingStateV1 = { schemaVersion: 1, status: "SKIPPED", lastCompletedStep: null, locale: "en-SG", preferredName: null, medicines: [], updatedAt: NOW } as DemoOnboardingStateV1;
+  const noteSelection = JSON.stringify({ schemaVersion: 1, selections: [] });
+
+  /** A local-storage owner whose removal can be switched between failing and working. */
+  function ownerStorage(initial: Record<string, string>, failing: boolean) {
+    const memory = createMemoryOnboardingStorage(initial);
+    const state = { failing, removeAttempts: 0 };
+    const port: DemoOnboardingStoragePort = {
+      getItem: (key) => memory.getItem(key),
+      setItem: (key, value) => memory.setItem(key, value),
+      removeItem: (key) => {
+        state.removeAttempts += 1;
+        if (state.failing) throw new Error("storage unavailable");
+        memory.removeItem(key);
+      },
+    };
+    return { port, state };
+  }
+
+  /**
+   * One simulated device: the IndexedDB dataset (existence and the durable
+   * marker) outlives every app instance, exactly like the real runtime contract
+   * proven in `local-state-cleanup.test.ts`.
+   */
+  function device(datasetExists: boolean) {
+    const disk = { exists: datasetExists, marker: null as null | { requestedAt: string }, deletions: 0, failMarkerWrite: false };
+    let gate: Promise<void> = Promise.resolve();
+    let release: () => void = () => undefined;
+    const runtimeFactory = vi.fn(async (_name?: string, options?: BrowserJournalRuntimeOptions) => {
+      await gate;
+      const request = options?.localStateCleanup;
+      let lifecycle: "CREATED" | "EXISTING" = "EXISTING";
+      if (!disk.exists) {
+        if (request && disk.failMarkerWrite) throw new LocalStateCleanupUnconfirmedError();
+        disk.exists = true;
+        lifecycle = "CREATED";
+        if (request) disk.marker = { requestedAt: request.requestedAt };
+      } else if (request?.when === "ALWAYS") {
+        if (disk.failMarkerWrite) throw new LocalStateCleanupUnconfirmedError();
+        disk.marker = { requestedAt: request.requestedAt };
+      }
+      return {
+        ...fakeRuntime(),
+        datasetLifecycle: lifecycle,
+        localStateCleanup: {
+          isPending: async () => disk.marker !== null,
+          complete: async () => {
+            await completion.gate;
+            disk.marker = null;
+          },
+        },
+      };
+    });
+    const completion = { gate: Promise.resolve() as Promise<void> };
+    const deleteAll: DeleteAllPortFactory = (hooks) =>
+      createDeleteDatasetService({
+        databaseName: hooks.databaseName,
+        now: () => new Date().toISOString() as never,
+        coordinator: { acquireExclusive: async () => () => undefined, announceDeleted: () => undefined },
+        deletion: {
+          deleteDatabase: async () => {
+            disk.deletions += 1;
+            disk.exists = false;
+            disk.marker = null;
+          },
+          exists: async () => disk.exists,
+        },
+        closeOwnConnections: hooks.closeRuntime,
+        clearLocalState: hooks.clearLocalState,
+      });
+    return {
+      disk,
+      runtimeFactory,
+      deleteAll,
+      completion,
+      holdOpen() {
+        gate = new Promise((resolve) => (release = resolve));
+      },
+      releaseOpen: () => release(),
+    };
+  }
+
+  function mount(dev: ReturnType<typeof device>, onboarding: ReturnType<typeof ownerStorage>, notes: ReturnType<typeof ownerStorage>) {
+    return render(
+      <JagaOnApp
+        runtimeFactory={dev.runtimeFactory}
+        onboardingRepositoryFactory={() => createDemoOnboardingRepository(onboarding.port)}
+        appointmentNoteStorageFactory={() => notes.port}
+        deleteAllPortFactory={dev.deleteAll}
+      />,
+    );
+  }
+
+  const onToday = () => screen.queryByRole("button", { name: en.today.recordReading });
+  const welcome = () => screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle });
+
+  async function deleteEverything() {
+    await screen.findByRole("button", { name: en.today.recordReading });
+    fireEvent.click(screen.getByRole("button", { name: en.shared.navMore }));
+    confirmDeleteAll(en);
+    await welcome();
+  }
+
+  function expectFreshSetupOnly() {
+    expect(onToday()).toBeNull();
+    expect(screen.queryByText(new RegExp(prepared.preferredName ?? "\\u0000"))).toBeNull();
+    expect(screen.queryByText(en.packet10.deletion.deleteAllDone)).toBeNull();
+  }
+
+  it("A: delete-all with incomplete cleanup leaves a durable marker in the replacement dataset and no success banner", async () => {
+    const dev = device(true);
+    const onboarding = ownerStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(prepared) }, true);
+    const notes = ownerStorage({ [APPOINTMENT_NOTE_SELECTION_KEY]: noteSelection }, false);
+    mount(dev, onboarding, notes);
+    await deleteEverything();
+    await waitFor(() => expect(dev.disk.marker).not.toBeNull());
+    expect(dev.disk.marker!.requestedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(Object.keys(dev.disk.marker!)).toEqual(["requestedAt"]);
+    expect(dev.disk.exists).toBe(true);
+    expectFreshSetupOnly();
+  });
+
+  it("B/C: after a full unmount, startup reads the marker first, retries every owner and keeps fresh setup until cleanup is confirmed", async () => {
+    const dev = device(true);
+    const onboarding = ownerStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(prepared) }, true);
+    const notes = ownerStorage({ [APPOINTMENT_NOTE_SELECTION_KEY]: noteSelection }, false);
+    mount(dev, onboarding, notes);
+    await deleteEverything();
+    await waitFor(() => expect(dev.disk.marker).not.toBeNull());
+    cleanup();
+
+    // B: a new app instance while cleanup still fails. Nothing is decided before the marker is read.
+    const before = { onboarding: onboarding.state.removeAttempts, notes: notes.state.removeAttempts };
+    notes.port.setItem(APPOINTMENT_NOTE_SELECTION_KEY, noteSelection);
+    dev.holdOpen();
+    mount(dev, onboarding, notes);
+    await waitFor(() => expect(dev.runtimeFactory).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(screen.getByRole("status")).toHaveTextContent(en.shared.loading);
+    expectFreshSetupOnly();
+    dev.releaseOpen();
+    await welcome();
+    await waitFor(() => expect(onboarding.state.removeAttempts).toBeGreaterThan(before.onboarding));
+    expect(notes.state.removeAttempts).toBeGreaterThan(before.notes);
+    expect(notes.port.getItem(APPOINTMENT_NOTE_SELECTION_KEY)).toBeNull();
+    expect(onboarding.port.getItem(DEMO_ONBOARDING_STORAGE_KEY)).not.toBeNull();
+    expect(dev.disk.marker).not.toBeNull();
+    expect(dev.disk.deletions).toBe(1);
+    expectFreshSetupOnly();
+    cleanup();
+
+    // C: a later instance where cleanup works. Success is claimed only after the marker is gone.
+    onboarding.state.failing = false;
+    notes.port.setItem(APPOINTMENT_NOTE_SELECTION_KEY, noteSelection);
+    let finish: () => void = () => undefined;
+    dev.completion.gate = new Promise((resolve) => (finish = resolve));
+    mount(dev, onboarding, notes);
+    await welcome();
+    await waitFor(() => expect(onboarding.port.getItem(DEMO_ONBOARDING_STORAGE_KEY)).toBeNull());
+    expect(notes.port.getItem(APPOINTMENT_NOTE_SELECTION_KEY)).toBeNull();
+    expect(dev.disk.marker).not.toBeNull();
+    expectFreshSetupOnly();
+    finish();
+    expect(await screen.findByText(en.packet10.deletion.deleteAllDone)).toBeInTheDocument();
+    expect(dev.disk.marker).toBeNull();
+    expect(onToday()).toBeNull();
+    expect(dev.disk.deletions).toBe(1);
+    cleanup();
+
+    // The stale profile never returns once cleanup is complete.
+    mount(dev, onboarding, notes);
+    await welcome();
+    expectFreshSetupOnly();
+  });
+
+  it("D: a crash after the old dataset was deleted still forces fresh setup on every later launch", async () => {
+    const dev = device(false);
+    const onboarding = ownerStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(prepared) }, true);
+    const notes = ownerStorage({}, false);
+    mount(dev, onboarding, notes);
+    await welcome();
+    expect(dev.disk.marker).not.toBeNull();
+    expectFreshSetupOnly();
+    cleanup();
+    // The replacement dataset is now an ordinary EXISTING dataset; the marker still governs.
+    mount(dev, onboarding, notes);
+    await welcome();
+    expect(dev.disk.marker).not.toBeNull();
+    expectFreshSetupOnly();
+  });
+
+  it("fails closed when the marker itself cannot be persisted", async () => {
+    const dev = device(false);
+    dev.disk.failMarkerWrite = true;
+    const onboarding = ownerStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(prepared) }, true);
+    mount(dev, onboarding, ownerStorage({}, false));
+    await welcome();
+    expectFreshSetupOnly();
+    expect(dev.disk.exists).toBe(false);
+  });
+
+  it("a setup finished before the first runtime opens is never sent back to setup", async () => {
+    const dev = device(false);
+    const onboarding = ownerStorage({}, false);
+    dev.holdOpen();
+    mount(dev, onboarding, ownerStorage({}, false));
+    await welcome();
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.usePrepared }));
+    await screen.findByRole("button", { name: en.today.recordReading });
+    dev.releaseOpen();
+    await waitFor(() => expect(dev.runtimeFactory).toHaveBeenCalled());
+    await waitFor(() => expect(dev.disk.exists).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole("button", { name: en.today.recordReading })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1, name: en.onboarding.welcomeTitle })).toBeNull();
+    expect(dev.disk.marker).toBeNull();
+  });
+
+  it("E: a successful delete-all with complete cleanup leaves no marker", async () => {
+    const dev = device(true);
+    const onboarding = ownerStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(prepared) }, false);
+    mount(dev, onboarding, ownerStorage({}, false));
+    await deleteEverything();
+    expect(await screen.findByText(en.packet10.deletion.deleteAllDone)).toBeInTheDocument();
+    expect(dev.disk.marker).toBeNull();
+  });
+
+  it("E: an ordinary first launch creates no marker and a legitimate setup is never mistaken for stale state", async () => {
+    const first = device(false);
+    mount(first, ownerStorage({}, false), ownerStorage({}, false));
+    await welcome();
+    expect(first.disk.marker).toBeNull();
+    cleanup();
+
+    for (const state of [skipped, prepared]) {
+      const dev = device(true);
+      const onboarding = ownerStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(state) }, false);
+      mount(dev, onboarding, ownerStorage({}, false));
+      await screen.findByRole("button", { name: en.today.recordReading });
+      expect(dev.disk.marker).toBeNull();
+      expect(onboarding.state.removeAttempts).toBe(0);
+      expect(onboarding.port.getItem(DEMO_ONBOARDING_STORAGE_KEY)).not.toBeNull();
+      cleanup();
+    }
   });
 });
