@@ -200,8 +200,10 @@ describe("storage barrel Packet 4F2 completion exports", () => {
     const codecs: ImplementedStorageRowCodecs = implementedStorageRowCodecs;
     expect(table).toBe("recordHeads");
     expect(rows).toBeUndefined();
-    expect(IMPLEMENTED_STORAGE_ROW_TABLES).toHaveLength(8);
+    // Packet 11A adds the AI invocation audit codec.
+    expect(IMPLEMENTED_STORAGE_ROW_TABLES).toHaveLength(9);
     expect(codecs.recordHeads).toBeDefined();
+    expect(codecs.aiInvocationAudits).toBeDefined();
   });
 
   it("exports the schema-driven canonical revision contracts", () => {

@@ -30,13 +30,18 @@ import {
   engineEvaluationAuditRowSchema,
   type StoredEngineEvaluationAudit,
 } from "./engine-evaluation-audit-row";
+import {
+  aiInvocationAuditRowSchema,
+  type AiInvocationAuditRow,
+} from "@/domain/ai/ai-invocation-audit";
 
 /**
  * Tables whose exact owning row schema exists after Packet 7A.
  *
- * Packet 7A adds the reverse-dependency and engine-evaluation audit rows. The
- * remaining eight physical tables stay intentionally unregistered until their
- * owning packets supply exact closed row contracts.
+ * Packet 7A adds the reverse-dependency and engine-evaluation audit rows;
+ * Packet 11A adds the minimal AI invocation audit row. The remaining seven
+ * physical tables stay intentionally unregistered here until their owning
+ * packets supply exact closed row contracts.
  */
 export const IMPLEMENTED_STORAGE_ROW_TABLES = Object.freeze([
   "appPreferences",
@@ -47,6 +52,7 @@ export const IMPLEMENTED_STORAGE_ROW_TABLES = Object.freeze([
   "eventConsumerReceipts",
   "reverseDependencies",
   "engineEvaluationAudits",
+  "aiInvocationAudits",
 ] as const);
 
 export type ImplementedStorageRowTable =
@@ -61,6 +67,7 @@ export type ImplementedStorageRowByTable = {
   eventConsumerReceipts: EventConsumerReceipt;
   reverseDependencies: StoredReverseDependency;
   engineEvaluationAudits: StoredEngineEvaluationAudit;
+  aiInvocationAudits: AiInvocationAuditRow;
 };
 
 export type ImplementedStorageRowCodecs = {
@@ -102,5 +109,9 @@ export const implementedStorageRowCodecs: ImplementedStorageRowCodecs =
     engineEvaluationAudits: createStorageRowCodec<StoredEngineEvaluationAudit>(
       "engineEvaluationAudits",
       engineEvaluationAuditRowSchema,
+    ),
+    aiInvocationAudits: createStorageRowCodec<AiInvocationAuditRow>(
+      "aiInvocationAudits",
+      aiInvocationAuditRowSchema,
     ),
   });

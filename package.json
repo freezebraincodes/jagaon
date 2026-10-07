@@ -8,7 +8,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "build": "next build",
-    "test:e2e:packet10": "playwright test --config playwright.config.ts"
+    "test:e2e:packet10": "playwright test --config playwright.config.ts",
+    "evaluate:packet11": "node --env-file=.env.local ./node_modules/vitest/vitest.mjs run --no-file-parallelism src/ai/evaluation/packet-11-live-kie.test.ts",
+    "evaluate:packet11:latency": "node --env-file=.env.local ./node_modules/vitest/vitest.mjs run --no-file-parallelism src/ai/evaluation/packet-11-live-latency.test.ts"
   },
   "dependencies": {
     "dexie": "^4.0.10",

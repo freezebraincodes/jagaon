@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createClosedRowCodecRegistry, createUnionRowCodec, emptyInProfileRowCodec, EMPTY_IN_PROFILE_TABLES, STORAGE_OWNED_CLOSED_CODECS } from "./closed-row-codecs";
 import { StorageRowValidationError, type StorageRowCodec } from "./storage-row-codec";
 import { storageMetadataRowCodec } from "./storage-metadata";
+import { acceptedCareAuditRowFixture, deterministicAuditRowFixture } from "@/domain/ai/ai-test-fixtures";
 
 const accepts = (tag: string): StorageRowCodec<unknown> => ({
   validateForWrite(value) {
@@ -33,6 +34,22 @@ describe("closed row-codec registry", () => {
       expect(read.code).toBe("STORAGE_INTEGRITY_FAILED");
       expect(read.table).toBe(table);
     }
+  });
+
+  it("keeps exactly the three runtime-governance tables empty in the profile (Packet 11A)", () => {
+    expect(EMPTY_IN_PROFILE_TABLES).toEqual(["runtimeManifests", "governedAssets", "runtimeActivationAudits"]);
+  });
+
+  it("enables the exact AI invocation audit codec at both boundaries without accepting payload fields", () => {
+    const codec = STORAGE_OWNED_CLOSED_CODECS.aiInvocationAudits;
+    for (const row of [deterministicAuditRowFixture(), acceptedCareAuditRowFixture()]) {
+      expect(codec.validateForWrite(row)).toEqual(row);
+      expect(codec.validateAfterRead(row)).toEqual(row);
+    }
+    expect(failure(() => codec.validateForWrite({ ...acceptedCareAuditRowFixture(), rawResponse: "{}" })).code).toBe("STORAGE_VALIDATION_FAILED");
+    const read = failure(() => codec.validateAfterRead({ ...deterministicAuditRowFixture(), prompt: "6.2 mmol/L" }));
+    expect(read).toMatchObject({ code: "STORAGE_INTEGRITY_FAILED", table: "aiInvocationAudits" });
+    expect(JSON.stringify(read) + read.message).not.toContain("6.2");
   });
 
   it("accepts a union row only through a registered member and retains no rejected value", () => {

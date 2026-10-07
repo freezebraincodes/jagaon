@@ -42,6 +42,8 @@ export type DeletionClosure = {
   consequences: DeletionConsequence[];
   purgedRecordIds: RecordId[];
   evaluationIds: string[];
+  /** AI invocation audits whose local source or downstream reference names a purged record (spec 6.6). */
+  aiInvocationRequestIds: string[];
   receiptCommandIds: string[];
   redactedEventIds: string[];
 };

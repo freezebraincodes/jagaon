@@ -1,6 +1,7 @@
 import { canonicalizeJson } from "@/application/contracts/canonical-json";
 import { isJournalSourceEventName, JOURNAL_DELETED_EVENT_PAYLOAD } from "@/application/journal/journal-stored-rows";
 import { HACKATHON_CLOSED_ROW_CODECS } from "@/application/storage/profile-row-codecs";
+import { validateAiAuditReferences } from "@/application/ai/ai-audit-lifecycle";
 import { validateReverseDependencies } from "@/application/restore/dependency-reconstruction";
 import { verifyDataset, type DatasetTables } from "@/storage/dataset-verifier";
 import { StorageOperationError } from "@/storage/storage-failure";
@@ -112,6 +113,10 @@ export function createBackupRestoreValidator(dependencies: {
       // Exact edge completeness and governed fields; the backup is never repaired.
       if (validateReverseDependencies(tables.recordRevisions, tables.reverseDependencies).kind !== "VALID") {
         throw new StorageOperationError("BACKUP_PAYLOAD_INVALID", { tableName: "reverseDependencies" });
+      }
+      // Every AI audit reference resolves exactly; a dangling or foreign one is never restored (Packet 11A).
+      if (validateAiAuditReferences({ recordRevisions: tables.recordRevisions, aiInvocationAudits: tables.aiInvocationAudits }).kind !== "VALID") {
+        throw new StorageOperationError("BACKUP_PAYLOAD_INVALID", { tableName: "aiInvocationAudits" });
       }
 
       const tombstoned = new Set((payload.tables.deletionTombstones as Array<{ recordId: string }>).map((row) => row.recordId));

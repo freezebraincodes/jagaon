@@ -52,7 +52,7 @@ export type PermanentDeletionService = {
   confirm(plan: DeletionPlan, confirmation: DeletionConfirmation): Promise<ConfirmDeletionResult>;
 };
 
-const SNAPSHOT_TABLES = ["recordHeads", "recordRevisions", "reverseDependencies", "engineEvaluationAudits", "commandReceipts", "domainEvents"] as const;
+const SNAPSHOT_TABLES = ["recordHeads", "recordRevisions", "reverseDependencies", "engineEvaluationAudits", "aiInvocationAudits", "commandReceipts", "domainEvents"] as const;
 
 async function readSnapshot(database: JagaOnDatabase): Promise<PermanentDeletionSnapshot> {
   return database.transaction("r", SNAPSHOT_TABLES.map((name) => database.table(name)), async () => ({
@@ -60,6 +60,7 @@ async function readSnapshot(database: JagaOnDatabase): Promise<PermanentDeletion
     recordRevisions: await database.table("recordRevisions").toArray(),
     reverseDependencies: await database.table("reverseDependencies").toArray(),
     engineEvaluationAudits: await database.table("engineEvaluationAudits").toArray(),
+    aiInvocationAudits: await database.table("aiInvocationAudits").toArray(),
     commandReceipts: await database.table("commandReceipts").toArray(),
     domainEvents: await database.table("domainEvents").toArray(),
   }));
@@ -182,6 +183,7 @@ export function createPermanentDeletionService(database: JagaOnDatabase, depende
         permanentDeletion: {
           purgedRecordIds: closure.purgedRecordIds,
           removedEvaluationIds: closure.evaluationIds,
+          removedAiInvocationRequestIds: closure.aiInvocationRequestIds,
           redactedEvents: closure.redactedEventIds.map((eventId) => ({ eventId, payload: { ...JOURNAL_DELETED_EVENT_PAYLOAD } })),
           neutralisedReceipts,
           // Revalidated inside the authoritative write transaction (spec 6.5 step 1).

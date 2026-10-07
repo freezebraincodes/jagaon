@@ -18,6 +18,7 @@ export type PermanentDeletionSnapshot = {
   recordRevisions: readonly unknown[];
   reverseDependencies: readonly unknown[];
   engineEvaluationAudits: readonly unknown[];
+  aiInvocationAudits: readonly unknown[];
   commandReceipts: readonly unknown[];
   domainEvents: readonly unknown[];
 };
@@ -27,6 +28,8 @@ export type PermanentDeletionEffects = {
   purgedRecordIds: readonly RecordId[];
   /** Engine evaluation audits that name a purged revision (6.6). */
   removedEvaluationIds: readonly string[];
+  /** AI invocation audits whose source or downstream reference names a purged record (6.6). */
+  removedAiInvocationRequestIds: readonly string[];
   /** Existing events whose payload copies deleted content get this closed replacement payload. */
   redactedEvents: readonly { eventId: string; payload: unknown }[];
   /** Receipts whose content-derived hash would remain a reversible fingerprint. */
@@ -47,6 +50,7 @@ export type PermanentDeletionTables = {
   revisions: Table<unknown>;
   dependencies: Table<unknown>;
   evaluations: Table<unknown>;
+  aiAudits: Table<unknown>;
   receipts: Table<CommandReceipt>;
   events: Table<unknown>;
 };
@@ -61,6 +65,7 @@ export async function applyPermanentDeletion(
     recordRevisions: await tables.revisions.toArray(),
     reverseDependencies: await tables.dependencies.toArray(),
     engineEvaluationAudits: await tables.evaluations.toArray(),
+    aiInvocationAudits: await tables.aiAudits.toArray(),
     commandReceipts: await tables.receipts.toArray(),
     domainEvents: await tables.events.toArray(),
   };
@@ -83,6 +88,7 @@ export async function applyPermanentDeletion(
     await tables.receipts.put(codecs.receiptCodec.validateForWrite({ ...existing, commandHash: neutralised.commandHash }));
   }
   if (effects.removedEvaluationIds.length > 0) await tables.evaluations.bulkDelete([...effects.removedEvaluationIds]);
+  if (effects.removedAiInvocationRequestIds.length > 0) await tables.aiAudits.bulkDelete([...effects.removedAiInvocationRequestIds]);
 
   // Step 4: every patient-content revision of every purged record.
   if (purged.size > 0) await tables.revisions.where("recordId").anyOf([...purged]).delete();

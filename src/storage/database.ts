@@ -1,3 +1,4 @@
+import type { AiInvocationAuditRow } from "@/domain/ai/ai-invocation-audit";
 import Dexie, { type Table, type Transaction } from "dexie";
 import {
   JAGAON_DATABASE_NAME,
@@ -76,7 +77,7 @@ export class JagaOnDatabase extends Dexie {
   engineEvaluationAudits!: Table<never, string>;
 
   // Section 2.7
-  aiInvocationAudits!: Table<never, string>;
+  aiInvocationAudits!: Table<AiInvocationAuditRow, string>;
 
   // Section 2.8
   runtimeManifests!: Table<never, string>;

@@ -687,6 +687,7 @@ export function createAuthoritativeCommandStore<
     database,
     "engineEvaluationAudits",
   );
+  const aiAudits = table<unknown>(database, "aiInvocationAudits");
   const preferences = table<AppPreferenceRow>(database, "appPreferences");
   const metadata = table<EventSequenceHighWaterMarkRow>(
     database,
@@ -703,6 +704,7 @@ export function createAuthoritativeCommandStore<
     work,
     dependencies,
     evaluations,
+    aiAudits,
     preferences,
     metadata,
   ];
@@ -818,6 +820,7 @@ export function createAuthoritativeCommandStore<
                   revisions: revisions as Table<unknown>,
                   dependencies: dependencies as Table<unknown>,
                   evaluations: evaluations as Table<unknown>,
+                  aiAudits: aiAudits as Table<unknown>,
                   receipts,
                   events: events as Table<unknown>,
                 },

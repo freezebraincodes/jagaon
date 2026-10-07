@@ -17,8 +17,11 @@ export type ClosedRowCodecRegistry = { readonly [TTable in JagaOnTableName]: Sto
 export const OWNER_COMPOSED_TABLES = Object.freeze(["recordRevisions", "auditEvents", "domainEvents"] as const);
 export type OwnerComposedTable = (typeof OWNER_COMPOSED_TABLES)[number];
 
-/** Tables no owner writes in the `HACKATHON_DEMO` profile; any row is invalid. */
-export const EMPTY_IN_PROFILE_TABLES = Object.freeze(["aiInvocationAudits", "runtimeManifests", "governedAssets", "runtimeActivationAudits"] as const);
+/**
+ * Tables no owner writes in the `HACKATHON_DEMO` profile; any row is invalid.
+ * Packet 11A enables only `aiInvocationAudits`, with no index or version change.
+ */
+export const EMPTY_IN_PROFILE_TABLES = Object.freeze(["runtimeManifests", "governedAssets", "runtimeActivationAudits"] as const);
 export type EmptyInProfileTable = (typeof EMPTY_IN_PROFILE_TABLES)[number];
 
 /** A codec that accepts no row. */
@@ -66,7 +69,7 @@ export const STORAGE_OWNED_CLOSED_CODECS: Readonly<Omit<ClosedRowCodecRegistry, 
   eventConsumerReceipts: implementedStorageRowCodecs.eventConsumerReceipts,
   reverseDependencies: implementedStorageRowCodecs.reverseDependencies,
   engineEvaluationAudits: implementedStorageRowCodecs.engineEvaluationAudits,
-  aiInvocationAudits: emptyInProfileRowCodec("aiInvocationAudits"),
+  aiInvocationAudits: implementedStorageRowCodecs.aiInvocationAudits,
   runtimeManifests: emptyInProfileRowCodec("runtimeManifests"),
   governedAssets: emptyInProfileRowCodec("governedAssets"),
   runtimeActivationAudits: emptyInProfileRowCodec("runtimeActivationAudits"),

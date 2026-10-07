@@ -32,6 +32,8 @@ import { StorageRowValidationError } from "./storage-row-codec";
 import type { StoredReverseDependency } from "./reverse-dependency-row";
 import type { StoredEngineEvaluationAudit } from "./engine-evaluation-audit-row";
 import { JAGAON_TABLE_NAMES } from "./table-catalogue";
+import { acceptedCareAuditRowFixture } from "@/domain/ai/ai-test-fixtures";
+import type { AiInvocationAuditRow } from "@/domain/ai";
 
 const instant = (value: string): Instant => instantSchema.parse(value);
 
@@ -143,10 +145,11 @@ const validRows: ImplementedStorageRowByTable = {
   eventConsumerReceipts: consumerReceipt,
   reverseDependencies: reverseDependency,
   engineEvaluationAudits: evaluationAudit,
+  aiInvocationAudits: acceptedCareAuditRowFixture() as AiInvocationAuditRow,
 };
 
 describe("IMPLEMENTED_STORAGE_ROW_TABLES", () => {
-  it("contains exactly the eight currently implemented row tables", () => {
+  it("contains exactly the nine currently implemented row tables", () => {
     expect(IMPLEMENTED_STORAGE_ROW_TABLES).toEqual([
       "appPreferences",
       "recordHeads",
@@ -156,12 +159,13 @@ describe("IMPLEMENTED_STORAGE_ROW_TABLES", () => {
       "eventConsumerReceipts",
       "reverseDependencies",
       "engineEvaluationAudits",
+      "aiInvocationAudits",
     ]);
-    expect(new Set(IMPLEMENTED_STORAGE_ROW_TABLES).size).toBe(8);
+    expect(new Set(IMPLEMENTED_STORAGE_ROW_TABLES).size).toBe(9);
     expect(Object.isFrozen(IMPLEMENTED_STORAGE_ROW_TABLES)).toBe(true);
   });
 
-  it("leaves the eight incomplete row tables outside the codec registry", () => {
+  it("leaves the seven incomplete row tables outside the codec registry", () => {
     const deferred = JAGAON_TABLE_NAMES.filter(
       (table) => !IMPLEMENTED_STORAGE_ROW_TABLES.includes(table as never),
     );
@@ -169,7 +173,6 @@ describe("IMPLEMENTED_STORAGE_ROW_TABLES", () => {
       "recordRevisions",
       "auditEvents",
       "domainEvents",
-      "aiInvocationAudits",
       "runtimeManifests",
       "governedAssets",
       "runtimeActivationAudits",
@@ -179,7 +182,7 @@ describe("IMPLEMENTED_STORAGE_ROW_TABLES", () => {
 });
 
 describe("implementedStorageRowCodecs", () => {
-  it("is a frozen exact eight-codec map", () => {
+  it("is a frozen exact nine-codec map", () => {
     expect(Object.keys(implementedStorageRowCodecs)).toEqual(
       IMPLEMENTED_STORAGE_ROW_TABLES,
     );

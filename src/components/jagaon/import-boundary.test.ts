@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -388,5 +388,149 @@ describe("Packet 10 storage, deletion and portability import boundary", () => {
     }
     const graph = [...visited].map((file) => relative(PROJECT_ROOT, file).replaceAll("\\", "/"));
     expect(graph.filter((file) => /^src\/storage\/(database|table-catalogue)\.ts$|dexie/.test(file))).toEqual([]);
+  });
+});
+
+describe("Packet 11B Kie server-only boundary", () => {
+  const all = (dir: string): string[] =>
+    readdirSync(join(PROJECT_ROOT, dir)).flatMap((name) => {
+      const path = `${dir}/${name}`;
+      return statSync(join(PROJECT_ROOT, path)).isDirectory() ? all(path) : /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) ? [path] : [];
+    });
+  const SERVER_ONLY = (file: string) => file.startsWith("src/ai/kie/") || file.startsWith("src/app/api/ai/");
+
+  it("lets only the Kie modules and the AI route read KIE_API_KEY; no public copy exists", () => {
+    for (const file of all("src")) {
+      const source = readFileSync(join(PROJECT_ROOT, file), "utf8");
+      expect(source, file).not.toMatch(/NEXT_PUBLIC_KIE/);
+      if (/KIE_API_KEY/.test(source)) expect(SERVER_ONLY(file), file).toBe(true);
+    }
+  });
+
+  it("lets only src/ai and the AI route import the Kie adapter", () => {
+    for (const file of all("src")) {
+      const imports = [...readFileSync(join(PROJECT_ROOT, file), "utf8").matchAll(STATIC_IMPORT)].map((match) => match[1]!);
+      if (imports.some((specifier) => specifier.startsWith("@/ai/kie") || (file.startsWith("src/ai/") && specifier.includes("/kie/")))) {
+        expect(file.startsWith("src/ai/") || file.startsWith("src/app/api/ai/"), file).toBe(true);
+      }
+    }
+  });
+
+  it("lets only the output validator and the evaluation boundary import the shared meaning rules", () => {
+    const importers = all("src").filter((file) => /ai-meaning-rules/.test(readFileSync(join(PROJECT_ROOT, file), "utf8")) && file !== "src/application/ai/ai-meaning-rules.ts");
+    expect(importers.filter((file) => file !== "src/application/ai/ai-output-validator.ts" && file !== "src/application/ai/language/shell-validator.ts" && !file.startsWith("src/ai/evaluation/"))).toEqual([]);
+    // No client or route graph reaches the evaluation diagnostics.
+    for (const entry of ["src/app/page.tsx", "src/app/api/ai/task/route.ts", "src/app/api/onemap/search/route.ts"]) {
+      expect(graphOf([entry]).filter((file) => file.startsWith("src/ai/evaluation/")), entry).toEqual([]);
+    }
+  });
+
+  it("keeps the closed abstention reason out of the route, UI, application service and production audit", () => {
+    const ALLOWED = ["src/domain/ai/ai-task-contracts.ts", "src/domain/ai/ai-test-fixtures.ts", "src/domain/ai/ai-language-shell-contracts.ts", "src/ai/prompts/packet-11-prompts.ts", "src/ai/kie/kie-responses-contracts.ts", "src/ai/prompts/packet-11-shell-prompts.ts", "src/ai/kie/kie-shell-contracts.ts"];
+    const mentions = all("src").filter((file) => !/\.test\.tsx?$/.test(file) && readFileSync(join(PROJECT_ROOT, file), "utf8").includes("abstentionReason"));
+    expect(mentions.filter((file) => !ALLOWED.includes(file) && !file.startsWith("src/ai/evaluation/"))).toEqual([]);
+  });
+
+  it("confines the raw request/response trace facility to the Packet 11 live evaluation runner", () => {
+    const importers = all("src").filter((file) => file !== "src/ai/evaluation/packet-11-live-trace.ts" && /packet-11-live-trace/.test(readFileSync(join(PROJECT_ROOT, file), "utf8")));
+    // No production module imports it; only the explicit live runner (a test file) wires it in.
+    expect(importers).toEqual([]);
+    expect(readFileSync(join(PROJECT_ROOT, "src/ai/evaluation/packet-11-live-kie.test.ts"), "utf8")).toMatch(/from "\.\/packet-11-live-trace"/);
+    expect(all("src").filter((file) => readFileSync(join(PROJECT_ROOT, file), "utf8").includes("KIE_EVALUATION_RAW_TRACE") && !file.startsWith("src/ai/evaluation/"))).toEqual([]);
+    for (const entry of ["src/app/page.tsx", "src/app/api/ai/task/route.ts", "src/app/api/onemap/search/route.ts"]) {
+      expect(graphOf([entry]).filter((file) => file.includes("packet-11-live-trace")), entry).toEqual([]);
+    }
+  });
+
+  it("confines the traced hybrid shell diagnostic to its explicit live runner", () => {
+    const importers = all("src").filter((file) => file !== "src/ai/evaluation/packet-11-hybrid-live-diagnostic.ts" && /packet-11-hybrid-live-diagnostic/.test(readFileSync(join(PROJECT_ROOT, file), "utf8")));
+    // No production module imports it; only the explicit live runner (a test file) wires it in.
+    expect(importers).toEqual([]);
+    expect(readFileSync(join(PROJECT_ROOT, "src/ai/evaluation/packet-11-live-hybrid-diagnostic.test.ts"), "utf8")).toMatch(/from "\.\/packet-11-hybrid-live-diagnostic"/);
+    expect(all("src").filter((file) => readFileSync(join(PROJECT_ROOT, file), "utf8").includes("RUN_LIVE_HYBRID_SHELL_DIAGNOSTIC") && !file.startsWith("src/ai/evaluation/"))).toEqual([]);
+    for (const entry of ["src/app/page.tsx", "src/app/api/ai/task/route.ts", "src/app/api/onemap/search/route.ts"]) {
+      expect(graphOf([entry]).filter((file) => file.includes("packet-11-hybrid-live-diagnostic")), entry).toEqual([]);
+    }
+  });
+
+  it("confines the FULL hybrid runner tooling (repair-capable tracer, human-review page) to its explicit live runner", () => {
+    const importers = all("src").filter((file) => file !== "src/ai/evaluation/packet-11-hybrid-human-review.ts" && /packet-11-hybrid-human-review/.test(readFileSync(join(PROJECT_ROOT, file), "utf8")));
+    // No production module imports the review builder; only the explicit FULL runner (a test file) wires it in.
+    expect(importers).toEqual([]);
+    const runner = readFileSync(join(PROJECT_ROOT, "src/ai/evaluation/packet-11-live-hybrid-full.test.ts"), "utf8");
+    expect(runner).toMatch(/from "\.\/packet-11-hybrid-human-review"/);
+    expect(runner).toMatch(/from "\.\/packet-11-hybrid-live-diagnostic"/);
+    expect(runner).toMatch(/RUN_LIVE_HYBRID_SHELL_FULL === "1"/);
+    // The review builder never reaches the tracer, the provider adapters or the network.
+    const review = readFileSync(join(PROJECT_ROOT, "src/ai/evaluation/packet-11-hybrid-human-review.ts"), "utf8");
+    expect(review).not.toMatch(/packet-11-hybrid-live-diagnostic|@\/ai\/kie|@\/ai\/deepseek|fetch\s*\(|https?:\/\/|process\.env|localStorage/);
+    expect(all("src").filter((file) => /RUN_LIVE_HYBRID_SHELL_FULL|HYBRID_FULL_/.test(readFileSync(join(PROJECT_ROOT, file), "utf8")) && !file.startsWith("src/ai/evaluation/"))).toEqual([]);
+    for (const entry of ["src/app/page.tsx", "src/app/api/ai/task/route.ts", "src/app/api/onemap/search/route.ts"]) {
+      expect(graphOf([entry]).filter((file) => file.includes("packet-11-hybrid-human-review") || file.includes("packet-11-live-hybrid-full") || file.includes("packet-11-hybrid-live-diagnostic")), entry).toEqual([]);
+    }
+  });
+
+  it("confines the targeted six-fixture EXPLAIN diagnostic runner (evaluation-only, env-gated, never reachable from the app)", () => {
+    const runner = readFileSync(join(PROJECT_ROOT, "src/ai/evaluation/packet-11-live-hybrid-targeted.test.ts"), "utf8");
+    expect(runner).toMatch(/from "\.\/packet-11-hybrid-live-diagnostic"/);
+    expect(runner).toMatch(/from "\.\/packet-11-hybrid-human-review"/);
+    expect(runner).toMatch(/RUN_LIVE_HYBRID_SHELL_TARGETED === "1"/);
+    // The offline part never reads a credential file or switches another runner on.
+    expect(runner).not.toMatch(/\.env\.local|RUN_OFFLINE_HYBRID_REPLAY|RUN_LIVE_HYBRID_SHELL_(?:SMOKE|FULL|DIAGNOSTIC)\b/);
+    expect(all("src").filter((file) => /RUN_LIVE_HYBRID_SHELL_TARGETED|HYBRID_TARGETED_/.test(readFileSync(join(PROJECT_ROOT, file), "utf8")) && !file.startsWith("src/ai/evaluation/"))).toEqual([]);
+    for (const entry of ["src/app/page.tsx", "src/app/api/ai/task/route.ts", "src/app/api/onemap/search/route.ts"]) {
+      expect(graphOf([entry]).filter((file) => file.includes("packet-11-live-hybrid-targeted")), entry).toEqual([]);
+    }
+  });
+
+  it("keeps the rules r8 offline replay network-free and evaluation-only (env-gated, fetch stubbed, no live switch, keys refused)", () => {
+    const replay = readFileSync(join(PROJECT_ROOT, "src/ai/evaluation/packet-11-offline-hybrid-replay.test.ts"), "utf8");
+    expect(replay).toMatch(/RUN_OFFLINE_HYBRID_REPLAY === "1"/);
+    expect(replay).toMatch(/vi\.stubGlobal\("fetch"/);
+    expect(replay).toMatch(/REPLAY_REQUIRES_PROVIDER_KEYS_UNSET/);
+    expect(replay).not.toMatch(/RUN_LIVE_|readDeepSeekToken|\.env\.local/);
+    expect(all("src").filter((file) => readFileSync(join(PROJECT_ROOT, file), "utf8").includes("RUN_OFFLINE_HYBRID_REPLAY"))).toEqual([]);
+  });
+
+  it("keeps the eval.18 offline reassessment network-free and evaluation-only (env-gated, fetch stubbed, no live switch, keys refused)", () => {
+    const tool = readFileSync(join(PROJECT_ROOT, "src/ai/evaluation/packet-11-offline-hybrid-reassessment.test.ts"), "utf8");
+    expect(tool).toMatch(/RUN_OFFLINE_HYBRID_REASSESSMENT === "1"/);
+    expect(tool).toMatch(/vi\.stubGlobal\("fetch"/);
+    expect(tool).toMatch(/REASSESSMENT_REQUIRES_PROVIDER_KEYS_UNSET/);
+    expect(tool).not.toMatch(/RUN_LIVE_|RUN_OFFLINE_HYBRID_REPLAY|readDeepSeekToken|\.env\.local/);
+    // Only the test file itself names the switch; no module, route or client graph reaches it.
+    expect(all("src").filter((file) => /RUN_OFFLINE_HYBRID_REASSESSMENT|OFFLINE_REASSESSMENT_UNDER_EVAL_18/.test(readFileSync(join(PROJECT_ROOT, file), "utf8")))).toEqual([]);
+    for (const entry of ["src/app/page.tsx", "src/app/api/ai/task/route.ts", "src/app/api/onemap/search/route.ts"]) {
+      expect(graphOf([entry]).filter((file) => file.includes("packet-11-offline-hybrid-reassessment")), entry).toEqual([]);
+    }
+  });
+
+  it("builds every Kie Responses request in the one retention-safe adapter used by the route and the live runners", () => {
+    const builders = all("src").filter((file) => /stream:\s*false/.test(readFileSync(join(PROJECT_ROOT, file), "utf8")));
+    expect(builders).toEqual(["src/ai/kie/kie-responses-provider.ts"]);
+    expect(readFileSync(join(PROJECT_ROOT, builders[0]!), "utf8")).toMatch(/stream: false,\s*store: false,/);
+    for (const file of ["src/app/api/ai/task/ai-task-handler.ts", "src/ai/evaluation/packet-11-live-kie.test.ts", "src/ai/evaluation/packet-11-live-latency.test.ts"]) {
+      const source = readFileSync(join(PROJECT_ROOT, file), "utf8");
+      expect(source, file).toMatch(/createKieResponsesProvider\(/);
+      expect(source, file).not.toMatch(/stream:\s*false|"store"|store:/);
+    }
+  });
+
+  it("lets only the projector, fallbacks and task service read the approved-meaning registry, never the browser graph", () => {
+    const importers = all("src").filter((file) => file !== "src/application/ai/ai-meaning-registry.ts" && /ai-meaning-registry/.test(readFileSync(join(PROJECT_ROOT, file), "utf8")));
+    // The evaluation harnesses (legacy eval.4 and hybrid eval.6) read only the revision constant; they are unreachable from the route and client graphs.
+    // The evaluation-only FULL human-review page renders the EXPLAIN limitation copy with the service's own renderer (confined above).
+    expect(importers.sort()).toEqual(["src/ai/evaluation/packet-11-evaluation.ts", "src/ai/evaluation/packet-11-fixtures.ts", "src/ai/evaluation/packet-11-hybrid-evaluation.ts", "src/ai/evaluation/packet-11-hybrid-human-review.ts", "src/application/ai/ai-fallbacks.ts", "src/application/ai/ai-hybrid-task-service.ts", "src/application/ai/ai-task-service.ts", "src/application/ai/detached-payload-projector.ts"]);
+    expect(graphOf(["src/app/page.tsx"])).not.toContain("src/application/ai/ai-meaning-registry.ts");
+    const source = readFileSync(join(PROJECT_ROOT, "src/application/ai/ai-meaning-registry.ts"), "utf8");
+    expect(source).not.toMatch(/process\.env|KIE_API_KEY|fetch\s*\(|https?:\/\/|@\/ai\/|evaluation/);
+  });
+
+  it("keeps the client feature graph away from every server AI module", () => {
+    const graph = graphOf(["src/app/page.tsx"]);
+    expect(graph.filter((file) => file.startsWith("src/ai/") || file.startsWith("src/app/api/"))).toEqual([]);
+    expect(graphOf(["src/app/api/onemap/search/route.ts"]).filter((file) => file.startsWith("src/ai/"))).toEqual([]);
+    // The evaluation boundary (fixtures, evaluator, latency and reference diagnostics) is unreachable from the AI route.
+    expect(graphOf(["src/app/api/ai/task/route.ts"]).filter((file) => file.startsWith("src/ai/evaluation/"))).toEqual([]);
   });
 });

@@ -1,3 +1,4 @@
+import { aiAuditReferencesIn, aiAuditsAffectedByDeletion } from "@/application/ai/ai-audit-lifecycle";
 import { canonicalizeJson, hashCanonicalJson, type Sha256Digest } from "@/application/contracts/canonical-json";
 import { frozenClone } from "@/application/deep-freeze";
 import { isJournalSourceEventName, JOURNAL_DELETED_EVENT_PAYLOAD } from "@/application/journal/journal-stored-rows";
@@ -98,6 +99,13 @@ export function computeDeletionClosure(snapshot: PermanentDeletionSnapshot, targ
     .filter((audit) => [...audit.triggeringRevisions, ...audit.consideredRevisions].some((ref) => purgedRevisionIds.has(ref.revisionId)))
     .map((audit) => audit.evaluationId)
     .sort();
+  // AI audits that would retain the deleted relationship are removed with it (spec 6.6).
+  const aiInvocationRequestIds = aiAuditsAffectedByDeletion(snapshot.aiInvocationAudits, { recordIds: purged, revisionIds: purgedRevisionIds });
+  const removedAudits = new Set(aiInvocationRequestIds);
+  // A surviving record may not keep a reference to a removed audit (no orphaned care-summary AI reference).
+  if (revisions.some((row) => !purged.has(row.recordId) && aiAuditReferencesIn((row as { revision?: { payload?: unknown } }).revision?.payload).some((ref) => removedAudits.has(ref as string)))) {
+    throw new DeletionPlanRefusedError("UNSUPPORTED_DEPENDENT");
+  }
   const receiptCommandIds = (snapshot.commandReceipts as Receipt[])
     .filter((receipt) => [...(receipt.resultingRevisions ?? []), ...(receipt.existingRevisions ?? []), ...(receipt.currentHeads ?? [])].some((ref) => purged.has(ref.recordId)))
     .map((receipt) => receipt.commandId)
@@ -135,6 +143,7 @@ export function computeDeletionClosure(snapshot: PermanentDeletionSnapshot, targ
     consequences,
     purgedRecordIds: [target.recordId, ...dependents.map((dependent) => dependent.head.recordId)] as RecordId[],
     evaluationIds,
+    aiInvocationRequestIds,
     receiptCommandIds,
     redactedEventIds,
   };
@@ -149,6 +158,7 @@ export function closureFingerprint(closure: DeletionClosure): string {
     consequences: closure.consequences,
     purged: closure.purgedRecordIds,
     evaluations: closure.evaluationIds,
+    aiInvocations: closure.aiInvocationRequestIds,
     receipts: closure.receiptCommandIds,
     events: closure.redactedEventIds,
   });

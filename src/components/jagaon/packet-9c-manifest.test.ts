@@ -224,9 +224,13 @@ describe("Packet 9 permanent-deletion boundary (Corrective Pass B)", () => {
   it("has no Packet 11, 12 or 7B imports or routes; Packet 10 adds only its own data paths", () => {
     // Packet 10's encrypted portability and storage modules are the only backup/restore paths.
     const packet10 = /^src\/(backup|storage|application\/(storage|deletion|restore)|components\/jagaon\/data|i18n\/(packet10-types|messages\/packet10-))/;
+    // Packet 11A (owner decision, blocker 1 option b): only the local AI audit row and its
+    // Packet 10 deletion/restore reconciliation enter the runtime; no provider, prompt or AI UI.
+    const packet11aAuditLifecycle = new Set(["src/application/ai/ai-audit-lifecycle.ts", "src/domain/ai/ai-invocation-audit.ts", "src/domain/ai/ai-task-contracts.ts"]);
     const forbidden = RUNTIME_GRAPH.filter(
       (file) =>
         !packet10.test(file) &&
+        !packet11aAuditLifecycle.has(file) &&
         /backup|restore|import-export|data-export|packet-?1[0-2]|(^|\/)ai\/|ai-assist|routine-shift|recurring-barrier|prescribed-timing|barrier-learning/i.test(file),
     );
     expect(forbidden, forbidden.join("\n")).toEqual([]);

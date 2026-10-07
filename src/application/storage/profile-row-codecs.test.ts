@@ -1,3 +1,4 @@
+import { acceptedCareAuditRowFixture } from "@/domain/ai/ai-test-fixtures";
 import { afterEach, describe, expect, it } from "vitest";
 import Dexie from "dexie";
 import { validateClosedStoredRow } from "@/storage/closed-row-codecs";
@@ -48,8 +49,12 @@ describe("HACKATHON_DEMO closed row codecs over a real populated dataset", () =>
       for (const table of JAGAON_TABLE_NAMES) {
         for (const row of tables[table]) validateClosedStoredRow(HACKATHON_CLOSED_ROW_CODECS, table, row);
       }
+      // Packet 11A: no runtime path writes an AI audit (every task is deterministic-only and unwired).
       expect(tables.aiInvocationAudits).toEqual([]);
+      expect(tables.runtimeManifests).toEqual([]);
       expect(tables.governedAssets).toEqual([]);
+      expect(tables.runtimeActivationAudits).toEqual([]);
+      expect(HACKATHON_CLOSED_ROW_CODECS.aiInvocationAudits.validateAfterRead(acceptedCareAuditRowFixture())).toEqual(acceptedCareAuditRowFixture());
     },
     INTEGRATION_TIMEOUT_MS,
   );

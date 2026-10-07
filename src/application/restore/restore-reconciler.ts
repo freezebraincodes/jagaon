@@ -1,3 +1,4 @@
+import { validateAiAuditReferences } from "@/application/ai/ai-audit-lifecycle";
 import { readDatasetTables } from "@/application/storage/integrity-gate";
 import { HACKATHON_CLOSED_ROW_CODECS } from "@/application/storage/profile-row-codecs";
 import type { Instant } from "@/domain/shared/time";
@@ -77,6 +78,8 @@ export function createRestoreReconciler(
         if (validateReverseDependencies(tables.recordRevisions, tables.reverseDependencies).kind !== "VALID") {
           throw new StorageOperationError("RESTORE_RECONCILIATION_FAILED", { tableName: "reverseDependencies" });
         }
+        // The same AI audit reference closure the target was verified against before commit.
+        if (validateAiAuditReferences(tables).kind !== "VALID") throw new StorageOperationError("RESTORE_RECONCILIATION_FAILED", { tableName: "aiInvocationAudits" });
         return;
       }
       case "BOOTSTRAP_LOCALE":

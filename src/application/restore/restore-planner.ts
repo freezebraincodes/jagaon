@@ -1,3 +1,4 @@
+import { aiAuditsAffectedByDeletion, validateAiAuditReferences } from "@/application/ai/ai-audit-lifecycle";
 import { canonicalizeJson, hashCanonicalJson, type Sha256Digest } from "@/application/contracts/canonical-json";
 import { frozenClone } from "@/application/deep-freeze";
 import { isJournalSourceEventName, JOURNAL_DELETED_EVENT_PAYLOAD } from "@/application/journal/journal-stored-rows";
@@ -91,7 +92,7 @@ function isRedacted(payload: unknown): boolean {
 /**
  * Same-lineage deletion-protection overlay (spec 6.7, 8.6; RST-004). For
  * each current tombstone the backup does not already contain, the backup's
- * revisions, edges, engine audits and copied event payloads for that record
+ * revisions, edges, engine and AI audits and copied event payloads for that record
  * are removed, its receipts are neutralised, and only the minimum deletion
  * ledger (head, tombstone, audit, event, receipts, work) is carried over.
  * Overlapping identities must be byte-equivalent; a conflict is corruption.
@@ -111,6 +112,9 @@ export async function applyDeletionOverlay(backup: BackupTableSetV1, current: Da
   target.engineEvaluationAudits = target.engineEvaluationAudits!.filter(
     (row) => ![...(row.triggeringRevisions as Row[]), ...(row.consideredRevisions as Row[])].some((ref) => purgedRevisions.has(ref.revisionId as string)),
   );
+  // An older AI audit naming a later-deleted record is never resurrected (spec 6.6, 6.7).
+  const removedAudits = new Set(aiAuditsAffectedByDeletion(target.aiInvocationAudits!, { recordIds: purged, revisionIds: purgedRevisions }));
+  target.aiInvocationAudits = target.aiInvocationAudits!.filter((row) => !removedAudits.has(row.requestId as string));
   for (const event of target.domainEvents!) {
     const change = event.change as Row;
     if (purged.has(change.recordId as string) && isJournalSourceEventName(event.eventName as string) && !isRedacted(event.payload)) event.payload = { ...JOURNAL_DELETED_EVENT_PAYLOAD };
@@ -166,7 +170,8 @@ export async function applyDeletionOverlay(backup: BackupTableSetV1, current: Da
 
 /**
  * Pre-destructive target verification (storage-backup-spec 8.4–8.6): every
- * closed dataset invariant plus the exact reverse-dependency set. The planner,
+ * closed dataset invariant, the exact reverse-dependency set and the exact
+ * AI audit reference closure (Packet 11A). The planner,
  * the confirmation pre-check and the replacement transaction all call this one
  * function before any row is cleared or written.
  */
@@ -181,6 +186,7 @@ export function verifyRestoreTarget(
   );
   if (verification.kind === "FAILED") return { kind: "FAILED", tableName: verification.tableName };
   if (validateReverseDependencies(target.tables.recordRevisions ?? [], target.tables.reverseDependencies ?? []).kind !== "VALID") return { kind: "FAILED", tableName: "reverseDependencies" };
+  if (validateAiAuditReferences({ recordRevisions: target.tables.recordRevisions ?? [], aiInvocationAudits: target.tables.aiInvocationAudits ?? [] }).kind !== "VALID") return { kind: "FAILED", tableName: "aiInvocationAudits" };
   return { kind: "VERIFIED" };
 }
 

@@ -37,7 +37,8 @@ describe("HACKATHON_DEMO storage profile manifest (Packet 10 freeze Section 3)",
   });
 
   it("freezes empty tables, metadata keys and the backup table set", () => {
-    expect(HACKATHON_STORAGE_PROFILE.emptyTables).toEqual(["aiInvocationAudits", "runtimeManifests", "governedAssets", "runtimeActivationAudits"]);
+    // Packet 11A enables only the AI invocation audit; the runtime-governance tables stay empty.
+    expect(HACKATHON_STORAGE_PROFILE.emptyTables).toEqual(["runtimeManifests", "governedAssets", "runtimeActivationAudits"]);
     // Corrective Pass C: the approved operational cleanup marker; no Dexie or logical version change.
     expect(HACKATHON_STORAGE_PROFILE.metadataKeys).toEqual(["DATABASE_IDENTITY", "EVENT_SEQUENCE_HIGH_WATER_MARK", "MIGRATION_STATE", "RESTORE_STATE", "LOCAL_STATE_CLEANUP_PENDING"]);
     expect(HACKATHON_STORAGE_PROFILE.physicalDexieVersion).toBe(2);
