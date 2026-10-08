@@ -168,4 +168,35 @@ describe("ReadingTimeScreen", () => {
     // The person's corrected time is still on screen for a retry.
     expect(screen.getByLabelText(en.readingTime.newTime)).toHaveValue("08:48");
   });
+
+  // Regression (full-suite failure 2026-10-08: "08:52" / "08:04" instead of "08:48"). The screen mounts at the current
+  // time and then commits the stored 07:48. React runs that commit's passive effects in a later scheduler task, so a
+  // keypress can arrive in between. The clock is fixed at 09:03 so a stale merge would show minute 03, not 48.
+  it("keeps the stored minute when the hour changes before the stored time's deferred effects run", async () => {
+    let observer: MutationObserver | undefined;
+    try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(`${today}T01:03:00.000Z`)); // 09:03 in Singapore
+      renderScreen(commands("FAILED"));
+      expect(screen.getByLabelText(en.readingTime.newTime)).toHaveValue("09:03");
+      // Press ArrowDown in the microtask right after the commit that shows the stored reading, before any later task.
+      let pressedAt: string | null = null;
+      observer = new MutationObserver(() => {
+        if (pressedAt !== null || !screen.queryByText("6.2")) return;
+        observer?.disconnect();
+        pressedAt = (screen.getByLabelText(en.readingTime.newTime) as HTMLInputElement).value;
+        fireEvent.keyDown(screen.getByRole("listbox", { name: en.readingTime.hourLabel }), { key: "ArrowDown" });
+      });
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+      await waitFor(() => expect(pressedAt).toBe("07:48"));
+      expect(screen.getByLabelText(en.readingTime.newTime)).toHaveValue("08:48");
+      fireEvent.click(screen.getByRole("button", { name: en.readingTime.saveOccurrence }));
+      expect(await screen.findByText(en.shared.notSaved)).toBeInTheDocument();
+      expect(screen.getByLabelText(en.readingTime.newTime)).toHaveValue("08:48");
+      expect(within(screen.getByRole("listbox", { name: en.readingTime.minuteLabel })).getByRole("option", { selected: true })).toHaveTextContent("48");
+    } finally {
+      observer?.disconnect();
+      vi.useRealTimers();
+    }
+  });
 });

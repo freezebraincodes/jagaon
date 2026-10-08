@@ -360,7 +360,9 @@ export function TimeWheel({ legend, value, onChange, messages, error }: TimeWhee
   // change merges into the latest emitted time so neither overwrites the other.
   const emitted = useRef(value);
 
-  useEffect(() => {
+  // A layout effect, not a passive one: React may run a commit's passive effects in a later task, and a column
+  // change in between (for example the stored time arriving, then an hour key) would merge into the previous value.
+  useLayoutEffect(() => {
     emitted.current = value;
   });
 
