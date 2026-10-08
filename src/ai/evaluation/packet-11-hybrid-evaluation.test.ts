@@ -835,7 +835,7 @@ describe("rules r4 in harness packet11-eval.12 (wording quality)", () => {
       fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.18",
       requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash", providerKey: "deepseek", endpoint: "https://api.deepseek.com/responses", approvalScope: "HYBRID_SHELL_WORDING_ONLY", legacyFactGeneration: "NOT_APPROVED",
       shellRequestVersion: "ai-shell-request.11b.11", shellMaxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 }, providerSchemaVersion: "kie-schema.11b.6", slotPlanVersion: "ai-slot-plan.11b.9",
-      atomRendererVersion: "ai-atoms.11b.7", defaultShellVersion: "ai-shells-default.11b.8", languageCopyRevision: "ai-language-copy.11b.9", validatorRulesRevision: "11b.2-meaning-r7", approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
+      atomRendererVersion: "ai-atoms.11b.7", defaultShellVersion: "ai-shells-default.11b.8", languageCopyRevision: "ai-language-copy.11b.10", validatorRulesRevision: "11b.2-meaning-r7", approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
     });
   });
   it("eval.8-era evidence (eval.8, fixtures 11b.8, @11b.10, prompt 11b.13, rules 11b.8-r3) fails with the specific codes, field by field and all together", async () => {
@@ -912,7 +912,7 @@ describe("rules r5 in harness packet11-eval.12 (clinical labels)", () => {
       fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.18",
       requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash", providerKey: "deepseek", endpoint: "https://api.deepseek.com/responses", approvalScope: "HYBRID_SHELL_WORDING_ONLY", legacyFactGeneration: "NOT_APPROVED",
       shellRequestVersion: "ai-shell-request.11b.11", shellMaxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 }, providerSchemaVersion: "kie-schema.11b.6", slotPlanVersion: "ai-slot-plan.11b.9",
-      atomRendererVersion: "ai-atoms.11b.7", defaultShellVersion: "ai-shells-default.11b.8", languageCopyRevision: "ai-language-copy.11b.9", validatorRulesRevision: "11b.2-meaning-r7", approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
+      atomRendererVersion: "ai-atoms.11b.7", defaultShellVersion: "ai-shells-default.11b.8", languageCopyRevision: "ai-language-copy.11b.10", validatorRulesRevision: "11b.2-meaning-r7", approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
     });
     expect(APPROVED_HYBRID_CONTRACT.shellRulesRevision).toBe(SHELL_RULES_REVISION);
     expect(APPROVED_HYBRID_CONTRACT.promptVersion).toBe(PACKET_11_SHELL_PROMPT_VERSION);

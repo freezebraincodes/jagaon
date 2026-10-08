@@ -1,5 +1,10 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { useEffect, useState } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import Dexie from "dexie";
+import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
+import type { Instant } from "@/domain/shared/time";
+import type { AiLocale, AiTaskRequest } from "@/domain/ai";
 import { getMessages } from "@/i18n/get-messages";
 import { createMemoryOnboardingStorage } from "@/application/onboarding/demo-onboarding-repository";
 import {
@@ -7,9 +12,28 @@ import {
   createAppointmentNoteSelectionRepository,
 } from "@/application/history/appointment-note-selection";
 import type { RecordedHistoryQueryPort, RecordedHistoryView } from "@/application/history/recorded-history-contracts";
+import { databases, dayBefore, FACT, higherFixture, local, NOW, TODAY } from "@/application/history/history-test-support";
+import { AI_ACTIVATION_MANIFEST } from "@/application/ai/ai-activation-manifest";
+import { createAiHybridTaskService, type AiHybridExecutionResult } from "@/application/ai/ai-hybrid-task-service";
+import { createPatternExplainer } from "@/application/ai/explain-pattern";
+import type { PatternExplainerPort, PatternExplanationResult } from "../history/PatternExplanationPanel";
 import { RecordedHistoryScreen } from "./RecordedHistoryScreen";
 
-afterEach(() => cleanup());
+const originalIndexedDB = Dexie.dependencies.indexedDB;
+const originalIDBKeyRange = Dexie.dependencies.IDBKeyRange;
+beforeAll(() => {
+  Dexie.dependencies.indexedDB = fakeIndexedDB;
+  Dexie.dependencies.IDBKeyRange = FDBKeyRange;
+});
+afterAll(() => {
+  Dexie.dependencies.indexedDB = originalIndexedDB;
+  Dexie.dependencies.IDBKeyRange = originalIDBKeyRange;
+});
+afterEach(async () => {
+  cleanup();
+  for (const database of databases) database.close();
+  for (const database of databases.splice(0)) await Dexie.delete(database.name);
+});
 
 const en = getMessages("en-SG");
 const zh = getMessages("zh-SG");
@@ -246,5 +270,332 @@ describe("Recorded history screen", () => {
     for (const pattern of [/\bhigh\b/i, /\blow\b/i, /normal/i, /\bsafe\b/i, /target/i, /risk/i, /missed/i, /adheren/i, /improv/i, /worsen/i, /cause/i]) {
       expect(text).not.toMatch(pattern);
     }
+  });
+
+  it("offers no explanation action and probes nothing when no explainer is supplied", async () => {
+    const history = port(readyView());
+    await renderScreen(history);
+    expect(screen.queryByRole("button", { name: en.history.explanation.action })).not.toBeInTheDocument();
+    expect(history.loadExplainablePattern).not.toHaveBeenCalled();
+  });
+});
+
+// --- Packet 11C Task 7: the explanation panel on the real journal -> coordinator -> evaluator -> query -> use case ---
+
+type Execute = (request: AiTaskRequest, signal?: AbortSignal) => Promise<AiHybridExecutionResult>;
+type Explained = Extract<PatternExplanationResult, { kind: "EXPLAINED" }>;
+
+const requestIds = () => {
+  let n = 0;
+  return () => `8b3d4e5f-6a70-4b1c-9d2e-${(n++).toString(16).padStart(12, "0")}`;
+};
+
+/** The real hybrid service under the SHIPPED manifest (EXPLAIN_PATTERN NOT_ACTIVATED); `invoke` is never reached. */
+function shippedExecute(invoke = vi.fn()): Execute {
+  return createAiHybridTaskService({
+    releaseProfile: "HACKATHON_DEMO",
+    audit: { append: async () => undefined },
+    now: () => NOW,
+    monotonicMs: () => 0,
+    manifest: AI_ACTIVATION_MANIFEST,
+    provider: { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, invoke },
+  }).execute;
+}
+
+/** The real use case; `execute` defaults to the shipped hybrid service. */
+function realExplainer(history: RecordedHistoryQueryPort, execute: Execute = shippedExecute()): PatternExplainerPort {
+  return createPatternExplainer({ history, execute, now: () => NOW as Instant, requestId: requestIds() });
+}
+
+/** Each `execute` call waits until the test releases it, then delegates to the real hybrid service. */
+function heldExecute(inner: Execute = shippedExecute()) {
+  const calls: Array<{ request: AiTaskRequest; signal?: AbortSignal; release: () => void }> = [];
+  const execute: Execute = (request, signal) =>
+    new Promise((resolve, reject) => calls.push({ request, signal, release: () => void inner(request, signal).then(resolve, reject) }));
+  return { execute, calls };
+}
+
+/**
+ * A port that answers each call only when the test resolves it, with a real explanation computed beforehand, and IGNORES the abort
+ * signal: the screen alone must discard a late answer.
+ */
+function heldPort(results: Readonly<Record<AiLocale, PatternExplanationResult>>) {
+  const calls: Array<{ input: { factId: string; locale: AiLocale }; signal?: AbortSignal; resolve: () => void }> = [];
+  const explainer: PatternExplainerPort = {
+    explain: (input, signal) => new Promise((resolve) => calls.push({ input, signal, resolve: () => resolve(results[input.locale]) })),
+  };
+  return { explainer, calls };
+}
+
+async function realResults(history: RecordedHistoryQueryPort): Promise<Record<AiLocale, Explained>> {
+  const explainer = realExplainer(history);
+  const out = {} as Record<AiLocale, Explained>;
+  for (const locale of ["en-SG", "zh-SG"] as const) {
+    const result = await explainer.explain({ factId: FACT, locale });
+    if (result.kind !== "EXPLAINED") throw new Error(`not explained: ${JSON.stringify(result)}`);
+    out[locale] = result;
+  }
+  return out;
+}
+
+const headlineOf = (explanation: Explained) => (explanation.composition.output.payload as { headline: { text: string } }).headline.text;
+
+/** One selection repository per history port, as the app keeps one (a new repository would reload the view). */
+const selections = new WeakMap<RecordedHistoryQueryPort, ReturnType<typeof selectionRepository>["repository"]>();
+
+function screenElement(locale: AiLocale, history: RecordedHistoryQueryPort, explainer: PatternExplainerPort | null) {
+  if (!selections.has(history)) selections.set(history, selectionRepository().repository);
+  return <RecordedHistoryScreen messages={getMessages(locale)} locale={locale} history={history} selection={selections.get(history)!} explainer={explainer} />;
+}
+
+async function openAction(locale: AiLocale = "en-SG") {
+  const action = await screen.findByRole("button", { name: getMessages(locale).history.explanation.action });
+  fireEvent.click(action);
+  await act(async () => undefined);
+  return action;
+}
+
+describe("Recorded history explanation panel (Packet 11C Task 7)", () => {
+  it("offers the action only on comparisons whose source projection is EXPLAINABLE", async () => {
+    const { history: real } = await higherFixture();
+    const probe = vi.fn((request: { factId: string }) => real.loadExplainablePattern(request));
+    const history: RecordedHistoryQueryPort = { load: (request) => real.load(request), loadExplainablePattern: probe };
+    render(screenElement("en-SG", history, realExplainer(real)));
+    const action = await screen.findByRole("button", { name: en.history.explanation.action });
+    expect(screen.getAllByRole("button", { name: en.history.explanation.action })).toHaveLength(1);
+    expect(probe).toHaveBeenCalledWith({ factId: FACT });
+    // The action belongs to the before-breakfast comparison fact, not to any other fact.
+    const fact = action.closest("li")!;
+    expect(fact.textContent).toContain(en.history.comparisonHigher(en.history.slotLabels.BEFORE_BREAKFAST, "7.35", "6", "mmol/L"));
+    expect(action).toHaveAttribute("aria-expanded", "false");
+    // Layout structure: icon and fact text stay the first two children (one row); the action is a separate third child row.
+    expect(fact).toHaveClass("history-fact", "history-fact--extended");
+    expect([...fact.children].map((child) => child.className)).toEqual(["history-fact-icon", "history-fact-body", "history-fact-extra"]);
+    expect(fact.children[2]).toContainElement(action);
+    for (const other of [...document.querySelectorAll("li.history-fact")].filter((item) => item !== fact)) {
+      expect(other).not.toHaveClass("history-fact--extended");
+      expect(other.querySelector(".history-fact-extra")).toBeNull();
+    }
+    cleanup();
+
+    // The same READY comparison whose projection is not explainable (for example a stale source) gets no action.
+    const ineligible = port(readyView());
+    ineligible.loadExplainablePattern = vi.fn(async () => ({ kind: "INELIGIBLE" as const, reason: "STALE_SOURCE" as const }));
+    render(<RecordedHistoryScreen messages={en} locale="en-SG" history={ineligible} selection={selectionRepository().repository} explainer={realExplainer(ineligible)} />);
+    await act(async () => undefined);
+    await act(async () => undefined);
+    expect(ineligible.loadExplainablePattern).toHaveBeenCalledWith({ factId: "COMPARISON:BEFORE_BREAKFAST" });
+    expect(screen.getByText(en.history.comparisonHigher(en.history.slotLabels.BEFORE_BREAKFAST, "7.3", "6", "mmol/L"))).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: en.history.explanation.action })).not.toBeInTheDocument();
+  });
+
+  it("opens the deterministic explanation under the unchanged 7A card text: heading focused, status announced, no provider call", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const { history } = await higherFixture();
+      const invoke = vi.fn();
+      const expected = await realResults(history);
+      render(screenElement("en-SG", history, realExplainer(history, shippedExecute(invoke))));
+      const cardText = en.history.comparisonHigher(en.history.slotLabels.BEFORE_BREAKFAST, "7.35", "6", "mmol/L");
+      const action = await openAction();
+      expect(action).toHaveAttribute("aria-expanded", "true");
+      const panel = await screen.findByRole("region", { name: en.history.explanation.title });
+      expect(action.getAttribute("aria-controls")).toBe(panel.id);
+      expect(within(panel).getByRole("heading", { level: 3 })).toHaveFocus();
+      await waitFor(() => expect(within(panel).getByRole("status")).toHaveTextContent(headlineOf(expected["en-SG"])));
+      expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
+      // The approved 7A card text is unchanged and still visible.
+      expect(screen.getByText(cardText)).toBeVisible();
+      expect(screen.getByText(cardText).closest("li")).toContainElement(panel);
+      expect(invoke).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      fireEvent.click(action);
+      expect(action).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByRole("region", { name: en.history.explanation.title })).not.toBeInTheDocument();
+      expect(screen.getByText(cardText)).toBeVisible();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("discards a late en-SG result after a switch to zh-SG (the old answer arrives first)", async () => {
+    const { history } = await higherFixture();
+    const results = await realResults(history);
+    const held = heldPort(results);
+    const { rerender } = render(screenElement("en-SG", history, held.explainer));
+    await openAction("en-SG");
+    expect(held.calls.map((call) => call.input.locale)).toEqual(["en-SG"]);
+    rerender(screenElement("zh-SG", history, held.explainer));
+    await act(async () => undefined);
+    expect(held.calls.map((call) => call.input.locale)).toEqual(["en-SG", "zh-SG"]);
+    expect(held.calls[0]!.signal?.aborted).toBe(true);
+
+    await act(async () => held.calls[0]!.resolve());
+    const panel = screen.getByRole("region", { name: zh.history.explanation.title });
+    expect(within(panel).getByRole("status")).toBeEmptyDOMElement();
+    expect(document.body.textContent).not.toContain(headlineOf(results["en-SG"]));
+
+    await act(async () => held.calls[1]!.resolve());
+    expect(within(panel).getByRole("status")).toHaveTextContent(headlineOf(results["zh-SG"]));
+    expect(document.body.textContent).not.toContain(headlineOf(results["en-SG"]));
+  });
+
+  it("discards a late zh-SG result after a switch to en-SG (the old answer arrives last)", async () => {
+    const { history } = await higherFixture();
+    const results = await realResults(history);
+    const held = heldPort(results);
+    const { rerender } = render(screenElement("zh-SG", history, held.explainer));
+    await openAction("zh-SG");
+    rerender(screenElement("en-SG", history, held.explainer));
+    await act(async () => undefined);
+    expect(held.calls.map((call) => call.input.locale)).toEqual(["zh-SG", "en-SG"]);
+    expect(held.calls[0]!.signal?.aborted).toBe(true);
+
+    await act(async () => held.calls[1]!.resolve());
+    const status = within(screen.getByRole("region", { name: en.history.explanation.title })).getByRole("status");
+    expect(status).toHaveTextContent(headlineOf(results["en-SG"]));
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(status, { childList: true, subtree: true, characterData: true });
+    try {
+      await act(async () => held.calls[0]!.resolve());
+      expect(mutations).toHaveLength(0);
+      expect(status).toHaveTextContent(headlineOf(results["en-SG"]));
+      expect(document.body.textContent).not.toContain(headlineOf(results["zh-SG"]));
+    } finally {
+      observer.disconnect();
+    }
+  });
+
+  it("discards a late result that arrives right after the locale commit, before that commit's passive effects run", async () => {
+    const { history } = await higherFixture();
+    const results = await realResults(history);
+    const held = heldPort(results);
+    const selection = selectionRepository().repository;
+    let switchLocale!: (locale: AiLocale) => void;
+    const switched = new Promise<AiLocale>((resolve) => (switchLocale = resolve));
+    function Harness() {
+      const [locale, setLocale] = useState<AiLocale>("en-SG");
+      useEffect(() => {
+        void switched.then(setLocale);
+      }, []);
+      return <RecordedHistoryScreen messages={getMessages(locale)} locale={locale} history={history} selection={selection} explainer={held.explainer} />;
+    }
+    render(<Harness />);
+    await openAction("en-SG");
+    expect(held.calls).toHaveLength(1);
+
+    const reactGlobal = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const actEnvironment = reactGlobal.IS_REACT_ACT_ENVIRONMENT;
+    let observer: MutationObserver | undefined;
+    let resolvedAfterCommit = false;
+    let englishShown = false;
+    try {
+      reactGlobal.IS_REACT_ACT_ENVIRONMENT = false;
+      observer = new MutationObserver(() => {
+        if (document.body.textContent?.includes(headlineOf(results["en-SG"]))) englishShown = true;
+        if (resolvedAfterCommit || !screen.queryByRole("heading", { level: 1, name: zh.history.title })) return;
+        // The zh-SG commit is on screen; answer the old en-SG request in this microtask, before any later task.
+        resolvedAfterCommit = true;
+        held.calls[0]!.resolve();
+      });
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+      switchLocale("zh-SG");
+      await waitFor(() => expect(held.calls).toHaveLength(2));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(resolvedAfterCommit).toBe(true);
+      expect(englishShown).toBe(false);
+      expect(within(screen.getByRole("region", { name: zh.history.explanation.title })).getByRole("status")).toBeEmptyDOMElement();
+    } finally {
+      observer?.disconnect();
+      reactGlobal.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+    }
+    await act(async () => held.calls[1]!.resolve());
+    expect(within(screen.getByRole("region", { name: zh.history.explanation.title })).getByRole("status")).toHaveTextContent(headlineOf(results["zh-SG"]));
+    expect(englishShown).toBe(false);
+  });
+
+  it("discards a late result after a period change and closes the panel", async () => {
+    const { history } = await higherFixture();
+    const results = await realResults(history);
+    const held = heldPort(results);
+    render(screenElement("en-SG", history, held.explainer));
+    await openAction();
+    fireEvent.click(screen.getByRole("radio", { name: en.history.periodLastWeek }));
+    await act(async () => undefined);
+    expect(held.calls[0]!.signal?.aborted).toBe(true);
+    // The new period's view is loaded first; the old answer then arrives late.
+    await waitFor(() => expect(screen.getByRole("radio", { name: en.history.periodLastWeek })).toBeChecked());
+    await waitFor(() => expect(screen.queryByText(en.history.loading)).not.toBeInTheDocument());
+    await act(async () => held.calls[0]!.resolve());
+    expect(document.body.textContent).not.toContain(headlineOf(results["en-SG"]));
+    expect(screen.queryByRole("region", { name: en.history.explanation.title })).not.toBeInTheDocument();
+    // The comparison is still explainable in the new period's view: its action is offered again, closed, and nothing was re-requested.
+    const action = await screen.findByRole("button", { name: en.history.explanation.action });
+    expect(screen.getAllByRole("button", { name: en.history.explanation.action })).toHaveLength(1);
+    expect(action).toHaveAttribute("aria-expanded", "false");
+    expect(action).not.toHaveAttribute("aria-controls");
+    expect(held.calls).toHaveLength(1);
+  });
+
+  it("aborts and discards a pending explanation when the screen unmounts", async () => {
+    const { history } = await higherFixture();
+    const results = await realResults(history);
+    const held = heldPort(results);
+    const consoleError = vi.spyOn(console, "error");
+    try {
+      const { unmount } = render(screenElement("en-SG", history, held.explainer));
+      await openAction();
+      unmount();
+      expect(held.calls[0]!.signal?.aborted).toBe(true);
+      await act(async () => held.calls[0]!.resolve());
+      expect(document.body.textContent).not.toContain(headlineOf(results["en-SG"]));
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("STALE_RESULT: a correction re-evaluated while the explanation is pending shows the stale message; reopening asks again", async () => {
+    const { history, journal, coordinator, recorded } = await higherFixture();
+    const held = heldExecute();
+    render(screenElement("en-SG", history, realExplainer(history, held.execute)));
+    const action = await openAction();
+    await waitFor(() => expect(held.calls).toHaveLength(1));
+
+    const target = recorded.at(-1)!;
+    const corrected = await journal.correctGlucoseTime({
+      recordId: target.recordId,
+      expectedRevisionId: target.revisionId,
+      expectedRevisionNumber: 1,
+      payload: {
+        measurement: { enteredValue: "7.8" as never, enteredUnit: "MMOL_L", normalization: null },
+        measurementMethod: "FINGERSTICK_METER",
+        context: { kind: "PATIENT_SELECTED_SLOT", slot: "BEFORE_BREAKFAST" },
+      },
+      temporal: local(dayBefore(TODAY, 12), "07:30"),
+      recordedAt: "2026-10-04T01:00:00.000Z" as Instant,
+    });
+    expect(corrected.kind).toBe("COMMITTED");
+    await coordinator.processPending();
+
+    await act(async () => held.calls[0]!.release());
+    const panel = screen.getByRole("region", { name: en.history.explanation.title });
+    await waitFor(() => expect(within(panel).getByRole("status")).toHaveTextContent(en.history.explanation.stale));
+    expect(within(panel).queryByRole("list")).not.toBeInTheDocument();
+
+    // Reopening asks again (a new request); the old stale message is not shown for it.
+    fireEvent.click(action);
+    fireEvent.click(action);
+    await act(async () => undefined);
+    await waitFor(() => expect(held.calls).toHaveLength(2));
+    const reopened = screen.getByRole("region", { name: en.history.explanation.title });
+    expect(within(reopened).getByRole("status")).toBeEmptyDOMElement();
+    await act(async () => held.calls[1]!.release());
+    await waitFor(() => expect(within(reopened).getByRole("status")).not.toBeEmptyDOMElement());
+    expect(within(reopened).getByRole("status")).not.toHaveTextContent(en.history.explanation.stale);
+    expect(within(reopened).getAllByRole("listitem").length).toBeGreaterThan(0);
   });
 });

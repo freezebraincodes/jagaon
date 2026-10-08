@@ -26,13 +26,24 @@ import { HistoryReadingsChart } from "../history/HistoryReadingsChart";
 import { HistoryFactsCard, type HistoryFact } from "../history/HistoryFactsCard";
 import { BookletStamps } from "../history/BookletStamps";
 import { formatDateRange, formatList, formatPosition } from "../history/history-format";
+import { PatternExplanationPanel, type PatternExplainerPort, type PatternExplanationResult } from "../history/PatternExplanationPanel";
 
 type Props = {
   messages: AppMessages;
   locale: SupportedLocale;
   history: RecordedHistoryQueryPort | null;
   selection: AppointmentNoteSelectionRepository;
+  /**
+   * Packet 11C Task 7: the pattern-explanation use case (`createPatternExplainer`). Without it no explanation action is offered and
+   * no source projection is probed.
+   */
+  explainer?: PatternExplainerPort | null;
 };
+
+/** One opened explanation: `nonce` makes every opening its own request. */
+type OpenExplanation = { factId: string; nonce: number };
+
+const panelIdFor = (factId: string) => `history-explanation-${factId.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 
 const UNIT = "mmol/L";
 
@@ -40,9 +51,14 @@ const UNIT = "mmol/L";
  * Recorded history (approved v1 frame 06, Packet 7A). Every statement is a
  * factual description of the journal: counts, recorded ranges, comparable
  * recorded values, repeated recorded labels, missing positions, provenance
- * and limitations. Nothing here classifies, explains, predicts or advises.
+ * and limitations. The 7A facts never classify, explain a cause, predict or
+ * advise. Packet 11C Task 7: when an `explainer` is supplied, an explainable
+ * comparison also offers a panel that shows how that comparison was worked
+ * out (its explanation, summary-role line, limitation and every supporting
+ * reading by period); it describes the records, never a cause, and leaves
+ * the 7A fact text unchanged.
  */
-export function RecordedHistoryScreen({ messages, locale, history, selection }: Props) {
+export function RecordedHistoryScreen({ messages, locale, history, selection, explainer = null }: Props) {
   const msg = messages.history;
   const [period, setPeriod] = useState<HistoryPeriod>("THIS_WEEK");
   const [view, setView] = useState<RecordedHistoryView | null>(null);
@@ -51,6 +67,12 @@ export function RecordedHistoryScreen({ messages, locale, history, selection }: 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<string | null>(null);
   const latestRequest = useRef(0);
+  // Packet 11C Task 7: the load that produced `view`, the comparisons it can explain, the opened explanation and its answer.
+  const [viewToken, setViewToken] = useState(0);
+  const [explainable, setExplainable] = useState<{ token: number; ids: ReadonlySet<string> }>({ token: -1, ids: new Set() });
+  const [opened, setOpened] = useState<OpenExplanation | null>(null);
+  const [answer, setAnswer] = useState<{ key: string; explanation: PatternExplanationResult } | null>(null);
+  const [openings, setOpenings] = useState(0);
 
   useEffect(() => {
     if (!history) return;
@@ -64,6 +86,8 @@ export function RecordedHistoryScreen({ messages, locale, history, selection }: 
       .then((next) => {
         if (latestRequest.current !== request) return;
         setView(next);
+        setViewToken(request);
+        setOpened(null);
         setStatus(null);
         setSelecting(false);
         const range = next.status === "UNAVAILABLE" ? null : next.status === "EMPTY" ? next.range : next.projection.range;
@@ -77,6 +101,69 @@ export function RecordedHistoryScreen({ messages, locale, history, selection }: 
   const projection: HistoryProjection | null =
     view && (view.status === "READY" || view.status === "INSUFFICIENT_EVIDENCE") ? view.projection : null;
   const comparisons = useMemo<HistoryComparison[]>(() => (view?.status === "READY" ? view.comparisons : []), [view]);
+
+  // Packet 11C Task 7: ask the source projection which comparisons can be explained (only when an explainer is supplied).
+  useEffect(() => {
+    if (!history || !explainer) return;
+    const candidates = comparisons.filter((comparison) => comparison.kind !== "NO_MATERIAL").map((comparison) => comparison.factId);
+    if (candidates.length === 0) return;
+    const token = viewToken;
+    let live = true;
+    void Promise.all(
+      candidates.map((factId) =>
+        history.loadExplainablePattern({ factId }).then(
+          (result) => (result.kind === "EXPLAINABLE" ? factId : null),
+          () => null,
+        ),
+      ),
+    ).then((ids) => {
+      if (live) setExplainable({ token, ids: new Set(ids.filter((id): id is string => id !== null)) });
+    });
+    return () => {
+      live = false;
+    };
+  }, [history, explainer, comparisons, viewToken]);
+
+  /**
+   * The answer to the opened explanation. Every request carries a key (view load, fact, opening, locale). A request is aborted when any
+   * of these changes or the screen unmounts, and an answer is shown only while its key is still the current one — checked at render
+   * time, so a late answer is discarded even if it lands before React has run the cleanup of the commit that superseded it.
+   */
+  const answerKey = explainer && opened ? `${viewToken}|${opened.factId}|${opened.nonce}|${locale}` : null;
+  useEffect(() => {
+    if (!explainer || !opened) return;
+    const key = `${viewToken}|${opened.factId}|${opened.nonce}|${locale}`;
+    const controller = new AbortController();
+    explainer.explain({ factId: opened.factId, locale }, controller.signal).then(
+      (explanation) => {
+        if (!controller.signal.aborted) setAnswer({ key, explanation });
+      },
+      () => {
+        if (!controller.signal.aborted) setAnswer({ key, explanation: { kind: "UNAVAILABLE", reason: "UNAVAILABLE" } });
+      },
+    );
+    return () => controller.abort();
+  }, [explainer, opened, locale, viewToken]);
+  const currentAnswer = answerKey !== null && answer?.key === answerKey ? answer.explanation : null;
+  const explainableIds = explainable.token === viewToken ? explainable.ids : null;
+
+  const toggleExplanation = useCallback(
+    (factId: string) => {
+      if (opened?.factId === factId) {
+        setOpened(null);
+        return;
+      }
+      const nonce = openings + 1;
+      setOpenings(nonce);
+      setOpened({ factId, nonce });
+    },
+    [opened, openings],
+  );
+
+  const changePeriod = useCallback((next: HistoryPeriod) => {
+    setOpened(null);
+    setPeriod(next);
+  }, []);
   const range = projection?.range ?? (view?.status === "EMPTY" ? view.range : null);
   const rangeText = range ? formatDateRange(locale, range.startDate, range.endDate) : "";
 
@@ -172,7 +259,7 @@ export function RecordedHistoryScreen({ messages, locale, history, selection }: 
         legendHidden
         variant="segmented"
         value={period}
-        onChange={setPeriod}
+        onChange={changePeriod}
         options={[
           { value: "THIS_WEEK", label: msg.periodThisWeek },
           { value: "LAST_WEEK", label: msg.periodLastWeek },
@@ -225,7 +312,36 @@ export function RecordedHistoryScreen({ messages, locale, history, selection }: 
           <HistoryFactsCard
             messages={messages}
             rangeText={rangeText}
-            facts={facts}
+            facts={facts.map((fact) => {
+              if (!explainer || !explainableIds?.has(fact.id)) return fact;
+              const isOpen = opened?.factId === fact.id;
+              const panelId = panelIdFor(fact.id);
+              return {
+                ...fact,
+                extra: (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-wide history-explain-action"
+                      aria-expanded={isOpen}
+                      aria-controls={isOpen ? panelId : undefined}
+                      onClick={() => toggleExplanation(fact.id)}
+                    >
+                      {msg.explanation.action}
+                    </button>
+                    {isOpen && opened ? (
+                      <PatternExplanationPanel
+                        key={opened.nonce}
+                        messages={messages}
+                        locale={locale}
+                        explanation={currentAnswer}
+                        panelId={panelId}
+                      />
+                    ) : null}
+                  </>
+                ),
+              };
+            })}
             notes={[
               ...(view.unavailableFamilies.length > 0 ? [msg.familyUnavailable] : []),
               msg.nonCausalLimitation,

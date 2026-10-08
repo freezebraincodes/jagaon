@@ -16,9 +16,9 @@ import { composeDeterministic } from "@/application/ai/language/deterministic-co
 import { projectShellTaskRequest } from "@/application/ai/language/shell-projector";
 import { validateShellCandidate } from "@/application/ai/language/shell-validator";
 import { planSlots, remoteBudgetAccount } from "@/application/ai/language/slot-planner";
-import { careSummaryLocalePack } from "@/application/care-preparation/care-summary-locale-pack";
 import type { ExplainablePatternView, HistoryComparison } from "@/application/history/recorded-history-contracts";
 import { formatDateRange } from "@/components/jagaon/history/history-format";
+import { supportingReadingsCopy, type SupportingReadingsCopy } from "@/components/jagaon/history/PatternExplanationPanel";
 import { SLOT_PLAN_VERSION, type AiLocale, type AiTaskRequest, type AtomTable, type SlotPlan } from "@/domain/ai";
 import { getMessages } from "@/i18n/get-messages";
 import type { HybridGate } from "./packet-11-hybrid-evaluation";
@@ -46,6 +46,7 @@ import { eligibilityBudget, SOURCE_BACKED_SCENARIOS, sourceBackedFixture, type S
  *   11b.8 code are cited read-only, with their sha256 verified.
  * - Deterministic composition (no provider) per scenario x locale, with r7.
  * The earlier DIAGNOSTIC_FORCED_ELIGIBILITY is superseded: en-SG eligibility is now genuine (it never was product acceptance).
+ * Checkpoint 2 Task 9: each card's supporting-readings block shows the implemented Task 7 panel copy (see TASK_7_MARK), not proposed copy.
  *
  * Writes a NEW bilingual private (0600) review page and JSON under the Git-ignored test-results/packet-11-source-backed-review/
  * (directory 0700; files opened with "wx", so nothing existing is ever overwritten). Skipped unless RUN_SOURCE_BACKED_REPLAY=1.
@@ -63,6 +64,12 @@ const HISTORICAL_RUN = Object.freeze({
   json: "test-results/packet-11-source-backed-review/20261007T201439Z-OFFLINE_SOURCE_BACKED_REPLAY.json",
   pageSha256: "79261677b8c372478e9f1f38d973f63326470d16b9ddedafcf948e9758cf1114",
 });
+/**
+ * The scenarios of that Checkpoint 1 run (its JSON has 10 rows: these 5 scenarios x 2 locales), frozen. That evidence predates the
+ * Task 6R BOUNDARY_DAY scenario, so its rows are compared against this list; the current-contract rows cover every SOURCE_BACKED_SCENARIOS
+ * entry, BOUNDARY_DAY included.
+ */
+const CHECKPOINT_1_SCENARIOS: readonly SourceBackedScenario[] = Object.freeze(["HIGHER", "LOWER", "VARIABILITY", "CORRECTED", "MANY_READINGS"] as const);
 const HISTORICAL_FIXTURE_DIGEST = "a77a79aa1c56b1530758147f12573051c4d786035f8926901bbbdaa19d3edd92";
 const CURRENT_FIXTURE_DIGEST = "5e7c96959d1d60b441abc54e7384cc0cb30dc33594ba9603f4e64c16de423ff8";
 /** The stored (historical, 11b.8) class bodies, and the current (11b.9) bodies that equal them after the version-only normalisation. */
@@ -81,8 +88,8 @@ const esc = escapeReviewHtml;
 
 /** Minimum additional evidence under the version policy (requirements and options for the owner; not a decision). Also in the record. */
 const MINIMUM_EVIDENCE: readonly string[] = [
-  "Owner ruling on the version-only body difference. Every guarded model-facing body (80: the 70 existing fixtures, care included, and the 10 source-backed bodies) now differs from the evaluated bytes in exactly two fields: the shell input's slotPlanVersion and the provider output-schema enum. Other bodies follow by the single-builder argument: every shell body is built by the one request builder (kie-responses-provider.ts:358-362). Spec §13: evidence under an earlier contract cannot qualify. Addendum A: if bytes differ, propose one targeted evaluation of the new class. No stored response validates under 11b.9 (S2:SCHEMA_INVALID).",
-  "Necessary for A1 (source-backed EXPLAIN), but it qualifies nothing by itself: an owner-authorized, targeted live evaluation under the 11b.9 contract of the two source-backed classes, en-SG body 1756934e… and zh-SG body 63f161dc…. One body per locale serves all five scenarios, because the body is value-blind. Coverage at least the stored per-class coverage (9 responses per locale), showing the model echoes ai-slot-plan.11b.9 and passes S1–S10 and r7. Only a live run can show the echo; no offline replay can.",
+  "Owner ruling on the version-only body difference. Every guarded model-facing body (82: the 70 existing fixtures, care included, and the 12 source-backed bodies) now differs from the evaluated bytes in exactly two fields: the shell input's slotPlanVersion and the provider output-schema enum. Other bodies follow by the single-builder argument: every shell body is built by the one request builder (kie-responses-provider.ts:358-362). Spec §13: evidence under an earlier contract cannot qualify. Addendum A: if bytes differ, propose one targeted evaluation of the new class. No stored response validates under 11b.9 (S2:SCHEMA_INVALID).",
+  "Necessary for A1 (source-backed EXPLAIN), but it qualifies nothing by itself: an owner-authorized, targeted live evaluation under the 11b.9 contract of the two source-backed classes, en-SG body 1756934e… and zh-SG body 63f161dc…. One body per locale serves all six current scenarios (BOUNDARY_DAY included), because the body is value-blind. Coverage at least the stored per-class coverage (9 responses per locale), showing the model echoes ai-slot-plan.11b.9 and passes S1–S10 and r7. Only a live run can show the echo; no offline replay can.",
   "Hybrid qualification under the current contract: hybrid spec §13 says evidence under an earlier contract cannot qualify the hybrid (internal-docs/superpowers/specs/2026-10-06-packet-11-hybrid-fact-slot-language-layer-design.md:516). Qualification therefore needs a FULL-policy run (hybrid-full-policy.2: the 70 fixtures and its thresholds; packet-11-hybrid-evaluation.ts:126-129) under ai-slot-plan.11b.9 / ai-atoms.11b.7, unless the owner amends §13.",
   "Care (A3 appointment preparation) and the other EXPLAIN bodies also changed in version only. Addendum A's “covered by the existing care evidence” assumed unchanged bytes. Options: (i) add a care sample in both locales to the targeted run of item 2; (ii) the FULL-policy run of item 3, which also covers care; (iii) an owner exception to §13: an explicit owner ruling that an echo-only difference needs no fresh care evidence, recorded with its reasons.",
   "Owner human review of the new presentation, still required by Addendum A even with byte identity: this page, the IQR copy, the observation template exception, the date formats and the 7A “recorded spread” wording.",
@@ -95,22 +102,22 @@ const MINIMUM_EVIDENCE_NOT = "These are requirements and options only; no decisi
 /** M1: why the 11b.9 service would not go straight to the deterministic composition after S2 (the repair call this replay cannot answer). */
 const REPAIR_NOTE = "S2:SCHEMA_INVALID is repairable for EXPLAIN (structuralRepairAllowed and maxAttempts 2, ai-runtime-bundles.ts:55; shell-validator.ts:243). The 11b.9 hybrid service would first spend its one structural-repair call (ai-hybrid-task-service.ts:68-70), which this offline replay cannot answer. Only if that call also failed would it show the deterministic composition.";
 const CHECKPOINT_2_PREREQUISITE = "Checkpoint 2 prerequisite (before integration): a request carrying taskPayload.periodSummary must never enter the legacy fact-sending route (src/application/ai/ai-task-service.ts, src/app/api/ai/task/ai-task-handler.ts). It may only take the value-blind hybrid shell path or be composed deterministically.";
+const CHECKPOINT_2_PREREQUISITE_STATUS = "Status (Checkpoint 2, Task 6A; owner review pending): implemented offline. The legacy service refuses a periodSummary request with PAYLOAD_INVALID before the bundle check, activation, projection or any send (ai-task-service-source-backed.test.ts), and the route's strict request schema refuses it (route.test.ts). The pattern-explanation use case (Task 6, explain-pattern.ts) uses the hybrid service only.";
 const VITE_NODE_NOTE = "Process note: vite-node (unlike vitest) loads .env.local into process.env. Any future offline probe run through vite-node must use a config with an empty envDir and must keep the provider-key refusal.";
 
-/** Proposed Task 7 copy from the plan (Checkpoint 2), verbatim. Not implemented in the product yet; shown on the page as proposed. */
-const PROPOSED_TASK_7_COPY: Readonly<Record<AiLocale, Readonly<{ supportingHeading: (n: number) => string; periodHeading: (role: "EARLIER" | "RECENT", n: number) => string; reconciliation: (a: number, b: number, t: number) => string }>>> = {
-  "en-SG": {
-    supportingHeading: (n) => `Supporting readings (${n})`,
-    periodHeading: (role, n) => (role === "EARLIER" ? `Earlier period (${n})` : `Recent period (${n})`),
-    reconciliation: (a, b, t) => `${a} + ${b} = ${t} readings, matching the count above.`,
-  },
-  "zh-SG": {
-    supportingHeading: (n) => `支持读数（${n} 条）`,
-    periodHeading: (role, n) => (role === "EARLIER" ? `较早期间（${n} 条）` : `近期（${n} 条）`),
-    reconciliation: (a, b, t) => `${a} + ${b} = ${t} 条读数，与上方数量一致。`,
-  },
+/**
+ * Checkpoint 2 Task 9 refresh: the supporting-readings block renders the IMPLEMENTED Task 7 panel copy (history.explanation), through
+ * the panel's own pure formatter `supportingReadingsCopy` (PatternExplanationPanel.tsx), so the page shows exactly the panel's strings:
+ * the heading, per-period headings, endpoint ranges with the shared cutoff (HH:MM when the cutoff instant has no seconds or
+ * milliseconds, otherwise HH:MM:SS, floored), every reading, the boundary note and the reconciliation line. The copy is
+ * coordinator-proposed and still awaits owner review.
+ */
+const TASK_7_MARK = "Task 7 panel copy (implemented; owner review pending)";
+/** The cutoff precision rule the panel applies, stated for the reviewer. */
+const cutoffPrecision = (instant: string) => {
+  const ms = Date.parse(instant);
+  return ms % 60_000 === 0 ? "HH:MM (the cutoff instant has no seconds or milliseconds)" : "HH:MM:SS (floored; the cutoff instant has seconds or milliseconds)";
 };
-const PROPOSED_MARK = "proposed UI copy (Checkpoint 2, Task 7) — not yet implemented";
 
 type Mode = "CURRENT_CONTRACT" | "VERSION_NORMALISED";
 type ReplayOutcome = Readonly<{ sequence: number; requestNormalisedIdentical: boolean; bodySha: string | null; versionFields: number; echoRewrites: number; shellsValid: boolean; composedAccepted: boolean; r7Accepted: boolean; failure: string | null }>;
@@ -209,21 +216,24 @@ function approvedCard(locale: AiLocale, comparison: HistoryComparison | null): {
   return { text, details };
 }
 
-/** The deterministic supporting-readings list by period (every reading), then the reconciliation line. Returns the html and the item count. */
-function supportingReadings(locale: AiLocale, view: ExplainablePatternView): { html: string; listed: number } {
-  const copy = PROPOSED_TASK_7_COPY[locale];
-  const pack = careSummaryLocalePack(locale);
+/**
+ * The Task 7 panel's supporting-readings block, from the panel's own formatter (every reading, by the view's periods, with the endpoint
+ * ranges, the boundary note and the reconciliation line). Returns the html, the listed item count and the copy (for the JSON).
+ */
+function supportingReadings(locale: AiLocale, view: ExplainablePatternView): { html: string; listed: number; copy: SupportingReadingsCopy } {
+  const copy = supportingReadingsCopy(getMessages(locale), locale, view);
   let listed = 0;
-  const periods = view.periods.map((period) => {
-    const items = period.readings.map((entry) => {
+  const periods = copy.periods.map((period) => {
+    const items = period.readings.map((reading) => {
       listed += 1;
-      return `<li><span class="rd">${esc(pack.localDateText(entry.localDate))}</span> <span class="rt">${esc(entry.localTime)}</span> <span class="rv">${esc(entry.enteredValue)} ${entry.enteredUnit === "MMOL_L" ? "mmol/L" : "mg/dL"}</span></li>`;
+      return `<li><span class="rd">${esc(reading.when)}</span> <span class="rv">${esc(reading.value)}</span></li>`;
     }).join("");
-    return `<h5 class="proposed-copy">${esc(copy.periodHeading(period.role, period.count))}</h5><ol class="readings" data-role="${period.role}" data-count="${period.readings.length}">${items}</ol>`;
+    const range = period.range === null ? "" : `<p class="panel-copy range">${esc(period.range)}</p>`;
+    return `<h5 class="panel-copy">${esc(period.heading)}</h5>${range}<ol class="readings" data-role="${period.role}" data-count="${period.readings.length}">${items}</ol>`;
   }).join("");
-  const [earlier, recent] = view.periods;
-  const html = `<div class="supporting" lang="${locale}"><p class="proposed-mark">${esc(PROPOSED_MARK)}: headings and reconciliation line below; the readings themselves are the view's deterministic data.</p><h4 class="proposed-copy">${esc(copy.supportingHeading(view.totalCount))}</h4>${periods}<p class="proposed-copy reconciliation">${esc(copy.reconciliation(earlier.count, recent.count, view.totalCount))}</p></div>`;
-  return { html, listed };
+  const boundary = copy.boundaryNote === null ? `<p class="warn">No shared cutoff: no boundary note.</p>` : `<p class="panel-copy boundary">${esc(copy.boundaryNote)}</p>`;
+  const html = `<div class="supporting" lang="${locale}"><p class="panel-mark">${esc(TASK_7_MARK)}: every string in this block is the panel's (history.explanation through supportingReadingsCopy); the readings are the view's deterministic data, grouped as the view groups them. Cutoff shown at ${esc(cutoffPrecision(view.sharedBoundary.instant))}.</p><h4 class="panel-copy">${esc(copy.heading)}</h4>${periods}${boundary}<p class="panel-copy reconciliation">${esc(copy.reconciliation)}</p></div>`;
+  return { html, listed, copy };
 }
 
 const asFixture = (locale: AiLocale, id: string, request: AiTaskRequest) => ({ id, taskType: "EXPLAIN_PATTERN" as const, locale, category: "ORDINARY" as const, expectedOutcome: "SUCCESS" as const, request });
@@ -324,6 +334,7 @@ describe.runIf(process.env.RUN_SOURCE_BACKED_REPLAY === "1")("OFFLINE source-bac
     // --- the page ---
     const renderBlock = HYBRID_REVIEW_PAGE_PARTS.renderBlock;
     const listedPerRow = new Map<string, number>();
+    const panelCopyPerRow = new Map<string, SupportingReadingsCopy>();
     const fieldsText = (account: Row["account"]) => account.fields.map((field) => `${field.path} ${field.owner === "LOCAL" ? "L" : "R"} ${field.reserved}`).join(" + ");
     const banner = `<p class="banner"><b>${LABEL}</b>: not a live run. Nothing was sent: the global fetch was stubbed to throw and was called ${network.mock.calls.length} times. The stored INDEPENDENT_CONFIRMATION_RUN responses (${esc(TRACE)}, sent under ${esc(HISTORICAL_SLOT_PLAN_VERSION)}) whose request body equals the locale's class hash (${classCalls["en-SG"].length} en-SG, ${classCalls["zh-SG"].length} zh-SG) were replayed offline in two separately labelled modes. Every scenario is real-evaluator synthetic demo data. Nothing on this page is qualification, product acceptance or fresh live evidence. Your review decisions remain open.</p>`;
 
@@ -334,7 +345,7 @@ describe.runIf(process.env.RUN_SOURCE_BACKED_REPLAY === "1")("OFFLINE source-bac
     const versionPaths = rows[0]?.versionPaths ?? [];
     const versionBox = `<section class="box versions"><h2>Version change</h2><ul>
 <li>Slot plan <code>${esc(HISTORICAL_SLOT_PLAN_VERSION)}</code> → <code>${esc(AI_HYBRID_VERSIONS.slotPlan)}</code> (eligibility accounting only). Atoms <code>ai-atoms.11b.6</code> → <code>${esc(ATOM_RENDERER_VERSION)}</code> (PERIOD_SUMMARY kind and lead joiner, application-only).</li>
-<li>Every guarded body (80: the 70 fixtures and the 10 source-backed bodies) differs from its historical body in exactly these ${SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY} paths, and nowhere else (structural guards): ${versionPaths.map((path) => `<code>${esc(path)}</code>`).join(" and ")}. Other bodies follow by the single-builder argument: every shell body is built by the one request builder (<code>kie-responses-provider.ts:358-362</code>).</li>
+<li>Every guarded body (82: the 70 fixtures and the 12 source-backed bodies) differs from its historical body in exactly these ${SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY} paths, and nowhere else (structural guards): ${versionPaths.map((path) => `<code>${esc(path)}</code>`).join(" and ")}. Other bodies follow by the single-builder argument: every shell body is built by the one request builder (<code>kie-responses-provider.ts:358-362</code>).</li>
 <li>70 existing fixtures (bodies and eligibility): historical <code>${HISTORICAL_FIXTURE_DIGEST}</code>; current <code>${esc(currentDigest)}</code>; current after version-only normalisation <code>${esc(normalisedDigest.digest)}</code> (${normalisedDigest.occurrences} version fields rewritten; ${normalisedDigest.digest === HISTORICAL_FIXTURE_DIGEST ? "equals the historical digest" : "DIFFERS"}).</li>
 ${LOCALES.map((locale) => `<li>${locale} source-backed class body: historical <code>${CLASS_BODY_SHA[locale]}</code>; current <code>${CURRENT_CLASS_BODY_SHA[locale]}</code>.</li>`).join("\n")}
 <li>Unchanged: prompt ${esc(AI_HYBRID_VERSIONS.prompt)}, ${esc(AI_HYBRID_VERSIONS.shellRules)}, ${esc(AI_HYBRID_VERSIONS.shellRequest)}, ${esc(AI_HYBRID_VERSIONS.providerSchema)} (label; its enum now carries the new slot-plan version), ${esc(AI_HYBRID_VERSIONS.validatorRules)}, ${esc(BUNDLE.bundleKey)}.</li></ul></section>`;
@@ -354,19 +365,23 @@ ${LOCALES.map((locale) => `<li>${locale} source-backed class body: historical <c
 
     const deterministicSection = `<section class="box"><h2>Deterministic composition (no provider)</h2><p>${rows.map((row) => `${row.locale} ${row.scenario}: r7 ${esc(row.deterministicR7)}`).join(" · ")}</p></section>`;
 
-    const openItems = `<section class="box open"><h2>Open presentation items (from Checkpoint 1, still open, plus one new item)</h2><ol>
+    const draftNoticeLabel = Object.fromEntries(LOCALES.map((locale) => [locale, getMessages(locale).careSummary.draftNotices.label])) as Record<AiLocale, string>;
+    const openItems = `<section class="box open"><h2>Open presentation items (from Checkpoint 1 and Phase 2, still open, plus the Checkpoint 2 items for owner review)</h2><ol>
 <li>The existing approved 7A VARIABILITY card says “recorded spread” / “记录范围”, while the new explanation says “interquartile range” / “四分位距” for the same value. The 7A copy is left byte-identical by constraint. This is an owner decision.</li>
-<li>The new IQR wording (“interquartile range”, “(the spread of the middle half of the readings)” / “四分位距”, “（中间一半读数的分布宽度）”) is copy proposed by the coordinator. It awaits owner review.</li>
+<li>The IQR wording (“interquartile range”, “(IQR: the spread of the middle half of the readings)” / “四分位距”, “（IQR，即中间一半读数的分布宽度）”; summary-role notice ai-language-copy.11b.10) follows the owner's implementation decision of 2026-10-08. It still awaits owner human review.</li>
 <li>The observation template “Readings by period — …” / “按期间的读数：…” is a deliberate exception to the presentation-correction rule that banned “readings” next to earlier/recent labels and dates.</li>
 <li>Date formats differ side by side (an observation for the owner; no recommendation). The 7A card uses the history formatter (for example “20 Sep – 4 Oct 2026” / “2026年9月20日至10月4日”). The explanation uses the care-summary locale pack (for example “20 Sept 2026” / “2026年9月20日至2026年10月4日”). The supporting-reading dates on this page also carry the year, unlike the plan's example (“1 Sept”).</li>
 <li>The boundary date (for example 20 Sept) appears in both periods: the earlier period ends on it and the recent period starts on it. This is the existing 7A instant-window behaviour, shown as inclusive local dates (an observation for the owner; no recommendation).</li>
 <li><b>New:</b> the provider output schema's <code>slotPlanVersion</code> enum carries the slot-plan version, so it moved to ${esc(CURRENT_SLOT_PLAN_VERSION)}, while the schema label <code>${esc(AI_HYBRID_VERSIONS.providerSchema)}</code> was not bumped. The coordinator ruled this a version-only difference; the owner may decide otherwise.</li>
 <li><b>New:</b> the evaluation harness label stays <code>${esc(AI_HYBRID_VERSIONS.evaluationReport)}</code> while the contract moved (<code>packet-11-hybrid-evaluation.ts:168</code>). The owner decides whether to bump the harness before any live run.</li>
 <li><b>New:</b> the live runners' header comments still describe the 11b.8 contract (<code>packet-11-live-hybrid-smoke.test.ts:54</code>, <code>-targeted.test.ts:71</code>, <code>-full.test.ts:70</code>, <code>-diagnostic.test.ts:68</code>). They must be fixed before any authorized live run. Their offline contract pins already say 11b.9.</li>
+<li><b>Checkpoint 2 (Task 6R):</b> the summary-role line, ${esc(AI_HYBRID_VERSIONS.languageCopy)}: “${esc(renderSummaryRoleNotice("en-SG"))}” / “${esc(renderSummaryRoleNotice("zh-SG"))}”. It names and explains the IQR; the PERIOD_SUMMARY atom and renderer are unchanged (${esc(ATOM_RENDERER_VERSION)}). Owner review pending.</li>
+<li><b>Checkpoint 2 (Task 7):</b> the explanation-panel copy (<code>history.explanation</code>, marked “${esc(TASK_7_MARK)}” in every card below): headings, endpoint ranges (“up to, but not including” / “至…之前”, “…起至…之前”), the cutoff at HH:MM or HH:MM:SS, the boundary note and the reconciliation line. Coordinator-proposed; owner review pending. The panel is reachable from the Recorded-history screen through an optional explainer port; the app is not wired (ruling: wiring belongs to the remaining 11C integration).</li>
+<li><b>Checkpoint 2 (Task 8):</b> the care-draft notice region label “${esc(draftNoticeLabel["en-SG"])}” / “${esc(draftNoticeLabel["zh-SG"])}” (new wording). The notices inside it are the approved text verbatim; they are screen-only (not printed). Owner review pending.</li>
 </ol></section>`;
 
     const minimumBox = `<section class="box minimum"><h2>Minimum additional evidence under the version policy (requirements and options; not a decision)</h2><ol>${MINIMUM_EVIDENCE.map((line) => `<li>${esc(line)}</li>`).join("")}</ol><p><b>${esc(MINIMUM_EVIDENCE_NOT)}</b></p></section>`;
-    const prerequisite = `<p class="box prerequisite"><b>${esc(CHECKPOINT_2_PREREQUISITE)}</b></p><p class="sub">${esc(VITE_NODE_NOTE)}</p>`;
+    const prerequisite = `<div class="box prerequisite"><p><b>${esc(CHECKPOINT_2_PREREQUISITE)}</b></p><p>${esc(CHECKPOINT_2_PREREQUISITE_STATUS)}</p></div><p class="sub">${esc(VITE_NODE_NOTE)}</p>`;
 
     const card = (row: Row) => {
       const { fixture, locale, scenario } = row;
@@ -374,6 +389,7 @@ ${LOCALES.map((locale) => `<li>${locale} source-backed class body: historical <c
       const cardText = approvedCard(locale, fixture.comparison);
       const supporting = supportingReadings(locale, fixture.view);
       listedPerRow.set(`${locale}:${scenario}`, supporting.listed);
+      panelCopyPerRow.set(`${locale}:${scenario}`, supporting.copy);
       const blocksOf = (item: HumanReviewItem | undefined | null) => (item ? item.blocks.filter((block) => block.path !== null).map((block) => renderBlock(block, locale)).join("") : `<p class="warn">No reviewable composition (excluded: ${row.excluded}).</p>`);
       const limitationSource = row.fallbackItem ?? shown;
       const limitations = limitationSource ? limitationSource.blocks.filter((block) => block.label === "Limitation").map((block) => renderBlock(block, locale)).join("") : "";
@@ -387,6 +403,7 @@ ${LOCALES.map((locale) => `<li>${locale} source-backed class body: historical <c
         `${esc(NORMALISED_MODE)}: <b>${triple(row.normalised.counts)}</b> of ${row.normalised.counts.of}`,
         `Deterministic composition: r7 ${esc(row.deterministicR7)}`,
         `View (real evaluator): ${fixture.view.kind} · ${fixture.view.periods.map((period) => `${period.role} ${period.count} (${period.summary.kind} ${esc(period.summary.valueMmolL)})`).join(" + ")} = ${fixture.view.totalCount} · readings listed: ${supporting.listed}`,
+        `Shared cutoff (view.sharedBoundary): instant <code>${esc(fixture.view.sharedBoundary.instant)}</code>, home-offset local ${esc(fixture.view.sharedBoundary.localDate)} ${esc(fixture.view.sharedBoundary.localTime)}; the panel shows it at ${esc(cutoffPrecision(fixture.view.sharedBoundary.instant))}`,
         ...(fixture.correction ? [`Correction: record ${esc(fixture.correction.recordId)} corrected on ${esc(fixture.correction.localDate)} ${esc(fixture.correction.localTime)}; the listed revision differs from the original revision ${esc(fixture.correction.previousRevisionId)}`] : []),
       ];
       return `<article class="card" data-scenario="${scenario}" data-locale="${locale}" lang="${locale}">
@@ -420,7 +437,7 @@ table { border-collapse: collapse; width: 100%; font-size: .82rem; margin: 8px 0
 .box { overflow-x: auto; } .approved7a p { margin: 2px 0; } .detail { color: var(--muted); font-size: .85rem; } .mode-label { margin: 14px 0 4px; }
 .supporting { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; } .supporting h4 { margin: 4px 0; } .supporting h5 { margin: 8px 0 2px; font-size: .9rem; }
 .readings { margin: 0; padding-left: 22px; columns: 2; column-gap: 24px; font-size: .88rem; } @media (max-width: 600px) { .readings { columns: 1; } }
-.proposed-copy { outline: 1px dashed var(--fact-line); outline-offset: 2px; } .proposed-mark { font-size: .75rem; color: var(--warn); margin: 0 0 6px; }
+.panel-copy { outline: 1px dashed var(--fact-line); outline-offset: 2px; } .panel-mark { font-size: .75rem; color: var(--warn); margin: 0 0 6px; } .supporting .range, .supporting .boundary { margin: 2px 0 4px; font-size: .88rem; }
 .reconciliation { margin: 8px 0 0; } .warn { color: var(--warn); } details { margin: 8px 0; font-size: .9rem; } .alt { margin: 6px 0 10px; padding-left: 8px; border-left: 2px solid var(--line); }
 </style></head><body><main data-label="${LABEL}">
 <h1>Source-backed explanations · offline review (after owner option (a))</h1>
@@ -435,7 +452,7 @@ ${deterministicSection}
 ${openItems}
 ${minimumBox}
 ${prerequisite}
-<p class="legend"><span class="ai">model wording</span><span class="det">application wording</span><span class="fact">supplied fact, shown verbatim</span><span class="proposed-copy">${esc(PROPOSED_MARK)}</span></p>
+<p class="legend"><span class="ai">model wording</span><span class="det">application wording</span><span class="fact">supplied fact, shown verbatim</span><span class="panel-copy">${esc(TASK_7_MARK)}</span></p>
 ${sections}
 </main></body></html>`;
 
@@ -467,6 +484,8 @@ ${sections}
         fixtureId: row.fixture.id,
         view: { kind: row.fixture.view.kind, periods: row.fixture.view.periods.map((period) => ({ role: period.role, window: period.window, count: period.count, readingsListed: period.readings.length, summary: period.summary })), totalCount: row.fixture.view.totalCount },
         readingsOnPage: listedPerRow.get(`${row.locale}:${row.scenario}`) ?? 0,
+        sharedBoundary: { ...row.fixture.view.sharedBoundary, shownAt: cutoffPrecision(row.fixture.view.sharedBoundary.instant) },
+        task7PanelCopy: (({ heading, periods, boundaryNote, reconciliation }: SupportingReadingsCopy) => ({ label: TASK_7_MARK, heading, periods: periods.map((period) => ({ role: period.role, heading: period.heading, range: period.range, readingsListed: period.readings.length })), boundaryNote, reconciliation }))(panelCopyPerRow.get(`${row.locale}:${row.scenario}`)!),
         eligibility: { remote: row.plan.remote, before: { rule: HISTORICAL_SLOT_PLAN_VERSION, sum: row.before.sum, ceiling: row.before.ceiling, overBy: row.before.overBy }, after: { rule: CURRENT_SLOT_PLAN_VERSION, total: row.account.total, ceiling: row.account.ceiling, fields: row.account.fields } },
         currentBodySha: row.currentBodySha,
         currentBodyIsPinnedClass: row.currentBodySha === CURRENT_CLASS_BODY_SHA[row.locale],
@@ -475,9 +494,10 @@ ${sections}
         deterministicR7: row.deterministicR7,
         reviewExcluded: row.excluded,
       })),
-      openOwnerItems: ["7A 'recorded spread' vs IQR wording", "proposed IQR copy", "observation template exception", "date formats side by side", "boundary date in both periods", `provider output-schema enum carries the slot-plan version; label ${AI_HYBRID_VERSIONS.providerSchema} not bumped (coordinator ruling; owner may decide)`, `evaluation harness label stays ${AI_HYBRID_VERSIONS.evaluationReport} while the contract moved (packet-11-hybrid-evaluation.ts:168); owner to decide a harness bump before any live run`, "stale 11b.8 header comments in the live runners (smoke:54, targeted:71, full:70, diagnostic:68) must be fixed before any authorized live run"],
+      openOwnerItems: ["7A 'recorded spread' vs IQR wording", "proposed IQR copy", "observation template exception", "date formats side by side", "boundary date in both periods", `provider output-schema enum carries the slot-plan version; label ${AI_HYBRID_VERSIONS.providerSchema} not bumped (coordinator ruling; owner may decide)`, `evaluation harness label stays ${AI_HYBRID_VERSIONS.evaluationReport} while the contract moved (packet-11-hybrid-evaluation.ts:168); owner to decide a harness bump before any live run`, "stale 11b.8 header comments in the live runners (smoke:54, targeted:71, full:70, diagnostic:68) must be fixed before any authorized live run", `Checkpoint 2 Task 6R: summary-role line ${AI_HYBRID_VERSIONS.languageCopy} (owner review)`, `Checkpoint 2 Task 7: ${TASK_7_MARK}`, `Checkpoint 2 Task 8: care-draft notice region label "${draftNoticeLabel["en-SG"]}" / "${draftNoticeLabel["zh-SG"]}" (new wording; owner review)`],
       minimumAdditionalEvidence: { requirementsAndOptions: MINIMUM_EVIDENCE, notMetBy: MINIMUM_EVIDENCE_NOT, decision: "NONE (owner)" },
       checkpoint2Prerequisite: CHECKPOINT_2_PREREQUISITE,
+      checkpoint2PrerequisiteStatus: CHECKPOINT_2_PREREQUISITE_STATUS,
       processNote: VITE_NODE_NOTE,
       ownerDecisions: "UNRESOLVED",
     };
@@ -518,11 +538,14 @@ ${sections}
     expect([historical.pageSha256, historical.recordedPageSha256]).toEqual([HISTORICAL_RUN.pageSha256, HISTORICAL_RUN.pageSha256]);
     // Only the 11b.8 service path counts: zh-SG 9/9/9; en-SG (superseded forced-eligibility diagnostic only) is never counted.
     expect(historical.rows.map((row) => [row.locale, row.scenario, row.counted, row.triple])).toEqual(
-      LOCALES.flatMap((locale) => SOURCE_BACKED_SCENARIOS.map((scenario) => [locale, scenario, locale === "zh-SG", locale === "zh-SG" ? "9/9/9" : null])),
+      LOCALES.flatMap((locale) => CHECKPOINT_1_SCENARIOS.map((scenario) => [locale, scenario, locale === "zh-SG", locale === "zh-SG" ? "9/9/9" : null])),
     );
     for (const row of rows) {
       const id = `${row.locale} ${row.scenario}`;
       expect(listedPerRow.get(`${row.locale}:${row.scenario}`), `${id}: every reading listed`).toBe(row.fixture.view.totalCount);
+      const panelCopy = panelCopyPerRow.get(`${row.locale}:${row.scenario}`)!;
+      expect(panelCopy, `${id}: Task 7 panel copy`).toEqual(supportingReadingsCopy(getMessages(row.locale), row.locale, row.fixture.view));
+      expect([panelCopy.boundaryNote === null, panelCopy.periods.map((period) => period.range === null)], `${id}: cutoff shown`).toEqual([false, [false, false]]);
       expect(row.excluded, `${id}: review exclusions`).toBe(0);
       expect(row.account.total, `${id}: 11b.9 account within the ceiling`).toBeLessThanOrEqual(row.account.ceiling);
       expect(row.currentBodySha, `${id}: current body`).toBe(CURRENT_CLASS_BODY_SHA[row.locale]);
@@ -530,6 +553,9 @@ ${sections}
       expect(row.deterministicR7, `${id}: deterministic r7`).toBe("ACCEPTED");
     }
     expect(rows.find((row) => row.scenario === "MANY_READINGS")!.fixture.view.periods.some((period) => period.readings.length > 32)).toBe(true);
+    // Six scenarios x two locales, BOUNDARY_DAY included (9 + 7 = 16 in both locales).
+    expect(rows.map((row) => `${row.locale} ${row.scenario}`)).toEqual(LOCALES.flatMap((locale) => SOURCE_BACKED_SCENARIOS.map((scenario) => `${locale} ${scenario}`)));
+    expect(rows.filter((row) => row.scenario === "BOUNDARY_DAY").map((row) => panelCopyPerRow.get(`${row.locale}:BOUNDARY_DAY`)!.periods.map((period) => period.readings.length))).toEqual([[9, 7], [9, 7]]);
     // CURRENT_CONTRACT, as observed: every request equals the stored body after normalisation; no stored response validates (S2).
     expect(rows.map((row) => [row.locale, row.scenario, row.current.counts.requestsNormalisedIdentical, triple(row.current.counts), row.current.codes])).toEqual(
       rows.map((row) => [row.locale, row.scenario, 9, "0/0/0", { "S2:SCHEMA_INVALID": 9 }]),
@@ -540,4 +566,12 @@ ${sections}
       rows.map((row) => [row.locale, row.scenario, String(RESPONSE_ECHO_OCCURRENCES_PER_RESPONSE).repeat(9), 9, "9/9/9"]),
     );
   }, 300_000);
+});
+
+describe("source-backed replay: the frozen Checkpoint 1 scenario list (ungated)", () => {
+  it("is the current scenario list minus only the Task 6R BOUNDARY_DAY scenario, in order", () => {
+    expect(CHECKPOINT_1_SCENARIOS.every((scenario) => SOURCE_BACKED_SCENARIOS.includes(scenario))).toBe(true);
+    expect(SOURCE_BACKED_SCENARIOS.filter((scenario) => !CHECKPOINT_1_SCENARIOS.includes(scenario))).toEqual(["BOUNDARY_DAY"]);
+    expect(SOURCE_BACKED_SCENARIOS.filter((scenario) => CHECKPOINT_1_SCENARIOS.includes(scenario))).toEqual([...CHECKPOINT_1_SCENARIOS]);
+  });
 });

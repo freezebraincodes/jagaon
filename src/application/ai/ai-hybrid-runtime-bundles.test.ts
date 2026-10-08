@@ -21,7 +21,8 @@ describe("hybrid runtime bundles 11b.18 (observation ownership)", () => {
     // Packet 11C Task 4 (2026-10-08): application copy 11b.9 and default shells 11b.8 (local PERIOD_SUMMARY observation); atoms and bundle keys stay.
     // Packet 11C phase 2 (option (a), 2026-10-08): atoms 11b.7 (the PERIOD_SUMMARY kind and its lead joiner), slot plan 11b.9 (eligibility
     // accounting); bundle keys, prompt, rules, request profile and provider schema version stay.
-    expect(AI_HYBRID_VERSIONS).toMatchObject({ atomRenderer: "ai-atoms.11b.7", defaultShells: "ai-shells-default.11b.8", languageCopy: "ai-language-copy.11b.9" });
+    // Packet 11C Task 6R (2026-10-08): application copy 11b.10 (the summary-role notice only); atoms, default shells and bundle keys stay.
+    expect(AI_HYBRID_VERSIONS).toMatchObject({ atomRenderer: "ai-atoms.11b.7", defaultShells: "ai-shells-default.11b.8", languageCopy: "ai-language-copy.11b.10" });
     expect(AI_HYBRID_VERSIONS.shellRequest).toBe(SHELL_PROVIDER_REQUEST_VERSION);
   });
   it("carries the audit component versions (validator profile 11b.18: rules r8 plus field ownership, the others 11b.7) and the domain contract versions", () => {

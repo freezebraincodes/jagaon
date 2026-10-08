@@ -31,6 +31,26 @@ describe("AI activation manifest", () => {
     }
   });
 
+  it("Packet 11C Checkpoint 2 leaves every task state unchanged: DETERMINISTIC_ONLY under HACKATHON_DEMO, none SYNTHETIC_REMOTE_ENABLED", () => {
+    expect(AI_ACTIVATION_MANIFEST).toEqual({
+      manifestVersion: "ai-activation.11a.1",
+      profile: "HACKATHON_DEMO",
+      tasks: {
+        EXTRACT_CANDIDATE_FACTS: "DETERMINISTIC_ONLY",
+        EXPLAIN_PATTERN: "DETERMINISTIC_ONLY",
+        DRAFT_NEUTRAL_INQUIRY: "DETERMINISTIC_ONLY",
+        ANSWER_BOUNDED_RECORD_QUERY: "DETERMINISTIC_ONLY",
+        DRAFT_CARE_PREPARATION_SUMMARY: "DETERMINISTIC_ONLY",
+        PHRASE_NON_CLINICAL_RESPONSE: "DETERMINISTIC_ONLY",
+      },
+    });
+    expect(Object.values(AI_ACTIVATION_MANIFEST.tasks).filter((state) => state === "SYNTHETIC_REMOTE_ENABLED")).toEqual([]);
+    // The two surfaces Checkpoint 2 prepares (source-backed explanation, appointment preparation) stay deterministic-only.
+    for (const taskType of ["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"] as const) {
+      expect(resolveAiTaskActivation(taskType, "HACKATHON_DEMO")).toEqual({ state: "DETERMINISTIC_ONLY", reason: "TASK_DISABLED" });
+    }
+  });
+
   it("keeps a disabled task disabled and rejects an unknown task", () => {
     const disabled = { ...AI_ACTIVATION_MANIFEST, tasks: { ...AI_ACTIVATION_MANIFEST.tasks, PHRASE_NON_CLINICAL_RESPONSE: "REGISTERED_DISABLED" as const } };
     expect(resolveAiTaskActivation("PHRASE_NON_CLINICAL_RESPONSE", "HACKATHON_DEMO", disabled)).toEqual({ state: "REGISTERED_DISABLED", reason: "TASK_DISABLED" });

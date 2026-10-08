@@ -5,6 +5,7 @@ import { OUTPUT_CODE_POINTS_PER_TOKEN } from "@/application/ai/ai-output-validat
 import { defaultShells } from "@/application/ai/language/default-shells";
 import { ATOM_SPACING_RESERVE } from "@/application/ai/language/slot-planner";
 import {
+  boundaryDayFixture,
   databases,
   dayBefore,
   FACT,
@@ -32,13 +33,14 @@ import type { Instant } from "@/domain/shared/time";
  * The caller installs fake-indexeddb as Dexie's dependency; each fixture closes and deletes its own database before returning.
  * Scenarios: HIGHER (the default), LOWER (HIGHER mirrored: the same earlier readings, recent readings below them), VARIABILITY (IQR),
  * CORRECTED (HIGHER with one recent reading corrected through the journal, then processPending() re-run) and MANY_READINGS (36 readings
- * in the earlier period). Negative builders: insufficient evidence (NOT_SUPPORTED) and a read-only NO_MATERIAL comparison; they return
+ * in the earlier period) and BOUNDARY_DAY (Task 6R: HIGHER plus one reading on the shared-boundary date before the 10:00 cutoff, which
+ * the evaluator puts in the earlier period, and one after it, in the recent period). Negative builders: insufficient evidence (NOT_SUPPORTED) and a read-only NO_MATERIAL comparison; they return
  * the INELIGIBLE result and never yield a request.
  *
  * Each fixture also carries the READY 7A history comparison for the same fact (`comparison`, from `history.load`), so a review page can
  * show the existing approved card text unchanged, and, for CORRECTED, the correction it made (`correction`).
  */
-export const SOURCE_BACKED_SCENARIOS = Object.freeze(["HIGHER", "LOWER", "VARIABILITY", "CORRECTED", "MANY_READINGS"] as const);
+export const SOURCE_BACKED_SCENARIOS = Object.freeze(["HIGHER", "LOWER", "VARIABILITY", "CORRECTED", "MANY_READINGS", "BOUNDARY_DAY"] as const);
 export type SourceBackedScenario = (typeof SOURCE_BACKED_SCENARIOS)[number];
 export type SourceBackedCorrection = Readonly<{ recordId: string; previousRevisionId: string; localDate: string; localTime: string }>;
 export type SourceBackedFixture = Readonly<{
@@ -95,6 +97,7 @@ const BUILDERS: Readonly<Record<SourceBackedScenario, () => Promise<Harness & { 
   VARIABILITY: variabilityFixture,
   CORRECTED: correctedFixture,
   MANY_READINGS: largePeriodFixture,
+  BOUNDARY_DAY: boundaryDayFixture,
 };
 
 /** Fixed request ids (UUID v4), so every fixture request is deterministic. */
@@ -104,6 +107,7 @@ const REQUEST_IDS: Readonly<Record<SourceBackedScenario, Readonly<Record<AiLocal
   MANY_READINGS: { "en-SG": "3b1f6c2e-8a4d-4e5f-9a1b-2c3d4e5f6a75", "zh-SG": "3b1f6c2e-8a4d-4e5f-9a1b-2c3d4e5f6a76" },
   LOWER: { "en-SG": "3b1f6c2e-8a4d-4e5f-9a1b-2c3d4e5f6a77", "zh-SG": "3b1f6c2e-8a4d-4e5f-9a1b-2c3d4e5f6a78" },
   CORRECTED: { "en-SG": "3b1f6c2e-8a4d-4e5f-9a1b-2c3d4e5f6a79", "zh-SG": "3b1f6c2e-8a4d-4e5f-9a1b-2c3d4e5f6a7a" },
+  BOUNDARY_DAY: { "en-SG": "3b1f6c2e-8a4d-4e5f-9a1b-2c3d4e5f6a7b", "zh-SG": "3b1f6c2e-8a4d-4e5f-9a1b-2c3d4e5f6a7c" },
 };
 
 async function release(harness: Harness): Promise<void> {

@@ -252,7 +252,8 @@ describe("observation ownership: versions", () => {
     expect(SHELL_OUTPUT_VERSIONS).toEqual({ EXPLAIN_PATTERN: "ai-shell.explain-pattern@11b.8", DRAFT_CARE_PREPARATION_SUMMARY: "ai-shell.draft-care-preparation-summary@11b.7" });
     // Packet 11C Task 4 (2026-10-08): application-only copy 11b.9 and default shells 11b.8; every model-facing pin is unchanged.
     // Packet 11C phase 2 (option (a), 2026-10-08): slot plan 11b.9 (eligibility accounting) and atoms 11b.7 (PERIOD_SUMMARY, lead joiner).
-    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.9", atomRenderer: "ai-atoms.11b.7", defaultShells: "ai-shells-default.11b.8", shellRules: "ai-shell-rules.11b.15-r8", languageCopy: "ai-language-copy.11b.9", prompt: "11b.18", providerSchema: "kie-schema.11b.6", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.18", shellRequest: "ai-shell-request.11b.11" });
+    // Packet 11C Task 6R (2026-10-08): application-only copy 11b.10 (the summary-role notice); every model-facing pin is unchanged.
+    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.9", atomRenderer: "ai-atoms.11b.7", defaultShells: "ai-shells-default.11b.8", shellRules: "ai-shell-rules.11b.15-r8", languageCopy: "ai-language-copy.11b.10", prompt: "11b.18", providerSchema: "kie-schema.11b.6", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.18", shellRequest: "ai-shell-request.11b.11" });
     expect(AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN.bundleKey).toBe("ai.explain-pattern@11b.18");
     expect(AI_HYBRID_RUNTIME_BUNDLES.DRAFT_CARE_PREPARATION_SUMMARY.bundleKey).toBe("ai.draft-care-preparation-summary@11b.18");
     for (const task of ["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"] as const) {

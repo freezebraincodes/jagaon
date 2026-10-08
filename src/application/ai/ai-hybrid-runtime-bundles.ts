@@ -74,6 +74,9 @@ import { AI_TASK_RUNTIME_BUNDLES, type AiComponentRef, type AiTaskRuntimeBundle 
  * field at its final composed wording) and atoms ai-atoms.11b.7 (the version record for PERIOD_SUMMARY and its lead joiner). Every
  * model-facing request body differs from its 11b.8 body only in the slot plan version field (enforced by the evaluation version-only
  * guard); bundle keys, prompt, rules, request profile, provider schema version, caps, temperature and budgets are unchanged.
+ * Packet 11C Task 6R (owner implementation decision 2026-10-08, offline): application copy ai-language-copy.11b.10 only (the summary-role
+ * notice names and explains the IQR). Atoms, default shells, slot plan, bundle keys, remote eligibility and every model-facing byte are
+ * unchanged.
  */
 export const AI_HYBRID_BUNDLE_VERSION = "11b.18";
 /** The components unchanged since bundle set 11b.7. */
@@ -85,7 +88,7 @@ export const AI_HYBRID_VERSIONS = deepFreeze({
   atomRenderer: "ai-atoms.11b.7",
   defaultShells: "ai-shells-default.11b.8",
   shellRules: "ai-shell-rules.11b.15-r8",
-  languageCopy: "ai-language-copy.11b.9",
+  languageCopy: "ai-language-copy.11b.10",
   prompt: "11b.18",
   providerSchema: "kie-schema.11b.6",
   validatorRules: "11b.2-meaning-r7",

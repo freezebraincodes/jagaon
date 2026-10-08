@@ -86,6 +86,24 @@ export async function variabilityFixture() {
 }
 
 /**
+ * Packet 11C Task 6R boundary-day case. The evaluator's windows are instant-based: earlier `[T−42d, T−14d)`, recent `[T−14d, T)`, with
+ * T = NOW (10:00 in Singapore). So the shared boundary is 10:00 on BOUNDARY_DATE, and that one local date belongs to both periods' date
+ * ranges. One reading on that date before the cutoff (earlier) and one after it (recent), on top of the HIGHER readings.
+ */
+export const BOUNDARY_DATE = dayBefore(TODAY, 14);
+/** A late before-breakfast reading at 10:30 is after the 10:00 cutoff; the evaluator alone decides its period (recent). */
+export const BOUNDARY_DAY_READINGS = Object.freeze({ before: Object.freeze(["07:30", "6.0"] as const), after: Object.freeze(["10:30", "7.4"] as const) });
+
+export async function boundaryDayFixture() {
+  const harness = await setup();
+  for (const [d, v] of [...REFERENCE, ...RECENT]) await reading(harness.journal, dayBefore(TODAY, d), "07:30", v);
+  const before = await reading(harness.journal, BOUNDARY_DATE, ...BOUNDARY_DAY_READINGS.before);
+  const after = await reading(harness.journal, BOUNDARY_DATE, ...BOUNDARY_DAY_READINGS.after);
+  await harness.coordinator.processPending();
+  return { ...harness, boundary: { before, after } };
+}
+
+/**
  * The evaluator counts one occasion per distinct instant in the slot, so three before-breakfast readings on each
  * of twelve reference days are 36 occasions (plus the 6 RECENT readings).
  */

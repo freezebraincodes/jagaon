@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { RecordId } from "@/domain/shared";
 import type { CareSummaryExportOutcome } from "@/domain/care-preparation/care-summary-export";
+import type { CareSummarySnapshotPayload } from "@/domain/care-preparation/care-summary-snapshot";
+import { getMessages } from "@/i18n/get-messages";
 import type { CarePreparationCommandPort, CarePreparationQueryPort, CareSummaryView, PrintObservation } from "@/application/care-preparation/care-preparation-contracts";
 import { printableCareSummary } from "@/application/care-preparation/care-summary-artifact";
 import { ScreenHeader, Notice } from "../primitives/ScreenHeader";
@@ -31,6 +33,18 @@ function outcomeText(messages: AppMessages, outcome: CareSummaryExportOutcome | 
   if (state === "EXPORTED" || state === "DIALOG_OPENED") return messages.careSummary.printOpened;
   if (state === "FAILED" || state === "UNAVAILABLE") return messages.careSummary.printUnavailable;
   return messages.careSummary.printUnknown;
+}
+
+/**
+ * The fixed care-draft notices (Packet 11C Task 8, Addendum A3), in the snapshot's own locale. The browser graph may not import
+ * the approved renderer (`renderCareDraftNotices`, packet-11a/9c manifest boundary), so its selection rule is mirrored here: the
+ * questions notice only when the summary has a questions section, then the not-sent/not-reviewed notice always. The text is
+ * the verbatim i18n copy; equality with the approved renderer is pinned by CareSummaryPreviewScreen.test.tsx.
+ */
+function careDraftNotices(payload: CareSummarySnapshotPayload): string[] {
+  const notices = getMessages(payload.locale).careSummary.draftNotices;
+  const hasQuestions = payload.sections.some((section) => section.sectionId === "QUESTIONS_FOR_CARE_TEAM");
+  return hasQuestions ? [notices.questions, notices.draft] : [notices.draft];
 }
 
 /**
@@ -177,6 +191,17 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
           {stale || notice === "HASH_MISMATCH" ? backButton : null}
 
           <PrintableCareSummary lines={printable.lines} locale={ready.payload.locale} />
+
+          {/* Screen-only: the print stylesheet prints the summary article alone, so the approved, hashed content is unchanged. */}
+          <section className="care-summary-draft-notices" aria-label={copy.draftNotices.label}>
+            <Notice className="notice--compact" icon={<InfoIcon size={18} />}>
+              {careDraftNotices(ready.payload).map((text) => (
+                <p key={text} lang={ready.payload.locale}>
+                  {text}
+                </p>
+              ))}
+            </Notice>
+          </section>
 
           {!stale && notice !== "HASH_MISMATCH" && commands ? (
             ready.snapshotStatus === "APPROVED" ? (

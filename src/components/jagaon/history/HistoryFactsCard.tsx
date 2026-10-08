@@ -10,6 +10,11 @@ export type HistoryFact = {
   icon: ReactNode;
   /** Secondary descriptive lines (evidence window, correction provenance). */
   details?: string[];
+  /**
+   * Packet 11C Task 7: content shown under the fact (the explanation action and panel of an explainable comparison). It sits outside
+   * the selection label and never changes the fact's own text.
+   */
+  extra?: ReactNode;
 };
 
 type Props = {
@@ -55,7 +60,7 @@ export function HistoryFactsCard({ messages, rangeText, facts, notes, selecting,
             </span>
           );
           return (
-            <li key={fact.id} className="history-fact">
+            <li key={fact.id} className={fact.extra ? "history-fact history-fact--extended" : "history-fact"}>
               {selecting ? (
                 <label className="history-fact-select">
                   <input
@@ -79,6 +84,7 @@ export function HistoryFactsCard({ messages, rangeText, facts, notes, selecting,
                   {body}
                 </>
               )}
+              {fact.extra ? <div className="history-fact-extra">{fact.extra}</div> : null}
             </li>
           );
         })}

@@ -13,7 +13,7 @@ import {
   type HistorySlot,
   type SupportingReading,
 } from "./recorded-history-contracts";
-import { windowDates } from "./recorded-history-query";
+import { homeLocalPoint, windowDates } from "./recorded-history-query";
 
 /**
  * Packet 11C Addendum A1 source projection (`ExplainablePatternView`).
@@ -23,6 +23,12 @@ import { windowDates } from "./recorded-history-query";
  * periods with exact counts, a role-labelled summary value and every
  * supporting reading. Every inconsistency fails closed with a reason; nothing
  * is recalculated, relabelled, capped or truncated.
+ *
+ * Task 6R (owner implementation decisions, 2026-10-08): each period also
+ * carries its source window instants with home-timezone local date and time,
+ * and the view carries the boundary the two periods share, so the shared
+ * boundary date can be explained by its cutoff time. Counts are included
+ * readings (one per distinct instant), never days.
  */
 
 const FAMILY = "COMPARABLE_SLOT_TREND" as const;
@@ -147,10 +153,16 @@ export function projectExplainablePattern(snapshot: IntelligenceSnapshot, factId
     if (methods.size !== 1) return ineligible("METHOD_MISMATCH");
   }
 
-  // Rule 6: windows as local dates; every reading, sorted by instant, never truncated.
+  // Rule 6 (Task 6R): the periods share one boundary, the evaluator's own (EARLIER's excluded end = RECENT's included start). If the
+  // stored windows do not meet there is no boundary to show, and one is never invented: the view is UNAVAILABLE.
+  if (instantMs(facts.reference.window.end) !== instantMs(facts.recent.window.start)) return ineligible("UNAVAILABLE");
+  const sharedBoundary = homeLocalPoint(facts.recent.window.start);
+
+  // Rule 7: windows as local dates (unchanged) and as source instants; every included reading, sorted by instant, never truncated.
   const periods = segments.map((segment, index) => ({
     role: EXPLAINABLE_PERIOD_ROLES[index]!,
     window: windowDates(segment.window),
+    bounds: { start: homeLocalPoint(segment.window.start), end: homeLocalPoint(segment.window.end) },
     count: segment.summary.distinctOccasionCount,
     summary: summaries[index]!,
     readings: sortByInstantThenRevision(resolved[index]!).map(supportingReading),
@@ -160,6 +172,7 @@ export function projectExplainablePattern(snapshot: IntelligenceSnapshot, factId
     slot: fact.slot,
     kind,
     periods,
+    sharedBoundary,
     totalCount,
     observationRef: { recordType: "PATTERN_OBSERVATION", recordId: chain.previous.observation.recordId, revisionId: chain.previous.observation.revisionId },
     snapshotRef: { recordType: "PATTERN_EVIDENCE_SNAPSHOT", recordId: chain.previous.snapshot.recordId, revisionId: chain.previous.snapshot.revisionId },

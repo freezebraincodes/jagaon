@@ -105,8 +105,8 @@ describe("PERIOD_SUMMARY atom (ai-language-copy.11b.9)", () => {
     mutate(source);
     expect(() => renderAtom(source, "en-SG")).toThrow("ATOM_INVALID_PERIOD_SUMMARY");
   });
-  it("renders the fixed summary-role notice in both locales", () => {
-    expect(renderSummaryRoleNotice("en-SG")).toBe("A median or an interquartile range (the spread of the middle half of the readings) is a summary value, not a single reading.");
-    expect(renderSummaryRoleNotice("zh-SG")).toBe("中位数或四分位距（中间一半读数的分布宽度）是汇总数值，不是单次读数。");
+  it("renders the fixed summary-role notice in both locales (ai-language-copy.11b.10: the IQR named and explained)", () => {
+    expect(renderSummaryRoleNotice("en-SG")).toBe("A median, or an interquartile range (IQR: the spread of the middle half of the readings), is a summary value, not a single reading.");
+    expect(renderSummaryRoleNotice("zh-SG")).toBe("中位数或四分位距（IQR，即中间一半读数的分布宽度）是汇总数值，不是单次读数。");
   });
 });

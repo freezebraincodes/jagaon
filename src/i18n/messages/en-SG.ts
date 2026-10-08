@@ -589,6 +589,20 @@ export const enSGMessages: AppMessages = {
     },
     positionLabels: { MORNING: "morning", EVENING: "evening" },
     periodLabels: { THIS_WEEK: "this week", LAST_WEEK: "last week", THIRTY_DAYS: "30 days" },
+    explanation: {
+      action: "Show how this comparison was worked out",
+      title: "How this comparison was worked out",
+      aiLabel: "AI-assisted wording",
+      supportingHeading: (count) => `Supporting readings (${count})`,
+      periodHeading: (role, count) => (role === "EARLIER" ? `Earlier period (${count})` : `Recent period (${count})`),
+      reconciliation: (earlier, recent, total) => `${earlier} + ${recent} = ${total} readings, matching the count above.`,
+      unavailable: "This comparison cannot be explained right now. The comparison above is unchanged.",
+      stale: "A supporting record changed. Reopen this comparison to see the update.",
+      earlierRange: (start, cutoff) => `${start} up to, but not including, ${cutoff}`,
+      recentRange: (cutoff, end) => `${cutoff} up to, but not including, ${end}`,
+      boundaryNote: (cutoff) =>
+        `The two periods meet at ${cutoff}. A reading recorded before then is in the earlier period; a reading recorded at or after it is in the recent period.`,
+    },
   },
   schedule: {
     title: "Medication schedule",
@@ -856,5 +870,13 @@ export const enSGMessages: AppMessages = {
     approvedNote: "Approved for local printing on this device.",
     printUnknown: "JagaOn could not tell whether the print dialog opened. Nothing was sent.",
     attemptsHeading: "Print attempts on this device",
+    // Packet 11C Task 8 (care-summary-notices.11c.1). `questions` and `draft`: verbatim copy of the approved care-draft notices
+    // (AI_LANGUAGE_COPY.careDraftNotices, ai-language-copy.11b.10); pinned by
+    // src/components/jagaon/screens/CareSummaryPreviewScreen.test.tsx; do not edit independently.
+    draftNotices: {
+      label: "Notes about this draft",
+      questions: "Questions are shown in your own words; the app does not carry them out.",
+      draft: "The app does not send this draft to your care team or confirm that a clinician has reviewed it.",
+    },
   },
 };

@@ -572,6 +572,19 @@ export const zhSGMessages: AppMessages = {
     },
     positionLabels: { MORNING: "早上", EVENING: "晚上" },
     periodLabels: { THIS_WEEK: "本周", LAST_WEEK: "上周", THIRTY_DAYS: "30天" },
+    explanation: {
+      action: "查看这项比较的依据",
+      title: "这项比较的依据",
+      aiLabel: "AI 辅助措辞",
+      supportingHeading: (count) => `支持读数（${count} 条）`,
+      periodHeading: (role, count) => (role === "EARLIER" ? `较早期间（${count} 条）` : `近期（${count} 条）`),
+      reconciliation: (earlier, recent, total) => `${earlier} + ${recent} = ${total} 条读数，与上方数量一致。`,
+      unavailable: "目前无法说明这项比较。上方的比较保持不变。",
+      stale: "一项支持记录已更改。请重新打开这项比较查看更新。",
+      earlierRange: (start, cutoff) => `${start}至${cutoff}之前`,
+      recentRange: (cutoff, end) => `${cutoff}起至${end}之前`,
+      boundaryNote: (cutoff) => `两个期间以${cutoff}为分界：在此之前记录的读数属于较早期间，在此时或之后记录的读数属于近期。`,
+    },
   },
   schedule: {
     title: "用药时间表",
@@ -835,5 +848,13 @@ export const zhSGMessages: AppMessages = {
     approvedNote: "已批准在此设备上本地打印。",
     printUnknown: "JagaOn 无法确定打印对话框是否已打开。没有发送任何内容。",
     attemptsHeading: "此设备上的打印记录",
+    // Packet 11C Task 8 (care-summary-notices.11c.1). `questions` and `draft`: verbatim copy of the approved care-draft notices
+    // (AI_LANGUAGE_COPY.careDraftNotices, ai-language-copy.11b.10); pinned by
+    // src/components/jagaon/screens/CareSummaryPreviewScreen.test.tsx; do not edit independently.
+    draftNotices: {
+      label: "关于此草稿的说明",
+      questions: "问题按您的原话显示，应用不会照此执行。",
+      draft: "应用不会把此草稿发送给护理团队，也不会确认医护人员已审阅。",
+    },
   },
 };

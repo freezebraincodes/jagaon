@@ -6,7 +6,7 @@ import { AI_ACTIVATION_MANIFEST, type AiActivationManifest } from "@/application
 import { AI_TASK_RUNTIME_BUNDLES } from "@/application/ai/ai-runtime-bundles";
 import { projectProviderTaskPayload } from "@/application/ai/detached-payload-projector";
 import { AI_TASK_TYPES, type ProviderTaskRequest } from "@/domain/ai";
-import { outputFixture, requestFixture } from "@/domain/ai/ai-test-fixtures";
+import { outputFixture, requestFixture, sourceBackedRequest } from "@/domain/ai/ai-test-fixtures";
 import { KIE_DOCUMENTED_MODELS, KIE_RESPONSES_URL, type KieModelSnapshot } from "@/ai/kie/kie-model-catalogue";
 import { AI_TASK_MAX_BODY_BYTES, createAiTaskHandler } from "./ai-task-handler";
 import * as route from "./route";
@@ -292,5 +292,62 @@ describe("Option B approved meaning at the route (owner approval 2026-10-05)", (
     const input = JSON.parse(JSON.parse(fetcher.mock.calls[0]![1].body as string).input[0].content[0].text);
     expect(input.taskPayload.claim.approvedMeaning).toBe("This compares readings from the same recorded slot across an earlier period and a recent period.");
     expect(input.taskPayload).not.toHaveProperty("limitations");
+  });
+});
+
+describe("source-backed requests at the route (Packet 11C Task 6A)", () => {
+  // The source-backed request addressed to the legacy EXPLAIN bundle, as the legacy projector would detach it.
+  const SOURCE_BACKED = { ...sourceBackedRequest(), runtimeBundleKey: AI_TASK_RUNTIME_BUNDLES.EXPLAIN_PATTERN.bundleKey } as ReturnType<typeof sourceBackedRequest>;
+  const BINDING = (SOURCE_BACKED.taskPayload as { periodSummary: unknown }).periodSummary;
+  function detachedSourceBacked(): ProviderTaskRequest {
+    const projected = projectProviderTaskPayload(SOURCE_BACKED, AI_TASK_RUNTIME_BUNDLES.EXPLAIN_PATTERN);
+    if (projected.kind !== "PROJECTED") throw new Error(projected.reason);
+    return projected.payload;
+  }
+  /** A recording environment: any read of the credential (or any other key) is observable. */
+  function recordingEnvironment() {
+    const reads: string[] = [];
+    const environment = new Proxy({ ...ENV } as Record<string, string | undefined>, { get: (target, key) => (reads.push(String(key)), target[String(key)]) });
+    return { environment, reads };
+  }
+  const withBinding = (body: ProviderTaskRequest) => ({ ...body, taskPayload: { ...(body.taskPayload as object), periodSummary: BINDING } });
+  const withSources = (body: ProviderTaskRequest) => ({ ...body, facts: body.facts.map((fact) => ({ ...fact, sources: [] })) });
+
+  it.each<[string, () => unknown]>([
+    ["a legacy EXPLAIN payload carrying taskPayload.periodSummary", () => withBinding(detached())],
+    ["the detached source-backed payload with its binding re-attached", () => withBinding(detachedSourceBacked())],
+    ["the whole internal source-backed request (binding, sources, request metadata)", () => SOURCE_BACKED],
+    ["a legacy EXPLAIN payload whose facts carry sources", () => withSources(detached())],
+    ["the detached source-backed payload whose facts carry sources", () => withSources(detachedSourceBacked())],
+  ])("refuses %s with PAYLOAD_INVALID 400 before any credential read or fetch", async (_label, body) => {
+    const fetcher = kie();
+    const resolveModel = vi.fn(() => MODEL);
+    const { environment, reads } = recordingEnvironment();
+    expect(await call(post(body()), { fetcher, environment, resolveModel })).toMatchObject({ status: 400, body: { kind: "UNAVAILABLE", reason: "PAYLOAD_INVALID" } });
+    expect(reads).toEqual([]);
+    expect(resolveModel).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("the shipped route refuses a body carrying the binding the same way", async () => {
+    const fetcher = kie();
+    const response = await createAiTaskHandler({ environment: ENV, fetcher })(post(withBinding(detachedSourceBacked())));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ kind: "UNAVAILABLE", reason: "PAYLOAD_INVALID" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("control: once the binding is dropped the route cannot tell a source-backed payload apart, so the client-side refusal is what protects its values", async () => {
+    const fetcher = kie();
+    const { environment, reads } = recordingEnvironment();
+    const body = detachedSourceBacked();
+    await call(post(body), { fetcher, environment });
+    expect(reads).toContain("KIE_API_KEY"); // the recording probe used above does observe a credential read
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    // The server's own recheck rebuilds the EXPLAIN payload from the claim alone, so it can never forward a binding either.
+    const input = JSON.parse(JSON.parse(fetcher.mock.calls[0]![1].body as string).input[0].content[0].text);
+    expect(Object.keys(input.taskPayload)).toEqual(["claim"]);
+    expect(JSON.stringify(input)).not.toMatch(/periodSummary|sources/);
+    expect(input.facts).toEqual(body.facts);
   });
 });

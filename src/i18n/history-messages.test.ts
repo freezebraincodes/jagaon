@@ -140,13 +140,14 @@ describe("Packet 7A history catalogue", () => {
   });
 
   it("contains no prohibited clinical, causal, adherence, prediction or delivery meaning", () => {
-    const strings = (catalogue: typeof en) =>
+    // Packet 11C Task 7: the nested `explanation` group (strings and functions) is checked with the same boundary.
+    const strings = (catalogue: object): string[] =>
       Object.values(catalogue).flatMap((value) =>
         typeof value === "string"
           ? [value]
           : typeof value === "function"
             ? [(value as (...args: unknown[]) => string)("X", 2, 3, "Y")]
-            : Object.values(value as Record<string, string>),
+            : strings(value as object),
       );
     // Permitted denials and record-only limitations from the matrix.
     const DENIALS = [/does not explain the cause/, /do not explain why/, /not a clinical analysis/, /does not mean no measurements/, /No summary was sent/];

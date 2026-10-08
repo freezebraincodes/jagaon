@@ -92,6 +92,17 @@ export function windowDates(window: { start: string; end: string }): DateRange {
   };
 }
 
+/**
+ * Packet 11C Task 6R: one window endpoint exactly as stored (canonical ISO form of the same instant) with its home-timezone local date
+ * and wall-clock time (HH:MM, seconds truncated, as supporting readings show theirs). Unlike `windowDates`, an end is not moved back
+ * 1 ms: this is the instant itself, so a half-open window's end reads as the excluded cutoff.
+ */
+export function homeLocalPoint(instant: string): { instant: Instant; localDate: LocalDate; localTime: string } {
+  const at = instantMs(instant);
+  const shifted = new Date(at + HOME_OFFSET_MINUTES * 60_000).toISOString();
+  return { instant: new Date(at).toISOString() as Instant, localDate: shifted.slice(0, 10) as LocalDate, localTime: shifted.slice(11, 16) };
+}
+
 function comparisons(snapshot: IntelligenceSnapshot, now: Instant): HistoryComparison[] {
   const facts: HistoryComparison[] = [];
   for (const slot of HISTORY_LABELLED_SLOTS) {

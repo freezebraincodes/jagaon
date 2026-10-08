@@ -90,6 +90,8 @@ describe("Packet 11A scope", () => {
         "src/application/ai/ai-runtime-bundles.ts",
         "src/application/ai/ai-task-service.test.ts",
         "src/application/ai/ai-task-service.ts",
+        // Packet 11C Task 6A: the legacy fact-sending service refuses a source-backed request (own file: module-wide projector spy).
+        "src/application/ai/ai-task-service-source-backed.test.ts",
         "src/application/ai/detached-payload-projector.test.ts",
         "src/application/ai/detached-payload-projector.ts",
         // Packet 11B.6: hybrid language layer
@@ -100,6 +102,9 @@ describe("Packet 11A scope", () => {
         // Packet 11C Task 3: the source-backed EXPLAIN_PATTERN request builder.
         "src/application/ai/explain-pattern-request.test.ts",
         "src/application/ai/explain-pattern-request.ts",
+        // Packet 11C Task 6: the pattern-explanation use case (stale-source and correction protection; hybrid execute only).
+        "src/application/ai/explain-pattern.test.ts",
+        "src/application/ai/explain-pattern.ts",
         "src/application/ai/language/ai-language-copy.test.ts",
         "src/application/ai/language/ai-language-copy.ts",
         "src/application/ai/language/assembler.test.ts",
@@ -208,5 +213,69 @@ describe("Packet 11A scope", () => {
     expect(JAGAON_DEXIE_VERSION).toBe(2);
     expect(LOGICAL_STORAGE_SCHEMA_VERSION).toBe(1);
     expect(JAGAON_STORES_V1.aiInvocationAudits).toBe("requestId, taskType, requestedAt, outcomeCode, routeProfileKey, [taskType+requestedAt]");
+  });
+});
+
+/**
+ * Packet 11C Checkpoint 2 (Task 9): no activation change, no new network call site and no browser credential. The allow-lists name
+ * the modules that held these before Checkpoint 2, exactly; a new entry is a stop for the owner, never an allow-list edit.
+ */
+const SOURCES = walk("src")
+  .filter((file) => !/\.test\.tsx?$/.test(file))
+  .sort();
+/** A network call site: a `fetch` call or the global `fetch` bound as a default fetcher, or another browser network primitive. */
+const NETWORK_CALL_SITE = /(?<![.\w$])fetch\b(?!\s*:)|(?:globalThis|window|self)\s*\.\s*fetch\b|\[\s*["'`]fetch["'`]\s*\]|XMLHttpRequest|WebSocket|EventSource|sendBeacon/;
+const EXISTING_NETWORK_MODULES = [
+  "src/ai/kie/kie-model-catalogue.ts",
+  "src/ai/kie/kie-responses-provider.ts",
+  "src/app/api/onemap/search/onemap-search-handler.ts",
+  "src/application/nearby-food/browser-nearby-food.ts",
+];
+const ENVIRONMENT_READ = /process\.env|import\.meta\.env/;
+const PROVIDER_KEY_NAME = /KIE_API_KEY|DEEPSEEK_API_KEY|ONEMAP_ACCESS_TOKEN/;
+
+describe("Packet 11C Checkpoint 2 guards", () => {
+  it("activates nothing: every task stays DETERMINISTIC_ONLY under HACKATHON_DEMO and none is SYNTHETIC_REMOTE_ENABLED", () => {
+    expect(activation.AI_ACTIVATION_MANIFEST.profile).toBe("HACKATHON_DEMO");
+    expect(Object.entries(activation.AI_ACTIVATION_MANIFEST.tasks).filter(([, state]) => state !== "DETERMINISTIC_ONLY")).toEqual([]);
+  });
+
+  it("detects a network call site (positive control for the scan below)", () => {
+    for (const sample of ["fetch(url)", "const f = options.fetcher ?? fetch;", "await globalThis.fetch(url)", "window['fetch'](url)", "new XMLHttpRequest()", "navigator.sendBeacon(url)"]) {
+      expect(sample, sample).toMatch(NETWORK_CALL_SITE);
+    }
+    for (const sample of ["const fetcher = options.fetcher;", "fetcher(input, init)", "{ fetch: false }", "refetch()"]) expect(sample, sample).not.toMatch(NETWORK_CALL_SITE);
+  });
+
+  it("adds no network call site outside the existing modules", () => {
+    expect(SOURCES.filter((file) => NETWORK_CALL_SITE.test(strip(readFileSync(join(ROOT, file), "utf8"))))).toEqual(EXISTING_NETWORK_MODULES);
+  });
+
+  it("keeps every credential and environment read out of the browser graph", () => {
+    // Only the two server routes read the environment, and only server-only modules name a provider key.
+    expect(SOURCES.filter((file) => ENVIRONMENT_READ.test(strip(readFileSync(join(ROOT, file), "utf8"))))).toEqual(["src/app/api/ai/task/route.ts", "src/app/api/onemap/search/route.ts"]);
+    expect(SOURCES.filter((file) => PROVIDER_KEY_NAME.test(readFileSync(join(ROOT, file), "utf8")))).toEqual([
+      "src/ai/deepseek/deepseek-catalogue.ts",
+      "src/ai/kie/kie-route-config.ts",
+      "src/app/api/ai/task/route.ts",
+      "src/app/api/onemap/search/route.ts",
+    ]);
+    for (const file of CLIENT_GRAPH) {
+      expect(readFileSync(join(ROOT, file), "utf8"), file).not.toMatch(/process\.env|import\.meta\.env|KIE_API_KEY|DEEPSEEK_API_KEY|ONEMAP_ACCESS_TOKEN|NEXT_PUBLIC_|\bBearer\b|api\.kie|deepseek\.com|readKieToken|readDeepSeekToken/);
+    }
+    expect(CLIENT_GRAPH.filter((file) => file.startsWith("src/ai/") || file.startsWith("src/app/api/"))).toEqual([]);
+  });
+
+  it("puts the Checkpoint 2 screens in the browser graph without the AI use case, the hybrid service or the care-draft renderer", () => {
+    expect(CLIENT_GRAPH).toEqual(expect.arrayContaining(["src/components/jagaon/history/PatternExplanationPanel.tsx", "src/components/jagaon/screens/CareSummaryPreviewScreen.tsx", "src/components/jagaon/screens/RecordedHistoryScreen.tsx"]));
+    for (const file of [
+      "src/application/ai/explain-pattern.ts",
+      "src/application/ai/explain-pattern-request.ts",
+      "src/application/ai/ai-hybrid-task-service.ts",
+      "src/application/ai/ai-task-service.ts",
+      "src/application/ai/language/care-draft-notices.ts",
+    ]) {
+      expect(CLIENT_GRAPH, file).not.toContain(file);
+    }
   });
 });

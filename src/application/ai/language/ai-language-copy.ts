@@ -26,8 +26,13 @@ import { COMPARISON_SLOTS } from "@/domain/ai/ai-task-contracts";
  * range) and `summaryRoleNotice` — and one new observation group, `periods`, with a single approved template used by the default and
  * every variant. New IQR wording is for owner review at Checkpoint 1. Nothing here is sent to the model; every 11b.8 entry is
  * byte-identical.
+ * ai-language-copy.11b.10 (Packet 11C Task 6R, owner implementation decision 2026-10-08, offline): changes only `summaryRoleNotice`, which
+ * now names variability as the interquartile range (IQR) and explains it as the spread of the middle half of the readings. The checkText
+ * rules are unchanged and accept the Latin "IQR" in the zh line. Application-only: the notice is never part of an atom, a composed field
+ * or a request, so atoms, default shells, remote eligibility and every model-facing byte are unchanged. Every 11b.9 entry other than
+ * `summaryRoleNotice` is byte-identical.
  */
-export const AI_LANGUAGE_COPY_REVISION = "ai-language-copy.11b.9";
+export const AI_LANGUAGE_COPY_REVISION = "ai-language-copy.11b.10";
 export type DisplayUnit = "MMOL_L" | "MG_DL";
 export type CountNounKey = "READINGS" | "RECORDS";
 export type ComparisonSlot = (typeof COMPARISON_SLOTS)[number];
@@ -61,7 +66,7 @@ export type LanguageCopy = Readonly<{
   comparisonSlotLabels: Readonly<Record<ComparisonSlot, ByLocale>>;
   /** 11b.9: the PERIOD_SUMMARY atom copy (application-only; never projected). */
   periodSummary: ByLocale<PeriodSummaryCopy>;
-  /** 11b.9: the fixed line that a median or an interquartile range is a summary value, not a single reading. */
+  /** 11b.9: the fixed line that a median or an interquartile range is a summary value, not a single reading (11b.10: the IQR named and explained). */
   summaryRoleNotice: ByLocale;
 }>;
 export type PeriodSummaryCopy = Readonly<{ lead: string; MEDIAN: string; IQR: string; roles: Readonly<Record<"EARLIER" | "RECENT", string>>; join: string }>;
@@ -250,5 +255,5 @@ export const AI_LANGUAGE_COPY: LanguageCopy = buildLanguageCopy({
     "en-SG": { lead: "{slot} readings", MEDIAN: "{role}, {range}: median {value} from {count}", IQR: "{role}, {range}: interquartile range {value} from {count}", roles: { EARLIER: "earlier period", RECENT: "recent period" }, join: "; " },
     "zh-SG": { lead: "{slot}时段", MEDIAN: "{role}（{range}）{count}的中位数为 {value}", IQR: "{role}（{range}）{count}的四分位距为 {value}", roles: { EARLIER: "较早期间", RECENT: "近期" }, join: "；" },
   },
-  summaryRoleNotice: both("A median or an interquartile range (the spread of the middle half of the readings) is a summary value, not a single reading.", "中位数或四分位距（中间一半读数的分布宽度）是汇总数值，不是单次读数。"),
+  summaryRoleNotice: both("A median, or an interquartile range (IQR: the spread of the middle half of the readings), is a summary value, not a single reading.", "中位数或四分位距（IQR，即中间一半读数的分布宽度）是汇总数值，不是单次读数。"),
 });

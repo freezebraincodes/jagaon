@@ -593,6 +593,27 @@ export type HistoryMessages = {
   slotLabels: Record<"BEFORE_BREAKFAST" | "BEFORE_LUNCH" | "BEFORE_DINNER" | "BEDTIME", string>;
   positionLabels: Record<"MORNING" | "EVENING", string>;
   periodLabels: Record<"THIS_WEEK" | "LAST_WEEK" | "THIRTY_DAYS", string>;
+  /** Packet 11C Task 7: the explanation panel under an explainable comparison (new application copy; the 7A rows above are unchanged). */
+  explanation: HistoryExplanationMessages;
+};
+
+/**
+ * Packet 11C Task 7 explanation-panel copy (history-explanation.11c.1). `start`, `cutoff` and `end` are "date, time" strings derived
+ * from the view's own period instants; counts are the view's included readings.
+ */
+export type HistoryExplanationMessages = {
+  action: string;
+  /** The panel heading (focus target on open). */
+  title: string;
+  aiLabel: string;
+  supportingHeading: (count: number) => string;
+  periodHeading: (role: "EARLIER" | "RECENT", count: number) => string;
+  reconciliation: (earlier: number, recent: number, total: number) => string;
+  unavailable: string;
+  stale: string;
+  earlierRange: (start: string, cutoff: string) => string;
+  recentRange: (cutoff: string, end: string) => string;
+  boundaryNote: (cutoff: string) => string;
 };
 
 /**
@@ -855,6 +876,14 @@ export type CareSummaryMessages = {
   approvedNote: string;
   printUnknown: string;
   attemptsHeading: string;
+  /**
+   * Packet 11C Task 8 (Addendum A3), care-summary-notices.11c.1: the fixed care-draft notices shown after "About this summary",
+   * outside the printed summary. `questions` and `draft` are a verbatim copy of the approved care-draft notices
+   * (AI_LANGUAGE_COPY.careDraftNotices, ai-language-copy.11b.10, unchanged since 11b.8); pinned by
+   * src/components/jagaon/screens/CareSummaryPreviewScreen.test.tsx; do not edit independently. `label` is new wording (the region's
+   * accessible name) for owner review.
+   */
+  draftNotices: { label: string; questions: string; draft: string };
 };
 
 export type AppMessages = {

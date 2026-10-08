@@ -4,9 +4,12 @@ import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
 import type { Instant } from "@/domain/shared/time";
 import { patternEvidenceSnapshotPayloadSchema } from "@/domain/patterns";
 import { loadIntelligenceSnapshot, type IntelligenceSnapshot } from "@/application/intelligence/intelligence-snapshot";
-import { explainablePatternResultSchema, type ExplainablePatternResult, type ExplainablePatternView } from "./recorded-history-contracts";
+import { explainablePatternResultSchema, explainablePatternViewSchema, type ExplainablePatternResult, type ExplainablePatternView } from "./recorded-history-contracts";
 import { projectExplainablePattern } from "./explainable-pattern-view";
 import {
+  BOUNDARY_DATE,
+  BOUNDARY_DAY_READINGS,
+  boundaryDayFixture,
   databases,
   dayBefore,
   FACT,
@@ -215,7 +218,128 @@ describe("ExplainablePatternView (Packet 11C Addendum A1)", () => {
   });
 });
 
+describe("Packet 11C Task 6R: the shared period boundary and included-reading counts (real evaluator)", () => {
+  // NOW is 10:00 on 4 Oct 2026 in Singapore: earlier [T−42d, T−14d), recent [T−14d, T), shared boundary T−14d.
+  const T_MINUS_42 = { instant: "2026-08-23T02:00:00.000Z", localDate: "2026-08-23", localTime: "10:00" };
+  const BOUNDARY = { instant: "2026-09-20T02:00:00.000Z", localDate: "2026-09-20", localTime: "10:00" };
+  const T = { instant: NOW, localDate: TODAY, localTime: "10:00" };
+
+  it("carries each period's source instants with their home-offset local date and time, and the shared boundary; window dates unchanged", async () => {
+    const { database, history } = await higherFixture();
+    const view = explainable(await history.loadExplainablePattern({ factId: FACT }));
+    const { facts } = comparisonChain(await loadIntelligenceSnapshot(database, NOW));
+    expect(view.periods.map((p) => p.bounds)).toEqual([
+      { start: T_MINUS_42, end: BOUNDARY },
+      { start: BOUNDARY, end: T },
+    ]);
+    // Source-derived: the evaluator's own window instants, not recomputed.
+    expect([facts.reference.window.start, facts.reference.window.end, facts.recent.window.start, facts.recent.window.end].map((at) => new Date(at).toISOString())).toEqual([
+      T_MINUS_42.instant,
+      BOUNDARY.instant,
+      BOUNDARY.instant,
+      T.instant,
+    ]);
+    expect(view.sharedBoundary).toEqual(BOUNDARY);
+    // Period semantics and the 7A date ranges are unchanged: the boundary date is the last date of one and the first of the other.
+    expect(view.periods.map((p) => p.window)).toEqual([
+      { startDate: "2026-08-23", endDate: "2026-09-20" },
+      { startDate: "2026-09-20", endDate: TODAY },
+    ]);
+  });
+
+  it("boundary day: a reading before the 10:00 cutoff on the boundary date is EARLIER, one after it is RECENT; counts reconcile", async () => {
+    const { database, history, boundary } = await boundaryDayFixture();
+    expect(BOUNDARY_DATE).toBe(BOUNDARY.localDate);
+    const view = explainable(await history.loadExplainablePattern({ factId: FACT }));
+    expect(view.kind).toBe("HIGHER");
+    expect(view.sharedBoundary).toEqual(BOUNDARY);
+    const [earlier, recent] = view.periods;
+    const before = earlier.readings.filter((r) => r.ref.recordId === boundary.before.recordId);
+    const after = recent.readings.filter((r) => r.ref.recordId === boundary.after.recordId);
+    expect(before).toEqual([expect.objectContaining({ localDate: BOUNDARY_DATE, localTime: BOUNDARY_DAY_READINGS.before[0], enteredValue: BOUNDARY_DAY_READINGS.before[1] })]);
+    expect(after).toEqual([expect.objectContaining({ localDate: BOUNDARY_DATE, localTime: BOUNDARY_DAY_READINGS.after[0], enteredValue: BOUNDARY_DAY_READINGS.after[1] })]);
+    expect(recent.readings.map((r) => r.ref.recordId)).not.toContain(boundary.before.recordId);
+    expect(earlier.readings.map((r) => r.ref.recordId)).not.toContain(boundary.after.recordId);
+    // The before-cutoff reading is the last earlier reading, the after-cutoff one the first recent reading.
+    expect(earlier.readings.at(-1)!.ref.recordId).toBe(boundary.before.recordId);
+    expect(recent.readings[0]!.ref.recordId).toBe(boundary.after.recordId);
+    // The evaluator agrees: each reading is assigned to exactly that period.
+    const { facts } = comparisonChain(await loadIntelligenceSnapshot(database, NOW));
+    expect(facts.reference.assignments.map((a) => a.reading.recordId)).toContain(boundary.before.recordId);
+    expect(facts.recent.assignments.map((a) => a.reading.recordId)).toContain(boundary.after.recordId);
+    // Counts: 8 + 1 earlier, 6 + 1 recent; each count is its list's length and the total is their sum.
+    expect(view.periods.map((p) => [p.role, p.count, p.readings.length])).toEqual([["EARLIER", 9, 9], ["RECENT", 7, 7]]);
+    expect(view.totalCount).toBe(16);
+    expect(view.totalCount).toBe(earlier.readings.length + recent.readings.length);
+    // Both date ranges still show the boundary date (unchanged period semantics).
+    expect(earlier.window.endDate).toBe(BOUNDARY_DATE);
+    expect(recent.window.startDate).toBe(BOUNDARY_DATE);
+    expect(earlier.bounds.end).toEqual(BOUNDARY);
+    expect(recent.bounds.start).toEqual(BOUNDARY);
+  });
+
+  it("counts distinct included readings: a same-instant duplicate the evaluator excludes is neither counted nor listed", async () => {
+    const { database, journal, coordinator, history } = await setup();
+    const recorded = new Map<number, string>();
+    for (const [d, v] of [...REFERENCE, ...RECENT]) recorded.set(d, (await reading(journal, dayBefore(TODAY, d), "07:30", v)).recordId);
+    // A second reading at exactly the same instant as the earlier reading 18 days ago (same value, so the summary is deterministic).
+    const twinDate = dayBefore(TODAY, 18);
+    expect(REFERENCE.find(([d]) => d === 18)).toEqual([18, "6.0"]);
+    const original = recorded.get(18)!;
+    const twin = await reading(journal, twinDate, "07:30", "6.0");
+    await coordinator.processPending();
+    const view = explainable(await history.loadExplainablePattern({ factId: FACT }));
+    const { chain, facts } = comparisonChain(await loadIntelligenceSnapshot(database, NOW));
+    const excluded = chain.previous.snapshot.payload.consideredButExcluded.filter((entry) => entry.reason === "DUPLICATE_LOGICAL_OCCASION");
+    expect(excluded).toHaveLength(1);
+    const excludedId = excluded[0]!.revision.recordId;
+    const [earlier, recent] = view.periods;
+    const atTwin = earlier.readings.filter((r) => r.localDate === twinDate && r.localTime === "07:30");
+    // Exactly one of the two same-instant readings is included and listed, exactly once; the excluded one is nowhere in the view.
+    expect(atTwin).toHaveLength(1);
+    expect([original, twin.recordId].sort()).toEqual([excludedId, atTwin[0]!.ref.recordId].sort());
+    expect(view.periods.flatMap((p) => p.readings.map((r) => r.ref.recordId))).not.toContain(excludedId);
+    const keys = view.periods.flatMap((p) => p.readings.map((r) => `${r.ref.recordId}:${r.ref.revisionId}`));
+    expect(new Set(keys).size).toBe(keys.length);
+    // The count is the evaluator's included readings (8, not the 9 recorded), equal to the listed readings; total = sum.
+    expect(earlier.count).toBe(8);
+    expect(earlier.count).toBe(facts.reference.assignments.length);
+    expect(earlier.count).toBe(earlier.readings.length);
+    expect(recent.count).toBe(recent.readings.length);
+    expect(view.totalCount).toBe(earlier.count + recent.count);
+  });
+});
+
 describe("projectExplainablePattern fail-closed reconciliation (pure, on clones of a real snapshot)", () => {
+  it("fails closed with UNAVAILABLE when the periods do not share one boundary (a gap or an overlap); a boundary is never invented", async () => {
+    const { database } = await higherFixture();
+    const base = await loadIntelligenceSnapshot(database, NOW);
+    expect(projectExplainablePattern(base, FACT).kind).toBe("EXPLAINABLE");
+    const shifted = (minutes: number) => {
+      const snapshot = structuredClone(base);
+      const recent = comparisonChain(snapshot).facts.recent;
+      recent.window.start = new Date(Date.parse(recent.window.start) + minutes * 60_000).toISOString() as never;
+      return projectExplainablePattern(snapshot, FACT);
+    };
+    expect(shifted(60)).toEqual({ kind: "INELIGIBLE", reason: "UNAVAILABLE" });
+    expect(shifted(-60)).toEqual({ kind: "INELIGIBLE", reason: "UNAVAILABLE" });
+  });
+
+  it("the view schema refuses a shared boundary that disagrees with either period's endpoint", async () => {
+    const { history } = await higherFixture();
+    const view = explainable(await history.loadExplainablePattern({ factId: FACT }));
+    expect(explainablePatternViewSchema.safeParse(view).success).toBe(true);
+    const moved = structuredClone(view);
+    moved.sharedBoundary = { ...moved.sharedBoundary, localTime: "11:00" };
+    expect(explainablePatternViewSchema.safeParse(moved).success).toBe(false);
+    const gap = structuredClone(view);
+    gap.periods[1].bounds.start = { instant: "2026-09-20T03:00:00.000Z" as never, localDate: "2026-09-20" as never, localTime: "11:00" };
+    expect(explainablePatternViewSchema.safeParse(gap).success).toBe(false);
+    const inverted = structuredClone(view);
+    inverted.periods[0].bounds.start = inverted.periods[0].bounds.end;
+    expect(explainablePatternViewSchema.safeParse(inverted).success).toBe(false);
+  });
+
   it("returns MISSING_READING when a supporting reading is absent from the resolved journal", async () => {
     const { database } = await higherFixture();
     const snapshot = await loadedClone(database);

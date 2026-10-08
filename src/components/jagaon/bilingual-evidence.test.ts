@@ -205,6 +205,88 @@ describe("catalogue wording boundaries", () => {
     }
   });
 
+  it("pins the Packet 11C Task 7 explanation-panel copy (history.explanation) with en/zh parity and full-width zh punctuation", () => {
+    const en = getMessages("en-SG").history.explanation;
+    const zh = getMessages("zh-SG").history.explanation;
+    expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort());
+    expect(Object.keys(en).sort()).toEqual(
+      ["action", "aiLabel", "boundaryNote", "earlierRange", "periodHeading", "reconciliation", "recentRange", "stale", "supportingHeading", "title", "unavailable"].sort(),
+    );
+    const pairs: Array<[string, string, string]> = [
+      ["action", en.action, zh.action],
+      ["title", en.title, zh.title],
+      ["aiLabel", en.aiLabel, zh.aiLabel],
+      ["supportingHeading", en.supportingHeading(14), zh.supportingHeading(14)],
+      ["periodHeading.EARLIER", en.periodHeading("EARLIER", 8), zh.periodHeading("EARLIER", 8)],
+      ["periodHeading.RECENT", en.periodHeading("RECENT", 6), zh.periodHeading("RECENT", 6)],
+      ["reconciliation", en.reconciliation(8, 6, 14), zh.reconciliation(8, 6, 14)],
+      ["unavailable", en.unavailable, zh.unavailable],
+      ["stale", en.stale, zh.stale],
+      ["earlierRange", en.earlierRange("S", "C"), zh.earlierRange("S", "C")],
+      ["recentRange", en.recentRange("C", "E"), zh.recentRange("C", "E")],
+      ["boundaryNote", en.boundaryNote("C"), zh.boundaryNote("C")],
+    ];
+    expect(Object.fromEntries(pairs.map(([key, english, chinese]) => [key, [english, chinese]]))).toEqual({
+      action: ["Show how this comparison was worked out", "查看这项比较的依据"],
+      title: ["How this comparison was worked out", "这项比较的依据"],
+      aiLabel: ["AI-assisted wording", "AI 辅助措辞"],
+      supportingHeading: ["Supporting readings (14)", "支持读数（14 条）"],
+      "periodHeading.EARLIER": ["Earlier period (8)", "较早期间（8 条）"],
+      "periodHeading.RECENT": ["Recent period (6)", "近期（6 条）"],
+      reconciliation: ["8 + 6 = 14 readings, matching the count above.", "8 + 6 = 14 条读数，与上方数量一致。"],
+      unavailable: ["This comparison cannot be explained right now. The comparison above is unchanged.", "目前无法说明这项比较。上方的比较保持不变。"],
+      stale: ["A supporting record changed. Reopen this comparison to see the update.", "一项支持记录已更改。请重新打开这项比较查看更新。"],
+      earlierRange: ["S up to, but not including, C", "S至C之前"],
+      recentRange: ["C up to, but not including, E", "C起至E之前"],
+      boundaryNote: [
+        "The two periods meet at C. A reading recorded before then is in the earlier period; a reading recorded at or after it is in the recent period.",
+        "两个期间以C为分界：在此之前记录的读数属于较早期间，在此时或之后记录的读数属于近期。",
+      ],
+    });
+    for (const [key, , chinese] of pairs) {
+      // Full-width punctuation only; these keys do not address the reader, so they need neither 您 nor 你.
+      expect(chinese, key).not.toMatch(/[()[\]:;,!?]|\.(?!\d)/);
+      expect(chinese, key).not.toMatch(/你/);
+    }
+    // Wording boundary: the panel copy never names the full range, a spread or a clinical judgement.
+    for (const [key, english, chinese] of pairs) {
+      expect(english, key).not.toMatch(/\brange\b|spread|normal|high|low|risk/i);
+      expect(chinese, key).not.toMatch(/范围|偏高|偏低|风险/);
+    }
+  });
+
+  it("pins the Packet 11C Task 8 care-draft notice copy (careSummary.draftNotices) with en/zh parity and full-width zh punctuation", () => {
+    // `questions` and `draft` are a verbatim copy of the approved care-draft notices (AI_LANGUAGE_COPY.careDraftNotices);
+    // their equality with the approved copy and renderer is pinned by CareSummaryPreviewScreen.test.tsx. `label` is new wording.
+    const en = getMessages("en-SG").careSummary.draftNotices;
+    const zh = getMessages("zh-SG").careSummary.draftNotices;
+    expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort());
+    expect(Object.keys(en).sort()).toEqual(["draft", "label", "questions"]);
+    expect({ en, zh }).toEqual({
+      en: {
+        label: "Notes about this draft",
+        questions: "Questions are shown in your own words; the app does not carry them out.",
+        draft: "The app does not send this draft to your care team or confirm that a clinician has reviewed it.",
+      },
+      zh: {
+        label: "关于此草稿的说明",
+        questions: "问题按您的原话显示，应用不会照此执行。",
+        draft: "应用不会把此草稿发送给护理团队，也不会确认医护人员已审阅。",
+      },
+    });
+    for (const key of ["label", "questions", "draft"] as const) {
+      // Full-width punctuation only; where the reader is addressed it is 您, never 你.
+      expect(zh[key], key).not.toMatch(/[()[\]:;,!?]|\.(?!\d)/);
+      expect(zh[key], key).not.toMatch(/你/);
+    }
+    expect(zh.questions).toContain("您");
+    // Each notice names sending or review only to deny it.
+    expect(en.questions).toMatch(/does not carry them out/);
+    expect(en.draft).toMatch(/^The app does not send .* or confirm that a clinician has reviewed it\.$/);
+    expect(zh.questions).toMatch(/不会照此执行/);
+    expect(zh.draft).toMatch(/^应用不会把此草稿发送给护理团队，也不会确认医护人员已审阅。$/);
+  });
+
   it("uses the design's compact bilingual boundary", () => {
     expect(getMessages("en-SG").onboarding.compactBoundary).toBe(
       "Hackathon demo. Synthetic data only. Not for patient use.",

@@ -107,6 +107,11 @@ describe("Packet 11C source-backed EXPLAIN byte guard (offline)", () => {
     await expectVersionOnlyDifference(body!, locale, `${locale} ${scenario}`);
   });
 
+  it("Task 6R: the BOUNDARY_DAY regression scenario is covered by every shape, version-only body, eligibility and composition case above and below", () => {
+    expect(SCENARIOS).toContain("BOUNDARY_DAY");
+    expect(CASES.filter(([, scenario]) => scenario === "BOUNDARY_DAY")).toEqual([["en-SG", "BOUNDARY_DAY"], ["zh-SG", "BOUNDARY_DAY"]]);
+  });
+
   it.each(LOCALES)("%s: the class hash is the stored class (the ordinary fixture of the 70 has the same body, version-normalised)", async (locale) => {
     expect(SLOT_PLAN_VERSION).toBe(CURRENT_SLOT_PLAN_VERSION);
     await expectVersionOnlyDifference(await ordinaryBody(locale), locale, `${locale} ordinary`);

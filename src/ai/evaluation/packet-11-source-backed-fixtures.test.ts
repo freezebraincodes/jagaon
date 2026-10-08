@@ -4,6 +4,7 @@ import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "@/application/ai/ai-hybrid-runtime-bundles";
 import { planSlots, remoteBudgetAccount } from "@/application/ai/language/slot-planner";
+import { BOUNDARY_DATE, BOUNDARY_DAY_READINGS } from "@/application/history/history-test-support";
 import { aiTaskRequestSchema } from "@/domain/ai";
 import {
   CORRECTION,
@@ -35,6 +36,7 @@ const EXPECTED_KIND: Readonly<Record<SourceBackedScenario, "HIGHER" | "LOWER" | 
   VARIABILITY: "VARIABILITY",
   CORRECTED: "HIGHER",
   MANY_READINGS: "HIGHER",
+  BOUNDARY_DAY: "HIGHER",
 };
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;
@@ -81,6 +83,22 @@ describe("Packet 11C source-backed fixtures (real evaluator, offline)", () => {
     expect(Math.max(...view.periods.map((period) => period.readings.length))).toBeGreaterThan(32);
     const keys = view.periods.flatMap((period) => period.readings.map((entry) => `${entry.ref.recordId}:${entry.ref.revisionId}`));
     expect(new Set(keys).size).toBe(view.totalCount);
+    // Task 6R: the count is included readings, not days: 36 readings on 12 days in the earlier period.
+    const [earlier] = view.periods;
+    expect(earlier.count).toBe(36);
+    expect(earlier.readings).toHaveLength(36);
+    expect(new Set(earlier.readings.map((entry) => entry.localDate)).size).toBe(12);
+  });
+
+  it.each(LOCALES)("%s BOUNDARY_DAY: on the boundary date the before-cutoff reading is earlier and the after-cutoff one recent; the view carries the cutoff", async (locale) => {
+    const { view } = await sourceBackedFixture(locale, "BOUNDARY_DAY");
+    const [earlier, recent] = view.periods;
+    expect(view.sharedBoundary).toEqual({ instant: "2026-09-20T02:00:00.000Z", localDate: BOUNDARY_DATE, localTime: "10:00" });
+    expect(earlier.readings.at(-1)).toMatchObject({ localDate: BOUNDARY_DATE, localTime: BOUNDARY_DAY_READINGS.before[0], enteredValue: BOUNDARY_DAY_READINGS.before[1] });
+    expect(recent.readings[0]).toMatchObject({ localDate: BOUNDARY_DATE, localTime: BOUNDARY_DAY_READINGS.after[0], enteredValue: BOUNDARY_DAY_READINGS.after[1] });
+    expect([earlier.window.endDate, recent.window.startDate]).toEqual([BOUNDARY_DATE, BOUNDARY_DATE]);
+    expect(view.periods.map((period) => [period.count, period.readings.length])).toEqual([[9, 9], [7, 7]]);
+    expect(view.totalCount).toBe(16);
   });
 
   it.each(LOCALES)("%s LOWER mirrors HIGHER: same windows and earlier period, recent summary below the earlier one", async (locale) => {
@@ -115,6 +133,40 @@ describe("Packet 11C source-backed fixtures (real evaluator, offline)", () => {
     expect(account.total, `${locale} ${scenario}${detail}`).toBeLessThanOrEqual(account.ceiling);
     expect(account.total, `${locale} ${scenario}${detail}`).toBeLessThanOrEqual(historical.sum);
     expect(planned.plan.remote, `${locale} ${scenario}: expected a remote-eligible plan${detail}`).toEqual({ eligible: true });
+  });
+});
+
+/**
+ * Packet 11C Task 6R (2026-10-08, offline): the planner's own remote-eligibility account per scenario x locale, pinned. The 6R changes
+ * (view boundary data, copy 11b.10 summaryRoleNotice) never reach the PERIOD_SUMMARY atom or any composed field, so these sums are the
+ * same before and after them; BOUNDARY_DAY is the new scenario. Each row: [Σ reserved, ceiling, headline R, observation L, evidence R].
+ */
+const ELIGIBILITY_ACCOUNT: Readonly<Record<string, readonly number[]>> = {
+  "en-SG HIGHER": [457, 525, 133, 222, 102],
+  "en-SG LOWER": [457, 525, 133, 222, 102],
+  "en-SG VARIABILITY": [486, 525, 133, 251, 102],
+  "en-SG CORRECTED": [456, 525, 133, 221, 102],
+  "en-SG MANY_READINGS": [458, 525, 133, 223, 102],
+  "en-SG BOUNDARY_DAY": [456, 525, 133, 221, 102],
+  "zh-SG HIGHER": [249, 525, 67, 112, 70],
+  "zh-SG LOWER": [249, 525, 67, 112, 70],
+  "zh-SG VARIABILITY": [254, 525, 67, 117, 70],
+  "zh-SG CORRECTED": [248, 525, 67, 111, 70],
+  "zh-SG MANY_READINGS": [250, 525, 67, 113, 70],
+  "zh-SG BOUNDARY_DAY": [248, 525, 67, 111, 70],
+};
+
+describe("Packet 11C Task 6R: eligibility sums per scenario x locale are pinned", () => {
+  it("every scenario's account is the pinned one", async () => {
+    const accounts: Record<string, number[]> = {};
+    for (const [locale, scenario] of CASES) {
+      const { request } = await sourceBackedFixture(locale, scenario);
+      const planned = planSlots(request, BUNDLE);
+      if (planned.kind !== "PLANNED") throw new Error(`${locale} ${scenario}: ${planned.reason}`);
+      const account = remoteBudgetAccount(planned.plan, planned.atoms, BUNDLE);
+      accounts[`${locale} ${scenario}`] = [account.total, account.ceiling, ...account.fields.map((field) => field.reserved)];
+    }
+    expect(accounts).toEqual(ELIGIBILITY_ACCOUNT);
   });
 });
 

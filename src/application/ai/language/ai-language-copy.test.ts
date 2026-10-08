@@ -26,6 +26,11 @@ const without11b9 = (copy: unknown) => {
   }
   return rest;
 };
+/**
+ * Packet 11C Task 6R: sha256 of JSON.stringify(ai-language-copy.11b.9) without `revision` and `summaryRoleNotice`, computed from the
+ * unchanged 11b.9 file before the 11b.10 change (2026-10-08).
+ */
+const COPY_11B9_WITHOUT_NOTICE_DIGEST = "b0c5823f17190a91bba323c6cebe4428080c2de03dce11c8fbdbe98fe6dad0cd";
 const withoutPresentation = (copy: unknown) => {
   const rest = without11b9(copy);
   delete rest.revision;
@@ -36,9 +41,9 @@ const withoutPresentation = (copy: unknown) => {
   }
   return rest;
 };
-describe("language copy ai-language-copy.11b.9", () => {
+describe("language copy ai-language-copy.11b.10", () => {
   it("pins the revision and the approved claim clauses", () => {
-    expect(AI_LANGUAGE_COPY_REVISION).toBe("ai-language-copy.11b.9");
+    expect(AI_LANGUAGE_COPY_REVISION).toBe("ai-language-copy.11b.10");
     expect(AI_LANGUAGE_COPY.claimClauses.COMPARABLE_SLOT_TREND).toEqual({ "en-SG": "your readings from the same time slot in an earlier and a recent period", "zh-SG": "同一时段在较早期间和近期的读数" });
   });
   it("has a gloss for every gloss key and an intro for every AI-organisable section, in both locales", () => {
@@ -55,6 +60,7 @@ describe("language copy ai-language-copy.11b.9", () => {
     ["the 11b.6 revision", (c: any) => (c.revision = "ai-language-copy.11b.6"), "LANGUAGE_COPY_INVALID_REVISION"],
     ["the 11b.7 revision", (c: any) => (c.revision = "ai-language-copy.11b.7"), "LANGUAGE_COPY_INVALID_REVISION"],
     ["the 11b.8 revision", (c: any) => (c.revision = "ai-language-copy.11b.8"), "LANGUAGE_COPY_INVALID_REVISION"],
+    ["the 11b.9 revision", (c: any) => (c.revision = "ai-language-copy.11b.9"), "LANGUAGE_COPY_INVALID_REVISION"],
     // 11b.9: every new string is checked with checkText; templates after marker removal.
     ["a slot label with a digit", (c: any) => (c.comparisonSlotLabels.BEDTIME["en-SG"] = "bedtime 2"), "LANGUAGE_COPY_DIGIT"],
     ["an English slot label in Chinese", (c: any) => (c.comparisonSlotLabels.BEFORE_LUNCH["en-SG"] = "午餐前"), "LANGUAGE_COPY_LOCALE_MISMATCH"],
@@ -110,12 +116,37 @@ describe("language copy ai-language-copy.11b.9", () => {
       "en-SG": { lead: "{slot} readings", MEDIAN: "{role}, {range}: median {value} from {count}", IQR: "{role}, {range}: interquartile range {value} from {count}", roles: { EARLIER: "earlier period", RECENT: "recent period" }, join: "; " },
       "zh-SG": { lead: "{slot}时段", MEDIAN: "{role}（{range}）{count}的中位数为 {value}", IQR: "{role}（{range}）{count}的四分位距为 {value}", roles: { EARLIER: "较早期间", RECENT: "近期" }, join: "；" },
     });
-    expect(AI_LANGUAGE_COPY.summaryRoleNotice).toEqual({
-      "en-SG": "A median or an interquartile range (the spread of the middle half of the readings) is a summary value, not a single reading.",
-      "zh-SG": "中位数或四分位距（中间一半读数的分布宽度）是汇总数值，不是单次读数。",
-    });
     expect(JSON.stringify(AI_LANGUAGE_COPY.periodSummary)).not.toMatch(/SPREAD|recorded spread|记录范围/);
     expect(Object.isFrozen(AI_LANGUAGE_COPY.periodSummary["zh-SG"].roles)).toBe(true);
+  });
+  it("11b.10 keeps every 11b.9 entry byte-identical and changes only the summary-role notice", () => {
+    const rest = structuredClone(AI_LANGUAGE_COPY) as any;
+    delete rest.revision;
+    delete rest.summaryRoleNotice;
+    expect(createHash("sha256").update(JSON.stringify(rest)).digest("hex")).toBe(COPY_11B9_WITHOUT_NOTICE_DIGEST);
+    expect(Object.keys(AI_LANGUAGE_COPY)).toContain("summaryRoleNotice");
+  });
+  it("11b.10 (owner decision 2026-10-08): the summary-role notice identifies variability as the IQR and explains it as the spread of the middle half of the readings", () => {
+    expect(AI_LANGUAGE_COPY.summaryRoleNotice).toEqual({
+      "en-SG": "A median, or an interquartile range (IQR: the spread of the middle half of the readings), is a summary value, not a single reading.",
+      "zh-SG": "中位数或四分位距（IQR，即中间一半读数的分布宽度）是汇总数值，不是单次读数。",
+    });
+    // Never the full range or a bare "spread"/"range"/"记录范围" on its own: each names the interquartile range.
+    expect(AI_LANGUAGE_COPY.summaryRoleNotice["en-SG"]).toMatch(/interquartile range \(IQR: the spread of the middle half of the readings\)/);
+    expect(AI_LANGUAGE_COPY.summaryRoleNotice["zh-SG"]).toMatch(/四分位距（IQR，即中间一半读数的分布宽度）/);
+    expect(JSON.stringify(AI_LANGUAGE_COPY.summaryRoleNotice)).not.toMatch(/记录范围|full range|recorded spread/);
+    expect(Object.isFrozen(AI_LANGUAGE_COPY.summaryRoleNotice)).toBe(true);
+  });
+  it("11b.10: the unchanged checkText accepts the Latin “IQR” inside the zh notice (and the IQR-free zh alternative), and still rejects a digit or an English-only notice", () => {
+    const build = (zh: string) => {
+      const copy = clone();
+      copy.summaryRoleNotice["zh-SG"] = zh;
+      return () => buildLanguageCopy(copy);
+    };
+    expect(build("中位数或四分位距（IQR，即中间一半读数的分布宽度）是汇总数值，不是单次读数。")).not.toThrow();
+    expect(build("中位数或四分位距（即中间一半读数的分布宽度）是汇总数值，不是单次读数。")).not.toThrow();
+    expect(build("中位数或四分位距（IQR，即中间 50% 读数的分布宽度）是汇总数值。")).toThrow("LANGUAGE_COPY_DIGIT");
+    expect(build("A median, or an interquartile range (IQR), is a summary value.")).toThrow("LANGUAGE_COPY_LOCALE_MISMATCH");
   });
   it("11b.9: the period joiner is an explicit per-locale allow-list (en ';'/',' with spaces; zh one of '；' '，' '、'), checkText unchanged", () => {
     const build = (locale: "en-SG" | "zh-SG", join: string) => {

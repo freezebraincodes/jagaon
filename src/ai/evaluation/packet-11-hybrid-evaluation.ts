@@ -161,7 +161,8 @@ export const APPROVED_HYBRID_CONTRACT = Object.freeze({
   // request byte, remote eligibility, bundle key, prompt, rule or threshold changed.
   // Packet 11C Task 4 (2026-10-08, offline): copy 11b.9 and default shells 11b.8 (the LOCAL PERIOD_SUMMARY observation); application only.
   defaultShellVersion: "ai-shells-default.11b.8",
-  languageCopyRevision: "ai-language-copy.11b.9",
+  // Packet 11C Task 6R (2026-10-08, offline): copy 11b.10 (the summary-role notice names and explains the IQR); application only.
+  languageCopyRevision: "ai-language-copy.11b.10",
   validatorRulesRevision: "11b.2-meaning-r7",
   approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
   fixtureSetRevision: "packet11-fixtures.11b.16",

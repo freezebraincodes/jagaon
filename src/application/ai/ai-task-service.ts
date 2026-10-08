@@ -176,6 +176,10 @@ export function createAiTaskService(dependencies: AiTaskServiceDependencies): Ai
       };
       const fallback = (reason: AiReasonCode) => finish({ kind: "REJECTED", reason });
 
+      // Packet 11C Task 6A: a source-backed EXPLAIN request (local `periodSummary` binding) never enters this fact-sending path,
+      // whatever its bundle key or activation. The detached projector drops the binding but keeps every fact value and interval
+      // date, so it would leave as an ordinary EXPLAIN payload carrying values; it goes only through the hybrid (value-blind) service.
+      if (request.taskType === "EXPLAIN_PATTERN" && request.taskPayload.periodSummary !== undefined) return fallback("PAYLOAD_INVALID");
       if (request.runtimeBundleKey !== bundle.bundleKey) return fallback("PAYLOAD_INVALID");
       const activation = resolveAiTaskActivation(request.taskType, dependencies.releaseProfile, manifest);
       if (activation.state !== "SYNTHETIC_REMOTE_ENABLED") return fallback(activation.reason);
