@@ -58,7 +58,11 @@ const FULL_MAX_CALLS = 140;
 const FULL_FIXTURE_COUNT = 70;
 const SENTINEL = "ds-SENTINEL-CREDENTIAL-f011c4a7e2";
 const NOW = () => "2026-10-06T10:00:00.000Z";
-// The frozen r8 contract (same literals as the smoke runner). Rules r8 (packet11-eval.14, offline only): rules 11b.15-r8, bundle set
+// The frozen contract (the same literals as the smoke, targeted and diagnostic runners; the whole Packet 11C contract is pinned in
+// packet-11c-contract-freeze.test.ts). CURRENT (Packet 11C B5 contract freeze, offline): prompt 11b.18, rules 11b.15-r8, request 11b.11,
+// bundle set 11b.18, provider schema kie-schema.11c.1, slot plan ai-slot-plan.11b.9, fixtures 11b.16, harness packet11-eval.19, policy
+// hybrid-full-policy.2, caps 512/1024, temperature 0.2. Revision history follows (each line was the contract at its time).
+// Rules r8 (packet11-eval.14, offline only): rules 11b.15-r8, bundle set
 // 11b.15, fixtures 11b.13 and harness eval.14; the policy, prompt, request, caps and temperature are unchanged. The live block is not run.
 // zh EXPLAIN guidance (packet11-eval.15, owner instruction 2026-10-07, offline only): prompt 11b.16 (one new paragraph in the zh-SG EXPLAIN
 // asset only), bundle set 11b.16, fixtures 11b.14 and harness eval.15; rules r8, the policy, request, caps and temperature are unchanged.
@@ -69,17 +73,23 @@ const NOW = () => "2026-10-06T10:00:00.000Z";
 // Observation ownership (packet11-eval.17, owner instruction 2026-10-07, offline only): prompt 11b.18, kie-schema.11b.6,
 // ai-slot-plan.11b.8, bundle set 11b.18, fixtures 11b.16, harness eval.17 (the model writes the EXPLAIN headline and evidence; the
 // application composes the observation); rules r8, the policy, request, caps and temperature are unchanged. The live block is not run.
+// Structural first-call validity (packet11-eval.18, owner decision 2026-10-07, offline only): harness eval.18 and policy
+// hybrid-full-policy.2; every request-side pin unchanged. The live block is not run.
+// Packet 11C phase 2 (option (a), 2026-10-08, offline only): slot plan ai-slot-plan.11b.9 (bodies differ only in the slot-plan version
+// echo); still harness eval.18 and kie-schema.11b.6. The live block is not run.
+// Packet 11C B5 contract freeze (offline only): labels only, kie-schema.11c.1 and packet11-eval.19 (no model-facing byte changes). The live
+// block is not run; any live run needs the owner's separate, explicit authorization.
 const REQUIRED_CONTRACT = Object.freeze({
   prompt: "11b.18",
   shellRules: "ai-shell-rules.11b.15-r8",
   shellRequest: "ai-shell-request.11b.11",
   explainBundle: "ai.explain-pattern@11b.18",
   careBundle: "ai.draft-care-preparation-summary@11b.18",
-  providerSchema: "kie-schema.11b.6",
+  providerSchema: "kie-schema.11c.1",
   // Packet 11C phase 2 (option (a), 2026-10-08, offline): eligibility accounting only; request bodies differ only in this version field.
   slotPlan: "ai-slot-plan.11b.9",
   fixtureSet: "packet11-fixtures.11b.16",
-  harness: "packet11-eval.18",
+  harness: "packet11-eval.19",
   fullEvaluationPolicy: "hybrid-full-policy.2",
   maxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 },
   temperature: 0.2,
@@ -766,6 +776,11 @@ describe("Packet 11 hybrid shell FULL runner (offline)", () => {
       [{ required: { ...REQUIRED_CONTRACT, fullEvaluationPolicy: "hybrid-full-policy.1" } }, "CONTRACT_MISMATCH:fullEvaluationPolicy"],
       [{ approved: { ...APPROVED_HYBRID_CONTRACT, evaluationReportVersion: "packet11-eval.17" } }, "CONTRACT_MISMATCH:evaluationReportVersion"],
       [{ approved: { ...APPROVED_HYBRID_CONTRACT, fullEvaluationPolicy: "hybrid-full-policy.1" } }, "CONTRACT_MISMATCH:fullEvaluationPolicy"],
+      // Packet 11C B5 contract freeze: the eval.18 harness label and the kie-schema.11b.6 label are refused.
+      [{ required: { ...REQUIRED_CONTRACT, harness: "packet11-eval.18" } }, "CONTRACT_MISMATCH:harness"],
+      [{ required: { ...REQUIRED_CONTRACT, providerSchema: "kie-schema.11b.6" } }, "CONTRACT_MISMATCH:providerSchema"],
+      [{ approved: { ...APPROVED_HYBRID_CONTRACT, evaluationReportVersion: "packet11-eval.18" } }, "CONTRACT_MISMATCH:evaluationReportVersion"],
+      [{ approved: { ...APPROVED_HYBRID_CONTRACT, providerSchemaVersion: "kie-schema.11b.6" } }, "CONTRACT_MISMATCH:providerSchemaVersion"],
     ];
     for (const [contract, expected] of cases) {
       let tracers = 0;

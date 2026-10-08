@@ -3,7 +3,10 @@ import { createResponsesProvider, createShellResponsesProvider, type ResponsesPr
 import { deepSeekCostMicroUsd, DEEPSEEK_RESPONSES_URL } from "./deepseek-catalogue";
 
 /**
- * Evaluation-only direct DeepSeek Responses provider (owner instruction 2026-10-06). Server-only. It uses the one
+ * Direct DeepSeek Responses provider (owner instruction 2026-10-06; first used by the evaluation runners). Server-only. Since Packet 11C
+ * Addendum B (D2) the hybrid shell variant below also serves the server-only value-blind route `POST /api/ai/shell`, which stays
+ * deterministic-only while the shipped activation manifest is (nothing is activated); the legacy full-prose variant stays
+ * evaluation-only. It uses the one
  * shared Responses request builder and parser, so the request mapping (static prompt in `instructions`, the
  * synthetic projection as the only input message, stream and store disabled, effort from the model, strict
  * `text.format`) and every response rule (HTTP 200, status completed, exact model identity, boolean `store: false`,
@@ -21,7 +24,10 @@ export function createDeepSeekResponsesProvider(config: ResponsesProviderConfig)
   return createResponsesProvider(DEEPSEEK_RESPONSES_PROFILE, config);
 }
 
-/** Evaluation-only hybrid shell variant: identical request and response rules, value-blind slot-shell contract. */
+/**
+ * The hybrid shell variant: identical request and response rules, value-blind slot-shell contract. Used by the evaluation runners and,
+ * since Packet 11C Addendum B (D2), by the server-only `/api/ai/shell` route (refused before any credential read while not activated).
+ */
 export function createDeepSeekShellResponsesProvider(config: ResponsesProviderConfig): AiShellProviderPort {
   return createShellResponsesProvider(DEEPSEEK_RESPONSES_PROFILE, config);
 }

@@ -255,6 +255,25 @@ describe("browser history explainer: session disclosure (Packet 11C B3)", () => 
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("Packet 11C B5: a reused AbortSignal is not supported for decline marking; a later request with a declined signal stays DECLINED (fails safe)", async () => {
+    const { history } = await higherFixture();
+    const log = audit();
+    const fetcher = fakeRoute();
+    const remoteUse = createAiRemoteUseSession();
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, remoteUse, fetcher });
+    remoteUse.accept();
+    const reused = new AbortController().signal;
+    await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "DECLINED" }, reused);
+    // The same signal without the decline flag: still DECLINED, deterministic and nothing sent (never an unintended send).
+    const again = await explainer.explain({ factId: FACT, locale: "en-SG" }, reused);
+    expect(again).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
+    expect(log.rows.map((row) => [row.outcomeCode, row.attempts.count])).toEqual([["REQUEST_CANCELLED", 0], ["REQUEST_CANCELLED", 0]]);
+    expect(fetcher).not.toHaveBeenCalled();
+    // A fresh signal per request (what every caller does) is unaffected: the accepted session sends one value-blind POST.
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG" }, new AbortController().signal)).toMatchObject({ kind: "EXPLAINED", source: "AI" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("Packet 11C B4a: never requires the disclosure while offline (nothing would be sent), even when activated and not accepted", async () => {
     const { history } = await higherFixture();
     let online = false;

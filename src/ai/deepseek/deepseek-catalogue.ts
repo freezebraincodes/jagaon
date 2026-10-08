@@ -1,7 +1,10 @@
 import type { KieDocumentedModel } from "@/ai/kie/kie-model-catalogue";
 
 /**
- * Direct DeepSeek Responses API (evaluation only; owner instruction 2026-10-06). Server-only.
+ * Direct DeepSeek Responses API (owner instruction 2026-10-06; first for evaluation only). Server-only. Since Packet 11C Addendum B (D2)
+ * the documented `deepseek-flash` entry is also the fixed model of the server-only `/api/ai/shell` route; that is recorded in the frozen
+ * contract and is not a production model pin (runtime bundles keep `modelSnapshot: null`; nothing is activated). The entry's closed
+ * `provenance` value below is unchanged: it is recorded evidence data, not a description of where the model is used.
  *
  * Documentation (api-docs.deepseek.com, retrieved 2026-10-06): guides/responses_api and api/create-response.
  * `POST https://api.deepseek.com/responses` with Bearer authentication; model `deepseek-flash`

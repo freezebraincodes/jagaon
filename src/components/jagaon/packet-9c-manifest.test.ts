@@ -37,7 +37,7 @@ const PACKET_9C_SOURCES = [
 ];
 
 describe("Packet 9C manifest", () => {
-  it("composes deterministically only, with pinned renderer and locale-pack versions", () => {
+  it("rejects an incomplete AI_ASSISTED composition, with pinned renderer and locale-pack versions", () => {
     expect(careSummaryCompositionSchema.safeParse({ method: "AI_ASSISTED", templateVersion: "x" }).success).toBe(false);
     // Packet 11C B1a (deliberate retarget, decision 5 and D4): new snapshots carry the care-draft notices and the 您 limitation
     // wording under new template, renderer and locale-pack versions; 9c.1 snapshots stay byte-identical (care-summary-legacy-artifact.test.ts).

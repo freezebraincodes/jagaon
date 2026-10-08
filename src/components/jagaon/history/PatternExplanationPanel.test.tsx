@@ -209,7 +209,8 @@ describe("PatternExplanationPanel (Packet 11C Task 7)", () => {
     expect(observation.textContent).toContain(iqr);
     const notice = screen.getByText(explanation.summaryRoleNotice);
     expect(notice.textContent).toContain("IQR");
-    // The approved 7A card wording ("recorded spread" / "记录范围") is not the new panel's wording for the summary.
+    // The superseded 7A wording ("recorded spread" / "记录范围") appears nowhere in the panel. Since Addendum B Task B4a the 7A VARIABILITY
+    // card itself labels the same value as the interquartile range (IQR), so the card and the panel use one term.
     const region = screen.getByRole("region");
     expect(region.textContent).not.toMatch(locale === "en-SG" ? /recorded spread/ : /记录范围/);
   });

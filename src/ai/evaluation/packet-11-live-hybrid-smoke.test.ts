@@ -35,6 +35,10 @@ const SMOKE_IDS = Object.freeze([
 ]);
 const SENTINEL = "ds-SENTINEL-CREDENTIAL-9a7b3c55e0";
 const NOW = () => "2026-10-06T09:00:00.000Z";
+// The frozen contract (the same literals as the FULL, targeted and diagnostic runners; the whole Packet 11C contract is pinned in
+// packet-11c-contract-freeze.test.ts). CURRENT (Packet 11C B5 contract freeze, offline): prompt 11b.18, rules 11b.15-r8, request 11b.11,
+// bundle set 11b.18, provider schema kie-schema.11c.1, slot plan ai-slot-plan.11b.9, fixtures 11b.16, harness packet11-eval.19, policy
+// hybrid-full-policy.2, caps 512/1024, temperature 0.2. Revision history follows (each line was the contract at its time).
 // Rules r4 (Packet 11B.11, offline only): prompt 11b.14, rules r4, bundle set 11b.11, fixtures 11b.9, harness eval.9.
 // Rules r5 (Packet 11B.12, offline only): prompt 11b.15, rules r5, bundle set 11b.12, fixtures 11b.10, harness eval.10.
 // Rules r6 (Packet 11B.13, offline only): prompt 11b.15 (unchanged), rules r6, bundle set 11b.13, fixtures 11b.11, harness eval.11.
@@ -53,17 +57,23 @@ const NOW = () => "2026-10-06T09:00:00.000Z";
 // Observation ownership (packet11-eval.17, owner instruction 2026-10-07, offline only): prompt 11b.18, kie-schema.11b.6,
 // ai-slot-plan.11b.8, bundle set 11b.18, fixtures 11b.16, harness eval.17 (the model writes the EXPLAIN headline and evidence; the
 // application composes the observation); rules r8, the policy, request, caps and temperature are unchanged. The live block is not run.
+// Structural first-call validity (packet11-eval.18, owner decision 2026-10-07, offline only): harness eval.18 and policy
+// hybrid-full-policy.2; every request-side pin unchanged. The live block is not run.
+// Packet 11C phase 2 (option (a), 2026-10-08, offline only): slot plan ai-slot-plan.11b.9 (bodies differ only in the slot-plan version
+// echo); still harness eval.18 and kie-schema.11b.6. The live block is not run.
+// Packet 11C B5 contract freeze (offline only): labels only, kie-schema.11c.1 and packet11-eval.19 (no model-facing byte changes). The live
+// block is not run; any live run needs the owner's separate, explicit authorization.
 const REQUIRED_CONTRACT = Object.freeze({
   prompt: "11b.18",
   shellRules: "ai-shell-rules.11b.15-r8",
   shellRequest: "ai-shell-request.11b.11",
   explainBundle: "ai.explain-pattern@11b.18",
   careBundle: "ai.draft-care-preparation-summary@11b.18",
-  providerSchema: "kie-schema.11b.6",
+  providerSchema: "kie-schema.11c.1",
   // Packet 11C phase 2 (option (a), 2026-10-08, offline): eligibility accounting only; request bodies differ only in this version field.
   slotPlan: "ai-slot-plan.11b.9",
   fixtureSet: "packet11-fixtures.11b.16",
-  harness: "packet11-eval.18",
+  harness: "packet11-eval.19",
   fullEvaluationPolicy: "hybrid-full-policy.2",
   maxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 },
   temperature: 0.2,
@@ -128,7 +138,9 @@ describe("Packet 11 hybrid shell smoke (offline)", () => {
       temperature: SHELL_TEMPERATURE,
     };
     expect(same(REQUIRED_CONTRACT, code)).toBe(true);
-    expect(REQUIRED_CONTRACT).toMatchObject({ prompt: "11b.18", shellRules: "ai-shell-rules.11b.15-r8", shellRequest: "ai-shell-request.11b.11", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18", fixtureSet: "packet11-fixtures.11b.16", harness: "packet11-eval.18", fullEvaluationPolicy: "hybrid-full-policy.2", temperature: 0.2 });
+    expect(REQUIRED_CONTRACT).toMatchObject({ prompt: "11b.18", shellRules: "ai-shell-rules.11b.15-r8", shellRequest: "ai-shell-request.11b.11", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18", fixtureSet: "packet11-fixtures.11b.16", harness: "packet11-eval.19", fullEvaluationPolicy: "hybrid-full-policy.2", temperature: 0.2 });
+    // Packet 11C B5 contract freeze: the provider output-schema label (label only; no body byte).
+    expect(REQUIRED_CONTRACT.providerSchema).toBe("kie-schema.11c.1");
     expect(APPROVED_HYBRID_CONTRACT.shellTemperature).toBe(REQUIRED_CONTRACT.temperature);
   });
   it("r7: each of the four smoke bodies carries temperature 0.2 beside its task cap and passes the preflight", async () => {

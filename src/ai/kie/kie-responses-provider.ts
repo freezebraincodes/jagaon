@@ -311,7 +311,8 @@ const FULL_PROSE_CONTRACT: ResponsesRequestContract = Object.freeze({
 });
 
 /**
- * The hybrid slot-shell contract (prompt 11b.13, kie-schema.11b.5, request profile ai-shell-request.11b.11): value-blind
+ * The hybrid slot-shell contract (introduced with prompt 11b.13 and kie-schema.11b.5; frozen in Packet 11C B5 at prompt 11b.18,
+ * kie-schema.11c.1 and request profile ai-shell-request.11b.11, pinned in packet-11c-contract-freeze.test.ts): value-blind
  * input only; no envelope normalisation; the fixed per-task output cap (EXPLAIN 512, care 1024) and, since rules r7, the
  * fixed sampling temperature SHELL_TEMPERATURE (0.2).
  */

@@ -362,6 +362,76 @@ describe("Packet 11C B4a (D7): each supporting reading carries its source instan
     expect(view.totalCount).toBe(17);
   });
 
+  /**
+   * Packet 11C B5 (carried B4a minor): true window edges, at +05:30. The evaluator's windows are half-open instants, earlier [T−42d, T−14d)
+   * and recent [T−14d, T), with T = 10:00 Singapore time on 4 Oct = 07:30 +05:30. So 07:29 +05:30 on 4 Oct is the last instant inside the
+   * recent window and 07:30 +05:30 is T itself (outside); 07:30 +05:30 on 23 Aug is T−42d (the first instant inside the earlier window)
+   * and 07:29 +05:30 is before it (outside). Placement is the evaluator's; the view keeps each reading's actual offset.
+   */
+  it("true window edges at +05:30: 07:29 is inside and 07:30 outside the recent end; 07:30 is inside and 07:29 outside the earlier start", async () => {
+    const harness = await setup();
+    for (const [d, v] of [...REFERENCE, ...RECENT]) await reading(harness.journal, dayBefore(TODAY, d), "07:30", v);
+    const at = (date: string, time: string, value: string) => reading(harness.journal, date, time, value, "BEFORE_BREAKFAST", atOffset(date, time, FOREIGN_OFFSET_MINUTES, FOREIGN_TIME_ZONE));
+    const earliest = dayBefore(TODAY, 42);
+    const edges = {
+      recentLastInside: await at(TODAY, "07:29", "7.3"),
+      recentEndOutside: await at(TODAY, "07:30", "7.3"),
+      earlierFirstInside: await at(earliest, "07:30", "6.0"),
+      earlierStartOutside: await at(earliest, "07:29", "6.0"),
+    };
+    await harness.coordinator.processPending();
+    const view = explainable(await harness.history.loadExplainablePattern({ factId: FACT }));
+    const [earlier, recent] = view.periods;
+    // The window instants are exactly the edges named above.
+    expect(earlier.bounds.start).toEqual({ instant: atOffset(earliest, "07:30", FOREIGN_OFFSET_MINUTES, FOREIGN_TIME_ZONE).occurrence.instantUtc, localDate: earliest, localTime: "10:00" });
+    expect(recent.bounds.end).toEqual({ instant: atOffset(TODAY, "07:30", FOREIGN_OFFSET_MINUTES, FOREIGN_TIME_ZONE).occurrence.instantUtc, localDate: TODAY, localTime: "10:00" });
+    const listed = view.periods.flatMap((p) => p.readings.map((r) => r.ref.recordId));
+    // Inside: listed in its period at its own offset; the last recent and the first earlier reading.
+    expect(recent.readings.at(-1)).toMatchObject({ ref: { recordId: edges.recentLastInside.recordId }, localDate: TODAY, localTime: "07:29", utcOffsetMinutes: FOREIGN_OFFSET_MINUTES });
+    expect(earlier.readings[0]).toMatchObject({ ref: { recordId: edges.earlierFirstInside.recordId }, localDate: earliest, localTime: "07:30", utcOffsetMinutes: FOREIGN_OFFSET_MINUTES });
+    // Outside: in neither period, never counted.
+    expect(listed).not.toContain(edges.recentEndOutside.recordId);
+    expect(listed).not.toContain(edges.earlierStartOutside.recordId);
+    expect(view.periods.map((p) => [p.role, p.count, p.readings.length])).toEqual([["EARLIER", 9, 9], ["RECENT", 7, 7]]);
+    expect(view.totalCount).toBe(16);
+    // The evaluator agrees: placement comes from its assignments only.
+    const { facts } = comparisonChain(await loadIntelligenceSnapshot(harness.database, NOW));
+    expect(facts.recent.assignments.map((a) => a.reading.recordId)).toContain(edges.recentLastInside.recordId);
+    expect(facts.reference.assignments.map((a) => a.reading.recordId)).toContain(edges.earlierFirstInside.recordId);
+    const assigned = [...facts.reference.assignments, ...facts.recent.assignments].map((a) => a.reading.recordId);
+    expect(assigned).not.toContain(edges.recentEndOutside.recordId);
+    expect(assigned).not.toContain(edges.earlierStartOutside.recordId);
+  });
+
+  it("Packet 11C B5: the view schema bounds utcOffsetMinutes to the real-world range [-720, 840] (UTC−12:00 to UTC+14:00)", async () => {
+    const { history } = await foreignOffsetFixture();
+    const view = explainable(await history.loadExplainablePattern({ factId: FACT }));
+    /** The first recent reading re-expressed at another offset, with its local date and time recomputed from its own instant. */
+    const atOffsetMinutes = (utcOffsetMinutes: number) => {
+      const changed = structuredClone(view);
+      const target = changed.periods[1].readings[0]!;
+      const local = new Date(Date.parse(target.instantUtc) + utcOffsetMinutes * 60_000).toISOString();
+      Object.assign(target, { utcOffsetMinutes, localDate: local.slice(0, 10), localTime: local.slice(11, 16) });
+      return changed;
+    };
+    for (const edge of [-720, 840]) expect(explainablePatternViewSchema.safeParse(atOffsetMinutes(edge)).success, String(edge)).toBe(true);
+    for (const outside of [-721, 841, 1440, -1440]) expect(explainablePatternViewSchema.safeParse(atOffsetMinutes(outside)).success, String(outside)).toBe(false);
+  });
+
+  it("Packet 11C B5: a stored reading at an impossible offset (+15:00) makes the explanation UNAVAILABLE (fail closed); +14:00 is shown", async () => {
+    for (const [offset, expected] of [[900, "UNAVAILABLE"], [840, "EXPLAINABLE"]] as const) {
+      const harness = await setup();
+      for (const [d, v] of [...REFERENCE, ...RECENT]) await reading(harness.journal, dayBefore(TODAY, d), "07:30", v);
+      // 2 Oct at the given offset: inside the recent window whatever the offset. The journal stores the offset as given (+14:00 is
+      // Pacific/Kiritimati; +15:00 exists nowhere), and the evaluator assigns the reading by its instant.
+      await reading(harness.journal, dayBefore(TODAY, 2), "07:30", "7.3", "BEFORE_BREAKFAST", atOffset(dayBefore(TODAY, 2), "07:30", offset, "Pacific/Kiritimati"));
+      await harness.coordinator.processPending();
+      const result = await harness.history.loadExplainablePattern({ factId: FACT });
+      if (result.kind === "EXPLAINABLE") expect(result.view.periods[1].readings.map((r) => r.utcOffsetMinutes)).toContain(offset);
+      expect(result.kind === "EXPLAINABLE" ? "EXPLAINABLE" : result.reason, String(offset)).toBe(expected);
+    }
+  });
+
   it("the view schema refuses a reading whose recorded local date and time disagree with its instant and offset", async () => {
     const { history } = await foreignOffsetFixture();
     const view = explainable(await history.loadExplainablePattern({ factId: FACT }));

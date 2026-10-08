@@ -136,11 +136,17 @@ export const EXPLAINABLE_INELIGIBLE_REASONS = Object.freeze([
   "UNAVAILABLE",
 ] as const);
 
+/** The real-world range of UTC offsets in minutes: UTC−12:00 to UTC+14:00 (Packet 11C B5). */
+const UTC_OFFSET_MINUTES_MIN = -720;
+const UTC_OFFSET_MINUTES_MAX = 840;
+
 /**
  * One supporting reading. `localDate` / `localTime` are its wall-clock date and time at its OWN recorded offset. Packet 11C B4a (D7): it
  * also carries the source's actual `instantUtc` and `utcOffsetMinutes` (from the journal's exact point, never inferred), so a reading
  * recorded away from +08:00 can be shown with its real offset and its exact Singapore-time equivalent. The local date and time must be
  * that instant at that offset (minute precision, floored); a disagreeing reading is refused. None of these fields enters an AI request.
+ * Packet 11C B5 (carried B4a minor): the offset is bounded to the real-world range of UTC offsets, UTC−12:00 to UTC+14:00 ([-720, 840]
+ * minutes); a reading outside it is refused, so the whole view fails closed (UNAVAILABLE) rather than showing an impossible offset.
  */
 const supportingReadingSchema = z
   .strictObject({
@@ -148,7 +154,7 @@ const supportingReadingSchema = z
     localDate: localDateSchema,
     localTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
     instantUtc: instantSchema,
-    utcOffsetMinutes: z.number().int().safe(),
+    utcOffsetMinutes: z.number().int().min(UTC_OFFSET_MINUTES_MIN).max(UTC_OFFSET_MINUTES_MAX),
     enteredValue: decimalStringSchema,
     enteredUnit: z.enum(["MMOL_L", "MG_DL"]),
     method: z.string().min(1).max(64),

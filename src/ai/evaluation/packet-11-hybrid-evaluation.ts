@@ -16,7 +16,7 @@ import type { AiEvaluationFixture, AiEvaluationPhase } from "./packet-11-fixture
 import { PACKET_11_HYBRID_FIXTURE_SET_REVISION } from "./packet-11-hybrid-fixtures";
 
 /**
- * Packet 11B.6 offline qualification harness, now packet11-eval.12 (spec Section 16; revision notes below). Mirrors packet11-eval.4: one
+ * Packet 11B.6 offline qualification harness, now packet11-eval.19 (spec Section 16; revision notes below). Mirrors packet11-eval.4: one
  * call at a time through the hybrid task service with an injected shell provider, a call cap and a spend
  * ceiling enforced between calls (billed usage on a rejected call included), a refused repair when repairs are
  * not allowed, and eval.4's early stops on unconfirmed retention, unexpected provider behaviour and a smoke fallback. Each completed
@@ -117,10 +117,21 @@ import { PACKET_11_HYBRID_FIXTURE_SET_REVISION } from "./packet-11-hybrid-fixtur
  * owner's §16.3 classification of every FULL safe shell fallback whose deciding reason is a hard-gate reason (`blockedContentReview`):
  * an owner-reviewed GENUINE_16_3_VIOLATION fails HARD_GATE:BLOCKED_16_3_VIOLATION; a missing or not owner-reviewed classification is
  * BLOCKED_CONTENT_REVIEW_PENDING. Runtime rules, rejections and fallbacks, the thresholds, prompt (11b.18), bundles (@11b.18), fixtures
- * (11b.16), rules (r8), request (11b.11), schema (kie-schema.11b.6) and slot plan (11b.8) are unchanged; eval.17 / hybrid-full-policy.1
- * evidence fails CONTRACT_VERSION_MISMATCH.
+ * (11b.16), rules (r8), request (11b.11), schema (kie-schema.11b.6) and slot plan (11b.8) were unchanged by eval.18; eval.17 /
+ * hybrid-full-policy.1 evidence fails CONTRACT_VERSION_MISMATCH.
+ * After eval.18, still under its label (2026-10-08, offline): the presentation correction P1/P3 and Packet 11C moved the contract pins to
+ * application copy ai-language-copy.11b.10 (via 11b.8 and 11b.9) and default shells ai-shells-default.11b.8 (via 11b.7), application
+ * only, and to slot plan ai-slot-plan.11b.9 and atoms ai-atoms.11b.7 (option (a); every model-facing body differs from its evaluated
+ * 11b.8 body only in the slot-plan version echo).
+ * packet11-eval.19 (Packet 11C Addendum B, Task B5 contract freeze, offline only): labels only. The harness logic, the FULL policy
+ * (hybrid-full-policy.2), the thresholds, gates and recorded fields are eval.18's. The label moves so that evidence under the frozen 11C
+ * contract is distinguishable from eval.18-era evidence, and the provider output-schema label moves to kie-schema.11c.1 (its
+ * slotPlanVersion enum carries ai-slot-plan.11b.9; structure unchanged). Prompt (11b.18), bundles (@11b.18), fixtures (11b.16), rules
+ * (r8), request (11b.11), caps, temperature, model and provider are unchanged, and neither label is part of a model-facing body. eval.18-era
+ * evidence (kie-schema.11b.6, packet11-eval.18, ai-slot-plan.11b.8) fails CONTRACT_VERSION_MISMATCH. The full frozen contract is pinned in
+ * packet-11c-contract-freeze.test.ts.
  */
-export const AI_HYBRID_EVALUATION_REPORT_VERSION = "packet11-eval.18";
+export const AI_HYBRID_EVALUATION_REPORT_VERSION = "packet11-eval.19";
 /**
  * The FULL evaluation policy this harness implements; recorded in the report and compared by the verdict. hybrid-full-policy.1 (eval.13):
  * FULL safe shell fallbacks. hybrid-full-policy.2 (eval.18): policy.1 plus §16.4 structural first-call validity and the owner's §16.3
@@ -151,7 +162,8 @@ export const APPROVED_HYBRID_CONTRACT = Object.freeze({
   shellMaxOutputTokens: Object.freeze({ EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 } as const),
   shellTemperature: 0.2,
   promptVersion: "11b.18",
-  providerSchemaVersion: "kie-schema.11b.6",
+  // Packet 11C B5 contract freeze (offline): label only; the schema's slotPlanVersion enum carries ai-slot-plan.11b.9.
+  providerSchemaVersion: "kie-schema.11c.1",
   shellRulesRevision: "ai-shell-rules.11b.15-r8",
   // Packet 11C phase 2 (owner decision option (a), 2026-10-08, offline): slot plan 11b.9 (eligibility accounting; bodies differ only in
   // this version field) and atoms 11b.7 (version record for PERIOD_SUMMARY and its lead joiner).
@@ -166,7 +178,8 @@ export const APPROVED_HYBRID_CONTRACT = Object.freeze({
   validatorRulesRevision: "11b.2-meaning-r7",
   approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
   fixtureSetRevision: "packet11-fixtures.11b.16",
-  evaluationReportVersion: "packet11-eval.18",
+  // Packet 11C B5 contract freeze (offline): eval.18's harness logic and policy under a new label.
+  evaluationReportVersion: "packet11-eval.19",
   fullEvaluationPolicy: "hybrid-full-policy.2",
   explainBundle: "ai.explain-pattern@11b.18",
   careBundle: "ai.draft-care-preparation-summary@11b.18",

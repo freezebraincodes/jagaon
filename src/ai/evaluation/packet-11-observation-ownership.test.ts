@@ -223,7 +223,7 @@ describe("observation ownership: harness and review (packet11-eval.17)", () => {
   it("each fixture records observationSource; language presence counts only the model-written fields", async () => {
     const fixtures = [...EXPLAIN.slice(0, 4), ...CARE.slice(0, 2)];
     const report = await evaluateHybridModelSnapshot({ model: { requestModelId: "fake-model", responseModelSnapshot: "fake-model" }, provider: echoing(), fixtures, phase: "FULL", limits: { maxCalls: 10, maxCredits: 1, allowRepair: false }, now: () => "2026-10-07T10:00:00.000Z", monotonicMs: () => 0 });
-    expect(report.reportVersion).toBe("packet11-eval.18");
+    expect(report.reportVersion).toBe("packet11-eval.19");
     for (const item of report.fixtures) {
       expect(item.source, item.fixtureId).toBe("AI");
       expect(item.observationSource).toBe(item.taskType === "EXPLAIN_PATTERN" ? "DETERMINISTIC" : null);
@@ -253,7 +253,8 @@ describe("observation ownership: versions", () => {
     // Packet 11C Task 4 (2026-10-08): application-only copy 11b.9 and default shells 11b.8; every model-facing pin is unchanged.
     // Packet 11C phase 2 (option (a), 2026-10-08): slot plan 11b.9 (eligibility accounting) and atoms 11b.7 (PERIOD_SUMMARY, lead joiner).
     // Packet 11C Task 6R (2026-10-08): application-only copy 11b.10 (the summary-role notice); every model-facing pin is unchanged.
-    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.9", atomRenderer: "ai-atoms.11b.7", defaultShells: "ai-shells-default.11b.8", shellRules: "ai-shell-rules.11b.15-r8", languageCopy: "ai-language-copy.11b.10", prompt: "11b.18", providerSchema: "kie-schema.11b.6", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.18", shellRequest: "ai-shell-request.11b.11" });
+    // Packet 11C B5 contract freeze: labels only, kie-schema.11c.1 and packet11-eval.19; no model-facing byte changed.
+    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.9", atomRenderer: "ai-atoms.11b.7", defaultShells: "ai-shells-default.11b.8", shellRules: "ai-shell-rules.11b.15-r8", languageCopy: "ai-language-copy.11b.10", prompt: "11b.18", providerSchema: "kie-schema.11c.1", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.19", shellRequest: "ai-shell-request.11b.11" });
     expect(AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN.bundleKey).toBe("ai.explain-pattern@11b.18");
     expect(AI_HYBRID_RUNTIME_BUNDLES.DRAFT_CARE_PREPARATION_SUMMARY.bundleKey).toBe("ai.draft-care-preparation-summary@11b.18");
     for (const task of ["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"] as const) {

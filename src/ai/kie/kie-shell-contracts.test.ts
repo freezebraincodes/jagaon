@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import { MAX_SLOTS, SHELL_MAX_OUTPUT_TOKENS, SHELL_PROVIDER_REQUEST_VERSION as DOMAIN_SHELL_REQUEST_VERSION, SHELL_OUTPUT_VERSIONS, SLOT_PLAN_VERSION, shellOutputSchema } from "@/domain/ai";
 import { SHELL_PROVIDER_REQUEST_VERSION, SHELL_PROVIDER_SCHEMA_VERSION, shellOutputJsonSchema, shellOutputSchemaName } from "./kie-shell-contracts";
 
-describe("strict shell provider schema kie-schema.11b.6", () => {
+describe("strict shell provider schema kie-schema.11c.1", () => {
   it("pins the version and names", () => {
     // Observation ownership: kie-schema.11b.6 (EXPLAIN shells { headline, evidence }); 11b.5 had the model observation.
-    expect(SHELL_PROVIDER_SCHEMA_VERSION).toBe("kie-schema.11b.6");
-    expect(SHELL_PROVIDER_SCHEMA_VERSION).not.toBe("kie-schema.11b.5");
+    // Packet 11C B5 contract freeze: kie-schema.11c.1, label only (the slotPlanVersion enum carries ai-slot-plan.11b.9; same structure).
+    expect(SHELL_PROVIDER_SCHEMA_VERSION).toBe("kie-schema.11c.1");
+    for (const earlier of ["kie-schema.11b.5", "kie-schema.11b.6"]) expect(SHELL_PROVIDER_SCHEMA_VERSION).not.toBe(earlier);
+    // The label is a record only: it is in no provider schema object.
+    for (const task of ["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"] as const) for (const locale of ["en-SG", "zh-SG"] as const) expect(JSON.stringify(shellOutputJsonSchema(task, locale))).not.toContain("kie-schema");
     expect(shellOutputSchemaName("DRAFT_CARE_PREPARATION_SUMMARY", "zh-SG")).toBe("draft_care_preparation_summary_shell_zh_sg");
   });
   it("is a closed object with every property required and the exact shell version", () => {
@@ -35,7 +38,7 @@ describe("strict shell provider schema kie-schema.11b.6", () => {
     for (const id of ["S1", "S9", "S10", "S29", "S32"]) expect(pattern.test(id) && shellOutputSchema("EXPLAIN_PATTERN").safeParse({ ...sample, tokenInventory: [id] }).success, id).toBe(true);
     for (const id of ["S0", "S01", "S33", "s1", "{{S1}}", " S1"]) expect(pattern.test(id) || shellOutputSchema("EXPLAIN_PATTERN").safeParse({ ...sample, tokenInventory: [id] }).success, id).toBe(false);
   });
-  it("kie-schema.11b.6 keeps parity with the domain echo fields for both tasks and locales", () => {
+  it("kie-schema.11c.1 keeps parity with the domain echo fields for both tasks and locales", () => {
     for (const task of ["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"] as const) {
       for (const locale of ["en-SG", "zh-SG"] as const) {
         const schema = shellOutputJsonSchema(task, locale) as any;

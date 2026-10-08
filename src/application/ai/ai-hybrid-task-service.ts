@@ -48,7 +48,7 @@ export type AiHybridTaskServiceDependencies = Readonly<{
   monotonicMs: () => number;
   provider?: AiShellProviderPort;
   manifest?: AiActivationManifest;
-  /** The patient's "keep wording on this device" preference; persisted setting and UI arrive with Packet 11C. */
+  /** The patient's "keep wording on this device" preference; private mode is not wired in 11C, and wiring it is a later owner decision. */
   privateMode?: () => boolean;
   /** Connectivity probe evaluated before any call; absent means online. */
   online?: () => boolean;

@@ -363,6 +363,44 @@ describe("provider outcomes", () => {
     expect(JSON.stringify(result.body)).not.toMatch(/store|RETENTION|deepseek|headline|candidate/);
   });
 
+  // Packet 11C B5 (carried B2b minor): the shared contract allows `usage` on any FAILED body; the handler gives it ONLY to the completed,
+  // billed response refused for retention. Every other FAILED path (refusal, not activated, configuration, provider HTTP status, stored
+  // or other-model response refused inside the adapter, transport, cancellation, rate limit) carries a closed reason and nothing else.
+  it("only the retention refusal's FAILED body carries usage; every other FAILED body is exactly { kind, reason }", async () => {
+    const aborted = new AbortController();
+    aborted.abort();
+    const cases: Array<[string, () => Promise<{ body: unknown }>]> = [
+      ["a GET", () => call(post(undefined, { method: "GET" }), { fetcher: deepseek() })],
+      ["a non-JSON content type", () => call(post(shellRequest(), { headers: { "content-type": "text/plain" } }), { fetcher: deepseek() })],
+      ["an oversized body", () => call(post(undefined, { raw: "x".repeat(AI_SHELL_MAX_BODY_BYTES + 1) }), { fetcher: deepseek() })],
+      ["malformed JSON", () => call(post(undefined, { raw: "{not json" }), { fetcher: deepseek() })],
+      ["raw facts", () => call(post({ ...shellRequest(), facts: [] }), { fetcher: deepseek() })],
+      ["the shipped manifest", () => call(post(shellRequest()), { fetcher: deepseek(), activationManifest: AI_ACTIVATION_MANIFEST })],
+      ["another release profile", () => call(post(shellRequest()), { fetcher: deepseek(), releaseProfile: "PRODUCTION" })],
+      ["a missing key", () => call(post(shellRequest()), { fetcher: deepseek(), environment: {} })],
+      ["provider HTTP 429", () => call(post(shellRequest()), { fetcher: deepseek({ error: "x" }, {}, 429) })],
+      ["provider HTTP 500", () => call(post(shellRequest()), { fetcher: deepseek({ error: "x" }, {}, 500) })],
+      ["provider HTTP 400", () => call(post(shellRequest()), { fetcher: deepseek({ error: "x" }, {}, 400) })],
+      ["provider HTTP 401", () => call(post(shellRequest()), { fetcher: deepseek({ error: "x" }, {}, 401) })],
+      ["a response reported as stored", () => call(post(shellRequest()), { fetcher: deepseek(VALID, { store: true }) })],
+      ["a response from another model", () => call(post(shellRequest()), { fetcher: deepseek(VALID, { model: "deepseek-pro" }) })],
+      ["an incomplete (truncated) response", () => call(post(shellRequest()), { fetcher: deepseek(VALID, { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }) })],
+      ["a transport failure", () => call(post(shellRequest()), { fetcher: vi.fn(async () => Promise.reject(new Error("offline"))) })],
+      ["a request cancelled before the call", () => call(post(shellRequest(), { signal: aborted.signal }), { fetcher: deepseek() })],
+    ];
+    for (const [label, run] of cases) {
+      const { body } = await run();
+      expect(body, label).toMatchObject({ kind: "FAILED" });
+      expect(Object.keys(body as object).sort(), label).toEqual(["kind", "reason"]);
+    }
+    // The rate limit refuses before any call: no usage either.
+    const limited = handler({ fetcher: deepseek(), rateLimit: { maxRequests: 1, windowMs: 60_000 }, now: () => new Date("2026-10-08T01:00:00.000Z") });
+    await limited(post(shellRequest()));
+    expect(await (await limited(post(shellRequest()))).json()).toEqual({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED" });
+    // The one FAILED body with usage: a completed, billed response whose retention is not confirmed.
+    expect((await call(post(shellRequest()), { fetcher: deepseek(VALID, { store: null }) })).body).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: USAGE });
+  });
+
   it("limits requests per window before calling the provider", async () => {
     const fetcher = deepseek();
     const limited = handler({ fetcher, rateLimit: { maxRequests: 2, windowMs: 60_000 }, now: () => new Date("2026-10-08T01:00:00.000Z") });

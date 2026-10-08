@@ -77,6 +77,10 @@ import { AI_TASK_RUNTIME_BUNDLES, type AiComponentRef, type AiTaskRuntimeBundle 
  * Packet 11C Task 6R (owner implementation decision 2026-10-08, offline): application copy ai-language-copy.11b.10 only (the summary-role
  * notice names and explains the IQR). Atoms, default shells, slot plan, bundle keys, remote eligibility and every model-facing byte are
  * unchanged.
+ * Packet 11C Addendum B, Task B5 (contract freeze, offline): two record labels only. The provider output-schema label is kie-schema.11c.1
+ * (its slotPlanVersion enum has carried ai-slot-plan.11b.9 since phase 2; structure unchanged) and the harness is packet11-eval.19 (the
+ * contract pins moved in 11C, so eval.18-era evidence is an earlier contract). Neither label reaches a model: bundle keys, components,
+ * remote eligibility and every model-facing byte are unchanged (packet-11c-contract-freeze.test.ts).
  */
 export const AI_HYBRID_BUNDLE_VERSION = "11b.18";
 /** The components unchanged since bundle set 11b.7. */
@@ -90,10 +94,10 @@ export const AI_HYBRID_VERSIONS = deepFreeze({
   shellRules: "ai-shell-rules.11b.15-r8",
   languageCopy: "ai-language-copy.11b.10",
   prompt: "11b.18",
-  providerSchema: "kie-schema.11b.6",
+  providerSchema: "kie-schema.11c.1",
   validatorRules: "11b.2-meaning-r7",
   fixtureSet: "packet11-fixtures.11b.16",
-  evaluationReport: "packet11-eval.18",
+  evaluationReport: "packet11-eval.19",
   shellRequest: SHELL_PROVIDER_REQUEST_VERSION,
 } as const);
 /** The audit fixtureSet component of bundle set 11b.18 (packet11-fixtures.11b.16). */

@@ -9,8 +9,12 @@ import { AI_ABSTENTION_REASONS, MAX_SLOTS, SHELL_OUTPUT_VERSIONS, SLOT_PLAN_VERS
  * tokenInventory as an array of slot-id patterns — in parity with the domain shell schema; moves with prompt 11b.13.
  * kie-schema.11b.6 (observation ownership, owner instruction 2026-10-07, offline): the EXPLAIN shells object is the closed
  * { headline, evidence } (the application composes the observation), in parity with ai-shell.explain-pattern@11b.8; care unchanged.
+ * kie-schema.11c.1 (Packet 11C Addendum B, Task B5 contract freeze, offline): label only. Since Packet 11C phase 2 the slotPlanVersion
+ * enum carries ai-slot-plan.11b.9 (it is built from SLOT_PLAN_VERSION), so the 11b.6 label no longer named the schema exactly; the schema
+ * structure is unchanged. The label is a record for the contract and the evaluation; it is not part of any model-facing body (the schema
+ * object, its name and every request byte are unchanged; pinned in packet-11c-contract-freeze.test.ts).
  */
-export const SHELL_PROVIDER_SCHEMA_VERSION = "kie-schema.11b.6";
+export const SHELL_PROVIDER_SCHEMA_VERSION = "kie-schema.11c.1";
 /**
  * Shell request profile ai-shell-request.11b.11 (rules r7): strict text.format + per-task max_output_tokens
  * (SHELL_MAX_OUTPUT_TOKENS: EXPLAIN 512, care 1024), chosen by the schema-parsed task in the shared builder's

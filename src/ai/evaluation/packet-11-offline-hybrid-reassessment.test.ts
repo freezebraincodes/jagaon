@@ -35,7 +35,11 @@ import { hybridFixturesForPhase, PACKET_11_HYBRID_FIXTURES } from "./packet-11-h
 import { shellCandidate } from "./packet-11-hybrid-test-support";
 
 /**
- * OFFLINE REASSESSMENT UNDER packet11-eval.18 (owner decision 2026-10-07, typed in the owner's own message: "I also authorize a clearly
+ * Label note (Packet 11C B5 contract freeze): "eval.18" below names the harness LOGIC and policy (hybrid-full-policy.2) this reassessment
+ * applies. Since B5 the current harness carries that logic under the label packet11-eval.19, so a run of this file records
+ * `reassessedUnder.harness: "packet11-eval.19"`. The record label OFFLINE_REASSESSMENT_UNDER_EVAL_18 and the recorded reassessment of the
+ * real stored run are kept unchanged (historical evidence).
+ * OFFLINE REASSESSMENT UNDER packet11-eval.18 LOGIC (owner decision 2026-10-07, typed in the owner's own message: "I also authorize a clearly
  * labelled reassessment of the existing 70 stored responses under this corrected definition, without another provider call. Preserve
  * the original FAIL report and trace files."). Decision record: internal-docs/superpowers/decisions/2026-10-07-hybrid-first-call-validity.md.
  *
@@ -65,7 +69,7 @@ const ACTUAL_LABEL = "ACTUAL_VERDICT_FROM_OWNER_RECORDS";
 const DEFAULT_STORED_RUN = "test-results/packet-11-hybrid-live-trace/20261007T102510Z-c0b4b5486e150ba0";
 const REASSESSMENT_ROOT = "test-results/packet-11-hybrid-reassessment";
 const ORIGINAL_REVIEW_ROOT = "test-results/packet-11-hybrid-review";
-/** The contract the stored run was produced under: only these two fields may differ from the current (eval.18) contract. */
+/** The contract the stored run was produced under: only these two fields may differ from the current contract (eval.18 logic; label packet11-eval.19 since B5). */
 const ORIGINAL_CONTRACT = Object.freeze({ evaluationReportVersion: "packet11-eval.17", fullEvaluationPolicy: "hybrid-full-policy.1" });
 const FULL_MAX_CALLS = 140;
 /** Never a credential: the fake fetcher never forwards it and nothing reaches the network. */
@@ -479,7 +483,7 @@ const stubNetwork = () => {
   return network;
 };
 
-describe("Packet 11 hybrid offline reassessment under packet11-eval.18 (offline, synthetic stored runs)", () => {
+describe("Packet 11 hybrid offline reassessment under eval.18 logic (label packet11-eval.19) (offline, synthetic stored runs)", () => {
   it("reassesses a synthetic 70-response eval.17 run shaped like the stored one (two S6, one S4): exact arithmetic, labels, pending and hypothetical verdicts, private record, originals untouched", async () => {
     const network = stubNetwork();
     const fixtures = hybridFixturesForPhase("FULL");
@@ -493,7 +497,9 @@ describe("Packet 11 hybrid offline reassessment under packet11-eval.18 (offline,
     expect(record).toMatchObject({ kind: OFFLINE_REASSESSMENT_LABEL, label: OFFLINE_REASSESSMENT_LABEL, liveEvaluation: false, providerCalls: 0, modelQualified: false });
     expect(record.statement).toContain("The original FAIL report and verdict (packet11-eval.17 / hybrid-full-policy.1) stand unchanged");
     expect(record.source).toMatchObject({ storedRun: directory, originalContract: { reportVersion: "packet11-eval.17", evaluationReportVersion: "packet11-eval.17", fullEvaluationPolicy: "hybrid-full-policy.1" }, originalVerdict: { kind: "FAIL", failures: ["UTILITY:FIRST_CALL_VALID", "HUMAN_REVIEW_PENDING"] }, originalVerdictStandsUnchanged: true, storedCalls: 70 });
-    expect(record.reassessedUnder).toMatchObject({ harness: "packet11-eval.18", fullEvaluationPolicy: "hybrid-full-policy.2" });
+    // The synthetic reassessment runs the CURRENT harness: eval.18's logic and policy, labelled packet11-eval.19 since the Packet 11C B5
+    // contract freeze (label only). The recorded reassessment of the real stored run (under eval.18) is historical evidence, unchanged.
+    expect(record.reassessedUnder).toMatchObject({ harness: "packet11-eval.19", fullEvaluationPolicy: "hybrid-full-policy.2" });
     expect(record.requestCheck).toEqual({ invocations: 70, compared: 70, identical: 70, mismatches: [] });
     expect(record.outcomeDifferencesFromOriginal).toEqual([]);
     expect(record.reassessedTotals).toMatchObject({ calls: 70, repairs: 0, completed: true, stoppedReason: null, hardGatePassed: true, assemblyInvariantBreaches: 0 });
@@ -617,7 +623,7 @@ describe("Packet 11 hybrid offline reassessment under packet11-eval.18 (offline,
 });
 
 // ---- The reassessment of the real stored FULL run (env-gated; offline; never a live call) ---------------------------------
-describe.runIf(process.env.RUN_OFFLINE_HYBRID_REASSESSMENT === "1")("OFFLINE reassessment of the stored FULL run under packet11-eval.18 (RUN_OFFLINE_HYBRID_REASSESSMENT=1)", () => {
+describe.runIf(process.env.RUN_OFFLINE_HYBRID_REASSESSMENT === "1")("OFFLINE reassessment of the stored FULL run under eval.18 logic (label packet11-eval.19) (RUN_OFFLINE_HYBRID_REASSESSMENT=1)", () => {
   it("reassesses all 70 stored responses and writes the labelled record; every original trace, report and review file stays byte-unchanged", async () => {
     if (process.env.DEEPSEEK_API_KEY || process.env.KIE_API_KEY) throw new Error("REASSESSMENT_REQUIRES_PROVIDER_KEYS_UNSET");
     const network = stubNetwork();

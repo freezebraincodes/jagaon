@@ -12,7 +12,7 @@ import { seedSyntheticCareOrganisation } from "@/application/care-organisation/s
 import { createAiInvocationAuditRepository } from "@/application/ai/ai-audit-persistence";
 import { AI_ACTIVATION_MANIFEST } from "@/application/ai/ai-activation-manifest";
 import { createAiHybridTaskService } from "@/application/ai/ai-hybrid-task-service";
-import { carePreparationRevisionRowCodec } from "./care-preparation-persistence";
+import { CARE_PREPARATION_STORED_ROW_CODECS, carePreparationRevisionRowCodec } from "./care-preparation-persistence";
 import { createCarePreparationService, type CarePreparationDependencies } from "./care-preparation-service";
 import { createCarePreparationQuery } from "./care-preparation-query";
 import { projectValidatedAiCareSummary } from "./ai-care-summary-replacement";
@@ -312,6 +312,61 @@ describe("replaceWithAiAssistedPreview (Packet 11C B1b)", () => {
  * injected hybrid `execute`, and replaces the preview only from an AI result with an accepted composition. A deterministic result never
  * creates a snapshot. No UI or app wiring (B4b). Fake provider and an injected test manifest only.
  */
+/**
+ * Packet 11C B5 (carried B1b minor): the care audit row codec admits `assistance: "AI_ASSISTED"` ONLY on the creation of an AI-assisted
+ * snapshot (CARE_SUMMARY_SNAPSHOT, CREATE, SUMMARY_PREPARED). Every other row (the old preview's SUMMARY_SUPERSEDED update, preview,
+ * approval, invalidation, deletion and every export row) is refused with AI_ASSISTED, and accepted with NONE (control).
+ */
+describe("care audit row codec: AI assistance only on the AI-assisted snapshot's creation (Packet 11C B5)", () => {
+  const codec = CARE_PREPARATION_STORED_ROW_CODECS.audit;
+  const row = (patch: Record<string, unknown>) => ({
+    auditEventId: crypto.randomUUID(),
+    transactionId: crypto.randomUUID(),
+    recordId: crypto.randomUUID(),
+    recordType: "CARE_SUMMARY_SNAPSHOT",
+    previousRevisionId: crypto.randomUUID(),
+    resultingRevisionId: crypto.randomUUID(),
+    action: "UPDATE",
+    initiator: "PATIENT",
+    assistance: "NONE",
+    occurredAt: NOW,
+    reasonCode: "SUMMARY_SUPERSEDED",
+    ...patch,
+  });
+  const accepts = (value: Record<string, unknown>) => {
+    try {
+      codec.validateForWrite(value);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const OTHER_ROWS: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+    ["the old preview's SUMMARY_SUPERSEDED update", { action: "UPDATE", reasonCode: "SUMMARY_SUPERSEDED" }],
+    ["a SUMMARY_PREVIEWED update", { action: "UPDATE", reasonCode: "SUMMARY_PREVIEWED" }],
+    ["a SUMMARY_APPROVED update", { action: "UPDATE", reasonCode: "SUMMARY_APPROVED" }],
+    ["a SUMMARY_INVALIDATED system derivation", { action: "SYSTEM_DERIVE", initiator: "JAGAON_SYSTEM", reasonCode: "SUMMARY_INVALIDATED" }],
+    ["a SUMMARY_SOURCE_DELETED deletion", { action: "DELETE", initiator: "JAGAON_SYSTEM", resultingRevisionId: null, reasonCode: "SUMMARY_SOURCE_DELETED" }],
+    ["a snapshot UPDATE recorded as SUMMARY_PREPARED", { action: "UPDATE", reasonCode: "SUMMARY_PREPARED" }],
+    ["an EXPORT_REQUESTED export creation", { recordType: "CARE_SUMMARY_EXPORT", action: "CREATE", previousRevisionId: null, reasonCode: "EXPORT_REQUESTED" }],
+    ["an EXPORT_OUTCOME_RECORDED export update", { recordType: "CARE_SUMMARY_EXPORT", action: "UPDATE", reasonCode: "EXPORT_OUTCOME_RECORDED" }],
+    ["an export record created as SUMMARY_PREPARED", { recordType: "CARE_SUMMARY_EXPORT", action: "CREATE", previousRevisionId: null, reasonCode: "SUMMARY_PREPARED" }],
+  ];
+
+  it("accepts AI_ASSISTED on the AI-assisted snapshot's creation (CREATE, SUMMARY_PREPARED)", () => {
+    expect(accepts(row({ action: "CREATE", previousRevisionId: null, reasonCode: "SUMMARY_PREPARED", assistance: "AI_ASSISTED" }))).toBe(true);
+  });
+
+  it.each(OTHER_ROWS)("refuses AI_ASSISTED on %s, and accepts the same row with NONE", (_label, patch) => {
+    expect(accepts(row({ ...patch, assistance: "NONE" }))).toBe(true);
+    expect(accepts(row({ ...patch, assistance: "AI_ASSISTED" }))).toBe(false);
+  });
+
+  it("refuses any other assistance value", () => {
+    for (const assistance of ["AI", "ai_assisted", "MODEL", null]) expect(accepts(row({ action: "CREATE", previousRevisionId: null, reasonCode: "SUMMARY_PREPARED", assistance })), String(assistance)).toBe(false);
+  });
+});
+
 describe("composeCareSummaryWithAi (Packet 11C B1b)", () => {
   type H = Awaited<ReturnType<typeof setup>>;
   function composer(h: H, options: { manifest?: typeof AI_ACTIVATION_MANIFEST; provider?: ReturnType<typeof fakeCareShellProvider> } = {}) {

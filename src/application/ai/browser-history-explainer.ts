@@ -106,6 +106,9 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
   const disclosure = session?.disclosure ?? dependencies.disclosure ?? INTERIM_FAIL_CLOSED_DISCLOSURE;
   // Packet 11C B4a: the signals of the requests the patient declined. The hybrid service decides remote use with the request's own
   // signal, so a declined request answers DECLINED (and never ACCEPTED), and no other request is affected.
+  // Packet 11C B5: a signal belongs to ONE request (every caller creates a fresh AbortController per request). Reusing an AbortSignal
+  // across requests is not supported for decline marking: once a request with that signal was declined, every later request carrying the
+  // same signal is also DECLINED. That fails safe (deterministic, nothing sent) and is pinned in browser-history-explainer.test.ts.
   const declined = new WeakSet<AbortSignal>();
   const perRequest: AiRemoteUseDisclosure = Object.freeze({
     decide: (signal: AbortSignal): Promise<AiRemoteUseDecision> => (declined.has(signal) ? Promise.resolve("DECLINED") : disclosure.decide(signal)),
