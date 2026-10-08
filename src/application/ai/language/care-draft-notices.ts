@@ -1,4 +1,4 @@
-import type { AiTaskRequest } from "@/domain/ai";
+import type { AiLocale, AiTaskRequest } from "@/domain/ai";
 import { AI_LANGUAGE_COPY, type LanguageCopy } from "./ai-language-copy";
 
 /**
@@ -12,8 +12,16 @@ export type CareDraftNotice = Readonly<{ kind: CareDraftNoticeKind; text: string
 
 export function renderCareDraftNotices(request: AiTaskRequest, copy: LanguageCopy = AI_LANGUAGE_COPY): readonly CareDraftNotice[] {
   if (request.taskType !== "DRAFT_CARE_PREPARATION_SUMMARY") return [];
+  return careDraftNoticesFor(request.locale, request.taskPayload.sections.some((section) => section.sectionId === "QUESTIONS_FOR_CARE_TEAM"), copy);
+}
+
+/**
+ * The one selection rule (Packet 11C B1a): the questions notice only with a questions section, then the draft notice always, in the
+ * locale, verbatim from the approved copy. The care-summary renderer stores exactly these as the snapshot's CARE_DRAFT_NOTICE blocks.
+ */
+export function careDraftNoticesFor(locale: AiLocale, hasQuestionsSection: boolean, copy: LanguageCopy = AI_LANGUAGE_COPY): readonly CareDraftNotice[] {
   const notices: CareDraftNotice[] = [];
-  if (request.taskPayload.sections.some((section) => section.sectionId === "QUESTIONS_FOR_CARE_TEAM")) notices.push({ kind: "QUESTIONS_IN_OWN_WORDS", text: copy.careDraftNotices.questions[request.locale] });
-  notices.push({ kind: "DRAFT_NOT_SENT_OR_REVIEWED", text: copy.careDraftNotices.draft[request.locale] });
+  if (hasQuestionsSection) notices.push({ kind: "QUESTIONS_IN_OWN_WORDS", text: copy.careDraftNotices.questions[locale] });
+  notices.push({ kind: "DRAFT_NOT_SENT_OR_REVIEWED", text: copy.careDraftNotices.draft[locale] });
   return Object.freeze(notices.map((notice) => Object.freeze(notice)));
 }

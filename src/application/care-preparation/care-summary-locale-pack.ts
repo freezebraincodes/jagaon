@@ -1,19 +1,36 @@
 import type { SupportedLocale } from "@/domain/patient-settings/locale";
-import type { CareSummarySectionId, CareSummaryLimitationCode } from "@/domain/care-preparation/care-summary-snapshot";
+import type { CareSummaryPayloadSectionId, CareSummaryLimitationCode, CareSummarySnapshotPayload } from "@/domain/care-preparation/care-summary-snapshot";
 import type { TimePoint } from "@/domain/shared/temporal";
 import { getMessages } from "@/i18n/get-messages";
 
 /**
  * The reviewed locale assets a care summary is rendered from (domain 11.7).
- * Every fixed label, heading and limitation resolves through this pack; no
- * other wording source exists, and nothing is translated from English.
+ * Every fixed label, heading and limitation resolves through this pack; the
+ * care-draft notice text (Packet 11C B1a) comes from its one approved source,
+ * AI_LANGUAGE_COPY.careDraftNotices, via the renderer. Nothing is translated
+ * from English.
+ *
+ * Versions (Packet 11C Addendum B, Task B1a; 9c.1 → 11c.1, offline, human acceptance pending):
+ * - care-summary-template.11c.1 / care-summary-renderer.11c.1: new snapshots store the applicable care-draft notices as
+ *   CARE_DRAFT_NOTICE blocks in a last CARE_DRAFT_NOTICES section (inside the hashed export projection).
+ * - care-summary-locale.11c.1: adds the notice section heading asset (careSummary.draftNotices.label) and carries the D4 zh
+ *   `selectedOnly` wording (你 → 您). Every 9c.1 heading, title and asset string is unchanged, so a 9c.1 snapshot (which stores its
+ *   own block text) prints byte-identically (care-summary-legacy-artifact.test.ts).
  */
 
-export const CARE_SUMMARY_LOCALE_PACK_VERSION = "care-summary-locale.9c.1";
-export const CARE_SUMMARY_RENDERER_VERSION = "care-summary-renderer.9c.1";
-export const CARE_SUMMARY_TEMPLATE_VERSION = "care-summary-template.9c.1";
+export const CARE_SUMMARY_LOCALE_PACK_VERSION = "care-summary-locale.11c.1";
+export const CARE_SUMMARY_RENDERER_VERSION = "care-summary-renderer.11c.1";
+export const CARE_SUMMARY_TEMPLATE_VERSION = "care-summary-template.11c.1";
 
-const SECTION_ASSET: Readonly<Record<CareSummarySectionId, string>> = Object.freeze({
+/**
+ * D3: an unapproved snapshot can be approved only when it was made with the current template and renderer. An older one is shown
+ * as stored but must be prepared again; an approved one is never touched and stays printable.
+ */
+export function isCurrentCareSummaryTemplate(payload: Pick<CareSummarySnapshotPayload, "composition" | "rendering">): boolean {
+  return payload.composition.templateVersion === CARE_SUMMARY_TEMPLATE_VERSION && payload.rendering.rendererVersion === CARE_SUMMARY_RENDERER_VERSION;
+}
+
+const SECTION_ASSET: Readonly<Record<CareSummaryPayloadSectionId, string>> = Object.freeze({
   SUMMARY_SCOPE: "care-summary.section.scope",
   CURRENT_CARE_PLAN: "care-summary.section.care-plan",
   CARE_ORGANISATION: "care-summary.section.organisation",
@@ -25,6 +42,7 @@ const SECTION_ASSET: Readonly<Record<CareSummarySectionId, string>> = Object.fre
   SAFETY_HISTORY: "care-summary.section.safety",
   QUESTIONS_FOR_CARE_TEAM: "care-summary.section.questions",
   DATA_LIMITATIONS: "care-summary.section.limitations",
+  CARE_DRAFT_NOTICES: "care-summary.section.draft-notices",
 });
 
 const LIMITATION_ASSET: Partial<Readonly<Record<CareSummaryLimitationCode, string>>> = Object.freeze({
@@ -33,7 +51,7 @@ const LIMITATION_ASSET: Partial<Readonly<Record<CareSummaryLimitationCode, strin
   MISSING_OR_UNRECORDED_DATA: "care-summary.limitation.missing",
 });
 
-export const sectionAssetId = (section: CareSummarySectionId) => SECTION_ASSET[section];
+export const sectionAssetId = (section: CareSummaryPayloadSectionId) => SECTION_ASSET[section];
 
 export function limitationAssetId(code: CareSummaryLimitationCode): string {
   const asset = LIMITATION_ASSET[code];
@@ -59,6 +77,7 @@ export function careSummaryLocalePack(locale: SupportedLocale) {
     "care-summary.section.intake-activity": summary.intakeActivityHeading,
     "care-summary.section.questions": summary.questionsHeading,
     "care-summary.section.limitations": summary.limitationsHeading,
+    "care-summary.section.draft-notices": summary.draftNotices.label,
     "care-summary.limitation.selected-only": summary.selectedOnly,
     "care-summary.limitation.patient-reported": summary.patientReported,
     "care-summary.limitation.missing": summary.missingLimitation,

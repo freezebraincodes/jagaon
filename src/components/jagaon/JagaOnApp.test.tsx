@@ -1,5 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import Dexie from "dexie";
+import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
+import { aiInvocationAuditRowSchema } from "@/domain/ai";
+import { databases as historyDatabases, higherFixture } from "@/application/history/history-test-support";
 import type {
   GlucoseRecordViewModel,
   JournalCommitResult,
@@ -9,7 +13,7 @@ import type {
 import type { BrowserJournalRuntimeOptions, JagaOnRuntime } from "@/application/journal/browser-journal-runtime";
 import { getMessages } from "@/i18n/get-messages";
 import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-fixture";
-import { JagaOnApp, type DeleteAllPortFactory } from "./JagaOnApp";
+import { JagaOnApp, type DeleteAllPortFactory, type HistoryExplainerFactory } from "./JagaOnApp";
 import { createDeleteDatasetService } from "@/storage/delete-dataset";
 import { JagaOnStorageLockedError, LocalStateCleanupUnconfirmedError } from "@/application/journal/browser-journal-runtime";
 import { lockStateFor } from "@/application/storage/integrity-gate";
@@ -239,6 +243,7 @@ function fakeRuntime(options?: BrowserJournalRuntimeOptions): JagaOnRuntime {
         approve: vi.fn(),
         invalidate: vi.fn(),
         supersede: vi.fn(),
+        replaceWithAiAssistedPreview: vi.fn(),
         requestPrintExport: vi.fn(),
         completePrintExport: vi.fn(),
         recoverInterruptedExports: vi.fn(async () => 0),
@@ -273,6 +278,7 @@ function fakeRuntime(options?: BrowserJournalRuntimeOptions): JagaOnRuntime {
     resolveLocale: vi.fn(async () => "en-SG" as const),
     persistLocale: vi.fn(async () => undefined),
     resetDemo,
+    aiAudit: { append: vi.fn(async () => undefined) },
     recordDeletion: { prepare: vi.fn(), confirm: vi.fn() },
     backup: { export: vi.fn() },
     datasetLifecycle: "EXISTING" as "CREATED" | "MIGRATED" | "EXISTING",
@@ -1171,5 +1177,81 @@ describe("durable local-state cleanup across app instances (Corrective Pass C)",
       expect(onboarding.port.getItem(DEMO_ONBOARDING_STORAGE_KEY)).not.toBeNull();
       cleanup();
     }
+  });
+});
+
+/**
+ * Packet 11C Addendum B, Task B2b: the history explanation is wired deterministically while NOT_ACTIVATED. One explainer per opened
+ * runtime (stable identity); nothing at startup, screen load or navigation; only the patient's explicit action composes, locally, with
+ * one audit row and no network call, no AI label and no disclosure.
+ */
+describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
+  const originalIndexedDB = Dexie.dependencies.indexedDB;
+  const originalIDBKeyRange = Dexie.dependencies.IDBKeyRange;
+  beforeAll(() => {
+    Dexie.dependencies.indexedDB = fakeIndexedDB;
+    Dexie.dependencies.IDBKeyRange = FDBKeyRange;
+  });
+  afterAll(() => {
+    Dexie.dependencies.indexedDB = originalIndexedDB;
+    Dexie.dependencies.IDBKeyRange = originalIDBKeyRange;
+  });
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    for (const database of historyDatabases) database.close();
+    for (const database of historyDatabases.splice(0)) await Dexie.delete(database.name);
+  });
+
+  it("builds one explainer per runtime from its history and audit ports, stable across re-renders and navigation", async () => {
+    const en = getMessages("en-SG");
+    const runtime = fakeRuntime();
+    const explainer = { explain: vi.fn() };
+    const factory = vi.fn<HistoryExplainerFactory>(() => explainer);
+    const props = { runtimeFactory: async () => runtime, onboardingRepositoryFactory: completed(), historyExplainerFactory: factory };
+    const { rerender } = render(<JagaOnApp {...props} />);
+    await screen.findByRole("button", { name: en.today.recordReading });
+    const nav = screen.getByRole("navigation");
+    for (const tab of [en.shared.navHistory, en.shared.navBooklet, en.shared.navHistory, en.shared.navToday, en.shared.navHistory]) {
+      fireEvent.click(within(nav).getByRole("button", { name: tab }));
+      await act(async () => undefined);
+    }
+    rerender(<JagaOnApp {...props} />);
+    await act(async () => undefined);
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(factory).toHaveBeenCalledWith({ history: runtime.history, audit: runtime.aiAudit });
+    // Nothing is explained without the patient's explicit action (this runtime's history offers none).
+    expect(explainer.explain).not.toHaveBeenCalled();
+  });
+
+  it("shipped manifest: no audit row or network call at startup, history load or probing; one deterministic local explanation on the explicit action", async () => {
+    const en = getMessages("en-SG");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { history } = await higherFixture();
+    const runtime = fakeRuntime();
+    const probe = vi.fn((request: { factId: string }) => history.loadExplainablePattern(request));
+    runtime.history = { load: (request) => history.load(request), loadExplainablePattern: probe };
+    const rows: unknown[] = [];
+    runtime.aiAudit = { append: vi.fn(async (row) => void rows.push(row)) };
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} />);
+    await screen.findByRole("button", { name: en.today.recordReading });
+    expect(runtime.aiAudit.append).not.toHaveBeenCalled();
+
+    fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navHistory }));
+    const action = await screen.findByRole("button", { name: en.history.explanation.action });
+    // Loading the screen and probing which comparison can be explained is local and writes no audit row.
+    expect(probe).toHaveBeenCalledWith({ factId: "COMPARISON:BEFORE_BREAKFAST" });
+    expect(runtime.aiAudit.append).not.toHaveBeenCalled();
+
+    fireEvent.click(action);
+    const panel = await screen.findByRole("region", { name: en.history.explanation.title });
+    await waitFor(() => expect(within(panel).getByRole("status")).not.toBeEmptyDOMElement());
+    expect(within(panel).getByRole("status")).not.toHaveTextContent(en.history.explanation.unavailable);
+    expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(rows).toHaveLength(1);
+    expect(aiInvocationAuditRowSchema.parse(rows[0])).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcomeCode: "TASK_DISABLED", providerModel: null, attempts: { count: 0 } });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

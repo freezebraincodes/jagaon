@@ -7,12 +7,14 @@ import {
   careSummarySnapshotPayloadSchema,
   type CareSummaryBlock,
   type CareSummaryFactBinding,
+  type CareSummaryPayloadSectionId,
   type CareSummaryPurpose,
   type CareSummarySection,
   type CareSummarySectionId,
   type CareSummarySnapshotPayload,
 } from "@/domain/care-preparation/care-summary-snapshot";
 import { hashCanonicalJson, type Sha256Digest } from "@/application/contracts/canonical-json";
+import { careDraftNoticesFor } from "@/application/ai/language/care-draft-notices";
 import {
   CARE_SUMMARY_RENDERER_VERSION,
   CARE_SUMMARY_TEMPLATE_VERSION,
@@ -27,8 +29,14 @@ import {
  *
  * It receives only facts the patient explicitly selected, each already read
  * from its exact current revision, and produces the snapshot content plus
- * its canonical SHA-256. It has no AI, provider, location or messaging
- * dependency, never interprets a value, and keeps patient text verbatim.
+ * its canonical SHA-256. It has no AI service, provider, location or
+ * messaging dependency, never interprets a value, and keeps patient text
+ * verbatim.
+ *
+ * care-summary-renderer.11c.1 (Packet 11C Addendum B, Task B1a, decision 5): after DATA_LIMITATIONS it stores the applicable
+ * approved care-draft notices as CARE_DRAFT_NOTICE blocks in a CARE_DRAFT_NOTICES section, so the content hash covers them and
+ * approval binds the exact artifact that contains them. The text comes only from the approved copy
+ * (AI_LANGUAGE_COPY.careDraftNotices, through `careDraftNoticesFor`); nothing is sent anywhere.
  */
 
 type Ref<T extends RecordType = RecordType> = TypedRevisionRef<T>;
@@ -188,7 +196,7 @@ export async function renderDeterministicCareSummary(draft: CareSummaryDraft): P
   const asOfText = pack.pointText({ kind: "EXACT", instantUtc: draft.asOf, timeZoneId: "Asia/Singapore" as never, utcOffsetMinutes: 480 });
   const scopeLines = [draft.appointment ? summary.purposeAppointment(draft.appointment.label) : summary.purposeRoutine, summary.periodLine(range), summary.preparedOn(asOfText)];
 
-  const sections: Array<{ sectionId: CareSummarySectionId; blocks: CareSummaryBlock[] }> = [
+  const sections: Array<{ sectionId: CareSummaryPayloadSectionId; blocks: CareSummaryBlock[] }> = [
     {
       sectionId: "SUMMARY_SCOPE",
       blocks: [{ kind: "SUMMARY_SCOPE", blockId: "scope", temporalRole: "NOT_APPLICABLE", purpose, conditionScope: [], selectedPeriod, asOf: draft.asOf, localeAssetId: "care-summary.scope", renderedText: scopeLines.join("\n") }],
@@ -246,6 +254,13 @@ export async function renderDeterministicCareSummary(draft: CareSummaryDraft): P
       const assetId = limitationAssetId(limitation.code);
       return { kind: "SUMMARY_LIMITATION", blockId: limitation.blockId, temporalRole: "NOT_APPLICABLE", limitationCode: limitation.code, relatedSources: [], localeAssetId: assetId, renderedText: pack.asset(assetId) };
     }),
+  });
+
+  // The fixed care-draft notices, apart from the facts and the limitations: application wording with no source.
+  const notices = careDraftNoticesFor(draft.locale, draft.questions.length > 0);
+  sections.push({
+    sectionId: "CARE_DRAFT_NOTICES",
+    blocks: notices.map((notice): CareSummaryBlock => ({ kind: "CARE_DRAFT_NOTICE", blockId: `notice.${notice.kind.toLowerCase().replaceAll("_", "-")}`, temporalRole: "NOT_APPLICABLE", noticeKind: notice.kind, renderedText: notice.text })),
   });
 
   const orderedSections: CareSummarySection[] = sections.map((section, displayOrder) => ({

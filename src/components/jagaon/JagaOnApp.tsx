@@ -62,6 +62,10 @@ import { PreventiveCareScreen } from "./screens/PreventiveCareScreen";
 import { CarePreparationScreen, type CarePreparationSelection } from "./screens/CarePreparationScreen";
 import { CareSummaryPreviewScreen } from "./screens/CareSummaryPreviewScreen";
 import { createBrowserPrintPort, type PrintPort } from "./care-preparation/PrintPort";
+import { createBrowserHistoryExplainer } from "@/application/ai/browser-history-explainer";
+import type { AiInvocationAuditPort } from "@/application/ai/ai-provider-port";
+import type { RecordedHistoryQueryPort } from "@/application/history/recorded-history-contracts";
+import type { PatternExplainerPort } from "./history/PatternExplanationPanel";
 
 // --- Section: Navigation state --------------------------------------------
 
@@ -109,7 +113,14 @@ type JagaOnAppProps = {
   appointmentNoteStorageFactory?: () => DemoOnboardingStoragePort;
   /** Packet 9C: injected browser printing (deterministic in tests). */
   printPortFactory?: () => PrintPort;
+  /**
+   * Packet 11C B2b: builds the history explanation (one hybrid service and one pattern explainer) from an opened runtime's ports.
+   * Called once per runtime; injected in tests to observe that.
+   */
+  historyExplainerFactory?: HistoryExplainerFactory;
 };
+
+export type HistoryExplainerFactory = (ports: { history: RecordedHistoryQueryPort; audit: AiInvocationAuditPort }) => PatternExplainerPort;
 
 /** Startup gate: onboarding until setup is completed or explicitly skipped. */
 type Phase =
@@ -136,6 +147,7 @@ export function JagaOnApp({
   printPortFactory = createBrowserPrintPort,
   deleteAllPortFactory = browserDeleteAllPort,
   restorePortFactory = browserRestorePort,
+  historyExplainerFactory = createBrowserHistoryExplainer,
 }: JagaOnAppProps = {}) {
   const printPort = useMemo(() => printPortFactory(), [printPortFactory]);
   const appointmentNotes = useMemo<AppointmentNoteSelectionRepository>(
@@ -358,6 +370,16 @@ export function JagaOnApp({
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
+
+  /**
+   * Packet 11C B2b: one history explainer per opened runtime (stable identity across renders, locale changes and navigation; a
+   * re-opened dataset gets a new one). Building it reads, writes and sends nothing: the history screen calls it only on the patient's
+   * explicit "Show how this comparison was worked out", and with the shipped manifest that is deterministic and local.
+   */
+  const historyExplainer = useMemo<PatternExplainerPort | null>(
+    () => (runtime ? historyExplainerFactory({ history: runtime.history, audit: runtime.aiAudit }) : null),
+    [runtime, historyExplainerFactory],
+  );
 
   const current = stack[stack.length - 1]!;
   const isTopLevel = TOP_LEVEL_SCREENS.includes(current.screen);
@@ -708,6 +730,7 @@ export function JagaOnApp({
             locale={locale}
             history={runtime?.history ?? null}
             selection={appointmentNotes}
+            explainer={historyExplainer}
           />
         );
       case "MEDICATION_SCHEDULE":

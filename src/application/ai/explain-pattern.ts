@@ -60,7 +60,11 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): 
     return Promise.resolve(ABORTED);
   }
   return new Promise((resolve, reject) => {
-    const onAbort = () => resolve(ABORTED);
+    // Released on whichever comes first (Packet 11C B2b): the abort, or execute settling while the signal never fired.
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(ABORTED);
+    };
     signal.addEventListener("abort", onAbort, { once: true });
     promise.then(
       (value) => {
@@ -80,6 +84,23 @@ const refKey = (ref: { recordType: string; recordId: string; revisionId: string 
 /** The view's source identity: the observation, the evidence snapshot and every supporting reading, per period and in order. */
 function sourceIdentity(view: ExplainablePatternView): string[] {
   return [refKey(view.observationRef), refKey(view.snapshotRef), ...view.periods.map((period) => `${period.role}[${period.readings.map((reading) => refKey(reading.ref)).join(",")}]`)];
+}
+
+/**
+ * Packet 11C B2b (carried Checkpoint 2 minor): the rendered limitations must be exactly the request's limitations, one per request
+ * limitation in the request's order, with the same ref and code and a non-empty approved text. Returns frozen copies, or null.
+ */
+function limitationsFor(request: AiTaskRequest, rendered: readonly PatternLimitation[]): readonly PatternLimitation[] | null {
+  if (request.taskType !== "EXPLAIN_PATTERN") return null;
+  const expected = request.taskPayload.limitations;
+  if (rendered.length !== expected.length) return null;
+  const copies: PatternLimitation[] = [];
+  for (const [index, limitation] of rendered.entries()) {
+    const wanted = expected[index]!;
+    if (limitation?.limitationRef !== wanted.ref || limitation.code !== wanted.code || typeof limitation.text !== "string" || limitation.text.length === 0) return null;
+    copies.push(Object.freeze({ limitationRef: limitation.limitationRef, code: limitation.code, text: limitation.text }));
+  }
+  return Object.freeze(copies);
 }
 
 function sameSource(built: ExplainablePatternView, reloaded: ExplainablePatternResult): boolean {
@@ -112,13 +133,15 @@ export function createPatternExplainer(deps: PatternExplainerDependencies): { ex
         const composition = result.composition;
         if (composition.taskType !== "EXPLAIN_PATTERN" || composition.locale !== input.locale) return unavailable("UNAVAILABLE");
         if (result.limitationCopyComplete !== true || !result.limitations || result.limitations.length === 0) return unavailable("UNAVAILABLE");
+        const limitations = limitationsFor(request, result.limitations);
+        if (!limitations) return unavailable("UNAVAILABLE");
 
         return {
           kind: "EXPLAINED",
           source: result.source,
           view,
           composition,
-          limitations: result.limitations.map((limitation) => ({ ...limitation })),
+          limitations,
           summaryRoleNotice: renderSummaryRoleNotice(input.locale),
         };
       } catch {

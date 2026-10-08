@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getMessages } from "@/i18n/get-messages";
+import { AI_LANGUAGE_COPY } from "@/application/ai/language/ai-language-copy";
 import { ALL_SCREENS, PACKET_6_ENABLED_SCREENS } from "@/components/jagaon/screen-manifest";
 
 describe("bilingual evidence — en-SG and zh-SG parity", () => {
@@ -255,13 +256,14 @@ describe("catalogue wording boundaries", () => {
     }
   });
 
-  it("pins the Packet 11C Task 8 care-draft notice copy (careSummary.draftNotices) with en/zh parity and full-width zh punctuation", () => {
-    // `questions` and `draft` are a verbatim copy of the approved care-draft notices (AI_LANGUAGE_COPY.careDraftNotices);
-    // their equality with the approved copy and renderer is pinned by CareSummaryPreviewScreen.test.tsx. `label` is new wording.
-    const en = getMessages("en-SG").careSummary.draftNotices;
-    const zh = getMessages("zh-SG").careSummary.draftNotices;
-    expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort());
-    expect(Object.keys(en).sort()).toEqual(["draft", "label", "questions"]);
+  it("pins the care-draft notice copy: the approved notices in AI_LANGUAGE_COPY and the printed section heading (careSummary.draftNotices.label)", () => {
+    // Packet 11C B1a: the notice text has one runtime source, AI_LANGUAGE_COPY.careDraftNotices (rendered into the snapshot's
+    // CARE_DRAFT_NOTICE blocks); the Checkpoint 2 i18n mirror was removed. `label` is now the printed section's heading
+    // (asset care-summary.section.draft-notices, care-summary-locale.11c.1), new wording, human acceptance pending.
+    const en = { label: getMessages("en-SG").careSummary.draftNotices.label, questions: AI_LANGUAGE_COPY.careDraftNotices.questions["en-SG"], draft: AI_LANGUAGE_COPY.careDraftNotices.draft["en-SG"] };
+    const zh = { label: getMessages("zh-SG").careSummary.draftNotices.label, questions: AI_LANGUAGE_COPY.careDraftNotices.questions["zh-SG"], draft: AI_LANGUAGE_COPY.careDraftNotices.draft["zh-SG"] };
+    expect(Object.keys(getMessages("en-SG").careSummary.draftNotices)).toEqual(["label"]);
+    expect(Object.keys(getMessages("zh-SG").careSummary.draftNotices)).toEqual(["label"]);
     expect({ en, zh }).toEqual({
       en: {
         label: "Notes about this draft",
@@ -285,6 +287,19 @@ describe("catalogue wording boundaries", () => {
     expect(en.draft).toMatch(/^The app does not send .* or confirm that a clinician has reviewed it\.$/);
     expect(zh.questions).toMatch(/不会照此执行/);
     expect(zh.draft).toMatch(/^应用不会把此草稿发送给护理团队，也不会确认医护人员已审阅。$/);
+  });
+
+  it("pins the Packet 11C B1a (D3) re-prepare message with en/zh parity, 您 and full-width zh punctuation (human acceptance pending)", () => {
+    const en = getMessages("en-SG").careSummary.templateSuperseded;
+    const zh = getMessages("zh-SG").careSummary.templateSuperseded;
+    expect({ en, zh }).toEqual({
+      en: "This summary was made with an earlier version of JagaOn. Prepare it again before you approve it.",
+      zh: "此摘要由较早版本的 JagaOn 制作。请您重新制作摘要，然后再批准。",
+    });
+    expect(zh).not.toMatch(/[()[\]:;,!?]|\.(?!\d)|你/);
+    expect(zh).toContain("您");
+    // Non-technical: no version label, code or template wording.
+    expect(`${en} ${zh}`).not.toMatch(/9c|11c|template|renderer|SUMMARY_|模板/i);
   });
 
   it("uses the design's compact bilingual boundary", () => {

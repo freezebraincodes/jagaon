@@ -10,6 +10,14 @@ import { createWebCryptoPort } from "@/backup/web-crypto-port";
 import { isJournalSourceEventName } from "@/application/journal/journal-stored-rows";
 import type { JagaOnDatabase } from "@/storage/database";
 import { createRestoreService } from "./restore-service";
+import { validateAiAuditReferences } from "@/application/ai/ai-audit-lifecycle";
+import { createAiInvocationAuditRepository } from "@/application/ai/ai-audit-persistence";
+import { projectValidatedAiCareSummary } from "@/application/care-preparation/ai-care-summary-replacement";
+import { printableCareSummary } from "@/application/care-preparation/care-summary-artifact";
+import { createCarePreparationQuery } from "@/application/care-preparation/care-preparation-query";
+import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
+import { acceptedAiCareComposition, rewriteAsLegacy9c1Snapshot } from "@/application/care-preparation/care-preparation-test-support";
+import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
 
 installFakeIndexedDb();
 const TIMEOUT = 240_000;
@@ -59,6 +67,103 @@ async function sourceBackup() {
 
 const identityOf = (tables: Record<string, unknown[]>) => (tables.storageMetadata.find((row) => (row as { key: string }).key === "DATABASE_IDENTITY") as { datasetIdentity: string }).datasetIdentity;
 
+/**
+ * Packet 11C Addendum B, Task B1b: Packet 10 coverage of the old and the new care-summary composition. A dataset holding a 9c.1 approved
+ * snapshot (stored exactly as the Packet 9C code path stored it) and an AI-assisted snapshot (created by `replaceWithAiAssistedPreview`
+ * from a fake-provider composition, with its ACCEPTED AI audit row) passes backup validation and restore reconciliation unchanged: the
+ * same rows, the 9c.1 artifact printing byte-identically, and the AI audit reference resolving. Offline; no provider, no network.
+ */
+describe("Packet 11C B1b: backup and restore of 9c.1 and AI-assisted care summaries", () => {
+  it(
+    "restores a 9c.1 approved snapshot and an AI-assisted snapshot with its accepted audit, byte-identical and still valid",
+    async () => {
+      const { name, runtime } = await createPopulatedDataset();
+      names.push(name);
+      // A second deterministic preview that the AI-assisted replacement will supersede: three readings (the full synthetic month has more
+      // than the 32 facts one request may carry, so that snapshot is not eligible for AI wording).
+      const visit = await runtime.careOrganisation.query.loadVisitPreparation();
+      if (visit.status !== "READY" || !visit.appointment) throw new Error("visit");
+      const glucose = visit.factGroups.find((group) => group.key === "GLUCOSE");
+      if (!glucose || glucose.sources.length < 3) throw new Error("glucose");
+      const second = await runtime.carePreparation.commands.prepare({
+        locale: "en-SG",
+        period: visit.period,
+        appointment: { recordType: "APPOINTMENT", recordId: visit.appointment.recordId, revisionId: visit.appointment.revisionId },
+        groups: [{ key: "GLUCOSE", sources: glucose.sources.slice(0, 3) }],
+        questions: visit.questions.map((entry) => ({ recordType: "CARE_QUESTION" as const, recordId: entry.recordId, revisionId: entry.revisionId })),
+        notSelected: [],
+      });
+      if (second.kind !== "COMMITTED") throw new Error(JSON.stringify(second));
+      runtime.close();
+
+      const database = await openRaw(name);
+      const uuid = () => crypto.randomUUID() as never;
+      const ids = { commandId: uuid, correlationId: uuid, recordId: uuid, revisionId: uuid, auditEventId: uuid, transactionId: uuid, domainEventId: uuid };
+      const service = createCarePreparationService(database, { now: () => PACKET10_NOW, ids, projectAiCareSummary: projectValidatedAiCareSummary });
+      const query = createCarePreparationQuery(database);
+      const snapshotHeads = (await database.table("recordHeads").where("recordType").equals("CARE_SUMMARY_SNAPSHOT").toArray()) as Array<{ recordId: string; headRevisionId: string; headRevisionNumber: number }>;
+      const first = snapshotHeads.find((head) => head.recordId !== second.recordId)!;
+
+      // The first snapshot: previewed, approved, then stored as the 9c.1 code path stored it.
+      const loadedFirst = await query.loadSummary(first.recordId as never);
+      if (loadedFirst.status !== "READY") throw new Error("first");
+      const firstHash = loadedFirst.payload.rendering.contentHash;
+      const previewed = await service.markPreviewed({ recordId: first.recordId as never, expectedRevisionId: first.headRevisionId as never, expectedRevisionNumber: 1, contentHash: firstHash });
+      if (previewed.kind !== "COMMITTED") throw new Error("previewed");
+      const approved = await service.approve({ recordId: first.recordId as never, expectedRevisionId: previewed.revisionId, expectedRevisionNumber: 2, contentHash: firstHash });
+      if (approved.kind !== "COMMITTED") throw new Error("approved");
+      const legacy = await rewriteAsLegacy9c1Snapshot(database, first.recordId as never);
+      expect(legacy.composition).toEqual({ method: "DETERMINISTIC", templateVersion: "care-summary-template.9c.1" });
+      const legacyPrint = printableCareSummary(legacy);
+
+      // The second snapshot: replaced from an accepted fake-provider AI composition, its audit row stored by the hybrid service.
+      const loadedSecond = await query.loadSummary(second.recordId);
+      if (loadedSecond.status !== "READY") throw new Error("second");
+      const ai = await acceptedAiCareComposition(loadedSecond.payload, { candidate: shellCandidate, requestId: crypto.randomUUID(), audit: createAiInvocationAuditRepository(database) });
+      const replaced = await service.replaceWithAiAssistedPreview({ recordId: second.recordId, expectedRevisionId: second.revisionId, expectedRevisionNumber: 1, expectedContentHash: loadedSecond.payload.rendering.contentHash, composition: ai.composition, aiInvocationAuditRef: ai.auditRef, validatedAt: PACKET10_NOW });
+      if (replaced.kind !== "COMMITTED") throw new Error(JSON.stringify(replaced));
+
+      const file = await exportFrom(database);
+      const source = await readAllTables(database);
+      database.close();
+      expect(validateAiAuditReferences({ recordRevisions: source.recordRevisions, aiInvocationAudits: source.aiInvocationAudits })).toEqual({ kind: "VALID" });
+
+      const target = await emptyDataset();
+      const { service: restore } = restoreService(target);
+      const inspected = await restore.inspect(file, PASS);
+      if (inspected.kind !== "PLAN_READY") throw new Error(JSON.stringify(inspected));
+      expect(await restore.confirm(inspected.plan, { planHash: inspected.plan.planHash, confirmedAt: LATER as never })).toEqual({ kind: "COMMITTED" });
+      (await createBrowserJournalRuntime(target, { now: () => LATER as never })).close();
+      const restoredDatabase = await openRaw(target);
+      const restored = await readAllTables(restoredDatabase);
+      const restoredQuery = createCarePreparationQuery(restoredDatabase);
+      const legacyView = await restoredQuery.loadSummary(first.recordId as never);
+      const aiView = await restoredQuery.loadSummary(replaced.recordId);
+      restoredDatabase.close();
+
+      // Same care-summary rows and the same AI audit rows (row key order is the codec's, so the comparison is deep equality).
+      type Row = { recordType: string; recordId: string; revisionId: string };
+      const careRows = (tables: Record<string, unknown[]>) => (tables.recordRevisions as Row[]).filter((row) => row.recordType === "CARE_SUMMARY_SNAPSHOT").sort((a, b) => a.revisionId.localeCompare(b.revisionId));
+      expect(careRows(restored)).toEqual(careRows(source));
+      expect(restored.aiInvocationAudits).toEqual(source.aiInvocationAudits);
+      expect(validateAiAuditReferences({ recordRevisions: restored.recordRevisions, aiInvocationAudits: restored.aiInvocationAudits })).toEqual({ kind: "VALID" });
+      // The 9c.1 approved artifact: still APPROVED and printing byte-identically.
+      if (legacyView.status !== "READY") throw new Error("legacy view");
+      expect(legacyView.snapshotStatus).toBe("APPROVED");
+      expect(JSON.stringify(legacyView.payload)).toBe(JSON.stringify(legacy));
+      expect(Buffer.from(printableCareSummary(legacyView.payload).text, "utf8").equals(Buffer.from(legacyPrint.text, "utf8"))).toBe(true);
+      // The AI-assisted snapshot: still the current unapproved preview, naming its accepted audit.
+      if (aiView.status !== "READY") throw new Error("ai view");
+      expect(aiView.snapshotStatus).toBe("PREPARED");
+      expect(aiView.payload.composition).toEqual({ method: "AI_ASSISTED", templateVersion: "care-summary-template.11c.1", aiInvocationAuditRef: ai.auditRef, validatedAt: PACKET10_NOW });
+      expect((restored.aiInvocationAudits as Array<{ requestId: string; outcomeCode: string }>).find((row) => row.requestId === ai.auditRef)?.outcomeCode).toBe("ACCEPTED");
+      // A backup whose AI-assisted snapshot names no stored audit is refused by the same Packet 10 rule.
+      expect(validateAiAuditReferences({ recordRevisions: restored.recordRevisions, aiInvocationAudits: [] })).toEqual({ kind: "INVALID", reason: "DANGLING" });
+    },
+    TIMEOUT,
+  );
+});
+
 describe("Packet 10C restore (RST-001–RST-006, RST-012, RST-015, RST-016, RST-021)", () => {
   it(
     "RST-001/016/021 restores into a bootstrap-only empty database, adopts its identity and reconciles without replay or network",
@@ -87,6 +192,16 @@ describe("Packet 10C restore (RST-001–RST-006, RST-012, RST-015, RST-016, RST-
       expect(afterCommit.storageMetadata.find((row) => (row as { key: string }).key === "RESTORE_STATE")).toMatchObject({ phase: "RECONCILING", lastCompletedStep: "COMMITTED", restoreMode: "RESTORE_INTO_EMPTY_DATABASE" });
       expect(afterCommit.appPreferences).toEqual([]);
       expect(identityOf(afterCommit)).toBe(identityOf(source.tables));
+      // Packet 11C B1a: the care-summary snapshot (now 11c.1, with its CARE_DRAFT_NOTICE blocks) passes backup and restore row
+      // validation and is restored with identical content (row key order is the codec's, so the comparison is deep equality).
+      type SnapshotRow = { recordType: string; revisionId: string; revision: { payload: { rendering: { rendererVersion: string }; sections: Array<{ sectionId: string; blocks: Array<{ kind: string }> }> } } };
+      const snapshotRows = (tables: Record<string, unknown[]>) => (tables.recordRevisions as SnapshotRow[]).filter((row) => row.recordType === "CARE_SUMMARY_SNAPSHOT").sort((a, b) => a.revisionId.localeCompare(b.revisionId));
+      expect(snapshotRows(source.tables).length).toBeGreaterThan(0);
+      expect(snapshotRows(afterCommit)).toEqual(snapshotRows(source.tables));
+      for (const row of snapshotRows(afterCommit)) {
+        expect(row.revision.payload.rendering.rendererVersion).toBe("care-summary-renderer.11c.1");
+        expect(row.revision.payload.sections.at(-1)!.blocks.map((block) => block.kind)).toEqual(["CARE_DRAFT_NOTICE", "CARE_DRAFT_NOTICE"]);
+      }
 
       const runtime = await createBrowserJournalRuntime(target, { now: () => LATER as never, bootstrapLocaleAfterRestore: "zh-SG" });
       expect(await runtime.resolveLocale()).toBe("zh-SG");

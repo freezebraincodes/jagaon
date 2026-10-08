@@ -598,4 +598,99 @@ describe("Recorded history explanation panel (Packet 11C Task 7)", () => {
     expect(within(reopened).getByRole("status")).not.toHaveTextContent(en.history.explanation.stale);
     expect(within(reopened).getAllByRole("listitem").length).toBeGreaterThan(0);
   });
+
+  // --- Packet 11C B2b: carried Checkpoint 2 integration minors ---
+
+  it("STALE_RESULT reloads the 7A card (a local read only): the stale message stays and nothing is explained again until the patient reopens", async () => {
+    const { history: real, journal, coordinator, recorded } = await higherFixture();
+    const load = vi.fn((request: Parameters<RecordedHistoryQueryPort["load"]>[0]) => real.load(request));
+    const history: RecordedHistoryQueryPort = { load, loadExplainablePattern: (request) => real.loadExplainablePattern(request) };
+    const held = heldExecute();
+    render(screenElement("en-SG", history, realExplainer(real, held.execute)));
+    const slot = en.history.slotLabels.BEFORE_BREAKFAST;
+    const before = en.history.comparisonHigher(slot, "7.35", "6", "mmol/L");
+    await screen.findByText(before);
+    const action = await openAction();
+    await waitFor(() => expect(held.calls).toHaveLength(1));
+
+    // A correction that moves the recent median, re-evaluated while the explanation is pending.
+    const target = recorded.at(-1)!;
+    const corrected = await journal.correctGlucoseTime({
+      recordId: target.recordId,
+      expectedRevisionId: target.revisionId,
+      expectedRevisionNumber: 1,
+      payload: {
+        measurement: { enteredValue: "5.0" as never, enteredUnit: "MMOL_L", normalization: null },
+        measurementMethod: "FINGERSTICK_METER",
+        context: { kind: "PATIENT_SELECTED_SLOT", slot: "BEFORE_BREAKFAST" },
+      },
+      temporal: local(dayBefore(TODAY, 12), "07:30"),
+      recordedAt: "2026-10-04T01:00:00.000Z" as Instant,
+    });
+    expect(corrected.kind).toBe("COMMITTED");
+    await coordinator.processPending();
+    const loads = load.mock.calls.length;
+
+    await act(async () => held.calls[0]!.release());
+    const panel = screen.getByRole("region", { name: en.history.explanation.title });
+    await waitFor(() => expect(within(panel).getByRole("status")).toHaveTextContent(en.history.explanation.stale));
+    await waitFor(() => expect(load.mock.calls.length).toBe(loads + 1));
+    expect(load.mock.calls.at(-1)![0]).toEqual({ period: "THIS_WEEK" });
+    // The card now states the re-evaluated comparison; the open panel keeps its stale message.
+    await waitFor(() => expect(screen.queryByText(before)).not.toBeInTheDocument());
+    expect(screen.getByText(en.history.comparisonHigher(slot, "7.25", "6", "mmol/L"))).toBeVisible();
+    expect(panel).toBeInTheDocument();
+    expect(within(panel).getByRole("status")).toHaveTextContent(en.history.explanation.stale);
+    expect(action).toHaveAttribute("aria-expanded", "true");
+    // Reloading the card never asks for another explanation, and it happens once per stale answer.
+    await act(async () => undefined);
+    expect(held.calls).toHaveLength(1);
+    expect(load.mock.calls.length).toBe(loads + 1);
+  });
+
+  it("STALE_RESULT whose comparison is gone after the reload: the panel closes, the stale message moves to the screen status, focus moves to the period control", async () => {
+    const first = readyView() as Extract<RecordedHistoryView, { status: "READY" }>;
+    // The reloaded view no longer holds the before-breakfast comparison.
+    const second = readyView({ comparisons: first.comparisons.slice(1) });
+    let loads = 0;
+    const history: RecordedHistoryQueryPort = {
+      load: vi.fn(async () => (++loads === 1 ? first : second)),
+      loadExplainablePattern: vi.fn(async () => ({ kind: "EXPLAINABLE" as const, view: {} as never })),
+    };
+    const explain = vi.fn(async () => ({ kind: "UNAVAILABLE" as const, reason: "STALE_RESULT" }));
+    render(screenElement("en-SG", history, { explain }));
+    await openAction();
+    await waitFor(() => expect(history.load).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("region", { name: en.history.explanation.title })).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: en.history.explanation.action })).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: en.history.periodThisWeek })).toHaveFocus();
+    expect(document.querySelector(".history-status")).toHaveTextContent(en.history.explanation.stale);
+    expect(explain).toHaveBeenCalledTimes(1);
+  });
+
+  it("a period change that closes the panel holding focus moves focus to the period control; focus already there stays", async () => {
+    const { history } = await higherFixture();
+    const results = await realResults(history);
+    const held = heldPort(results);
+    render(screenElement("en-SG", history, held.explainer));
+    await openAction();
+    const panel = screen.getByRole("region", { name: en.history.explanation.title });
+    expect(within(panel).getByRole("heading", { level: 3 })).toHaveFocus();
+    // A pointer or assistive-technology activation changes the period without moving focus off the panel heading first.
+    fireEvent.click(screen.getByRole("radio", { name: en.history.periodLastWeek }));
+    await act(async () => undefined);
+    expect(screen.queryByRole("region", { name: en.history.explanation.title })).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: en.history.periodLastWeek })).toHaveFocus();
+    await waitFor(() => expect(screen.queryByText(en.history.loading)).not.toBeInTheDocument());
+    expect(screen.getByRole("radio", { name: en.history.periodLastWeek })).toHaveFocus();
+
+    // Keyboard: focus is on the period control when the period changes; it stays there.
+    await openAction();
+    const thisWeek = screen.getByRole("radio", { name: en.history.periodThisWeek });
+    thisWeek.focus();
+    fireEvent.click(thisWeek);
+    await act(async () => undefined);
+    await waitFor(() => expect(screen.queryByText(en.history.loading)).not.toBeInTheDocument());
+    expect(thisWeek).toHaveFocus();
+  });
 });

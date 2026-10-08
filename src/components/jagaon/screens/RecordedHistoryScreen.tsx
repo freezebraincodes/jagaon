@@ -74,13 +74,39 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
   const [answer, setAnswer] = useState<{ key: string; explanation: PatternExplanationResult } | null>(null);
   const [openings, setOpenings] = useState(0);
 
+  /**
+   * Packet 11C B2b (carried Checkpoint 2 minor): focus is never dropped when the panel or a fact card that holds it is removed by a
+   * period change or a reload. Right before such an update, focus inside the screen but outside the period control is noted; once the
+   * update has removed that element, focus moves to the checked period option (the control the patient changes periods with). Focus
+   * that survives the update, or that is already on the period control, stays where it is.
+   */
+  const rootRef = useRef<HTMLDivElement>(null);
+  const focusToPeriod = useRef(false);
+  const noteFocusBeforeRemoval = useCallback(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && rootRef.current?.contains(active) && !active.closest("fieldset")) focusToPeriod.current = true;
+  }, []);
+  useEffect(() => {
+    if (!focusToPeriod.current) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body && active.isConnected) {
+      focusToPeriod.current = false;
+      return;
+    }
+    focusToPeriod.current = false;
+    rootRef.current?.querySelector<HTMLInputElement>("fieldset input:checked")?.focus();
+  });
+
   useEffect(() => {
     if (!history) return;
     const request = latestRequest.current + 1;
     latestRequest.current = request;
     void Promise.resolve()
       .then(() => {
-        if (latestRequest.current === request) setView(null);
+        if (latestRequest.current === request) {
+          noteFocusBeforeRemoval();
+          setView(null);
+        }
         return history.load({ period });
       })
       .then((next) => {
@@ -96,7 +122,7 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
       .catch(() => {
         if (latestRequest.current === request) setView({ status: "UNAVAILABLE", code: "STORAGE_UNAVAILABLE" });
       });
-  }, [history, period, attempt, selection]);
+  }, [history, period, attempt, selection, noteFocusBeforeRemoval]);
 
   const projection: HistoryProjection | null =
     view && (view.status === "READY" || view.status === "INSUFFICIENT_EVIDENCE") ? view.projection : null;
@@ -117,12 +143,15 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
         ),
       ),
     ).then((ids) => {
-      if (live) setExplainable({ token, ids: new Set(ids.filter((id): id is string => id !== null)) });
+      if (!live) return;
+      // A comparison that is no longer explainable loses its action (and an open panel); focus there is not dropped.
+      noteFocusBeforeRemoval();
+      setExplainable({ token, ids: new Set(ids.filter((id): id is string => id !== null)) });
     });
     return () => {
       live = false;
     };
-  }, [history, explainer, comparisons, viewToken]);
+  }, [history, explainer, comparisons, viewToken, noteFocusBeforeRemoval]);
 
   /**
    * The answer to the opened explanation. Every request carries a key (view load, fact, opening, locale). A request is aborted when any
@@ -147,6 +176,33 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
   const currentAnswer = answerKey !== null && answer?.key === answerKey ? answer.explanation : null;
   const explainableIds = explainable.token === viewToken ? explainable.ids : null;
 
+  /**
+   * Packet 11C B2b (carried Checkpoint 2 minor): a STALE_RESULT means a supporting record changed after the card was loaded, so the 7A
+   * card is reloaded once for that answer: a local history read only. The view token is kept, so the open panel keeps its stale
+   * message and nothing is explained again until the patient reopens the comparison. If the comparison is gone from the reloaded
+   * view, the panel closes and the stale message moves to the screen's status line.
+   */
+  const staleReloadedFor = useRef<string | null>(null);
+  const staleFactId = currentAnswer?.kind === "UNAVAILABLE" && currentAnswer.reason === "STALE_RESULT" && opened ? opened.factId : null;
+  useEffect(() => {
+    if (!history || staleFactId === null || answerKey === null || staleReloadedFor.current === answerKey) return;
+    staleReloadedFor.current = answerKey;
+    const request = latestRequest.current + 1;
+    latestRequest.current = request;
+    void history.load({ period }).then(
+      (next) => {
+        if (latestRequest.current !== request) return;
+        noteFocusBeforeRemoval();
+        setView(next);
+        if (next.status !== "READY" || !next.comparisons.some((comparison) => comparison.factId === staleFactId)) {
+          setOpened(null);
+          setStatus(msg.explanation.stale);
+        }
+      },
+      () => undefined,
+    );
+  }, [history, period, staleFactId, answerKey, msg, noteFocusBeforeRemoval]);
+
   const toggleExplanation = useCallback(
     (factId: string) => {
       if (opened?.factId === factId) {
@@ -160,10 +216,14 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
     [opened, openings],
   );
 
-  const changePeriod = useCallback((next: HistoryPeriod) => {
-    setOpened(null);
-    setPeriod(next);
-  }, []);
+  const changePeriod = useCallback(
+    (next: HistoryPeriod) => {
+      noteFocusBeforeRemoval();
+      setOpened(null);
+      setPeriod(next);
+    },
+    [noteFocusBeforeRemoval],
+  );
   const range = projection?.range ?? (view?.status === "EMPTY" ? view.range : null);
   const rangeText = range ? formatDateRange(locale, range.startDate, range.endDate) : "";
 
@@ -252,7 +312,7 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
   );
 
   return (
-    <div className="history-screen">
+    <div className="history-screen" ref={rootRef}>
       <h1 className="screen-title">{msg.title}</h1>
       <ChoiceGroup
         legend={msg.title}

@@ -118,7 +118,8 @@ export type CarePreparationAuditRow = {
   action: "CREATE" | "UPDATE" | "SYSTEM_DERIVE" | "DELETE";
   /** Preview, approval and export keep the patient as initiator (domain 11.10). */
   initiator: "PATIENT" | "JAGAON_SYSTEM";
-  assistance: "NONE";
+  /** Packet 11C B1b: AI_ASSISTED only on the creation of an AI-assisted snapshot (its revision provenance says the same). */
+  assistance: "NONE" | "AI_ASSISTED";
   occurredAt: Instant;
   reasonCode: CarePreparationAuditReason;
 };
@@ -133,11 +134,13 @@ const auditRowSchema = z
     resultingRevisionId: revisionIdSchema.nullable(),
     action: z.enum(["CREATE", "UPDATE", "SYSTEM_DERIVE", "DELETE"]),
     initiator: z.enum(["PATIENT", "JAGAON_SYSTEM"]),
-    assistance: z.literal("NONE"),
+    assistance: z.enum(["NONE", "AI_ASSISTED"]),
     occurredAt: instantSchema,
     reasonCode: z.enum(CARE_PREPARATION_AUDIT_REASONS),
   })
   .refine((row) => (row.action === "DELETE") === (row.resultingRevisionId === null), "DELETE_HAS_NO_RESULTING_REVISION")
+  // Packet 11C B1b: AI assistance is audited only where the domain records it, on the creation of an AI-assisted snapshot.
+  .refine((row) => row.assistance === "NONE" || (row.recordType === "CARE_SUMMARY_SNAPSHOT" && row.action === "CREATE" && row.reasonCode === "SUMMARY_PREPARED"), "AI_ASSISTANCE_NOT_PERMITTED")
   .refine((row) => !row.reasonCode.startsWith("EXPORT_") || (row.recordType === "CARE_SUMMARY_EXPORT" && row.initiator === "PATIENT"), "EXPORT_REQUIRES_PATIENT")
   .transform((row): CarePreparationAuditRow => row as CarePreparationAuditRow);
 
@@ -255,9 +258,17 @@ export function buildCarePreparationCommitPlan(input: {
   changes: CarePreparationChange[];
   /** Exact source revision IDs of a newly prepared snapshot (one edge each). */
   summarySources?: { snapshot: { recordId: RecordId; revisionId: RevisionId }; sourceRevisionIds: RevisionId[] };
+  /**
+   * Packet 11C B1b: the exact current heads of the sources the new snapshot is built from, re-checked inside the transaction, so a source
+   * corrected, superseded or deleted after the pre-checks rejects the whole command (HEAD_CONFLICT) and nothing is written.
+   */
+  sourceHeads?: RecordHead[];
 }): CarePreparationCommandPlan {
   const { commandId, commandHash, correlationId, transactionId, completedAt } = input;
-  const expectations: RecordHeadExpectation[] = [];
+  const expectations: RecordHeadExpectation[] = (input.sourceHeads ?? []).map((head) => {
+    if (head.state !== "ACTIVE" || (CARE_PREPARATION_RECORD_TYPES as readonly string[]).includes(head.recordType)) throw new OwnerPlanError("INVALID_TRANSITION");
+    return { kind: "MUST_MATCH", recordType: head.recordType, recordId: head.recordId, expectedRevisionId: head.headRevisionId, expectedRevisionNumber: head.headRevisionNumber };
+  });
   const revisions: StoredCarePreparationRevision[] = [];
   const heads: RecordHead[] = [];
   const tombstones: DeletionTombstone[] = [];
@@ -281,7 +292,8 @@ export function buildCarePreparationCommitPlan(input: {
         resultingRevisionId: revision.revisionId,
         action: revision.action,
         initiator: change.initiator,
-        assistance: "NONE",
+        // The revision's own provenance (validated by the domain schema) is the only source of the audited assistance.
+        assistance: revision.provenance.assistance,
         occurredAt: completedAt,
         reasonCode: change.auditReason,
       });

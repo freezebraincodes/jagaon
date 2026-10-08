@@ -55,6 +55,8 @@ import type { CarePreparationCommandPort, CarePreparationQueryPort } from "@/app
 import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
 import { createCarePreparationQuery } from "@/application/care-preparation/care-preparation-query";
 import { createCareSummaryInvalidation } from "@/application/care-preparation/care-summary-invalidation";
+import { createAiInvocationAuditRepository } from "@/application/ai/ai-audit-persistence";
+import type { AiInvocationAuditPort } from "@/application/ai/ai-provider-port";
 import type {
   JournalCommandService,
   JournalCommitResult,
@@ -78,6 +80,11 @@ export type JagaOnRuntime = {
   resolveLocale(): Promise<SupportedLocale>;
   persistLocale(locale: SupportedLocale): Promise<void>;
   resetDemo(): Promise<void>;
+  /**
+   * Packet 11C B2b: the append-only local AI invocation audit port (the existing Packet 10 `aiInvocationAudits` table), written only by
+   * the wired hybrid service, one validated minimised row per explicit request.
+   */
+  aiAudit: AiInvocationAuditPort;
   /** Packet 10A: exact, confirmed permanent deletion of one patient record. */
   recordDeletion: {
     prepare(target: DeletionTarget): Promise<PrepareDeletionResult>;
@@ -367,7 +374,10 @@ export async function createBrowserJournalRuntime(
     file: createBrowserBackupFilePort(),
     now,
   });
+  const aiAudits = createAiInvocationAuditRepository(database);
   const ports = gate.guard({
+    // Append only: the patient-facing runtime never reads, lists or rewrites AI audit rows.
+    aiAudit: Object.freeze({ append: aiAudits.append } satisfies AiInvocationAuditPort),
     backup: Object.freeze({ export: backupExport.export }),
     recordDeletion: Object.freeze({
       async prepare(target: DeletionTarget) {
@@ -415,6 +425,9 @@ export async function createBrowserJournalRuntime(
         approve: carePreparationService.approve,
         invalidate: carePreparationService.invalidate,
         supersede: carePreparationService.supersede,
+        // Packet 11C B1b: the port's AI-assisted replacement. This runtime's service has no AI projection configured (B4b wires one),
+        // so it refuses every request (SUMMARY_AI_VALIDATION_MISSING); nothing here imports an AI module or reaches a provider.
+        replaceWithAiAssistedPreview: carePreparationService.replaceWithAiAssistedPreview,
         requestPrintExport: carePreparationService.requestPrintExport,
         completePrintExport: carePreparationService.completePrintExport,
         recoverInterruptedExports: carePreparationService.recoverInterruptedExports,

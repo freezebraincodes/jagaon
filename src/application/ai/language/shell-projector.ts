@@ -70,3 +70,36 @@ export function projectShellTaskRequest(plan: SlotPlan, copy: LanguageCopy = AI_
   if (!isApprovedShellTaskRequest(request, copy)) throw new Error("SHELL_REQUEST_NOT_APPROVED");
   return deepFreeze(request) as ShellTaskRequest;
 }
+
+/**
+ * Packet 11C Addendum B, Task B2a: the value-blind plan view the server shell route rebuilds from an approved request alone, so that it can
+ * run validateShellCandidate (which takes a SlotPlan) without any fact. Every field of the request is a REMOTE field (the request carries the
+ * REMOTE fields only), slot homes come from each field's required slots, glosses map back to their approved gloss keys, and each section is
+ * identified by its approved heading. No reference crosses the boundary: slots bind no refs and a section's ref is its slot. The gates read
+ * only the plan version, task, locale, fields, sections and remote token inventory, all of which are the request's own; an unapproved
+ * request never gets a view.
+ */
+export function shellPlanView(request: ShellTaskRequest, copy: LanguageCopy = AI_LANGUAGE_COPY): SlotPlan {
+  if (!isApprovedShellTaskRequest(request, copy)) throw new Error("SHELL_REQUEST_NOT_APPROVED");
+  const homeOf = new Map(request.fields.flatMap((field) => field.requiredSlots.map((slotId) => [slotId, field.path] as const)));
+  const sectionIdOf = (heading: string) => AI_ORGANISABLE_SECTIONS.find((id) => approvedSectionHeading(request.locale, id) === heading);
+  const view = {
+    planVersion: request.slotPlanVersion,
+    taskType: request.taskType,
+    locale: request.locale,
+    runtimeBundleKey: request.runtimeBundleKey,
+    claimFamily: request.claimFamily,
+    fields: request.fields.map((field) => ({ path: field.path, requiredSlots: [...field.requiredSlots], maxCodePoints: field.maxCodePoints, maxSentences: field.maxSentences, mayBeAtomOnly: field.mayBeAtomOnly, owner: "REMOTE" as const })),
+    slots: request.slots.map((slot) => ({
+      slotId: slot.slotId,
+      atomKind: slot.atomKind,
+      homeField: homeOf.get(slot.slotId)!,
+      boundRefs: [],
+      orderGroup: null,
+      glossKey: GLOSSES_BY_KIND[slot.atomKind].find((key) => copy.glosses[key][request.locale] === slot.gloss)!,
+    })),
+    sections: request.sections.map((section) => ({ sectionSlot: section.sectionSlot, sectionRef: section.sectionSlot, sectionId: sectionIdOf(section.heading)!, heading: section.heading, introPath: section.introPath, bulletPaths: [...section.bulletPaths] })),
+    remote: { eligible: true as const },
+  };
+  return deepFreeze(view) as SlotPlan;
+}

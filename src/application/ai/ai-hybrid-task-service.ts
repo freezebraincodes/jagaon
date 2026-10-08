@@ -3,8 +3,8 @@ import { AI_ACTIVATION_MANIFEST, resolveAiTaskActivation, type AiActivationManif
 import { createDeterministicFallback, type AiFallbackResult } from "./ai-fallbacks";
 import { resolveAiHybridBundle, type AiHybridRuntimeBundle } from "./ai-hybrid-runtime-bundles";
 import { renderExplainLimitations, type RenderedLimitation } from "./ai-meaning-registry";
-import { PROVIDER_FAILURE_REASONS, type AiInvocationAuditPort, type AiShellProviderPort } from "./ai-provider-port";
-import { addUsage, buildAuditRow, callOnce, NO_USAGE, type Attempts } from "./ai-task-service";
+import { addUsage, buildAuditRow, callOnce, NO_USAGE, type Attempts } from "./ai-call-support";
+import { PROVIDER_FAILURE_REASONS, SHELL_STRUCTURAL_REJECTION_REASONS, type AiInvocationAuditPort, type AiShellProviderPort } from "./ai-provider-port";
 import { composeAiResult } from "./language/ai-composition";
 import type { AiComposition } from "./language/assembler";
 import { renderCareDraftNotices, type CareDraftNotice } from "./language/care-draft-notices";
@@ -24,6 +24,9 @@ import { planSlots } from "./language/slot-planner";
  * the application composes the EXPLAIN observation deterministically (variant selected from the requestId), then the shared
  * composeAiResult runs the existing assembler (S9) and the unchanged r7 verifier (S10) over the whole output. A composer, assembler
  * or verifier failure returns the deterministic composition (always the default variant 0).
+ * Packet 11C Addendum B, Task B2a (D6): the provider may answer with a typed structural rejection from the server shell gates; it is handled
+ * exactly like a local shell-gate rejection (usage counted, at most one structural repair within maxAttempts), so the repair happens here
+ * once and never in the route. The provider-call helpers come from the shared ai-call-support module, not from the legacy service.
  */
 export type AiLanguageMode = "REMOTE_AI" | "PRIVATE" | "OFFLINE" | "NOT_ACTIVATED" | "NO_PROVIDER" | "INELIGIBLE";
 export type AiHybridExecutionResult =
@@ -60,9 +63,23 @@ async function invokeShells(request: AiTaskRequest, plan: SlotPlan, atoms: AtomT
         return fallback("PROVIDER_TIMEOUT");
       }
       const result = call.result;
-      if (result.kind !== "COMPLETED") return fallback((PROVIDER_FAILURE_REASONS as readonly string[]).includes(result.reason) ? result.reason : "PROVIDER_FAILED");
+      if (result.kind !== "COMPLETED" && result.kind !== "STRUCTURALLY_REJECTED") {
+        // Packet 11C B2b: a failure after a completed, billed response carries that usage; it is counted like any attempt's.
+        if (result.usage !== undefined) addUsage(attempts, result.usage);
+        return fallback((PROVIDER_FAILURE_REASONS as readonly string[]).includes(result.reason) ? result.reason : "PROVIDER_FAILED");
+      }
       addUsage(attempts, result.usage);
       if (result.retention !== "CONFIRMED_NOT_STORED") return fallback("PROVIDER_FAILED");
+      // D6 (Addendum B, Task B2a): a typed rejection from the server shell gates is handled exactly like a local shell-gate rejection
+      // below (usage already counted). Its reason must be a closed shell-gate reason, and the server can never widen the local repair
+      // rule: only a structural SCHEMA_INVALID under a bundle that allows structural repair, within maxAttempts, is repaired.
+      if (result.kind === "STRUCTURALLY_REJECTED") {
+        if (!(SHELL_STRUCTURAL_REJECTION_REASONS as readonly string[]).includes(result.reason) || typeof result.repairable !== "boolean") return fallback("PROVIDER_FAILED");
+        const repairable = result.repairable && result.reason === "SCHEMA_INVALID" && budget.structuralRepairAllowed;
+        if (!repairable || attempts.count >= budget.maxAttempts) return fallback(result.reason);
+        attempts.structuralRepairUsed = true;
+        continue;
+      }
       const shells = validateShellCandidate(plan, bundle, result.candidate);
       if (shells.kind === "REJECTED") {
         if (!shells.repairable || attempts.count >= budget.maxAttempts) return fallback(shells.reason);

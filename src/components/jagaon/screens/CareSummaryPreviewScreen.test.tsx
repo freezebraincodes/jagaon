@@ -5,8 +5,9 @@ import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
 import { getMessages } from "@/i18n/get-messages";
 import type { SupportedLocale } from "@/i18n/types";
 import type { RecordHead, RecordId } from "@/domain/shared";
-import { NOW, closeCarePreparationHarnesses, createCarePreparationHarness, exact } from "@/application/care-preparation/care-preparation-test-support";
+import { NOW, closeCarePreparationHarnesses, createCarePreparationHarness, exact, rewriteAsLegacy9c1Snapshot } from "@/application/care-preparation/care-preparation-test-support";
 import type { CarePreparationCommandPort } from "@/application/care-preparation/care-preparation-contracts";
+import { printableCareSummary } from "@/application/care-preparation/care-summary-artifact";
 import type { AiTaskRequest } from "@/domain/ai";
 import { renderCareDraftNotices } from "@/application/ai/language/care-draft-notices";
 import { AI_LANGUAGE_COPY } from "@/application/ai/language/ai-language-copy";
@@ -174,26 +175,35 @@ function approvedNoticeTexts(payload: { locale: SupportedLocale; sections: Reado
   return renderCareDraftNotices(request).map((notice) => notice.text);
 }
 
-async function noticeRegion(locale: SupportedLocale = "en-SG") {
-  return screen.findByRole("region", { name: getMessages(locale).careSummary.draftNotices.label });
+/**
+ * Packet 11C Addendum B, Task B1a (decision 5): the notices are the printed summary's own last section ("Notes about this draft"),
+ * rendered from the snapshot's stored, hashed notice blocks. The Checkpoint 2 screen-only region no longer exists.
+ */
+async function noticeSection(locale: SupportedLocale = "en-SG") {
+  const article = await screen.findByRole("article");
+  const heading = within(article).getByRole("heading", { level: 2, name: getMessages(locale).careSummary.draftNotices.label });
+  return heading.closest("section") as HTMLElement;
 }
 
-const noticeTexts = (region: HTMLElement) => within(region).getAllByRole("paragraph").map((paragraph) => paragraph.textContent);
+const noticeTexts = (section: HTMLElement) => within(section).getAllByRole("paragraph").map((paragraph) => paragraph.textContent);
 
-describe("Care-summary preview: Packet 11C appointment preview (A3)", () => {
-  it("renders the fixed care-draft notices after “About this summary”, as a separate labelled region outside the printed summary", async () => {
+describe("Care-summary preview: Packet 11C appointment preview (A3) with notices in the printed artifact (B1a)", () => {
+  it("prints the fixed care-draft notices as the summary's last section, after “About this summary”, with no screen-only copy", async () => {
     const { h, recordId } = await prepared();
     renderPreview(h, recordId);
     const article = await screen.findByRole("article");
-    const region = await noticeRegion();
-    // The limitation section is the article's last section, and the notices follow the article rather than sit inside it.
+    const section = await noticeSection();
     const headings = within(article).getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
-    expect(headings.at(-1)).toBe(en.careSummary.limitationsHeading);
-    expect(article.contains(region)).toBe(false);
-    expect(article.compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(noticeTexts(region)).toEqual([en.careSummary.draftNotices.questions, en.careSummary.draftNotices.draft]);
-    // Not part of the limitation list, and not part of the approved, hashed print content.
-    for (const text of noticeTexts(region)) expect(article.textContent).not.toContain(text);
+    expect(headings.slice(-2)).toEqual([en.careSummary.limitationsHeading, en.careSummary.draftNotices.label]);
+    expect(article.contains(section)).toBe(true);
+    expect(noticeTexts(section)).toEqual([AI_LANGUAGE_COPY.careDraftNotices.questions["en-SG"], AI_LANGUAGE_COPY.careDraftNotices.draft["en-SG"]]);
+    // Not part of the limitation list, and nowhere outside the printed summary.
+    const limitations = within(article).getByRole("heading", { level: 2, name: en.careSummary.limitationsHeading }).closest("section") as HTMLElement;
+    for (const text of noticeTexts(section)) expect(limitations.textContent).not.toContain(text);
+    expect(screen.queryByRole("region", { name: en.careSummary.draftNotices.label })).toBeNull();
+    expect(document.querySelector(".care-summary-draft-notices")).toBeNull();
+    const outside = (document.body.textContent ?? "").replace(article.textContent ?? "", "");
+    for (const text of noticeTexts(section)) expect(outside).not.toContain(text);
   });
 
   it("shows the questions notice only when the summary has a questions section", async () => {
@@ -201,13 +211,13 @@ describe("Care-summary preview: Packet 11C appointment preview (A3)", () => {
     renderPreview(h, recordId);
     const article = await screen.findByRole("article");
     expect(within(article).queryByRole("heading", { name: en.careSummary.questionsHeading })).toBeNull();
-    expect(noticeTexts(await noticeRegion())).toEqual([en.careSummary.draftNotices.draft]);
+    expect(noticeTexts(await noticeSection())).toEqual([AI_LANGUAGE_COPY.careDraftNotices.draft["en-SG"]]);
   });
 
   it("keeps approval a separate click with its meaning visible, and print reachable only after approval", async () => {
     const { h, recordId } = await prepared();
     renderPreview(h, recordId);
-    await noticeRegion();
+    await noticeSection();
     const approve = (await screen.findByRole("button", { name: en.careSummary.approveAction })) as HTMLButtonElement;
     await waitFor(() => expect(approve.disabled).toBe(false));
     expect(screen.getByText(en.careSummary.approvalMeaning)).toBeTruthy();
@@ -219,7 +229,10 @@ describe("Care-summary preview: Packet 11C appointment preview (A3)", () => {
     expect(await screen.findByRole("button", { name: en.careSummary.printAction })).toBeTruthy();
     const after = await h.query.loadSummary(recordId);
     expect(after.status === "READY" && after.snapshotStatus).toBe("APPROVED");
-    expect(noticeTexts(await noticeRegion())).toEqual([en.careSummary.draftNotices.questions, en.careSummary.draftNotices.draft]);
+    // The approved hash is the hash of the artifact that contains the notices.
+    expect(after.status === "READY" && after.payload.patientApproval.state === "APPROVED" && after.payload.patientApproval.approvedContentHash).toBe(before.status === "READY" && before.payload.rendering.contentHash);
+    expect(before.status === "READY" && before.payload.sections.at(-1)!.sectionId).toBe("CARE_DRAFT_NOTICES");
+    expect(noticeTexts(await noticeSection())).toEqual([AI_LANGUAGE_COPY.careDraftNotices.questions["en-SG"], AI_LANGUAGE_COPY.careDraftNotices.draft["en-SG"]]);
   });
 
   for (const locale of ["en-SG", "zh-SG"] as const) {
@@ -227,7 +240,7 @@ describe("Care-summary preview: Packet 11C appointment preview (A3)", () => {
       const { h, recordId } = await prepared(locale);
       const { container } = renderPreview(h, recordId, { locale });
       const messages = getMessages(locale).careSummary;
-      const region = await noticeRegion(locale);
+      const region = await noticeSection(locale);
       const scan = () => {
         const actions = [...screen.queryAllByRole("button"), ...screen.queryAllByRole("link")].map((element) => element.textContent ?? "");
         expect(actions.length).toBeGreaterThan(0);
@@ -241,7 +254,8 @@ describe("Care-summary preview: Packet 11C appointment preview (A3)", () => {
         const outside = noticeTexts(region).reduce((rest, notice) => rest.replaceAll(notice ?? "", ""), text);
         expect(outside).not.toMatch(/reviewed by|sent to|已审阅|已发送/i);
       };
-      expect(container.textContent).toContain(messages.draftNotices.draft);
+      expect(container.textContent).toContain(AI_LANGUAGE_COPY.careDraftNotices.draft[locale]);
+      expect(messages.draftNotices.label.length).toBeGreaterThan(0);
       scan();
       await approveWhenPreviewed(messages.approveAction);
       await screen.findByRole("button", { name: messages.printAction });
@@ -267,7 +281,7 @@ describe("Care-summary preview: Packet 11C appointment preview (A3)", () => {
     if (result.kind !== "COMMITTED") throw new Error(JSON.stringify(result));
     const { container } = renderPreview(h, result.recordId);
     const article = await screen.findByRole("article");
-    await noticeRegion();
+    await noticeSection();
     expect(within(article).getByText("3 Oct 2026, 9:00 pm · 6.6 mmol/L")).toBeTruthy();
     expect(within(article).getByText("Selected question words")).toBeTruthy();
     expect(container.textContent).not.toContain("9.4");
@@ -275,32 +289,111 @@ describe("Care-summary preview: Packet 11C appointment preview (A3)", () => {
   });
 });
 
-describe("Care-summary preview: care-draft notices are the approved copy, verbatim", () => {
-  // The i18n strings careSummary.draftNotices.{questions,draft} are a verbatim copy of the approved care-draft notices
-  // (AI_LANGUAGE_COPY.careDraftNotices, ai-language-copy.11b.10, unchanged since 11b.8); pinned by this test; do not edit independently.
-  // The screen cannot import the approved renderer (packet-11a-manifest / packet-9c-manifest browser-graph boundary), so this
-  // test, which is not in the browser graph, holds both sides equal byte for byte.
-  it("keeps the i18n strings byte-identical to the approved notice copy", () => {
+describe("Care-summary preview: stored care-draft notice blocks are the approved copy, verbatim", () => {
+  // Packet 11C B1a (retargeted pin): the notice text has one runtime source, the approved copy (AI_LANGUAGE_COPY.careDraftNotices,
+  // ai-language-copy.11b.10, unchanged since 11b.8). It is rendered into the snapshot's CARE_DRAFT_NOTICE blocks at preparation
+  // time; the screen and the printable artifact show those stored blocks. The Checkpoint 2 i18n mirror no longer exists.
+  it("keeps no i18n mirror of the notice text", () => {
     for (const locale of ["en-SG", "zh-SG"] as const) {
-      const notices = getMessages(locale).careSummary.draftNotices;
-      expect([notices.questions, notices.draft], locale).toEqual([AI_LANGUAGE_COPY.careDraftNotices.questions[locale], AI_LANGUAGE_COPY.careDraftNotices.draft[locale]]);
+      expect(Object.keys(getMessages(locale).careSummary.draftNotices), locale).toEqual(["label"]);
+      expect(JSON.stringify(getMessages(locale)), locale).not.toContain(AI_LANGUAGE_COPY.careDraftNotices.draft[locale]);
     }
   });
 
   for (const locale of ["en-SG", "zh-SG"] as const) {
     for (const questions of [true, false]) {
-      it(`renders exactly the approved renderer's notices (${locale}, ${questions ? "with" : "without"} a questions section)`, async () => {
+      it(`stores and shows exactly the approved renderer's notices (${locale}, ${questions ? "with" : "without"} a questions section)`, async () => {
         const { h, recordId } = await prepared(locale, { questions });
         renderPreview(h, recordId, { locale });
-        const rendered = noticeTexts(await noticeRegion(locale));
+        const rendered = noticeTexts(await noticeSection(locale));
         const view = await h.query.loadSummary(recordId);
         if (view.status !== "READY") throw new Error("ready");
         expect(view.payload.sections.some((section) => section.sectionId === "QUESTIONS_FOR_CARE_TEAM")).toBe(questions);
+        const stored = view.payload.sections.at(-1)!.blocks.map((block) => (block.kind === "CARE_DRAFT_NOTICE" ? block.renderedText : null));
         const approved = approvedNoticeTexts(view.payload);
-        expect(approved).toHaveLength(questions ? 2 : 1);
+        const copy = AI_LANGUAGE_COPY.careDraftNotices;
+        expect(approved).toEqual(questions ? [copy.questions[locale], copy.draft[locale]] : [copy.draft[locale]]);
+        expect(stored).toEqual(approved);
         expect(rendered).toEqual(approved);
-        for (const [index, text] of approved.entries()) expect(Buffer.from(rendered[index] ?? "", "utf8").equals(Buffer.from(text, "utf8"))).toBe(true);
+        for (const [index, text] of approved.entries()) {
+          expect(Buffer.from(stored[index] ?? "", "utf8").equals(Buffer.from(text, "utf8"))).toBe(true);
+          expect(Buffer.from(rendered[index] ?? "", "utf8").equals(Buffer.from(text, "utf8"))).toBe(true);
+        }
       });
     }
   }
 });
+
+/**
+ * Packet 11C Addendum B, Task B1a (D3): an unapproved preview made with an older template or renderer is shown as it was stored, but
+ * it must be prepared again before approval. The message is non-technical and the way back to the existing "prepare" action is offered.
+ */
+describe("Care-summary preview: an older-version preview must be prepared again (D3)", () => {
+  for (const locale of ["en-SG", "zh-SG"] as const) {
+    it(`shows the stored 9c.1 preview unchanged, offers no approval, never records a preview, and offers the way back (${locale})`, async () => {
+      const { h, recordId } = await prepared(locale);
+      const legacy = await rewriteAsLegacy9c1Snapshot(h.database, recordId);
+      const onBack = vi.fn();
+      renderPreview(h, recordId, { locale, onBack });
+      const messages = getMessages(locale).careSummary;
+      expect(await screen.findByText(messages.templateSuperseded)).toBeTruthy();
+      const article = screen.getByRole("article");
+      // The old artifact is shown exactly as stored: no notice section is added to it.
+      expect(within(article).queryByRole("heading", { name: messages.draftNotices.label })).toBeNull();
+      expect(article.textContent).toBe(printableCareSummaryText(legacy));
+      expect(screen.queryByRole("button", { name: messages.approveAction })).toBeNull();
+      expect(screen.queryByRole("button", { name: messages.printAction })).toBeNull();
+      fireEvent.click(screen.getAllByRole("button", { name: messages.backToPreparation })[0]!);
+      expect(onBack).toHaveBeenCalled();
+      // Showing it never recorded a preview: the snapshot is still revision 1.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(((await h.database.table("recordHeads").get(recordId)) as RecordHead).headRevisionNumber).toBe(1);
+    });
+  }
+
+  it("blocks approval of a previewed 9c.1 snapshot the same way", async () => {
+    const { h, recordId } = await prepared();
+    const view = await h.query.loadSummary(recordId);
+    if (view.status !== "READY") throw new Error("ready");
+    const previewed = await h.service.markPreviewed({ recordId, expectedRevisionId: view.revisionId, expectedRevisionNumber: 1, contentHash: view.payload.rendering.contentHash });
+    if (previewed.kind !== "COMMITTED") throw new Error("previewed");
+    await rewriteAsLegacy9c1Snapshot(h.database, recordId);
+    renderPreview(h, recordId);
+    expect(await screen.findByText(en.careSummary.templateSuperseded)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: en.careSummary.approveAction })).toBeNull();
+  });
+
+  it("shows the same message when the service refuses approval with SUMMARY_TEMPLATE_SUPERSEDED", async () => {
+    const { h, recordId } = await prepared();
+    const commands: CarePreparationCommandPort = { ...h.service, approve: async () => ({ kind: "REJECTED", code: "SUMMARY_TEMPLATE_SUPERSEDED" }) };
+    renderPreview(h, recordId, { commands });
+    await approveWhenPreviewed(en.careSummary.approveAction);
+    expect(await screen.findByText(en.careSummary.templateSuperseded)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: en.careSummary.approveAction })).toBeNull();
+    expect(screen.getAllByRole("button", { name: en.careSummary.backToPreparation }).length).toBeGreaterThan(0);
+    expect(screen.queryByText(en.carePreparation.saveFailed)).toBeNull();
+  });
+
+  it("keeps an approved 9c.1 snapshot printable exactly as approved", async () => {
+    const { h, recordId } = await prepared();
+    const view = await h.query.loadSummary(recordId);
+    if (view.status !== "READY") throw new Error("ready");
+    const previewed = await h.service.markPreviewed({ recordId, expectedRevisionId: view.revisionId, expectedRevisionNumber: 1, contentHash: view.payload.rendering.contentHash });
+    if (previewed.kind !== "COMMITTED") throw new Error("previewed");
+    const approved = await h.service.approve({ recordId, expectedRevisionId: previewed.revisionId, expectedRevisionNumber: previewed.revisionNumber, contentHash: view.payload.rendering.contentHash });
+    if (approved.kind !== "COMMITTED") throw new Error("approved");
+    const legacy = await rewriteAsLegacy9c1Snapshot(h.database, recordId);
+    renderPreview(h, recordId);
+    fireEvent.click(await screen.findByRole("button", { name: en.careSummary.printAction }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(en.careSummary.printOpened));
+    expect(screen.queryByText(en.careSummary.templateSuperseded)).toBeNull();
+    expect(screen.getByRole("article").textContent).toBe(printableCareSummaryText(legacy));
+    const after = await h.query.loadSummary(recordId);
+    expect(after.status === "READY" && [after.snapshotStatus, after.payload.rendering.contentHash, after.exports.map((entry) => entry.outcome.state)]).toEqual(["APPROVED", legacy.rendering.contentHash, ["EXPORTED"]]);
+  });
+});
+
+/** The article's visible text for a payload: every printable line, headings without their markdown marker, no separators. */
+function printableCareSummaryText(payload: Parameters<typeof printableCareSummary>[0]): string {
+  return printableCareSummary(payload).lines.map((line) => line.text).join("");
+}

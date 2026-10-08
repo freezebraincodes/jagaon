@@ -31,6 +31,22 @@ export type ProviderUsage = Readonly<{ inputTokens: number | null; outputTokens:
  */
 export type ProviderRetentionResult = "CONFIRMED_NOT_STORED" | "PROVIDER_REPORTED_STORED" | "RETENTION_UNCONFIRMED";
 
+/**
+ * Packet 11C Addendum B, Task B2a (D6): the closed reasons a server shell gate (validateShellCandidate, S1–S7b) may give for a shell
+ * candidate it rejected. Exactly the shell validator's reasons; every one is an AiReasonCode. Only SCHEMA_INVALID is ever repairable.
+ */
+export const SHELL_STRUCTURAL_REJECTION_REASONS = Object.freeze([
+  "SCHEMA_INVALID",
+  "LOCALE_INVALID",
+  "MODEL_ABSTAINED",
+  "REFERENCE_MISMATCH",
+  "OUTPUT_BUDGET_EXCEEDED",
+  "FACT_FIDELITY_FAILED",
+  "CLINICAL_MEANING_VIOLATION",
+  "AUTHORITY_BOUNDARY_VIOLATION",
+] as const);
+export type ShellStructuralRejectionReason = (typeof SHELL_STRUCTURAL_REJECTION_REASONS)[number];
+
 /** `candidate` is untrusted: raw text or parsed JSON that the validator alone may accept. */
 export type ProviderInvocationResult =
   | Readonly<{
@@ -42,7 +58,17 @@ export type ProviderInvocationResult =
       /** Absent means unconfirmed: remote use requires CONFIRMED_NOT_STORED. */
       retention?: ProviderRetentionResult;
     }>
-  | Readonly<{ kind: "FAILED"; reason: ProviderFailureReason }>;
+  /**
+   * D6: a completed (billed) shell candidate that the server shell route rejected at its value-blind shell gates. The candidate itself
+   * never leaves the server. The hybrid service handles it exactly like its own shell-gate rejection: the usage is counted, and at most
+   * one structural repair is made, only for a repairable SCHEMA_INVALID within maxAttempts. The direct provider adapters never return it.
+   */
+  | Readonly<{ kind: "STRUCTURALLY_REJECTED"; reason: ShellStructuralRejectionReason; repairable: boolean; usage: ProviderUsage; retention?: ProviderRetentionResult }>
+  /**
+   * `usage` (Packet 11C B2b): present only when a completed, billed response was refused after completion (the shell route's retention
+   * refusal), so the hybrid service still counts that spend. Absent on every other failure.
+   */
+  | Readonly<{ kind: "FAILED"; reason: ProviderFailureReason; usage?: ProviderUsage }>;
 
 export type AiProviderPort = Readonly<{
   /** The exact provider and model snapshot this port is pinned to, recorded in the local audit. */

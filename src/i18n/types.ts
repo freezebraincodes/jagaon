@@ -877,13 +877,14 @@ export type CareSummaryMessages = {
   printUnknown: string;
   attemptsHeading: string;
   /**
-   * Packet 11C Task 8 (Addendum A3), care-summary-notices.11c.1: the fixed care-draft notices shown after "About this summary",
-   * outside the printed summary. `questions` and `draft` are a verbatim copy of the approved care-draft notices
-   * (AI_LANGUAGE_COPY.careDraftNotices, ai-language-copy.11b.10, unchanged since 11b.8); pinned by
-   * src/components/jagaon/screens/CareSummaryPreviewScreen.test.tsx; do not edit independently. `label` is new wording (the region's
-   * accessible name) for owner review.
+   * Packet 11C Task 8 (Addendum A3), care-summary-notices.11c.1; Addendum B, Task B1a. `label` is the heading of the printed
+   * summary's care-draft notice section (locale asset care-summary.section.draft-notices, care-summary-locale.11c.1). The notice
+   * text itself is no longer mirrored here: its one runtime source is the approved copy (AI_LANGUAGE_COPY.careDraftNotices), stored
+   * in the snapshot's CARE_DRAFT_NOTICE blocks. New wording; human acceptance pending.
    */
-  draftNotices: { label: string; questions: string; draft: string };
+  draftNotices: { label: string };
+  /** Packet 11C B1a (D3): an unapproved summary made by an earlier version must be prepared again. Human acceptance pending. */
+  templateSuperseded: string;
 };
 
 export type AppMessages = {

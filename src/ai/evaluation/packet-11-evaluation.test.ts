@@ -348,8 +348,10 @@ describe("DIAGNOSTIC phase (owner instruction 2026-10-05)", () => {
 
 describe("public route isolation", () => {
   it("the application route never observes or returns the diagnostic", () => {
-    const handler = readFileSync(join(process.cwd(), "src/app/api/ai/task/ai-task-handler.ts"), "utf8");
-    expect(handler).not.toMatch(/onDiagnostic|KieProviderDiagnostic|diagnostic/i);
+    // Packet 11C B2b (B2a review follow-up): the app's provider route is now the value-blind shell route; the retired legacy route stays pinned.
+    for (const file of ["src/app/api/ai/task/ai-task-handler.ts", "src/app/api/ai/shell/ai-shell-handler.ts", "src/app/api/ai/shell/route.ts"]) {
+      expect(readFileSync(join(process.cwd(), file), "utf8"), file).not.toMatch(/onDiagnostic|KieProviderDiagnostic|diagnostic/i);
+    }
   });
 });
 
@@ -630,7 +632,10 @@ describe("validatorRulesRevision evidence and the approved smoke contract (owner
       expect(source.indexOf(printed), printed).toBeGreaterThan(source.indexOf("contractMismatches("));
       expect(source.indexOf(printed), printed).toBeLessThan(source.indexOf("evaluateModelSnapshot({"));
     }
-    for (const file of ["src/app/api/ai/task/ai-task-handler.ts", "src/app/api/ai/task/route.ts"]) expect(readFileSync(join(process.cwd(), file), "utf8")).not.toMatch(/validatorRulesRevision|VALIDATOR_RULES_REVISION/);
+    // Packet 11C B2b (B2a review follow-up): the value-blind shell route is pinned beside the retired legacy route.
+    for (const file of ["src/app/api/ai/task/ai-task-handler.ts", "src/app/api/ai/task/route.ts", "src/app/api/ai/shell/ai-shell-handler.ts", "src/app/api/ai/shell/route.ts"]) {
+      expect(readFileSync(join(process.cwd(), file), "utf8"), file).not.toMatch(/validatorRulesRevision|VALIDATOR_RULES_REVISION/);
+    }
   });
 });
 

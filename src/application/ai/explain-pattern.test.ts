@@ -308,6 +308,87 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
     }
   });
 
+  /** Packet 11C B2b (carried Checkpoint 2 minor): the limitations kept are exactly the request's, as the renderer produced them. */
+  it("fails closed when the rendered limitations do not match the request's limitation refs and codes", async () => {
+    const { history } = await higherFixture();
+    const real = hybrid(AI_ACTIVATION_MANIFEST, vi.fn()).execute;
+    const withLimitations = (change: (limitations: Array<{ limitationRef: string; code: string; text: string }>) => unknown): Execute => async (request, signal) => {
+      const result = (await real(request, signal)) as Extract<AiHybridExecutionResult, { kind: "COMPOSED" }>;
+      const limitations = result.limitations!.map((limitation) => ({ ...limitation }));
+      const changed = change(limitations);
+      return { ...result, limitations: (changed ?? limitations) as never };
+    };
+    const cases: Array<[string, Execute]> = [
+      ["another limitation ref", withLimitations((l) => void (l[0]!.limitationRef = "limitation-2"))],
+      ["another limitation code", withLimitations((l) => void (l[0]!.code = "SELF_REPORTED_DATA"))],
+      ["an extra limitation", withLimitations((l) => [...l, { ...l[0]!, limitationRef: "limitation-2" }])],
+      ["a duplicated limitation", withLimitations((l) => [...l, { ...l[0]! }])],
+      ["an empty text", withLimitations((l) => void (l[0]!.text = ""))],
+      ["a non-string text", withLimitations((l) => void ((l[0] as { text: unknown }).text = 7))],
+      ["a missing ref", withLimitations((l) => [{ code: l[0]!.code, text: l[0]!.text }])],
+    ];
+    for (const [label, execute] of cases) {
+      expect(await explainer(history, execute).explain({ factId: FACT, locale: "en-SG" }), label).toEqual({ kind: "UNAVAILABLE", reason: "UNAVAILABLE" });
+    }
+  });
+
+  it("returns frozen copies of the limitations, detached from the hybrid result", async () => {
+    const { history } = await higherFixture();
+    const real = hybrid(AI_ACTIVATION_MANIFEST, vi.fn()).execute;
+    let source: Array<{ limitationRef: string; code: string; text: string }> = [];
+    const execute: Execute = async (request, signal) => {
+      const result = (await real(request, signal)) as Extract<AiHybridExecutionResult, { kind: "COMPOSED" }>;
+      source = result.limitations!.map((limitation) => ({ ...limitation }));
+      return { ...result, limitations: source };
+    };
+    const result = explained(await explainer(history, execute).explain({ factId: FACT, locale: "zh-SG" }));
+    expect(result.limitations).toEqual(renderExplainLimitations([{ ref: "limitation-1", code: "DOES_NOT_ESTABLISH_CAUSE" }], "zh-SG").limitations);
+    expect(Object.isFrozen(result.limitations)).toBe(true);
+    for (const limitation of result.limitations) expect(Object.isFrozen(limitation)).toBe(true);
+    expect(result.limitations[0]).not.toBe(source[0]);
+    source[0]!.text = "changed afterwards";
+    expect(result.limitations[0]!.text).not.toBe("changed afterwards");
+  });
+
+  /** Packet 11C B2b (carried Checkpoint 2 minor): every abort listener the use case adds is released once `explain` settles. */
+  it.each([
+    ["execute resolves and the signal never fires", "RESOLVE"],
+    ["execute rejects and the signal never fires", "REJECT"],
+    ["the signal fires while execute is pending", "ABORT"],
+  ] as const)("releases its abort listener when %s", async (_label, path) => {
+    const { history } = await higherFixture();
+    const controller = new AbortController();
+    const live = new Set<unknown>();
+    const add = controller.signal.addEventListener.bind(controller.signal);
+    const remove = controller.signal.removeEventListener.bind(controller.signal);
+    vi.spyOn(controller.signal, "addEventListener").mockImplementation((type: string, listener: any, options?: any) => {
+      if (type === "abort") live.add(listener);
+      add(type, listener, options);
+    });
+    vi.spyOn(controller.signal, "removeEventListener").mockImplementation((type: string, listener: any, options?: any) => {
+      if (type === "abort") live.delete(listener);
+      remove(type, listener, options);
+    });
+    // `execute` never touches the signal itself, so every listener seen here is the use case's own.
+    const real = hybrid(AI_ACTIVATION_MANIFEST, vi.fn()).execute;
+    let release!: () => void;
+    const execute: Execute = (request) =>
+      path === "REJECT" ? Promise.reject(new Error("boom")) : path === "ABORT" ? new Promise((resolve) => (release = () => void real(request).then(resolve))) : real(request);
+    const pending = explainer(history, execute).explain({ factId: FACT, locale: "en-SG" }, controller.signal);
+    if (path === "ABORT") {
+      await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+      expect(live.size).toBeGreaterThan(0);
+      controller.abort();
+      expect(await pending).toEqual({ kind: "UNAVAILABLE", reason: "CANCELLED" });
+      // Released explicitly on abort, without waiting for the abandoned execute to settle.
+      expect(live.size).toBe(0);
+      release();
+    } else {
+      expect((await pending).kind).toBe(path === "RESOLVE" ? "EXPLAINED" : "UNAVAILABLE");
+    }
+    await vi.waitFor(() => expect(live.size).toBe(0));
+  });
+
   it("fails closed with UNAVAILABLE when the history port throws, and never calls execute", async () => {
     const execute = vi.fn<Execute>();
     const port: RecordedHistoryQueryPort = { load: vi.fn(), loadExplainablePattern: async () => Promise.reject(new Error("storage")) };

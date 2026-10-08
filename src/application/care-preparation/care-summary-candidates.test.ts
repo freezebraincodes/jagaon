@@ -59,7 +59,8 @@ describe("care-summary candidates", () => {
     if (view.status !== "READY") throw new Error("ready");
     expect(view.payload.selection.excludedCandidates).toEqual([{ source: ref, reason: "NOT_SELECTED" }]);
     expect(JSON.stringify(view.payload.sections)).not.toContain(reading.recordId);
-    expect(view.payload.sections.map((section) => section.sectionId)).toEqual(["SUMMARY_SCOPE", "CARE_ORGANISATION", "DATA_LIMITATIONS"]);
+    // Packet 11C B1a (11c.1): the care-draft notice section follows the limitations section.
+    expect(view.payload.sections.map((section) => section.sectionId)).toEqual(["SUMMARY_SCOPE", "CARE_ORGANISATION", "DATA_LIMITATIONS", "CARE_DRAFT_NOTICES"]);
   });
 });
 

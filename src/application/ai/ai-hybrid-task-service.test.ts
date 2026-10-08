@@ -228,3 +228,125 @@ describe("hybrid task service", () => {
     expect(await service.execute({ taskType: "EXPLAIN_PATTERN" } as never)).toEqual({ kind: "REQUEST_REJECTED" });
   });
 });
+
+/**
+ * Packet 11C Addendum B, Task B2a (D6): the server shell route runs the value-blind shell gates and may answer with a typed structural
+ * rejection instead of a candidate. The service treats it exactly like its own validateShellCandidate rejection: the attempt's usage is
+ * counted, at most one structural repair is made (only a repairable SCHEMA_INVALID, within maxAttempts), otherwise the deterministic
+ * composition with that reason. The repair happens here, once; the route never retries.
+ */
+describe("typed structural rejection from the server shell gates (D6)", () => {
+  const USAGE = { inputTokens: 10, outputTokens: 5, costMicroUsd: 1 };
+  const serverRejected = (reason: string, repairable: boolean, retention: "CONFIRMED_NOT_STORED" | "RETENTION_UNCONFIRMED" = "CONFIRMED_NOT_STORED") =>
+    ({ kind: "STRUCTURALLY_REJECTED", reason, repairable, usage: USAGE, retention }) as ProviderInvocationResult;
+  const MALFORMED = completed(`${JSON.stringify(VALID)}}`);
+  const BOTH_ATTEMPTS = { inputTokens: 20, outputTokens: 10, costMicroUsd: 2 };
+
+  it("a repairable rejection is repaired once and the second candidate is accepted; usage is summed over both attempts", async () => {
+    const run = harness([serverRejected("SCHEMA_INVALID", true), completed(VALID)]);
+    expect(await run.service.execute(EN.request)).toMatchObject({ kind: "COMPOSED", source: "AI", mode: "REMOTE_AI", reason: null });
+    expect(run.calls).toEqual([projectShellTaskRequest(EN.plan), projectShellTaskRequest(EN.plan)]);
+    expectOneValidRow(run.rows, "ACCEPTED");
+    expect(run.rows[0]!.attempts).toEqual({ count: 2, structuralRepairUsed: true, timedOut: false });
+    expect(run.rows[0]!.measurements).toMatchObject(BOTH_ATTEMPTS);
+  });
+
+  it("a repairable rejection twice falls back after two attempts with that reason; usage counted for both", async () => {
+    const run = harness([serverRejected("SCHEMA_INVALID", true), serverRejected("SCHEMA_INVALID", true), completed(VALID)]);
+    expect(await run.service.execute(EN.request)).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "REMOTE_AI", reason: "SCHEMA_INVALID" });
+    expect(run.calls).toHaveLength(2);
+    expectOneValidRow(run.rows, "SCHEMA_INVALID");
+    expect(run.rows[0]!.attempts).toEqual({ count: 2, structuralRepairUsed: true, timedOut: false });
+    expect(run.rows[0]!.measurements).toMatchObject(BOTH_ATTEMPTS);
+  });
+
+  it.each([
+    ["a non-repairable gate rejection", "FACT_FIDELITY_FAILED", false],
+    ["a non-repairable schema rejection", "SCHEMA_INVALID", false],
+    // The server can never widen the local rule: only a structural SCHEMA_INVALID is ever repaired.
+    ["a non-structural reason marked repairable", "CLINICAL_MEANING_VIOLATION", true],
+    ["an abstention marked repairable", "MODEL_ABSTAINED", true],
+  ])("%s is never repaired: one attempt, its usage, that reason", async (_label, reason, repairable) => {
+    const run = harness([serverRejected(reason, repairable), completed(VALID)]);
+    expect(await run.service.execute(EN.request)).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", reason });
+    expect(run.calls).toHaveLength(1);
+    expectOneValidRow(run.rows, reason);
+    expect(run.rows[0]!.attempts).toEqual({ count: 1, structuralRepairUsed: false, timedOut: false });
+    expect(run.rows[0]!.measurements).toMatchObject(USAGE);
+  });
+
+  it.each([
+    ["a reason outside the closed shell-gate list", serverRejected("PROVIDER_REJECTED", true)],
+    ["an unknown reason", serverRejected("SOMETHING_ELSE", true)],
+    ["a rejection whose retention is unconfirmed", serverRejected("SCHEMA_INVALID", true, "RETENTION_UNCONFIRMED")],
+    ["a rejection with a non-boolean repairable flag", { ...serverRejected("SCHEMA_INVALID", true), repairable: "true" } as unknown as ProviderInvocationResult],
+  ])("%s fails closed (PROVIDER_FAILED), counts its usage and is never repaired", async (_label, result) => {
+    const run = harness([result, completed(VALID)]);
+    expect(await run.service.execute(EN.request)).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", reason: "PROVIDER_FAILED" });
+    expect(run.calls).toHaveLength(1);
+    expectOneValidRow(run.rows, "PROVIDER_FAILED");
+    expect(run.rows[0]!.measurements).toMatchObject(USAGE);
+  });
+
+  it.each([
+    ["repaired then accepted", [MALFORMED, completed(VALID)], [serverRejected("SCHEMA_INVALID", true), completed(VALID)]],
+    ["rejected twice", [MALFORMED, MALFORMED], [serverRejected("SCHEMA_INVALID", true), serverRejected("SCHEMA_INVALID", true)]],
+    ["a final rejection", [completed({ ...VALID, shells: { ...(VALID as any).shells, evidence: "About 10 of {{S3}}." } })], [serverRejected("FACT_FIDELITY_FAILED", false)]],
+  ])("the local and the server rejection paths produce the same outcome and audit row (%s)", async (_label, local, server) => {
+    const viaLocal = harness(local as ProviderInvocationResult[]);
+    const viaServer = harness(server as ProviderInvocationResult[]);
+    const localResult = await viaLocal.service.execute(EN.request);
+    const serverResult = await viaServer.service.execute(EN.request);
+    expect(serverResult).toEqual(localResult);
+    expect(viaServer.calls).toEqual(viaLocal.calls);
+    expect(viaServer.rows).toEqual(viaLocal.rows);
+  });
+
+  it.each([
+    ["server then server", [serverRejected("SCHEMA_INVALID", true), serverRejected("SCHEMA_INVALID", true), completed(VALID)]],
+    ["local then server", [MALFORMED, serverRejected("SCHEMA_INVALID", true), completed(VALID)]],
+    ["server then local", [serverRejected("SCHEMA_INVALID", true), MALFORMED, completed(VALID)]],
+  ])("maxAttempts is never exceeded and the repair is never doubled (%s)", async (_label, results) => {
+    const run = harness(results);
+    expect(await run.service.execute(EN.request)).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", reason: "SCHEMA_INVALID" });
+    expect(run.calls).toHaveLength(AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN.executionBudget.maxAttempts);
+    expect(run.rows[0]!.attempts).toEqual({ count: 2, structuralRepairUsed: true, timedOut: false });
+  });
+});
+
+/**
+ * Packet 11C Addendum B, Task B2b (B2a review follow-up): a provider FAILED result may carry the bounded usage of a billed attempt that
+ * was refused after completion (the shell route's retention refusal). The service folds that usage like any other attempt's, so the
+ * billed spend is counted; a FAILED without usage behaves exactly as before.
+ */
+describe("usage carried by a FAILED result", () => {
+  const USAGE = { inputTokens: 10, outputTokens: 5, costMicroUsd: 1 };
+  const failedWith = (usage?: unknown) => ({ kind: "FAILED", reason: "PROVIDER_FAILED", ...(usage === undefined ? {} : { usage }) }) as ProviderInvocationResult;
+
+  it("is counted in the audit row; the outcome is unchanged", async () => {
+    const run = harness([failedWith(USAGE)]);
+    expect(await run.service.execute(EN.request)).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "REMOTE_AI", reason: "PROVIDER_FAILED" });
+    expectOneValidRow(run.rows, "PROVIDER_FAILED");
+    expect(run.rows[0]!.attempts).toEqual({ count: 1, structuralRepairUsed: false, timedOut: false });
+    expect(run.rows[0]!.measurements).toMatchObject(USAGE);
+  });
+
+  it("is summed with an earlier attempt's usage (a repair attempt that failed after completion)", async () => {
+    const run = harness([completed(`${JSON.stringify(VALID)}}`), failedWith(USAGE)]);
+    expect(await run.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", reason: "PROVIDER_FAILED" });
+    expect(run.rows[0]!.measurements).toMatchObject({ inputTokens: 20, outputTokens: 10, costMicroUsd: 2 });
+  });
+
+  it("is bounded like any usage, and an unknown reason still fails closed as PROVIDER_FAILED", async () => {
+    const run = harness([{ kind: "FAILED", reason: "SOMETHING_ELSE", usage: { inputTokens: 1e9, outputTokens: -1, costMicroUsd: 3 } } as unknown as ProviderInvocationResult]);
+    expect(await run.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", reason: "PROVIDER_FAILED" });
+    expectOneValidRow(run.rows, "PROVIDER_FAILED");
+    expect(run.rows[0]!.measurements).toMatchObject({ inputTokens: null, outputTokens: null, costMicroUsd: 3 });
+  });
+
+  it("a FAILED without usage records no usage, exactly as before", async () => {
+    const run = harness([failedWith()]);
+    await run.service.execute(EN.request);
+    expect(run.rows[0]!.measurements).toMatchObject({ inputTokens: null, outputTokens: null, costMicroUsd: null });
+  });
+});

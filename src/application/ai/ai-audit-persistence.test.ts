@@ -24,6 +24,24 @@ async function database() {
 }
 
 describe("AI invocation audit repository", () => {
+  /** Packet 11C B2b: the browser runtime exposes the append-only audit port the wired hybrid service writes through (integrity-gated). */
+  it("is exposed by the browser runtime as an append-only port over the same table", async () => {
+    const name = `packet11c-runtime-audit-${crypto.randomUUID()}`;
+    names.push(name);
+    const runtime = await createBrowserJournalRuntime(name, { now: () => PACKET10_NOW, seedSyntheticScenarioOnCreate: false });
+    try {
+      expect(Object.keys(runtime.aiAudit)).toEqual(["append"]);
+      const row = aiInvocationAuditRowSchema.parse(deterministicAuditRowFixture());
+      await runtime.aiAudit.append(row);
+      await expect(runtime.aiAudit.append({ ...row, outcomeCode: "OK" } as never)).rejects.toBeInstanceOf(StorageRowValidationError);
+    } finally {
+      runtime.close();
+    }
+    const db = await openRaw(name);
+    expect(await db.table("aiInvocationAudits").toArray()).toEqual([aiInvocationAuditRowSchema.parse(deterministicAuditRowFixture())]);
+    db.close();
+  });
+
   it("validates before one write and reads back losslessly", async () => {
     const db = await database();
     const repository = createAiInvocationAuditRepository(db);

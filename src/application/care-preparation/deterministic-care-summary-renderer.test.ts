@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Instant } from "@/domain/shared";
-import { careSummarySnapshotPayloadSchema } from "@/domain/care-preparation/care-summary-snapshot";
+import { CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES, careSummaryExportProjection, careSummarySnapshotPayloadSchema, type CareSummarySnapshotPayload } from "@/domain/care-preparation/care-summary-snapshot";
+import { hashCanonicalJson } from "@/application/contracts/canonical-json";
+import { AI_LANGUAGE_COPY } from "@/application/ai/language/ai-language-copy";
+import { careDraftNoticesFor } from "@/application/ai/language/care-draft-notices";
 import { renderDeterministicCareSummary, type CareSummaryDraft } from "./deterministic-care-summary-renderer";
+import { CARE_SUMMARY_LOCALE_PACK_VERSION, CARE_SUMMARY_RENDERER_VERSION, CARE_SUMMARY_TEMPLATE_VERSION } from "./care-summary-locale-pack";
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}` as never;
 const ref = <T extends string>(recordType: T, n: number) => ({ recordType, recordId: id(n), revisionId: id(n + 500) }) as never;
@@ -47,7 +51,7 @@ describe("deterministic care-summary renderer", () => {
     const prepared = await renderDeterministicCareSummary(draft());
     const payload = prepared.payload;
     expect(careSummarySnapshotPayloadSchema.safeParse(payload).success).toBe(true);
-    expect(payload.sections.map((section) => section.sectionId)).toEqual(["SUMMARY_SCOPE", "CARE_ORGANISATION", "MEASUREMENTS", "MEDICATION_RECORDS", "INTAKE_AND_ACTIVITY", "QUESTIONS_FOR_CARE_TEAM", "DATA_LIMITATIONS"]);
+    expect(payload.sections.map((section) => section.sectionId)).toEqual(["SUMMARY_SCOPE", "CARE_ORGANISATION", "MEASUREMENTS", "MEDICATION_RECORDS", "INTAKE_AND_ACTIVITY", "QUESTIONS_FOR_CARE_TEAM", "DATA_LIMITATIONS", "CARE_DRAFT_NOTICES"]);
     const text = payload.sections.flatMap((section) => section.blocks).map((block) => ("renderedText" in block ? block.renderedText : block.kind === "PATIENT_QUESTION" ? block.originalPatientText.text : "")).join("\n");
     // Exact entered values in time order, never normalised or interpreted.
     expect(text).toContain("Glucose readings\n3 Oct 2026, 7:30 am · 11.2 mmol/L\n3 Oct 2026, 9:00 pm · 6.60 mmol/L");
@@ -65,7 +69,8 @@ describe("deterministic care-summary renderer", () => {
     expect(sourceRevisions.map((source) => source.recordType)).toEqual(["APPOINTMENT", "GLUCOSE_READING", "GLUCOSE_READING", "MEDICATION_EVENT", "MEDICATION", "ACTIVITY_EVENT", "CARE_QUESTION"]);
     expect(payload.selection.excludedCandidates).toEqual([{ source: ref("INTAKE_EVENT", 8), reason: "NOT_SELECTED" }]);
     expect(payload.limitations.map((limitation) => limitation.code)).toEqual(["SELECTED_RECORDS_ONLY", "PATIENT_REPORTED_NOT_EXTERNALLY_VERIFIED", "MISSING_OR_UNRECORDED_DATA"]);
-    const limitationText = payload.sections.at(-1)!.blocks.map((block) => (block.kind === "SUMMARY_LIMITATION" ? block.renderedText : ""));
+    // 11c.1: the care-draft notice section follows the limitations section.
+    const limitationText = payload.sections.find((section) => section.sectionId === "DATA_LIMITATIONS")!.blocks.map((block) => (block.kind === "SUMMARY_LIMITATION" ? block.renderedText : ""));
     expect(limitationText[0]).toBe("This summary contains only the records and questions you selected.");
     // The export never reveals what was left out.
     expect(JSON.stringify(payload.sections)).not.toContain(id(8));
@@ -76,7 +81,9 @@ describe("deterministic care-summary renderer", () => {
     const text = zh.sections.flatMap((section) => section.blocks).map((block) => ("renderedText" in block ? block.renderedText : "")).join("\n");
     expect(text).toContain("血糖读数");
     expect(text).toContain("2026年10月3日 下午9:00 · 6.60 mmol/L");
-    expect(text).toContain("此摘要仅包含你所选择的记录和问题。");
+    // care-summary-locale.11c.1 (D4): the selected-records limitation addresses the reader with 您.
+    expect(text).toContain("此摘要仅包含您所选择的记录和问题。");
+    expect(text).not.toContain("此摘要仅包含你所选择的记录和问题。");
     expect(text).toContain("Dr Lim, Bukit Merah Polyclinic");
     expect(text).toContain("Bishan Park 公园");
     expect(text).not.toContain("Glucose readings");
@@ -109,11 +116,71 @@ describe("deterministic care-summary renderer", () => {
     expect(block.kind === "RECORDED_FACT" && block.renderedText).toBe("Walks\nTime not recorded · Walk");
   });
 
+  it("renders under the 11c.1 template, renderer and locale-pack versions", async () => {
+    const { payload } = await renderDeterministicCareSummary(draft());
+    expect(payload.composition).toEqual({ method: "DETERMINISTIC", templateVersion: "care-summary-template.11c.1" });
+    expect([payload.rendering.rendererVersion, payload.rendering.localePackVersion]).toEqual(["care-summary-renderer.11c.1", "care-summary-locale.11c.1"]);
+    expect([CARE_SUMMARY_TEMPLATE_VERSION, CARE_SUMMARY_RENDERER_VERSION, CARE_SUMMARY_LOCALE_PACK_VERSION]).toEqual(["care-summary-template.11c.1", "care-summary-renderer.11c.1", "care-summary-locale.11c.1"]);
+    expect(CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES).toContain(CARE_SUMMARY_TEMPLATE_VERSION);
+  });
+
   it("fails closed when nothing factual is selected", async () => {
     const empty = draft();
     empty.appointment = null;
     empty.groups = [];
     empty.questions = [];
     await expect(renderDeterministicCareSummary(empty)).rejects.toThrow();
+  });
+});
+
+/**
+ * Packet 11C Addendum B, Task B1a (decision 5): the applicable approved care-draft notices are rendered into the snapshot as block
+ * content at preparation time, from their one runtime source (AI_LANGUAGE_COPY.careDraftNotices), and the content hash covers them.
+ */
+describe("deterministic care-summary renderer: care-draft notices (Packet 11C B1a)", () => {
+  const noticesOf = (payload: CareSummarySnapshotPayload) => {
+    const section = payload.sections.at(-1)!;
+    expect(section.sectionId).toBe("CARE_DRAFT_NOTICES");
+    expect(section.titleLocaleAssetId).toBe("care-summary.section.draft-notices");
+    return section.blocks.map((block) => (block.kind === "CARE_DRAFT_NOTICE" ? { blockId: block.blockId, noticeKind: block.noticeKind, text: block.renderedText } : null));
+  };
+
+  for (const locale of ["en-SG", "zh-SG"] as const) {
+    it(`stores the questions notice then the draft notice, verbatim from the approved copy, with a questions section (${locale})`, async () => {
+      const { payload } = await renderDeterministicCareSummary(draft(locale));
+      expect(noticesOf(payload)).toEqual([
+        { blockId: "notice.questions-in-own-words", noticeKind: "QUESTIONS_IN_OWN_WORDS", text: AI_LANGUAGE_COPY.careDraftNotices.questions[locale] },
+        { blockId: "notice.draft-not-sent-or-reviewed", noticeKind: "DRAFT_NOT_SENT_OR_REVIEWED", text: AI_LANGUAGE_COPY.careDraftNotices.draft[locale] },
+      ]);
+      // The same selection and text as the approved care-draft renderer.
+      expect(noticesOf(payload).map((notice) => notice?.text)).toEqual(careDraftNoticesFor(locale, true).map((notice) => notice.text));
+    });
+
+    it(`stores the draft notice alone without a questions section (${locale})`, async () => {
+      const value = draft(locale);
+      value.questions = [];
+      const { payload } = await renderDeterministicCareSummary(value);
+      expect(payload.sections.some((section) => section.sectionId === "QUESTIONS_FOR_CARE_TEAM")).toBe(false);
+      expect(noticesOf(payload)).toEqual([{ blockId: "notice.draft-not-sent-or-reviewed", noticeKind: "DRAFT_NOT_SENT_OR_REVIEWED", text: AI_LANGUAGE_COPY.careDraftNotices.draft[locale] }]);
+    });
+  }
+
+  it("covers the notices with the content hash: any change to a notice or its presence changes the hash", async () => {
+    const { payload, contentHash } = await renderDeterministicCareSummary(draft());
+    const hashOf = (sections: CareSummarySnapshotPayload["sections"]) =>
+      hashCanonicalJson(careSummaryExportProjection({ ...payload, sections, rendererVersion: payload.rendering.rendererVersion, localePackVersion: payload.rendering.localePackVersion }));
+    expect(await hashOf(payload.sections)).toBe(contentHash);
+    const notices = payload.sections.at(-1)!;
+    const edited = { ...notices, blocks: notices.blocks.map((block, index) => (index === 1 && block.kind === "CARE_DRAFT_NOTICE" ? { ...block, renderedText: `${block.renderedText} ` } : block)) } as typeof notices;
+    expect(await hashOf([...payload.sections.slice(0, -1), edited])).not.toBe(contentHash);
+    expect(await hashOf(payload.sections.slice(0, -1))).not.toBe(contentHash);
+  });
+
+  it("keeps patient facts, values, questions and limitations exactly as before; only the notice section is added", async () => {
+    const { payload } = await renderDeterministicCareSummary(draft());
+    const content = payload.sections.filter((section) => section.sectionId !== "CARE_DRAFT_NOTICES");
+    expect(content.at(-1)!.sectionId).toBe("DATA_LIMITATIONS");
+    for (const block of content.flatMap((section) => section.blocks)) expect(block.kind).not.toBe("CARE_DRAFT_NOTICE");
+    expect(JSON.stringify(payload.limitations)).not.toContain("notice");
   });
 });

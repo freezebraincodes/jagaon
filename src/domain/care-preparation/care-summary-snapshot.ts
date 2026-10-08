@@ -111,6 +111,21 @@ export const CARE_SUMMARY_SECTION_ORDER = Object.freeze([
 ] as const);
 export type CareSummarySectionId = (typeof CARE_SUMMARY_SECTION_ORDER)[number];
 
+/**
+ * Packet 11C Addendum B, Task B1a (decision 5): the fixed care-draft notices are stored as block content in their own section,
+ * which follows DATA_LIMITATIONS. It is deliberately NOT part of `CARE_SUMMARY_SECTION_ORDER` (the content sections, from which
+ * the AI-organisable set is derived), so the AI contracts are unchanged. Only snapshots made under a notice template carry it;
+ * a snapshot made under an earlier template never does.
+ */
+export const CARE_SUMMARY_DRAFT_NOTICES_SECTION = "CARE_DRAFT_NOTICES" as const;
+export const CARE_SUMMARY_PAYLOAD_SECTION_ORDER = Object.freeze([...CARE_SUMMARY_SECTION_ORDER, CARE_SUMMARY_DRAFT_NOTICES_SECTION] as const);
+export type CareSummaryPayloadSectionId = (typeof CARE_SUMMARY_PAYLOAD_SECTION_ORDER)[number];
+/** The approved notice kinds, in their fixed order (the questions notice only with a questions section; the draft notice always). */
+export const CARE_DRAFT_NOTICE_KINDS = Object.freeze(["QUESTIONS_IN_OWN_WORDS", "DRAFT_NOT_SENT_OR_REVIEWED"] as const);
+export type CareDraftNoticeBlockKind = (typeof CARE_DRAFT_NOTICE_KINDS)[number];
+/** Template versions whose snapshots must carry exactly the applicable notices. */
+export const CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES: readonly string[] = Object.freeze(["care-summary-template.11c.1"]);
+
 export const CARE_SUMMARY_TEMPORAL_ROLES = Object.freeze(["CURRENT", "HISTORICAL", "DURING_SELECTED_PERIOD", "NOT_APPLICABLE"] as const);
 
 // --- 11.5 Bindings ---------------------------------------------------------------------
@@ -239,11 +254,20 @@ export const careSummaryBlockSchema = z.discriminatedUnion("kind", [
     localeAssetId: assetIdSchema,
     renderedText: renderedTextSchema,
   }),
+  // Packet 11C B1a: one fixed, approved care-draft notice, rendered at preparation time. Application wording, never a fact,
+  // a limitation or a source reference.
+  z.strictObject({
+    kind: z.literal("CARE_DRAFT_NOTICE"),
+    blockId: blockIdSchema,
+    temporalRole: z.literal("NOT_APPLICABLE"),
+    noticeKind: z.enum(CARE_DRAFT_NOTICE_KINDS),
+    renderedText: renderedTextSchema,
+  }),
 ]);
 export type CareSummaryBlock = z.infer<typeof careSummaryBlockSchema>;
 
 export const careSummarySectionSchema = z.strictObject({
-  sectionId: z.enum(CARE_SUMMARY_SECTION_ORDER),
+  sectionId: z.enum(CARE_SUMMARY_PAYLOAD_SECTION_ORDER),
   titleLocaleAssetId: assetIdSchema,
   displayOrder: z.number().int().nonnegative(),
   blocks: nonEmpty(careSummaryBlockSchema),
@@ -254,8 +278,20 @@ export const careSummaryLimitationSchema = z.strictObject({ code: z.enum(CARE_SU
 
 // --- 11.7 Composition, rendering and payload ------------------------------------------------
 
-/** Hackathon profile: deterministic composition only; no AI path exists. */
-export const careSummaryCompositionSchema = z.strictObject({ method: z.literal("DETERMINISTIC"), templateVersion: z.string().min(1).max(96) });
+/** The local AI invocation audit request id an AI-assisted composition names (the `aiInvocationAudits` key; a UUID v4). */
+const aiInvocationAuditRefSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, "SUMMARY_AI_VALIDATION_MISSING");
+
+/**
+ * Domain 11.7 composition. The deterministic branch is unchanged. Packet 11C Addendum B, Task B1b (original Task 1 Step 1) adds exactly
+ * the AI-assisted branch: whole-result-validated `DRAFT_CARE_PREPARATION_SUMMARY` wording, named by its local AI invocation audit and
+ * its validation time. Neither branch is hashed (`templateVersion` and the composition are outside the export projection); the
+ * AI-assisted wording itself is block content, so it is.
+ */
+export const careSummaryCompositionSchema = z.discriminatedUnion("method", [
+  z.strictObject({ method: z.literal("DETERMINISTIC"), templateVersion: z.string().min(1).max(96) }),
+  z.strictObject({ method: z.literal("AI_ASSISTED"), templateVersion: z.string().min(1).max(96), aiInvocationAuditRef: aiInvocationAuditRefSchema, validatedAt: instantSchema }),
+]);
+export type CareSummaryComposition = z.infer<typeof careSummaryCompositionSchema>;
 
 export const careSummaryRenderingSchema = z.strictObject({
   rendererVersion: z.string().min(1).max(96),
@@ -267,7 +303,7 @@ const sameRef = (a: TypedRevisionRef<RecordType>, b: TypedRevisionRef<RecordType
 const refKey = (ref: TypedRevisionRef<RecordType>) => `${ref.recordType}|${ref.recordId}|${ref.revisionId}`;
 
 /** Which blocks a section may hold (domain 11.4, 11.6). */
-const SECTION_BLOCK_KINDS: Readonly<Record<CareSummarySectionId, readonly CareSummaryBlock["kind"][]>> = Object.freeze({
+const SECTION_BLOCK_KINDS: Readonly<Record<CareSummaryPayloadSectionId, readonly CareSummaryBlock["kind"][]>> = Object.freeze({
   SUMMARY_SCOPE: ["SUMMARY_SCOPE"],
   CURRENT_CARE_PLAN: ["RECORDED_FACT"],
   CARE_ORGANISATION: ["RECORDED_FACT"],
@@ -279,6 +315,7 @@ const SECTION_BLOCK_KINDS: Readonly<Record<CareSummarySectionId, readonly CareSu
   SAFETY_HISTORY: ["RECORDED_FACT"],
   QUESTIONS_FOR_CARE_TEAM: ["PATIENT_QUESTION"],
   DATA_LIMITATIONS: ["SUMMARY_LIMITATION"],
+  CARE_DRAFT_NOTICES: ["CARE_DRAFT_NOTICE"],
 });
 
 /** Structural rules every snapshot payload must satisfy, reported as stable codes. */
@@ -297,12 +334,31 @@ export function careSummaryPayloadIssues(payload: z.infer<typeof careSummarySnap
 
   // Sections: closed order, mandatory scope and limitations, no empty or misplaced blocks.
   const ids = sections.map((section) => section.sectionId);
-  const orderIndex = ids.map((id) => CARE_SUMMARY_SECTION_ORDER.indexOf(id));
+  const orderIndex = ids.map((id) => CARE_SUMMARY_PAYLOAD_SECTION_ORDER.indexOf(id));
   if (orderIndex.some((value, index) => index > 0 && value <= orderIndex[index - 1]!)) issues.add("SUMMARY_SECTION_INVALID");
   if (sections.some((section, index) => section.displayOrder !== index)) issues.add("SUMMARY_SECTION_INVALID");
-  if (ids[0] !== "SUMMARY_SCOPE" || ids[ids.length - 1] !== "DATA_LIMITATIONS") issues.add("SUMMARY_SECTION_INVALID");
+  // The content always ends with DATA_LIMITATIONS; only the care-draft notice section may follow it.
+  const contentIds = ids.filter((id) => id !== CARE_SUMMARY_DRAFT_NOTICES_SECTION);
+  if (ids[0] !== "SUMMARY_SCOPE" || contentIds[contentIds.length - 1] !== "DATA_LIMITATIONS") issues.add("SUMMARY_SECTION_INVALID");
   for (const section of sections) {
     if (section.blocks.some((block) => !SECTION_BLOCK_KINDS[section.sectionId].includes(block.kind))) issues.add("SUMMARY_SECTION_INVALID");
+  }
+
+  // Care-draft notices (Packet 11C B1a): exactly the applicable notices under a notice template, in fixed order; none otherwise.
+  const noticeSection = sections.find((section) => section.sectionId === CARE_SUMMARY_DRAFT_NOTICES_SECTION);
+  if (CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES.includes(payload.composition.templateVersion)) {
+    const expected: CareDraftNoticeBlockKind[] = [...(ids.includes("QUESTIONS_FOR_CARE_TEAM") ? (["QUESTIONS_IN_OWN_WORDS"] as const) : []), "DRAFT_NOT_SENT_OR_REVIEWED"];
+    const actual = noticeSection?.blocks.map((block) => (block.kind === "CARE_DRAFT_NOTICE" ? block.noticeKind : null)) ?? [];
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) issues.add("SUMMARY_SECTION_INVALID");
+  } else if (noticeSection) {
+    issues.add("SUMMARY_SECTION_INVALID");
+  }
+
+  // Packet 11C B1b: an AI-assisted snapshot is made only under a notice template (its notices equal the deterministic snapshot's it
+  // replaces) and only from output validated no earlier than the facts' asOf.
+  const composition = payload.composition;
+  if (composition.method === "AI_ASSISTED" && (!CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES.includes(composition.templateVersion) || Date.parse(composition.validatedAt) < Date.parse(payload.asOf))) {
+    issues.add("SUMMARY_AI_VALIDATION_MISSING");
   }
   const blocks = sections.flatMap((section) => section.blocks);
   if (new Set(blocks.map((block) => block.blockId)).size !== blocks.length) issues.add("SUMMARY_SECTION_INVALID");
@@ -421,7 +477,16 @@ export const careSummarySnapshotRevisionSchema = createRecordRevisionSchema(
   const issue = (message: string, path: string[]) => ctx.addIssue({ code: z.ZodIssueCode.custom, message, path });
   if (!(CARE_SUMMARY_SNAPSHOT_REVISION_ACTIONS as readonly string[]).includes(revision.action)) issue("UNSUPPORTED_REVISION_ACTION", ["action"]);
   if (revision.provenance.sourceKind !== "SYSTEM_DERIVATION" || revision.provenance.captureMethod !== "RULE_ENGINE") issue("SUMMARY_REQUIRES_SYSTEM_DERIVATION", ["provenance"]);
-  if (revision.provenance.assistance !== "NONE") issue("SUMMARY_AI_VALIDATION_MISSING", ["provenance"]);
+  // Packet 11C B1b: AI assistance is recorded only on the creating revision of an AI-assisted snapshot (validated output named by its
+  // audit). Without that composition it is the prohibited path; a lifecycle revision (preview, approval, invalidation, supersession)
+  // is never AI-assisted; and an AI-assisted snapshot's creating revision must record it.
+  const aiComposed = revision.payload.composition.method === "AI_ASSISTED";
+  if (revision.provenance.assistance !== "NONE") {
+    if (!aiComposed) issue("SUMMARY_AI_VALIDATION_MISSING", ["provenance"]);
+    else if (revision.action !== "CREATE") issue("AI_ASSISTANCE_NOT_PERMITTED", ["provenance"]);
+  } else if (aiComposed && revision.action === "CREATE") {
+    issue("SUMMARY_AI_PROVENANCE_MISSING", ["provenance"]);
+  }
   if ((revision.action === "CREATE") !== (revision.revisionNumber === 1)) issue("INVALID_REVISION_LINEAGE", ["action"]);
   if (revision.action === "CREATE" && revision.payload.status !== "PREPARED") issue("SUMMARY_MUST_BEGIN_PREPARED", ["payload", "status"]);
 }) as unknown as z.ZodType<CareSummarySnapshotRevision, z.ZodTypeDef, unknown>;
@@ -443,6 +508,64 @@ export function careSummaryContentOf(payload: CareSummarySnapshotPayload) {
     rendering: payload.rendering,
     replacesSnapshot: payload.replacesSnapshot ?? null,
   };
+}
+
+/**
+ * Packet 11C B1b: the sections whose recorded-fact wording an AI-assisted replacement may change. Equal to the AI-organisable sections
+ * (`AI_ORGANISABLE_SECTIONS`, domain/ai, pinned equal by test; restated here because domain/ai imports this module): never the scope,
+ * the limitations, the safety history or the care-draft notices.
+ */
+export const CARE_SUMMARY_AI_WORDING_SECTIONS = Object.freeze(CARE_SUMMARY_SECTION_ORDER.filter((id) => id !== "SUMMARY_SCOPE" && id !== "DATA_LIMITATIONS" && id !== "SAFETY_HISTORY"));
+
+export type CareSummaryAiReplacementIssue =
+  | "AI_REPLACEMENT_SOURCE_NOT_DETERMINISTIC"
+  | "AI_REPLACEMENT_COMPOSITION_INVALID"
+  | "AI_REPLACEMENT_CONTENT_CHANGED"
+  | "AI_REPLACEMENT_WORDING_UNCHANGED"
+  | "AI_REPLACEMENT_LIFECYCLE_INVALID";
+
+/**
+ * Packet 11C B1b (original Task 1 Step 2): the replacement invariant between the current deterministic snapshot and its AI-assisted
+ * replacement. Purpose, condition scope, period, asOf, locale, selection (included and excluded), limitations, renderer and locale-pack
+ * versions, every section and every block are identical, except the `renderedText` of RECORDED_FACT blocks in the AI-wording sections,
+ * at least one of which changes (with a new content hash). Patient questions, limitations, the scope and the notices never change. The
+ * replacement is a new unapproved PREPARED snapshot under the same template. Pure; stable closed codes, sorted.
+ */
+export function careSummaryAiReplacementIssues(current: CareSummarySnapshotPayload, candidate: CareSummarySnapshotPayload): CareSummaryAiReplacementIssue[] {
+  const issues = new Set<CareSummaryAiReplacementIssue>();
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  if (current.composition.method !== "DETERMINISTIC") issues.add("AI_REPLACEMENT_SOURCE_NOT_DETERMINISTIC");
+  if (candidate.composition.method !== "AI_ASSISTED" || candidate.composition.templateVersion !== current.composition.templateVersion) issues.add("AI_REPLACEMENT_COMPOSITION_INVALID");
+  if (candidate.status !== "PREPARED" || candidate.patientApproval.state !== "NOT_APPROVED" || candidate.invalidation !== undefined) issues.add("AI_REPLACEMENT_LIFECYCLE_INVALID");
+
+  const fixed = (value: CareSummarySnapshotPayload) => [value.purpose, value.conditionScope, value.selectedPeriod, value.asOf, value.locale, value.selection, value.limitations, value.rendering.rendererVersion, value.rendering.localePackVersion];
+  let reworded = 0;
+  if (!same(fixed(current), fixed(candidate)) || current.sections.length !== candidate.sections.length) issues.add("AI_REPLACEMENT_CONTENT_CHANGED");
+  else {
+    current.sections.forEach((section, index) => {
+      const next = candidate.sections[index]!;
+      const { blocks: _blocks, ...meta } = section;
+      const { blocks: _nextBlocks, ...nextMeta } = next;
+      if (!same(meta, nextMeta) || section.blocks.length !== next.blocks.length) {
+        issues.add("AI_REPLACEMENT_CONTENT_CHANGED");
+        return;
+      }
+      const wordable = (CARE_SUMMARY_AI_WORDING_SECTIONS as readonly string[]).includes(section.sectionId);
+      section.blocks.forEach((block, blockIndex) => {
+        const after = next.blocks[blockIndex]!;
+        if (wordable && block.kind === "RECORDED_FACT" && after.kind === "RECORDED_FACT") {
+          const { renderedText, ...facts } = block;
+          const { renderedText: nextText, ...nextFacts } = after;
+          if (!same(facts, nextFacts)) issues.add("AI_REPLACEMENT_CONTENT_CHANGED");
+          else if (renderedText !== nextText) reworded += 1;
+        } else if (!same(block, after)) {
+          issues.add("AI_REPLACEMENT_CONTENT_CHANGED");
+        }
+      });
+    });
+  }
+  if (!issues.has("AI_REPLACEMENT_CONTENT_CHANGED") && (reworded === 0 || candidate.rendering.contentHash === current.rendering.contentHash)) issues.add("AI_REPLACEMENT_WORDING_UNCHANGED");
+  return [...issues].sort();
 }
 
 /**

@@ -249,7 +249,9 @@ describe("Packet 9C care-summary copy (09-bilingual-copy-matrix.md Section 4)", 
   it("ships every approved Section 4 row with the exact matrix wording", () => {
     const rows: Array<[keyof typeof en, string, string]> = [
       ["title", "Preview my summary", "预览我的摘要"],
-      ["selectedOnly", "This summary contains only the records and questions you selected.", "此摘要仅包含你所选择的记录和问题。"],
+      // Packet 11C B1a (owner decision D4, care-summary-locale.11c.1): the only change to these rows is 你 → 您 in the two zh strings
+      // `selectedOnly` and `approvalMeaning`; every other row is byte-identical. Human acceptance pending.
+      ["selectedOnly", "This summary contains only the records and questions you selected.", "此摘要仅包含您所选择的记录和问题。"],
       ["scopeHeading", "Summary scope", "摘要范围"],
       ["carePlanHeading", "Current recorded care plan", "当前记录的护理计划"],
       ["organisationHeading", "Care organisation", "护理安排"],
@@ -260,7 +262,7 @@ describe("Packet 9C care-summary copy (09-bilingual-copy-matrix.md Section 4)", 
       ["patientReported", "Patient-reported information; not externally verified.", "由使用者自行报告；未经外部核实。"],
       ["missingLimitation", "Missing or unrecorded information may not appear here.", "缺失或未记录的资料可能不会显示在这里。"],
       ["approveAction", "Approve this exact summary", "批准这份确切摘要"],
-      ["approvalMeaning", "Approval means you have reviewed this content for local printing. It does not verify the records.", "批准表示你已查看这些内容并同意在本机打印，但并不表示记录已获核实。"],
+      ["approvalMeaning", "Approval means you have reviewed this content for local printing. It does not verify the records.", "批准表示您已查看这些内容并同意在本机打印，但并不表示记录已获核实。"],
       ["printAction", "Open print dialog", "打开打印对话框"],
       ["printOpened", "The print dialog was opened. JagaOn cannot tell whether anything was printed or shared.", "打印对话框已打开。JagaOn 无法确定资料是否已打印或分享。"],
       ["printUnavailable", "Printing is unavailable on this device. No summary was sent.", "此设备无法使用打印功能。摘要并未发送。"],
@@ -276,6 +278,15 @@ describe("Packet 9C care-summary copy (09-bilingual-copy-matrix.md Section 4)", 
 
   it("keeps identical key sets in both locales", () => {
     expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort());
+  });
+
+  it("D4: the two zh strings differ from their approved 9C wording only by 你 → 您", () => {
+    const approved9c = { selectedOnly: "此摘要仅包含你所选择的记录和问题。", approvalMeaning: "批准表示你已查看这些内容并同意在本机打印，但并不表示记录已获核实。" };
+    for (const [key, before] of Object.entries(approved9c) as Array<[keyof typeof approved9c, string]>) {
+      expect(zh[key], key).toBe(before.replaceAll("你", "您"));
+      expect(zh[key], key).not.toMatch(/你/);
+      expect([...zh[key]].length, key).toBe([...before].length);
+    }
   });
 
   // Rows that explicitly negate sending, verification or review are checked by exact key above.

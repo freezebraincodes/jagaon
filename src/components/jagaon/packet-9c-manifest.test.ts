@@ -9,7 +9,7 @@ import { careSummaryEffectsFor } from "@/application/care-preparation/care-summa
 import { PACKET_9_SUBSCRIPTIONS } from "@/application/packet9-subscriptions";
 import { careSummaryCompositionSchema, CARE_SUMMARY_MAX_PERIOD_DAYS, CARE_SUMMARY_MAX_SELECTIONS } from "@/domain/care-preparation/care-summary-snapshot";
 import { HACKATHON_EXPORT_PROFILE, careSummaryExternalConfirmationSchema } from "@/domain/care-preparation/care-summary-export";
-import { CARE_SUMMARY_LOCALE_PACK_VERSION, CARE_SUMMARY_RENDERER_VERSION } from "@/application/care-preparation/care-summary-locale-pack";
+import { CARE_SUMMARY_LOCALE_PACK_VERSION, CARE_SUMMARY_RENDERER_VERSION, CARE_SUMMARY_TEMPLATE_VERSION } from "@/application/care-preparation/care-summary-locale-pack";
 import { CARE_SUMMARY_SOURCE_EVALUATOR, CARE_PREPARATION_EVENT_TARGETS } from "@/application/care-preparation/care-preparation-persistence";
 import { PACKET_9C_EVENT_OWNERSHIP } from "@/application/contracts/command-event-names";
 import { REVERSE_DEPENDENCY_EVALUATORS } from "@/storage/reverse-dependency-row";
@@ -39,7 +39,9 @@ const PACKET_9C_SOURCES = [
 describe("Packet 9C manifest", () => {
   it("composes deterministically only, with pinned renderer and locale-pack versions", () => {
     expect(careSummaryCompositionSchema.safeParse({ method: "AI_ASSISTED", templateVersion: "x" }).success).toBe(false);
-    expect([CARE_SUMMARY_RENDERER_VERSION, CARE_SUMMARY_LOCALE_PACK_VERSION]).toEqual(["care-summary-renderer.9c.1", "care-summary-locale.9c.1"]);
+    // Packet 11C B1a (deliberate retarget, decision 5 and D4): new snapshots carry the care-draft notices and the 您 limitation
+    // wording under new template, renderer and locale-pack versions; 9c.1 snapshots stay byte-identical (care-summary-legacy-artifact.test.ts).
+    expect([CARE_SUMMARY_TEMPLATE_VERSION, CARE_SUMMARY_RENDERER_VERSION, CARE_SUMMARY_LOCALE_PACK_VERSION]).toEqual(["care-summary-template.11c.1", "care-summary-renderer.11c.1", "care-summary-locale.11c.1"]);
     expect([CARE_SUMMARY_MAX_SELECTIONS, CARE_SUMMARY_MAX_PERIOD_DAYS]).toEqual([32, 180]);
   });
 
@@ -225,12 +227,52 @@ describe("Packet 9 permanent-deletion boundary (Corrective Pass B)", () => {
     // Packet 10's encrypted portability and storage modules are the only backup/restore paths.
     const packet10 = /^src\/(backup|storage|application\/(storage|deletion|restore)|components\/jagaon\/data|i18n\/(packet10-types|messages\/packet10-))/;
     // Packet 11A (owner decision, blocker 1 option b): only the local AI audit row and its
-    // Packet 10 deletion/restore reconciliation enter the runtime; no provider, prompt or AI UI.
-    const packet11aAuditLifecycle = new Set(["src/application/ai/ai-audit-lifecycle.ts", "src/domain/ai/ai-invocation-audit.ts", "src/domain/ai/ai-task-contracts.ts"]);
+    // Packet 10 deletion/restore reconciliation entered the runtime; no provider, prompt or AI UI.
+    // Packet 11C Addendum B, Task B2b (D1, deliberate retarget): the wired history explanation adds exactly the enumerated browser
+    // closure; this list mirrors CLIENT_AI_FILES in packet-11a-manifest.test.ts, which pins it against the page graph. Still no
+    // provider adapter (src/ai/**), prompt, AI route or legacy fact-sending service.
+    const packet11cBrowserAi = new Set([
+      "src/application/ai/ai-activation-manifest.ts",
+      "src/application/ai/ai-audit-lifecycle.ts",
+      "src/application/ai/ai-audit-persistence.ts",
+      "src/application/ai/ai-call-support.ts",
+      "src/application/ai/ai-fallbacks.ts",
+      "src/application/ai/ai-hybrid-runtime-bundles.ts",
+      "src/application/ai/ai-hybrid-task-service.ts",
+      "src/application/ai/ai-meaning-registry.ts",
+      "src/application/ai/ai-meaning-rules.ts",
+      "src/application/ai/ai-output-validator.ts",
+      "src/application/ai/ai-provider-port.ts",
+      "src/application/ai/ai-runtime-bundles.ts",
+      "src/application/ai/ai-shell-route-contract.ts",
+      "src/application/ai/browser-history-explainer.ts",
+      "src/application/ai/browser-shell-client.ts",
+      "src/application/ai/detached-payload-projector.ts",
+      "src/application/ai/explain-pattern-request.ts",
+      "src/application/ai/explain-pattern.ts",
+      "src/application/ai/language/ai-composition.ts",
+      "src/application/ai/language/ai-language-copy.ts",
+      "src/application/ai/language/assembler.ts",
+      "src/application/ai/language/atom-renderer.ts",
+      "src/application/ai/language/care-draft-notices.ts",
+      "src/application/ai/language/default-shells.ts",
+      "src/application/ai/language/deterministic-composition.ts",
+      "src/application/ai/language/observation-composer.ts",
+      "src/application/ai/language/shell-lexicon.ts",
+      "src/application/ai/language/shell-projector.ts",
+      "src/application/ai/language/shell-validator.ts",
+      "src/application/ai/language/slot-planner.ts",
+      "src/domain/ai/ai-invocation-audit.ts",
+      "src/domain/ai/ai-language-shell-contracts.ts",
+      "src/domain/ai/ai-task-contracts.ts",
+      "src/domain/ai/index.ts",
+    ]);
+    expect(RUNTIME_GRAPH.filter((file) => /^src\/(application|domain)\/ai\//.test(file))).toEqual([...packet11cBrowserAi]);
+    expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/ai/"))).toEqual([]);
     const forbidden = RUNTIME_GRAPH.filter(
       (file) =>
         !packet10.test(file) &&
-        !packet11aAuditLifecycle.has(file) &&
+        !packet11cBrowserAi.has(file) &&
         /backup|restore|import-export|data-export|packet-?1[0-2]|(^|\/)ai\/|ai-assist|routine-shift|recurring-barrier|prescribed-timing|barrier-learning/i.test(file),
     );
     expect(forbidden, forbidden.join("\n")).toEqual([]);

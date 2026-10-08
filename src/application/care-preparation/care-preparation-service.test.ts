@@ -14,6 +14,8 @@ import { createCarePreparationQuery } from "./care-preparation-query";
 import { createCareSummaryInvalidation } from "./care-summary-invalidation";
 import { printableCareSummary } from "./care-summary-artifact";
 import type { CareSummarySelectionInput } from "./care-preparation-contracts";
+import { rewriteAsLegacy9c1Snapshot } from "./care-preparation-test-support";
+import { AI_LANGUAGE_COPY } from "@/application/ai/language/ai-language-copy";
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;
 const originalKeyRange = Dexie.dependencies.IDBKeyRange;
@@ -279,5 +281,95 @@ describe("one-attempt print export", () => {
     const requested = await h.service.requestPrintExport({ ...expected(approved), approvedContentHash: hash });
     if (requested.kind !== "COMMITTED") throw new Error("requested");
     expect(await h.service.completePrintExport({ ...expected(requested), observation: "DIALOG_OPENED", artifact: null })).toEqual({ kind: "REJECTED", code: "EXPORT_OUTCOME_INVALID" });
+  });
+});
+
+/**
+ * Packet 11C Addendum B, Task B1a (decision 5, D3): approval binds the exact 11c.1 artifact including its notices; an unapproved
+ * snapshot made with an older template or renderer must be re-prepared before approval; an approved snapshot is never touched.
+ */
+describe("Packet 11C B1a: notices in the approved artifact and re-prepare before approval (D3)", () => {
+  const storedRows = async (h: Harness, recordId: RecordId) => JSON.stringify(await h.database.table("recordRevisions").where("recordId").equals(recordId).sortBy("revisionNumber"));
+
+  it("approves the exact 11c.1 artifact that contains the notices, and prints them", async () => {
+    const h = await setup();
+    const { approved, hash } = await preparedAndApproved(h);
+    const view = await h.query.loadSummary(approved.recordId);
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.payload.sections.at(-1)!.blocks.map((block) => block.kind === "CARE_DRAFT_NOTICE" && block.noticeKind)).toEqual(["QUESTIONS_IN_OWN_WORDS", "DRAFT_NOT_SENT_OR_REVIEWED"]);
+    expect(view.payload.patientApproval).toEqual({ state: "APPROVED", approvedAt: NOW, approvedContentHash: hash });
+    const text = printableCareSummary(view.payload).text;
+    expect(text.endsWith(`## Notes about this draft\n${AI_LANGUAGE_COPY.careDraftNotices.questions["en-SG"]}\n${AI_LANGUAGE_COPY.careDraftNotices.draft["en-SG"]}`)).toBe(true);
+    expect((await h.service.requestPrintExport({ ...expected(approved), approvedContentHash: hash })).kind).toBe("COMMITTED");
+  });
+
+  it("refuses to record the preview of an unapproved 9c.1 snapshot and writes nothing", async () => {
+    const h = await setup();
+    const prepared = await h.service.prepare(await h.selection());
+    if (prepared.kind !== "COMMITTED") throw new Error("prepared");
+    const legacy = await rewriteAsLegacy9c1Snapshot(h.database, prepared.recordId);
+    const before = await storedRows(h, prepared.recordId);
+    expect(await h.service.markPreviewed({ ...expected(prepared), contentHash: legacy.rendering.contentHash })).toEqual({ kind: "REJECTED", code: "SUMMARY_TEMPLATE_SUPERSEDED" });
+    expect(await storedRows(h, prepared.recordId)).toBe(before);
+    expect((await h.rows("CARE_SUMMARY_SNAPSHOT"))[0]!.headRevisionNumber).toBe(1);
+    // A hash mismatch is still reported first, as before.
+    expect(await h.service.markPreviewed({ ...expected(prepared), contentHash: "f".repeat(64) })).toEqual({ kind: "REJECTED", code: "SUMMARY_CONTENT_HASH_MISMATCH" });
+  });
+
+  it("refuses to approve a previewed 9c.1 snapshot with SUMMARY_TEMPLATE_SUPERSEDED, leaving it byte-identical", async () => {
+    const h = await setup();
+    const prepared = await h.service.prepare(await h.selection());
+    if (prepared.kind !== "COMMITTED") throw new Error("prepared");
+    const current = await h.query.loadSummary(prepared.recordId);
+    if (current.status !== "READY") throw new Error("ready");
+    const previewed = await h.service.markPreviewed({ ...expected(prepared), contentHash: current.payload.rendering.contentHash });
+    if (previewed.kind !== "COMMITTED") throw new Error("previewed");
+    const legacy = await rewriteAsLegacy9c1Snapshot(h.database, prepared.recordId);
+    expect(legacy.status).toBe("PREVIEWED");
+    const before = await storedRows(h, prepared.recordId);
+    expect(await h.service.approve({ ...expected(previewed), contentHash: legacy.rendering.contentHash })).toEqual({ kind: "REJECTED", code: "SUMMARY_TEMPLATE_SUPERSEDED" });
+    expect(await storedRows(h, prepared.recordId)).toBe(before);
+    expect(await h.rows("CARE_SUMMARY_EXPORT")).toEqual([]);
+    // Every earlier refusal keeps its own code and order.
+    expect(await h.service.approve({ ...expected(previewed), contentHash: "f".repeat(64) })).toEqual({ kind: "REJECTED", code: "SUMMARY_CONTENT_HASH_MISMATCH" });
+    expect(await h.service.requestPrintExport({ ...expected(previewed), approvedContentHash: legacy.rendering.contentHash })).toEqual({ kind: "REJECTED", code: "SUMMARY_NOT_APPROVED" });
+  });
+
+  it("re-preparing replaces the old preview with an 11c.1 snapshot with notices, which can then be approved", async () => {
+    const h = await setup();
+    const prepared = await h.service.prepare(await h.selection());
+    if (prepared.kind !== "COMMITTED") throw new Error("prepared");
+    await rewriteAsLegacy9c1Snapshot(h.database, prepared.recordId);
+    const replacement = await h.service.prepare({ ...(await h.selection()), replaces: expected(prepared) });
+    if (replacement.kind !== "COMMITTED") throw new Error(JSON.stringify(replacement));
+    const old = await h.query.loadSummary(prepared.recordId);
+    const fresh = await h.query.loadSummary(replacement.recordId);
+    if (old.status !== "READY" || fresh.status !== "READY") throw new Error("ready");
+    expect(old.snapshotStatus).toBe("SUPERSEDED");
+    expect(old.payload.rendering.rendererVersion).toBe("care-summary-renderer.9c.1");
+    expect(fresh.payload.rendering.rendererVersion).toBe("care-summary-renderer.11c.1");
+    expect(fresh.payload.sections.at(-1)!.sectionId).toBe("CARE_DRAFT_NOTICES");
+    const hash = fresh.payload.rendering.contentHash;
+    const previewed = await h.service.markPreviewed({ ...expected(replacement), contentHash: hash });
+    if (previewed.kind !== "COMMITTED") throw new Error(JSON.stringify(previewed));
+    expect((await h.service.approve({ ...expected(previewed), contentHash: hash })).kind).toBe("COMMITTED");
+  });
+
+  it("never touches an approved 9c.1 snapshot: it stays approved, byte-identical and printable without notices", async () => {
+    const h = await setup();
+    const { approved } = await preparedAndApproved(h);
+    const legacy = await rewriteAsLegacy9c1Snapshot(h.database, approved.recordId);
+    expect(legacy.status).toBe("APPROVED");
+    const before = await storedRows(h, approved.recordId);
+    const artifact = printableCareSummary(legacy);
+    expect(artifact.text).not.toContain(AI_LANGUAGE_COPY.careDraftNotices.draft["en-SG"]);
+    expect(artifact.text.endsWith("## About this summary\nThis summary contains only the records and questions you selected.\nPatient-reported information; not externally verified.\nMissing or unrecorded information may not appear here.")).toBe(true);
+    // Approval semantics are unchanged for it; previewing again records nothing.
+    expect(await h.service.approve({ ...expected(approved), contentHash: legacy.rendering.contentHash })).toEqual({ kind: "REJECTED", code: "SUMMARY_NOT_APPROVED" });
+    expect(await h.service.markPreviewed({ ...expected(approved), contentHash: legacy.rendering.contentHash })).toEqual({ kind: "COMMITTED", recordId: approved.recordId, revisionId: approved.revisionId, revisionNumber: approved.revisionNumber });
+    const requested = await h.service.requestPrintExport({ ...expected(approved), approvedContentHash: legacy.rendering.contentHash });
+    if (requested.kind !== "COMMITTED") throw new Error(JSON.stringify(requested));
+    expect((await h.service.completePrintExport({ ...expected(requested), observation: "DIALOG_OPENED", artifact: { hash: artifact.hash, byteLength: artifact.byteLength } })).kind).toBe("COMMITTED");
+    expect(await storedRows(h, approved.recordId)).toBe(before);
   });
 });

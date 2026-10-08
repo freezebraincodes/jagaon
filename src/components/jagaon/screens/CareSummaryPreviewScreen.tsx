@@ -4,10 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { RecordId } from "@/domain/shared";
 import type { CareSummaryExportOutcome } from "@/domain/care-preparation/care-summary-export";
-import type { CareSummarySnapshotPayload } from "@/domain/care-preparation/care-summary-snapshot";
-import { getMessages } from "@/i18n/get-messages";
 import type { CarePreparationCommandPort, CarePreparationQueryPort, CareSummaryView, PrintObservation } from "@/application/care-preparation/care-preparation-contracts";
 import { printableCareSummary } from "@/application/care-preparation/care-summary-artifact";
+import { isCurrentCareSummaryTemplate } from "@/application/care-preparation/care-summary-locale-pack";
 import { ScreenHeader, Notice } from "../primitives/ScreenHeader";
 import { CheckIcon, ChevronLeftIcon, InfoIcon, LockIcon } from "../primitives/Icons";
 import { PrintableCareSummary } from "../care-preparation/PrintableCareSummary";
@@ -25,7 +24,7 @@ type Props = {
   onBack: () => void;
 };
 
-type Notice = "HASH_MISMATCH" | "SOURCE_CHANGED" | "FAILED" | null;
+type Notice = "HASH_MISMATCH" | "SOURCE_CHANGED" | "TEMPLATE_SUPERSEDED" | "FAILED" | null;
 
 /** The factual message for one attempt; none implies sending, delivery or review. */
 function outcomeText(messages: AppMessages, outcome: CareSummaryExportOutcome | PrintObservation): string {
@@ -36,22 +35,15 @@ function outcomeText(messages: AppMessages, outcome: CareSummaryExportOutcome | 
 }
 
 /**
- * The fixed care-draft notices (Packet 11C Task 8, Addendum A3), in the snapshot's own locale. The browser graph may not import
- * the approved renderer (`renderCareDraftNotices`, packet-11a/9c manifest boundary), so its selection rule is mirrored here: the
- * questions notice only when the summary has a questions section, then the not-sent/not-reviewed notice always. The text is
- * the verbatim i18n copy; equality with the approved renderer is pinned by CareSummaryPreviewScreen.test.tsx.
- */
-function careDraftNotices(payload: CareSummarySnapshotPayload): string[] {
-  const notices = getMessages(payload.locale).careSummary.draftNotices;
-  const hasQuestions = payload.sections.some((section) => section.sectionId === "QUESTIONS_FOR_CARE_TEAM");
-  return hasQuestions ? [notices.questions, notices.draft] : [notices.draft];
-}
-
-/**
  * Care-summary preview (plan 9C Task 4). Shows one immutable snapshot,
  * records its preview, binds approval to its exact hash, and runs one
  * print attempt per click: the attempt is recorded before the browser
  * dialog opens and its exact observed outcome is recorded afterwards.
+ *
+ * Packet 11C B1a: the care-draft notices are part of the snapshot itself (its last, hashed section), so they are shown and printed
+ * from the artifact; there is no separate screen-only copy. D3: an unapproved snapshot made with an older template or renderer is
+ * shown exactly as stored, is never marked previewed or approved, and the patient is sent back to prepare it again. Human acceptance
+ * pending for the new message and its placement.
  */
 export function CareSummaryPreviewScreen({ messages, locale, recordId, query, commands, print, onBack }: Props) {
   const copy = messages.careSummary;
@@ -73,22 +65,29 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
   const ready = view?.status === "READY" ? view : null;
   const stale = ready !== null && (!ready.sourcesCurrent || ready.snapshotStatus === "INVALIDATED" || ready.snapshotStatus === "SUPERSEDED");
   const printable = useMemo(() => (ready ? printableCareSummary(ready.payload) : null), [ready]);
+  // D3: an unapproved preview from an older template or renderer must be prepared again (the service refuses it as well).
+  const superseded = ready !== null && !stale && ready.snapshotStatus !== "APPROVED" && (!isCurrentCareSummaryTemplate(ready.payload) || notice === "TEMPLATE_SUPERSEDED");
+  const blocked = stale || notice === "HASH_MISMATCH" || superseded;
 
   // Showing the exact prepared content is the preview; it is recorded once.
   useEffect(() => {
-    if (!ready || !commands || stale || ready.snapshotStatus !== "PREPARED" || previewRecorded.current === ready.revisionId) return;
+    if (!ready || !commands || stale || ready.snapshotStatus !== "PREPARED" || !isCurrentCareSummaryTemplate(ready.payload) || previewRecorded.current === ready.revisionId) return;
     previewRecorded.current = ready.revisionId;
     void commands
       .markPreviewed({ recordId: ready.recordId, expectedRevisionId: ready.revisionId, expectedRevisionNumber: ready.revisionNumber, contentHash: ready.payload.rendering.contentHash })
       .then((result) => {
         if (!mounted.current) return;
-        if (result.kind !== "COMMITTED") setNotice(result.kind === "REJECTED" && result.code === "SUMMARY_CONTENT_HASH_MISMATCH" ? "HASH_MISMATCH" : "FAILED");
+        if (result.kind !== "COMMITTED") {
+          const code = result.kind === "REJECTED" ? result.code : null;
+          setNotice(code === "SUMMARY_CONTENT_HASH_MISMATCH" ? "HASH_MISMATCH" : code === "SUMMARY_TEMPLATE_SUPERSEDED" ? "TEMPLATE_SUPERSEDED" : "FAILED");
+        }
         reload();
       });
   }, [ready, commands, stale, reload]);
 
   function noticeFor(code: string): Notice {
     if (code === "SUMMARY_CONTENT_HASH_MISMATCH") return "HASH_MISMATCH";
+    if (code === "SUMMARY_TEMPLATE_SUPERSEDED") return "TEMPLATE_SUPERSEDED";
     if (code === "SUMMARY_INVALIDATED_FOR_EXPORT" || code === "SUMMARY_NOT_APPROVED") return "SOURCE_CHANGED";
     return "FAILED";
   }
@@ -183,27 +182,21 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
               <p className="banner-title">{copy.sourceChanged}</p>
             </div>
           ) : null}
+          {superseded && notice !== "HASH_MISMATCH" ? (
+            <div className="banner banner-warning" role="alert">
+              <p className="banner-title">{copy.templateSuperseded}</p>
+            </div>
+          ) : null}
           {notice === "FAILED" ? (
             <p className="field-error" role="alert">
               {messages.carePreparation.saveFailed}
             </p>
           ) : null}
-          {stale || notice === "HASH_MISMATCH" ? backButton : null}
+          {blocked ? backButton : null}
 
           <PrintableCareSummary lines={printable.lines} locale={ready.payload.locale} />
 
-          {/* Screen-only: the print stylesheet prints the summary article alone, so the approved, hashed content is unchanged. */}
-          <section className="care-summary-draft-notices" aria-label={copy.draftNotices.label}>
-            <Notice className="notice--compact" icon={<InfoIcon size={18} />}>
-              {careDraftNotices(ready.payload).map((text) => (
-                <p key={text} lang={ready.payload.locale}>
-                  {text}
-                </p>
-              ))}
-            </Notice>
-          </section>
-
-          {!stale && notice !== "HASH_MISMATCH" && commands ? (
+          {!blocked && commands ? (
             ready.snapshotStatus === "APPROVED" ? (
               <div className="care-summary-actions">
                 <Notice icon={<CheckIcon size={20} />}>
@@ -245,7 +238,7 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
           <Notice className="notice--compact" icon={<LockIcon size={18} />}>
             <p>{messages.carePreparation.localOnly}</p>
           </Notice>
-          {!stale && notice !== "HASH_MISMATCH" ? backButton : null}
+          {!blocked ? backButton : null}
         </>
       ) : null}
     </div>

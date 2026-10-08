@@ -4,9 +4,10 @@ import { fingerprint } from "@/application/intelligence/metrics";
 import type { AuditEventId, Instant, RecordHead, RecordId, RevisionId, TransactionId } from "@/domain/shared";
 import type { ProvenanceCore } from "@/domain/shared/provenance";
 import type { TypedRevisionRef } from "@/domain/shared/typed-revision-ref";
-import type { CareSummaryInvalidationReason, CareSummarySnapshotPayload, CareSummarySnapshotRevision } from "@/domain/care-preparation/care-summary-snapshot";
+import { careSummaryAiReplacementIssues, type CareSummaryInvalidationReason, type CareSummarySnapshotPayload, type CareSummarySnapshotRevision } from "@/domain/care-preparation/care-summary-snapshot";
 import { HACKATHON_EXPORT_PROFILE, type CareSummaryExportOutcome, type CareSummaryExportRevision } from "@/domain/care-preparation/care-summary-export";
 import { CommandTransactionError } from "@/storage/authoritative-command-transaction";
+import { implementedStorageRowCodecs } from "@/storage/implemented-row-codecs";
 import { StorageRowValidationError } from "@/storage/storage-row-codec";
 import type { JagaOnDatabase } from "@/storage/database";
 import { OwnerPlanError } from "@/application/owner-plan-support";
@@ -20,6 +21,7 @@ import {
   type CarePreparationRevision,
 } from "./care-preparation-persistence";
 import { renderDeterministicCareSummary } from "./deterministic-care-summary-renderer";
+import { isCurrentCareSummaryTemplate } from "./care-summary-locale-pack";
 import { loadCareSummaryDraft, sourcesAreCurrent } from "./care-summary-candidates";
 import type { CarePreparationCommandPort, CarePreparationCommitResult, ExpectedHead, PrintObservation } from "./care-preparation-contracts";
 
@@ -41,6 +43,12 @@ export type CarePreparationDependencies = {
     transactionId(): TransactionId;
     domainEventId(): DomainEventId;
   };
+  /**
+   * Packet 11C B1b: the AI-assisted projection (`projectValidatedAiCareSummary`), injected so that this service and the Packet 9C
+   * entry points import no AI module; absent (the shipped runtime until B4b wires it), `replaceWithAiAssistedPreview` refuses every
+   * request. It returns the replacement payload or throws.
+   */
+  projectAiCareSummary?: (input: { current: CareSummarySnapshotPayload; composition: unknown; auditRef: string; validatedAt: Instant }) => Promise<CareSummarySnapshotPayload>;
 };
 
 /** Internal system effect used by the invalidation worker only. */
@@ -49,6 +57,8 @@ export type CarePreparationService = CarePreparationCommandPort & {
 };
 
 const SYSTEM_DERIVATION: ProvenanceCore = { sourceKind: "SYSTEM_DERIVATION", captureMethod: "RULE_ENGINE", initiator: "JAGAON_SYSTEM", assistance: "NONE" };
+/** Packet 11C B1b: the creating revision of an AI-assisted snapshot (the domain allows AI assistance there only). */
+const AI_ASSISTED_DERIVATION: ProvenanceCore = { ...SYSTEM_DERIVATION, assistance: "AI_ASSISTED" };
 const PATIENT_ENTRY: ProvenanceCore = { sourceKind: "PATIENT_ENTRY", captureMethod: "FORM", initiator: "PATIENT", assistance: "NONE" };
 const ACTIONABLE = new Set(["PREPARED", "PREVIEWED", "APPROVED"]);
 const PATIENT_REASONS = new Set<CareSummaryInvalidationReason>(["PATIENT_CHANGED_SELECTION", "PATIENT_CHANGED_PURPOSE", "PATIENT_CHANGED_PERIOD", "PATIENT_CHANGED_LOCALE"]);
@@ -80,6 +90,7 @@ export function createCarePreparationService(database: JagaOnDatabase, dependenc
     now: Instant;
     changes: CarePreparationChange[];
     summarySources?: { snapshot: { recordId: RecordId; revisionId: RevisionId }; sourceRevisionIds: RevisionId[] };
+    sourceHeads?: RecordHead[];
   }): Promise<CarePreparationCommitResult> {
     try {
       const plan = buildCarePreparationCommitPlan({
@@ -90,6 +101,7 @@ export function createCarePreparationService(database: JagaOnDatabase, dependenc
         completedAt: input.now,
         changes: input.changes,
         summarySources: input.summarySources,
+        ...(input.sourceHeads ? { sourceHeads: input.sourceHeads } : {}),
       });
       const receipt = await store.execute(plan);
       if (receipt.outcome === "COMMITTED") {
@@ -120,6 +132,7 @@ export function createCarePreparationService(database: JagaOnDatabase, dependenc
     recordedAt: Instant;
     now: Instant;
     transactionId: TransactionId;
+    provenance?: ProvenanceCore;
   }) {
     return {
       schemaVersion: 1,
@@ -132,7 +145,7 @@ export function createCarePreparationService(database: JagaOnDatabase, dependenc
       recordedAt: input.recordedAt,
       revisionCreatedAt: input.now,
       temporal: { kind: "ATEMPORAL" as const },
-      provenance: input.recordType === "CARE_SUMMARY_SNAPSHOT" ? SYSTEM_DERIVATION : PATIENT_ENTRY,
+      provenance: input.provenance ?? (input.recordType === "CARE_SUMMARY_SNAPSHOT" ? SYSTEM_DERIVATION : PATIENT_ENTRY),
       auditEventId: ids.auditEventId(),
       transactionId: input.transactionId,
     };
@@ -192,6 +205,45 @@ export function createCarePreparationService(database: JagaOnDatabase, dependenc
       now,
       changes: [change(revision, loaded.head, "CARE_SUMMARY_SNAPSHOT_INVALIDATED", "INVALIDATED", "SUMMARY_INVALIDATED", system ? "JAGAON_SYSTEM" : "PATIENT")],
     });
+  }
+
+  /** Packet 11C B1b: the recorded outcome of an already executed command id, or null when the id is new. */
+  async function replay(commandId: CommandId, commandHash: string): Promise<CarePreparationCommitResult | null> {
+    try {
+      const raw = await database.table("commandReceipts").get(commandId);
+      if (raw === undefined) return null;
+      const receipt = implementedStorageRowCodecs.commandReceipts.validateAfterRead(raw);
+      if (receipt.commandHash !== commandHash) return { kind: "FAILED", code: "COMMIT_FAILED" };
+      if (receipt.outcome === "REJECTED") return { kind: "REJECTED", code: "HEAD_CONFLICT" };
+      const created = receipt.outcome === "COMMITTED" ? receipt.resultingRevisions[0] : undefined;
+      return created ? { kind: "COMMITTED", recordId: created.recordId, revisionId: created.revisionId, revisionNumber: 1 } : { kind: "FAILED", code: "COMMIT_FAILED" };
+    } catch {
+      return { kind: "FAILED", code: "STORAGE_UNAVAILABLE" };
+    }
+  }
+
+  /**
+   * Packet 11C B1b: the named AI invocation is an ACCEPTED `DRAFT_CARE_PREPARATION_SUMMARY` audit in the snapshot's locale, not yet linked
+   * to any record, whose sources (if any were transmitted) are among the snapshot's own. The same rule the Packet 10 backup and restore
+   * validators apply to a stored `aiInvocationAuditRef` (validateAiAuditReferences).
+   */
+  async function acceptedCareAudit(requestId: string, current: CareSummarySnapshotPayload): Promise<boolean> {
+    const raw = await database.table("aiInvocationAudits").get(requestId);
+    if (raw === undefined) return false;
+    const row = implementedStorageRowCodecs.aiInvocationAudits.validateAfterRead(raw) as { outcomeCode: string; taskType: string; locale: string; downstream: unknown; sourceRevisions: Array<{ revisionId: string }> };
+    const included = new Set<string>(sourcesOf(current).map((source) => source.revisionId));
+    return row.outcomeCode === "ACCEPTED" && row.taskType === "DRAFT_CARE_PREPARATION_SUMMARY" && row.locale === current.locale && row.downstream === null && row.sourceRevisions.every((source) => included.has(source.revisionId));
+  }
+
+  /** Packet 11C B1b: the exact current heads of the given sources, or null when any is no longer its record's current active revision. */
+  async function currentSourceHeads(refs: CareSummarySnapshotPayload["selection"]["includedSourceRevisions"]): Promise<RecordHead[] | null> {
+    const heads: RecordHead[] = [];
+    for (const ref of refs) {
+      const head = await readHead(ref.recordId);
+      if (!head || head.state !== "ACTIVE" || head.recordType !== ref.recordType || head.headRevisionId !== ref.revisionId) return null;
+      heads.push(head);
+    }
+    return heads;
   }
 
   async function activeSnapshot(recordId: RecordId): Promise<Loaded<CareSummarySnapshotRevision> | null> {
@@ -273,6 +325,8 @@ export function createCarePreparationService(database: JagaOnDatabase, dependenc
       if (!ACTIONABLE.has(payload.status)) return { kind: "REJECTED", code: "SUMMARY_INVALIDATED_FOR_EXPORT" };
       // Previewing again records nothing new.
       if (payload.status !== "PREPARED") return { kind: "COMMITTED", recordId: loaded.head.recordId, revisionId: loaded.head.headRevisionId, revisionNumber: loaded.head.headRevisionNumber };
+      // D3: a preview made with an older template or renderer is never recorded; it must be prepared again before approval.
+      if (!isCurrentCareSummaryTemplate(payload)) return { kind: "REJECTED", code: "SUMMARY_TEMPLATE_SUPERSEDED" };
       const now = dependencies.now();
       const transactionId = ids.transactionId();
       return commit({
@@ -292,6 +346,8 @@ export function createCarePreparationService(database: JagaOnDatabase, dependenc
       if (payload.status === "INVALIDATED" || payload.status === "SUPERSEDED") return { kind: "REJECTED", code: "SUMMARY_INVALIDATED_FOR_EXPORT" };
       if (payload.status !== "PREVIEWED") return { kind: "REJECTED", code: "SUMMARY_NOT_APPROVED" };
       if (payload.rendering.contentHash !== input.contentHash) return { kind: "REJECTED", code: "SUMMARY_CONTENT_HASH_MISMATCH" };
+      // D3: approval binds only an artifact made with the current template and renderer; an older preview is left exactly as stored.
+      if (!isCurrentCareSummaryTemplate(payload)) return { kind: "REJECTED", code: "SUMMARY_TEMPLATE_SUPERSEDED" };
       try {
         if (!(await sourcesAreCurrent(database, sourcesOf(payload)))) return { kind: "REJECTED", code: "SUMMARY_INVALIDATED_FOR_EXPORT" };
       } catch {
@@ -331,6 +387,71 @@ export function createCarePreparationService(database: JagaOnDatabase, dependenc
         transactionId,
         now,
         changes: [change(lifecycleRevision(loaded, { ...loaded.revision.payload, status: "SUPERSEDED" }, "UPDATE", now, transactionId), loaded.head, "CARE_SUMMARY_SNAPSHOT_SUPERSEDED", "SUPERSEDED", "SUMMARY_SUPERSEDED", "PATIENT")],
+      });
+    },
+
+    async replaceWithAiAssistedPreview(input) {
+      const refused: CarePreparationCommitResult = { kind: "REJECTED", code: "SUMMARY_AI_VALIDATION_MISSING" };
+      const commandName = "REPLACE_CARE_SUMMARY_WITH_AI_ASSISTED_PREVIEW";
+      // The command's identity: the exact target, its expected hash and the one accepted AI invocation (one composition per audit).
+      const hashMaterial = { target: input.expectedRevisionId, expectedContentHash: input.expectedContentHash, aiInvocationAuditRef: input.aiInvocationAuditRef, validatedAt: input.validatedAt };
+      if (input.commandId) {
+        // Idempotent receipt: a replay returns the recorded outcome before any precondition is read again; never a second replacement.
+        const replayed = await replay(input.commandId, fingerprint({ commandName, content: hashMaterial }));
+        if (replayed) return replayed;
+      }
+      const project = dependencies.projectAiCareSummary;
+      if (!project) return refused;
+      const loaded = await loadExpected<CareSummarySnapshotRevision>(input, "CARE_SUMMARY_SNAPSHOT");
+      if (isResult(loaded)) return loaded;
+      const current = loaded.revision.payload;
+      // Only the current unapproved deterministic preview: an approved artifact is never replaced; invalidated or superseded ones are not current.
+      if (current.status === "APPROVED") return { kind: "REJECTED", code: "SUMMARY_ALREADY_APPROVED" };
+      if (current.status !== "PREPARED" && current.status !== "PREVIEWED") return { kind: "REJECTED", code: "SUMMARY_INVALIDATED_FOR_EXPORT" };
+      if (current.rendering.contentHash !== input.expectedContentHash) return { kind: "REJECTED", code: "SUMMARY_CONTENT_HASH_MISMATCH" };
+      if (!isCurrentCareSummaryTemplate(current)) return { kind: "REJECTED", code: "SUMMARY_TEMPLATE_SUPERSEDED" };
+      if (current.composition.method !== "DETERMINISTIC") return refused;
+      let sourceHeads: RecordHead[];
+      try {
+        if (!(await acceptedCareAudit(input.aiInvocationAuditRef, current))) return refused;
+        const heads = await currentSourceHeads(sourcesOf(current));
+        if (!heads) return { kind: "REJECTED", code: "SUMMARY_INVALIDATED_FOR_EXPORT" };
+        sourceHeads = heads;
+      } catch {
+        return { kind: "FAILED", code: "STORAGE_UNAVAILABLE" };
+      }
+      let next: CareSummarySnapshotPayload;
+      try {
+        next = await project({ current, composition: input.composition, auditRef: input.aiInvocationAuditRef, validatedAt: input.validatedAt });
+      } catch {
+        return refused;
+      }
+      // Defence in depth: the replacement invariant and the command's own audit and time are checked here as well.
+      if (careSummaryAiReplacementIssues(current, next).length > 0 || next.composition.method !== "AI_ASSISTED" || next.composition.aiInvocationAuditRef !== input.aiInvocationAuditRef || next.composition.validatedAt !== input.validatedAt) {
+        return refused;
+      }
+      const now = dependencies.now();
+      const transactionId = ids.transactionId();
+      const recordId = ids.recordId();
+      const created = {
+        ...envelope({ recordType: "CARE_SUMMARY_SNAPSHOT", recordId, revisionNumber: 1, previousRevisionId: null, action: "CREATE", recordedAt: now, now, transactionId, provenance: AI_ASSISTED_DERIVATION }),
+        payload: { ...next, replacesSnapshot: refOf(loaded.revision) },
+      } as CareSummarySnapshotRevision;
+      const superseded = lifecycleRevision(loaded, { ...current, status: "SUPERSEDED" }, "UPDATE", now, transactionId);
+      return commit({
+        commandName,
+        hashMaterial,
+        commandId: input.commandId,
+        transactionId,
+        now,
+        // One transaction: the new snapshot (with its exact source edges) and the old snapshot's supersession, or neither. The sources'
+        // exact heads are expected again inside it, so a change after these checks rolls everything back (HEAD_CONFLICT).
+        changes: [
+          change(created, null, "CARE_SUMMARY_SNAPSHOT_PREPARED", "PREPARED", "SUMMARY_PREPARED", "PATIENT"),
+          change(superseded, loaded.head, "CARE_SUMMARY_SNAPSHOT_SUPERSEDED", "SUPERSEDED", "SUMMARY_SUPERSEDED", "PATIENT"),
+        ],
+        summarySources: { snapshot: { recordId, revisionId: created.revisionId }, sourceRevisionIds: sourcesOf(next).map((source) => source.revisionId) },
+        sourceHeads,
       });
     },
 

@@ -870,13 +870,12 @@ export const enSGMessages: AppMessages = {
     approvedNote: "Approved for local printing on this device.",
     printUnknown: "JagaOn could not tell whether the print dialog opened. Nothing was sent.",
     attemptsHeading: "Print attempts on this device",
-    // Packet 11C Task 8 (care-summary-notices.11c.1). `questions` and `draft`: verbatim copy of the approved care-draft notices
-    // (AI_LANGUAGE_COPY.careDraftNotices, ai-language-copy.11b.10); pinned by
-    // src/components/jagaon/screens/CareSummaryPreviewScreen.test.tsx; do not edit independently.
+    // Packet 11C Task 8 (care-summary-notices.11c.1); B1a: `label` heads the printed notice section (care-summary-locale.11c.1).
+    // The notice text is stored in the snapshot from AI_LANGUAGE_COPY.careDraftNotices, not mirrored here. Human acceptance pending.
     draftNotices: {
       label: "Notes about this draft",
-      questions: "Questions are shown in your own words; the app does not carry them out.",
-      draft: "The app does not send this draft to your care team or confirm that a clinician has reviewed it.",
     },
+    // Packet 11C B1a (D3), new wording, human acceptance pending.
+    templateSuperseded: "This summary was made with an earlier version of JagaOn. Prepare it again before you approve it.",
   },
 };

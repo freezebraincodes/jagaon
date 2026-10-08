@@ -7,6 +7,12 @@ import { deterministicAuditRowFixture, explainAuditRowFixture } from "@/domain/a
 import type { PermanentDeletionSnapshot } from "@/storage/permanent-deletion-transaction";
 import { computeDeletionClosure, DeletionPlanRefusedError } from "./deletion-planner";
 import { createDeletionFixture } from "./packet10-deletion-fixture";
+import { createCareOrganisationQuery } from "@/application/care-organisation/care-organisation-query";
+import { projectValidatedAiCareSummary } from "@/application/care-preparation/ai-care-summary-replacement";
+import { createCarePreparationQuery } from "@/application/care-preparation/care-preparation-query";
+import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
+import { acceptedAiCareComposition } from "@/application/care-preparation/care-preparation-test-support";
+import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
 
 /**
  * Packet 11A Task 5 (owner decision, blocker 1 option b): permanent deletion
@@ -126,6 +132,39 @@ describe("permanent deletion and AI invocation audits", () => {
       expect(() => computeDeletionClosure(snapshot, target)).toThrow(DeletionPlanRefusedError);
       // Without that reference the same snapshot plans normally.
       expect(computeDeletionClosure(tables as unknown as PermanentDeletionSnapshot, target).aiInvocationRequestIds).toEqual([AFFECTED]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "Packet 11C B1b: deleting a source of a real AI-assisted snapshot purges that snapshot, the preview it superseded and its AI audit together",
+    async () => {
+      const h = await createDeletionFixture();
+      opened.push(h);
+      const uuid = () => crypto.randomUUID() as never;
+      const ids = { commandId: uuid, correlationId: uuid, recordId: uuid, revisionId: uuid, auditEventId: uuid, transactionId: uuid, domainEventId: uuid };
+      const carePreparation = createCarePreparationService(h.database, { now: () => PACKET10_NOW, ids, projectAiCareSummary: projectValidatedAiCareSummary });
+      const visit = await createCareOrganisationQuery(h.database, { now: () => PACKET10_NOW }).loadVisitPreparation();
+      if (visit.status !== "READY" || !visit.appointment) throw new Error("visit");
+      const readings = visit.factGroups.find((group) => group.key === "GLUCOSE")!.sources.slice(0, 3);
+      const prepared = await carePreparation.prepare({ locale: "en-SG", period: visit.period, appointment: null, groups: [{ key: "GLUCOSE", sources: readings }], questions: [], notSelected: [] });
+      if (prepared.kind !== "COMMITTED") throw new Error(JSON.stringify(prepared));
+      const loaded = await createCarePreparationQuery(h.database).loadSummary(prepared.recordId);
+      if (loaded.status !== "READY") throw new Error("ready");
+      const ai = await acceptedAiCareComposition(loaded.payload, { candidate: shellCandidate, requestId: crypto.randomUUID(), audit: createAiInvocationAuditRepository(h.database) });
+      const replaced = await carePreparation.replaceWithAiAssistedPreview({ recordId: prepared.recordId, expectedRevisionId: prepared.revisionId, expectedRevisionNumber: 1, expectedContentHash: loaded.payload.rendering.contentHash, composition: ai.composition, aiInvocationAuditRef: ai.auditRef, validatedAt: PACKET10_NOW });
+      if (replaced.kind !== "COMMITTED") throw new Error(JSON.stringify(replaced));
+
+      const target = { recordType: "GLUCOSE_READING" as const, recordId: readings[0]!.recordId };
+      const plan = await h.service.prepare(target);
+      if (plan.kind !== "PLAN_READY") throw new Error(plan.kind);
+      expect(plan.plan.closure.purgedRecordIds).toEqual(expect.arrayContaining([target.recordId, prepared.recordId, replaced.recordId]));
+      expect(plan.plan.closure.aiInvocationRequestIds).toContain(ai.auditRef);
+      expect((await h.service.confirm(plan.plan, { planHash: plan.plan.planHash, confirmedAt: PACKET10_NOW })).kind).toBe("DELETED");
+      expect(await auditIds(h)).not.toContain(ai.auditRef);
+      const left = (await h.revisions()).filter((row) => row.recordId === replaced.recordId || row.recordId === prepared.recordId);
+      expect(left).toEqual([]);
+      expect((await h.head(replaced.recordId))?.state).toBe("DELETED");
     },
     TIMEOUT,
   );

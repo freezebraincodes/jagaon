@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { PACKET_11_HYBRID_FIXTURES } from "@/ai/evaluation/packet-11-hybrid-fixtures";
 import type { AiTaskRequest } from "@/domain/ai";
 import { AI_LANGUAGE_COPY } from "./ai-language-copy";
-import { renderCareDraftNotices } from "./care-draft-notices";
+import { careDraftNoticesFor, renderCareDraftNotices } from "./care-draft-notices";
 
 /**
  * P3 presentation correction (owner instruction 2026-10-08, offline): fixed bilingual application copy for a care preparation draft,
@@ -32,6 +32,16 @@ describe("care draft notices (ai-language-copy.11b.8)", () => {
     const request = withoutQuestions(fixture("p11.draft-care-preparation-summary.en-sg.prompt-injection"));
     expect(request.taskPayload).not.toHaveProperty("sections.1");
     expect(renderCareDraftNotices(request)).toEqual([{ kind: "DRAFT_NOT_SENT_OR_REVIEWED", text: AI_LANGUAGE_COPY.careDraftNotices.draft["en-SG"] }]);
+  });
+  it("careDraftNoticesFor (Packet 11C B1a) is the one selection rule both the care draft and the care-summary renderer use", () => {
+    for (const entry of PACKET_11_HYBRID_FIXTURES.filter((item) => item.taskType === "DRAFT_CARE_PREPARATION_SUMMARY")) {
+      for (const request of [entry.request, withoutQuestions(entry.request)]) {
+        const hasQuestions = request.taskType === "DRAFT_CARE_PREPARATION_SUMMARY" && request.taskPayload.sections.some((section) => section.sectionId === "QUESTIONS_FOR_CARE_TEAM");
+        expect(careDraftNoticesFor(request.locale, hasQuestions), entry.id).toEqual(renderCareDraftNotices(request));
+      }
+    }
+    expect(careDraftNoticesFor("zh-SG", false)).toEqual([{ kind: "DRAFT_NOT_SENT_OR_REVIEWED", text: AI_LANGUAGE_COPY.careDraftNotices.draft["zh-SG"] }]);
+    expect(Object.isFrozen(careDraftNoticesFor("en-SG", true))).toBe(true);
   });
   it("an EXPLAIN request gets no care notice", () => {
     expect(renderCareDraftNotices(fixture("p11.explain-pattern.en-sg.prompt-injection"))).toEqual([]);

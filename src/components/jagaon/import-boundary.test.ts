@@ -339,6 +339,23 @@ describe("Packet 9C care-preparation import boundary", () => {
     expect(forbidden, `Forbidden Packet 9C imports:\n${forbidden.join("\n")}`).toEqual([]);
   });
 
+  it("Packet 11C B1a: reaches only the approved care-draft notice copy among AI modules (inside the B2b browser allow-list)", () => {
+    // The renderer stores the approved notices (one runtime source: AI_LANGUAGE_COPY.careDraftNotices via careDraftNoticesFor).
+    // That closure is the copy, the notice selector, deep-freeze and the domain AI contracts; no service, provider port or network.
+    const graph = graphOf(PACKET_9C_ENTRYPOINTS);
+    expect(graph.filter((file) => /^src\/(application|domain)\/ai\//.test(file)).sort()).toEqual([
+      "src/application/ai/language/ai-language-copy.ts",
+      "src/application/ai/language/care-draft-notices.ts",
+      "src/domain/ai/ai-invocation-audit.ts",
+      "src/domain/ai/ai-language-shell-contracts.ts",
+      "src/domain/ai/ai-task-contracts.ts",
+      "src/domain/ai/index.ts",
+    ]);
+    // Only the renderer imports it; the printable artifact, query, invalidation and the service's other modules do not.
+    const importers = graph.filter((file) => file.startsWith("src/application/care-preparation/") && /@\/application\/ai\//.test(readFileSync(join(PROJECT_ROOT, file), "utf8")));
+    expect(importers.sort()).toEqual(["src/application/care-preparation/deterministic-care-summary-renderer.ts"]);
+  });
+
   it("keeps the preview screen on narrow ports: no storage, services, journal or location modules", () => {
     const graph = graphOf(["src/components/jagaon/screens/CareSummaryPreviewScreen.tsx", "src/components/jagaon/care-preparation/PrintPort.ts"]);
     const allowed = new Set([
@@ -426,7 +443,18 @@ describe("Packet 11B Kie server-only boundary", () => {
   });
 
   it("keeps the closed abstention reason out of the route, UI, application service and production audit", () => {
-    const ALLOWED = ["src/domain/ai/ai-task-contracts.ts", "src/domain/ai/ai-test-fixtures.ts", "src/domain/ai/ai-language-shell-contracts.ts", "src/ai/prompts/packet-11-prompts.ts", "src/ai/kie/kie-responses-contracts.ts", "src/ai/prompts/packet-11-shell-prompts.ts", "src/ai/kie/kie-shell-contracts.ts"];
+    const ALLOWED = [
+      "src/domain/ai/ai-task-contracts.ts",
+      "src/domain/ai/ai-test-fixtures.ts",
+      "src/domain/ai/ai-language-shell-contracts.ts",
+      "src/ai/prompts/packet-11-prompts.ts",
+      "src/ai/kie/kie-responses-contracts.ts",
+      "src/ai/prompts/packet-11-shell-prompts.ts",
+      "src/ai/kie/kie-shell-contracts.ts",
+      // Packet 11C B1b (deliberate, narrow): the AI-assisted care projection re-runs the shell gates on a candidate it builds itself from
+      // already-accepted wording, with the schema's required `abstentionReason: null`; it never reads, stores or shows a model's reason.
+      "src/application/care-preparation/ai-care-summary-replacement.ts",
+    ];
     const mentions = all("src").filter((file) => !/\.test\.tsx?$/.test(file) && readFileSync(join(PROJECT_ROOT, file), "utf8").includes("abstentionReason"));
     expect(mentions.filter((file) => !ALLOWED.includes(file) && !file.startsWith("src/ai/evaluation/"))).toEqual([]);
   });
@@ -509,11 +537,18 @@ describe("Packet 11B Kie server-only boundary", () => {
     const builders = all("src").filter((file) => /stream:\s*false/.test(readFileSync(join(PROJECT_ROOT, file), "utf8")));
     expect(builders).toEqual(["src/ai/kie/kie-responses-provider.ts"]);
     expect(readFileSync(join(PROJECT_ROOT, builders[0]!), "utf8")).toMatch(/stream: false,\s*store: false,/);
-    for (const file of ["src/app/api/ai/task/ai-task-handler.ts", "src/ai/evaluation/packet-11-live-kie.test.ts", "src/ai/evaluation/packet-11-live-latency.test.ts"]) {
+    for (const file of ["src/ai/evaluation/packet-11-live-kie.test.ts", "src/ai/evaluation/packet-11-live-latency.test.ts"]) {
       const source = readFileSync(join(PROJECT_ROOT, file), "utf8");
       expect(source, file).toMatch(/createKieResponsesProvider\(/);
       expect(source, file).not.toMatch(/stream:\s*false|"store"|store:/);
     }
+    // Packet 11C B2a, deliberate retarget: the app's one provider route is now POST /api/ai/shell (B-boundary). Its handler builds its
+    // request only through the same shared adapter, as the Direct DeepSeek deepseek-flash shell provider (D2), and never writes a
+    // request field itself. The retired legacy handler (POST /api/ai/task) constructs no provider at all.
+    const shell = readFileSync(join(PROJECT_ROOT, "src/app/api/ai/shell/ai-shell-handler.ts"), "utf8");
+    expect(shell).toMatch(/createDeepSeekShellResponsesProvider\(/);
+    expect(shell).not.toMatch(/stream:\s*false|"store"|store:|createKieResponsesProvider\(|createDeepSeekResponsesProvider\(|createKieShellResponsesProvider\(/);
+    expect(readFileSync(join(PROJECT_ROOT, "src/app/api/ai/task/ai-task-handler.ts"), "utf8")).not.toMatch(/create\w*Provider\(|from\s+["']@\/ai\//);
   });
 
   it("lets only the projector, fallbacks and task service read the approved-meaning registry, never the browser graph", () => {
@@ -521,7 +556,12 @@ describe("Packet 11B Kie server-only boundary", () => {
     // The evaluation harnesses (legacy eval.4 and hybrid eval.6) read only the revision constant; they are unreachable from the route and client graphs.
     // The evaluation-only FULL human-review page renders the EXPLAIN limitation copy with the service's own renderer (confined above).
     expect(importers.sort()).toEqual(["src/ai/evaluation/packet-11-evaluation.ts", "src/ai/evaluation/packet-11-fixtures.ts", "src/ai/evaluation/packet-11-hybrid-evaluation.ts", "src/ai/evaluation/packet-11-hybrid-human-review.ts", "src/application/ai/ai-fallbacks.ts", "src/application/ai/ai-hybrid-task-service.ts", "src/application/ai/ai-task-service.ts", "src/application/ai/detached-payload-projector.ts"]);
-    expect(graphOf(["src/app/page.tsx"])).not.toContain("src/application/ai/ai-meaning-registry.ts");
+    // Packet 11C B2b (D1, deliberate retarget): the history explanation is wired, so the registry now enters the browser graph, only as
+    // part of the exact enumerated hybrid closure (packet-11a-manifest.test.ts). In that graph it is reached only through the hybrid
+    // service, the fallbacks and the projector the planner uses locally; the legacy service and the evaluation importers stay out.
+    const page = graphOf(["src/app/page.tsx"]);
+    expect(page).toContain("src/application/ai/ai-meaning-registry.ts");
+    expect(importers.filter((file) => page.includes(file)).sort()).toEqual(["src/application/ai/ai-fallbacks.ts", "src/application/ai/ai-hybrid-task-service.ts", "src/application/ai/detached-payload-projector.ts"]);
     const source = readFileSync(join(PROJECT_ROOT, "src/application/ai/ai-meaning-registry.ts"), "utf8");
     expect(source).not.toMatch(/process\.env|KIE_API_KEY|fetch\s*\(|https?:\/\/|@\/ai\/|evaluation/);
   });
@@ -529,8 +569,18 @@ describe("Packet 11B Kie server-only boundary", () => {
   it("keeps the client feature graph away from every server AI module", () => {
     const graph = graphOf(["src/app/page.tsx"]);
     expect(graph.filter((file) => file.startsWith("src/ai/") || file.startsWith("src/app/api/"))).toEqual([]);
+    // Packet 11C B2b: the wired browser graph reaches the hybrid service and the browser shell client, never the legacy fact-sending service.
+    expect(graph).toContain("src/application/ai/browser-shell-client.ts");
+    expect(graph).not.toContain("src/application/ai/ai-task-service.ts");
     expect(graphOf(["src/app/api/onemap/search/route.ts"]).filter((file) => file.startsWith("src/ai/"))).toEqual([]);
     // The evaluation boundary (fixtures, evaluator, latency and reference diagnostics) is unreachable from the AI route.
     expect(graphOf(["src/app/api/ai/task/route.ts"]).filter((file) => file.startsWith("src/ai/evaluation/"))).toEqual([]);
+    // Packet 11C B2a: nor from the value-blind shell route, which also never reaches the legacy fact-sending service or projector output path.
+    const shellRoute = graphOf(["src/app/api/ai/shell/route.ts"]);
+    expect(shellRoute.filter((file) => file.startsWith("src/ai/evaluation/"))).toEqual([]);
+    expect(shellRoute).not.toContain("src/application/ai/ai-task-service.ts");
+    expect(shellRoute).not.toContain("src/app/api/ai/task/ai-task-handler.ts");
+    // The retired legacy route reaches no provider adapter, credential reader or AI service at all.
+    expect(graphOf(["src/app/api/ai/task/route.ts"]).filter((file) => file.startsWith("src/ai/") || file.startsWith("src/application/ai/") || file.startsWith("src/domain/ai/"))).toEqual([]);
   });
 });

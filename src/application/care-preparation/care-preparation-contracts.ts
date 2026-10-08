@@ -37,6 +37,12 @@ export type CarePreparationRejection =
   | "SUMMARY_NOT_APPROVED"
   | "SUMMARY_INVALIDATED_FOR_EXPORT"
   | "SUMMARY_CONTENT_HASH_MISMATCH"
+  /** Packet 11C B1a (D3): an unapproved snapshot made with an older template or renderer; prepare it again before approval. */
+  | "SUMMARY_TEMPLATE_SUPERSEDED"
+  /** Packet 11C B1b: an approved snapshot is never replaced (approval binds its exact artifact). */
+  | "SUMMARY_ALREADY_APPROVED"
+  /** Packet 11C B1b: no accepted AI audit, no configured projection, or AI output that does not project onto the current snapshot. */
+  | "SUMMARY_AI_VALIDATION_MISSING"
   | "EXPORT_OUTCOME_INVALID";
 
 export type CarePreparationCommitResult =
@@ -53,6 +59,14 @@ export type CarePreparationCommandPort = {
   approve(input: ExpectedHead & { contentHash: string; commandId?: CommandId }): Promise<CarePreparationCommitResult>;
   invalidate(input: ExpectedHead & { reason: CareSummaryInvalidationReason; commandId?: CommandId }): Promise<CarePreparationCommitResult>;
   supersede(input: ExpectedHead & { replacement: TypedRevisionRef<"CARE_SUMMARY_SNAPSHOT">; commandId?: CommandId }): Promise<CarePreparationCommitResult>;
+  /**
+   * Packet 11C Addendum B, Task B1b: one authoritative transaction that supersedes the current unapproved deterministic snapshot (exact
+   * head and content hash, current template, current sources) and creates its AI-assisted replacement (PREPARED; the preview flow records
+   * PREVIEWED), projected from the validated `DRAFT_CARE_PREPARATION_SUMMARY` composition named by its ACCEPTED AI audit. The composition
+   * is the hybrid service's (`AiComposition`, typed opaque here so the contracts stay free of AI modules) and is never trusted: the
+   * configured projection re-validates it against the snapshot. No approval or export side effect.
+   */
+  replaceWithAiAssistedPreview(input: ExpectedHead & { expectedContentHash: string; composition: unknown; aiInvocationAuditRef: string; validatedAt: Instant; commandId?: CommandId }): Promise<CarePreparationCommitResult>;
   /** Preflight (approval, validity, hash, current sources) then one REQUESTED export record. */
   requestPrintExport(input: ExpectedHead & { approvedContentHash: string; replacesExports?: TypedRevisionRef<"CARE_SUMMARY_EXPORT">[]; commandId?: CommandId }): Promise<CarePreparationCommitResult>;
   /** Exactly one terminal outcome for one requested attempt. */

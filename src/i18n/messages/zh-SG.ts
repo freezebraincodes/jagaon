@@ -818,7 +818,9 @@ export const zhSGMessages: AppMessages = {
   },
   careSummary: {
     title: "预览我的摘要",
-    selectedOnly: "此摘要仅包含你所选择的记录和问题。",
+    // Packet 11C B1a (owner decision D4): 你 → 您 only. Feeds the care-summary.limitation.selected-only asset, so new snapshots carry
+    // it under care-summary-locale.11c.1; a 9c.1 snapshot keeps its stored 你 text byte-identically. Human acceptance pending.
+    selectedOnly: "此摘要仅包含您所选择的记录和问题。",
     scopeHeading: "摘要范围",
     carePlanHeading: "当前记录的护理计划",
     organisationHeading: "护理安排",
@@ -829,7 +831,8 @@ export const zhSGMessages: AppMessages = {
     patientReported: "由使用者自行报告；未经外部核实。",
     missingLimitation: "缺失或未记录的资料可能不会显示在这里。",
     approveAction: "批准这份确切摘要",
-    approvalMeaning: "批准表示你已查看这些内容并同意在本机打印，但并不表示记录已获核实。",
+    // Packet 11C B1a (owner decision D4): 你 → 您 only; preview-screen text (not stored in any snapshot). Human acceptance pending.
+    approvalMeaning: "批准表示您已查看这些内容并同意在本机打印，但并不表示记录已获核实。",
     printAction: "打开打印对话框",
     printOpened: "打印对话框已打开。JagaOn 无法确定资料是否已打印或分享。",
     printUnavailable: "此设备无法使用打印功能。摘要并未发送。",
@@ -848,13 +851,12 @@ export const zhSGMessages: AppMessages = {
     approvedNote: "已批准在此设备上本地打印。",
     printUnknown: "JagaOn 无法确定打印对话框是否已打开。没有发送任何内容。",
     attemptsHeading: "此设备上的打印记录",
-    // Packet 11C Task 8 (care-summary-notices.11c.1). `questions` and `draft`: verbatim copy of the approved care-draft notices
-    // (AI_LANGUAGE_COPY.careDraftNotices, ai-language-copy.11b.10); pinned by
-    // src/components/jagaon/screens/CareSummaryPreviewScreen.test.tsx; do not edit independently.
+    // Packet 11C Task 8 (care-summary-notices.11c.1); B1a: `label` heads the printed notice section (care-summary-locale.11c.1).
+    // The notice text is stored in the snapshot from AI_LANGUAGE_COPY.careDraftNotices, not mirrored here. Human acceptance pending.
     draftNotices: {
       label: "关于此草稿的说明",
-      questions: "问题按您的原话显示，应用不会照此执行。",
-      draft: "应用不会把此草稿发送给护理团队，也不会确认医护人员已审阅。",
     },
+    // Packet 11C B1a (D3), new wording (您), human acceptance pending.
+    templateSuperseded: "此摘要由较早版本的 JagaOn 制作。请您重新制作摘要，然后再批准。",
   },
 };

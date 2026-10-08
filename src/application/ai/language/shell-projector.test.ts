@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { PACKET_11_FIXTURES } from "@/ai/evaluation/packet-11-fixtures";
-import { asHybridRequest, plannedFixture } from "@/ai/evaluation/packet-11-hybrid-test-support";
+import { PACKET_11_ADVERSARIAL_SHELLS, PACKET_11_HYBRID_FIXTURES } from "@/ai/evaluation/packet-11-hybrid-fixtures";
+import { asHybridRequest, plannedFixture, shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
+import { remoteFields, remoteTokenInventory, type AiTaskRequest } from "@/domain/ai";
+import { sourceBackedRequest } from "@/domain/ai/ai-test-fixtures";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "../ai-hybrid-runtime-bundles";
 import { AI_LANGUAGE_COPY } from "./ai-language-copy";
+import { defaultShells } from "./default-shells";
 import { planSlots } from "./slot-planner";
-import { approvedSectionHeading, GLOSSES_BY_KIND, isApprovedShellTaskRequest, projectShellTaskRequest } from "./shell-projector";
+import { approvedSectionHeading, GLOSSES_BY_KIND, isApprovedShellTaskRequest, projectShellTaskRequest, shellPlanView } from "./shell-projector";
+import { validateShellCandidate } from "./shell-validator";
 
 function numbersOutsideBudgets(value: unknown, key = ""): string[] {
   if (typeof value === "number") return key === "maxCodePoints" || key === "maxSentences" ? [] : [`${key}=${value}`];
@@ -127,5 +132,66 @@ describe("value-blind shell projector", () => {
   it("approvedSectionHeading returns null for a section with no heading asset", () => {
     expect(approvedSectionHeading("en-SG", "PATTERNS")).toBeNull();
     expect(approvedSectionHeading("en-SG", "MEASUREMENTS")).toEqual(expect.any(String));
+  });
+});
+
+/**
+ * Packet 11C Addendum B, Task B2a: the server shell route re-validates a returned shell with validateShellCandidate over a plan view it
+ * rebuilds from the approved value-blind request alone (no facts, atoms, references or local fields). The view must decide every
+ * candidate exactly as the browser's own plan does.
+ */
+describe("shellPlanView (the server's value-blind plan view)", () => {
+  const eligible = PACKET_11_HYBRID_FIXTURES.flatMap((fixture) => {
+    const planned = planSlots(fixture.request, AI_HYBRID_RUNTIME_BUNDLES[fixture.taskType as "EXPLAIN_PATTERN"]);
+    return planned.kind === "PLANNED" && planned.plan.remote.eligible === true ? [{ id: fixture.id, plan: planned.plan }] : [];
+  });
+  const sourceBacked = planSlots(sourceBackedRequest() as AiTaskRequest, AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN);
+
+  it("covers the remote-eligible fixtures and the source-backed request", () => {
+    expect(eligible.length).toBeGreaterThan(20);
+    expect(sourceBacked).toMatchObject({ kind: "PLANNED", plan: { remote: { eligible: true } } });
+  });
+
+  it("carries only what the approved request carries: the remote fields, their slots and the sections; no reference", () => {
+    for (const { id, plan } of eligible) {
+      const view = shellPlanView(projectShellTaskRequest(plan));
+      expect(view.fields, id).toEqual(remoteFields(plan));
+      expect(view.fields.every((field) => field.owner === "REMOTE"), id).toBe(true);
+      expect(remoteTokenInventory(view), id).toEqual(remoteTokenInventory(plan));
+      expect(view.sections.map(({ sectionSlot, heading, introPath, bulletPaths }) => ({ sectionSlot, heading, introPath, bulletPaths })), id).toEqual(plan.sections.map(({ sectionSlot, heading, introPath, bulletPaths }) => ({ sectionSlot, heading, introPath, bulletPaths })));
+      expect(JSON.stringify(view), id).not.toMatch(/fact-|claim-|section-\d|option-|record-|limitation-/);
+      expect(view.slots.every((slot) => slot.boundRefs.length === 0), id).toBe(true);
+      expect({ planVersion: view.planVersion, taskType: view.taskType, locale: view.locale, runtimeBundleKey: view.runtimeBundleKey, claimFamily: view.claimFamily, remote: view.remote }, id).toEqual({ planVersion: plan.planVersion, taskType: plan.taskType, locale: plan.locale, runtimeBundleKey: plan.runtimeBundleKey, claimFamily: plan.claimFamily, remote: { eligible: true } });
+    }
+  });
+
+  it("decides the default shells of every eligible plan exactly as the plan does", () => {
+    for (const { id, plan } of [...eligible, ...(sourceBacked.kind === "PLANNED" ? [{ id: "source-backed", plan: sourceBacked.plan }] : [])]) {
+      const bundle = AI_HYBRID_RUNTIME_BUNDLES[plan.taskType];
+      const candidate = shellCandidate(plan, defaultShells(plan));
+      const local = validateShellCandidate(plan, bundle, candidate);
+      expect(local.kind, id).toBe("VALID");
+      expect(validateShellCandidate(shellPlanView(projectShellTaskRequest(plan)), bundle, candidate), id).toEqual(local);
+    }
+  });
+
+  it("decides every adversarial shell exactly as the plan does (gate, reason, repairability and every evaluation detail)", () => {
+    for (const entry of PACKET_11_ADVERSARIAL_SHELLS) {
+      const fixture = PACKET_11_HYBRID_FIXTURES.find((item) => item.id === entry.baseFixtureId)!;
+      const planned = planSlots(fixture.request, AI_HYBRID_RUNTIME_BUNDLES[fixture.taskType as "EXPLAIN_PATTERN"]);
+      if (planned.kind !== "PLANNED") throw new Error(entry.id);
+      const base = shellCandidate(planned.plan, defaultShells(planned.plan)) as any;
+      const candidate = entry.raw === "EXTRA_BRACE" ? `${JSON.stringify(base)}}` : { ...base, ...(entry.envelope ?? {}), shells: { ...base.shells, ...entry.override } };
+      if (entry.introOverride) candidate.shells.sections[entry.introOverride.sectionIndex].intro = entry.introOverride.text;
+      if (entry.bulletOverride) candidate.shells.sections[entry.bulletOverride.sectionIndex].bullets[entry.bulletOverride.bulletIndex] = entry.bulletOverride.text;
+      const bundle = AI_HYBRID_RUNTIME_BUNDLES[planned.plan.taskType];
+      expect(validateShellCandidate(shellPlanView(projectShellTaskRequest(planned.plan)), bundle, candidate), entry.id).toEqual(validateShellCandidate(planned.plan, bundle, candidate));
+    }
+  });
+
+  it("refuses a request that is not approved (never builds a view from unapproved input)", () => {
+    const request = structuredClone(projectShellTaskRequest(plannedFixture("p11.explain-pattern.en-sg.ordinary").plan)) as any;
+    request.slots[0].gloss = "the value 6.2 mmol/L";
+    expect(() => shellPlanView(request)).toThrow("SHELL_REQUEST_NOT_APPROVED");
   });
 });

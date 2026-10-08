@@ -3,6 +3,10 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import * as activation from "@/application/ai/ai-activation-manifest";
 import * as lifecycle from "@/application/ai/ai-audit-lifecycle";
+import * as callSupport from "@/application/ai/ai-call-support";
+import * as shellRouteContract from "@/application/ai/ai-shell-route-contract";
+import * as browserShellClient from "@/application/ai/browser-shell-client";
+import * as browserHistoryExplainer from "@/application/ai/browser-history-explainer";
 import * as meaningRules from "@/application/ai/ai-meaning-rules";
 import * as persistence from "@/application/ai/ai-audit-persistence";
 import * as fallbacks from "@/application/ai/ai-fallbacks";
@@ -60,6 +64,56 @@ const AI_SOURCES = AI_FILES.filter((file) => !/\.test\.ts$/.test(file) && !file.
 const CLIENT_GRAPH = importGraph(["src/app/page.tsx"]);
 const RUNTIME_GRAPH = importGraph(["src/app/page.tsx", ...walk("src/app/api").filter((file) => file.endsWith("route.ts"))]);
 const exportsOf = (module: object) => Object.keys(module).sort();
+
+/**
+ * Packet 11C Addendum B, Task B2b (D1, owner approval 2026-10-08): the EXACT AI modules of the browser graph (`src/app/page.tsx`), which
+ * replaces the Packet 11A three-file pin. It is the transitive closure the app reaches once the history explanation is wired: the local
+ * audit row and its Packet 10 reconciliation (11A), the runtime's append-only audit port, the history explainer wiring, the
+ * pattern-explanation use case and its request builder, the hybrid task service with its shared call helpers, the browser shell client
+ * and the shared route contract, the activation manifest, runtime bundles, fallbacks, the approved-meaning registry and rules, the output
+ * validator's locale checks, the detached projector (used locally by the slot planner only), the language modules and `domain/ai`.
+ * A new entry is a deliberate change; never a broad relaxation. Still excluded and asserted below: `src/ai/**`, `src/app/api/**`, the
+ * legacy `ai-task-service`, any client of `/api/ai/task`, credential and environment readers and provider adapters. The same list is
+ * mirrored in packet-9c-manifest.test.ts.
+ */
+const CLIENT_AI_FILES = [
+  "src/application/ai/ai-activation-manifest.ts",
+  "src/application/ai/ai-audit-lifecycle.ts",
+  "src/application/ai/ai-audit-persistence.ts",
+  "src/application/ai/ai-call-support.ts",
+  "src/application/ai/ai-fallbacks.ts",
+  "src/application/ai/ai-hybrid-runtime-bundles.ts",
+  "src/application/ai/ai-hybrid-task-service.ts",
+  "src/application/ai/ai-meaning-registry.ts",
+  "src/application/ai/ai-meaning-rules.ts",
+  "src/application/ai/ai-output-validator.ts",
+  "src/application/ai/ai-provider-port.ts",
+  "src/application/ai/ai-runtime-bundles.ts",
+  "src/application/ai/ai-shell-route-contract.ts",
+  "src/application/ai/browser-history-explainer.ts",
+  "src/application/ai/browser-shell-client.ts",
+  "src/application/ai/detached-payload-projector.ts",
+  "src/application/ai/explain-pattern-request.ts",
+  "src/application/ai/explain-pattern.ts",
+  "src/application/ai/language/ai-composition.ts",
+  "src/application/ai/language/ai-language-copy.ts",
+  "src/application/ai/language/assembler.ts",
+  "src/application/ai/language/atom-renderer.ts",
+  "src/application/ai/language/care-draft-notices.ts",
+  "src/application/ai/language/default-shells.ts",
+  "src/application/ai/language/deterministic-composition.ts",
+  "src/application/ai/language/observation-composer.ts",
+  "src/application/ai/language/shell-lexicon.ts",
+  "src/application/ai/language/shell-projector.ts",
+  "src/application/ai/language/shell-validator.ts",
+  "src/application/ai/language/slot-planner.ts",
+  "src/domain/ai/ai-invocation-audit.ts",
+  "src/domain/ai/ai-language-shell-contracts.ts",
+  "src/domain/ai/ai-task-contracts.ts",
+  "src/domain/ai/index.ts",
+];
+const BROWSER_SHELL_CLIENT = "src/application/ai/browser-shell-client.ts";
+const DETACHED_PROJECTOR = "src/application/ai/detached-payload-projector.ts";
 
 describe("Packet 11A scope", () => {
   it("adds exactly the planned AI files", () => {
@@ -130,6 +184,17 @@ describe("Packet 11A scope", () => {
         // Presentation correction P3 (2026-10-08): the fixed bilingual care-draft notices.
         "src/application/ai/language/care-draft-notices.test.ts",
         "src/application/ai/language/care-draft-notices.ts",
+        // Packet 11C Addendum B, Task B2a: the provider-call helpers shared by the legacy and hybrid services (moved out of
+        // ai-task-service.ts, no behaviour change, so the hybrid service no longer imports the legacy fact-sending service), and the
+        // value-blind POST /api/ai/shell response contract (browser-safe: shared by the server route and the B2b browser client).
+        "src/application/ai/ai-call-support.ts",
+        "src/application/ai/ai-shell-route-contract.ts",
+        // Packet 11C Addendum B, Task B2b: the browser client of POST /api/ai/shell (interim fail-closed disclosure) and the browser
+        // wiring of the history explanation (one hybrid service, one pattern explainer).
+        "src/application/ai/browser-shell-client.test.ts",
+        "src/application/ai/browser-shell-client.ts",
+        "src/application/ai/browser-history-explainer.test.ts",
+        "src/application/ai/browser-history-explainer.ts",
         "src/domain/ai/ai-language-shell-contracts.test.ts",
         "src/domain/ai/ai-language-shell-contracts.ts",
       ].sort(),
@@ -145,9 +210,16 @@ describe("Packet 11A scope", () => {
     expect(exportsOf(validator)).toEqual(["OUTPUT_CODE_POINTS_PER_TOKEN", "localeTextAccepted", "spelledCounts", "validateAiTaskOutput"]);
     // Packet 11B corrective pass: shared immutable meaning rules for the validator and the evaluation-only diagnostic.
     expect(exportsOf(meaningRules)).toEqual(["MEANING_RULES", "generatedTextFields", "meaningMatches", "meaningScanText", "withoutQuotations"]);
-    expect(exportsOf(port)).toEqual(["PROVIDER_FAILURE_REASONS"]);
-    // Packet 11B.6: hybrid language layer (the hybrid service reuses these helpers).
-    expect(exportsOf(service)).toEqual(["NO_USAGE", "addUsage", "buildAuditRow", "callOnce", "createAiTaskService"]);
+    // Packet 11C B2a (D6): the closed reasons of the typed structural rejection a server shell gate may return.
+    expect(exportsOf(port)).toEqual(["PROVIDER_FAILURE_REASONS", "SHELL_STRUCTURAL_REJECTION_REASONS"]);
+    // Packet 11B.6 had the hybrid service reuse these helpers from the legacy service. Packet 11C B2a (deliberate retarget) moved them,
+    // unchanged, to the shared ai-call-support module, so the legacy service exports only its factory.
+    expect(exportsOf(service)).toEqual(["createAiTaskService"]);
+    expect(exportsOf(callSupport)).toEqual(["NO_USAGE", "addUsage", "buildAuditRow", "callOnce"]);
+    expect(exportsOf(shellRouteContract)).toEqual(["AI_SHELL_MAX_BODY_BYTES", "AI_SHELL_ROUTE_PATH", "aiShellRouteResponseSchema"]);
+    // Packet 11C B2b: no production module exports a disclosure that accepts remote use (the interim rule; B3 adds the real one).
+    expect(exportsOf(browserShellClient)).toEqual(["BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createBrowserShellClient"]);
+    expect(exportsOf(browserHistoryExplainer)).toEqual(["createBrowserHistoryExplainer"]);
     expect(exportsOf(persistence)).toEqual(["createAiInvocationAuditRepository"]);
     expect(exportsOf(lifecycle)).toEqual(["AI_AUDIT_REFERENCE_KEYS", "aiAuditReferencesIn", "aiAuditsAffectedByDeletion", "validateAiAuditReferences"]);
     for (const name of ["AI_TASK_TYPES", "aiTaskRequestSchema", "aiTaskOutputSchema", "providerTaskRequestSchema", "providerTaskOutputSchema", "AI_REASON_CODES", "aiInvocationAuditRowSchema", "AI_INVOCATION_OUTCOME_CODES"]) {
@@ -177,7 +249,11 @@ describe("Packet 11A scope", () => {
     for (const file of AI_SOURCES) {
       const source = strip(readFileSync(join(ROOT, file), "utf8"));
       // "Kie.ai" may appear only as an untranslated product name (matrix Section 1), never as an endpoint.
-      expect(source, file).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|https?:\/\/|process\.env|KIE_API_KEY|NEXT_PUBLIC_|api\.kie/i);
+      expect(source, file).not.toMatch(/XMLHttpRequest|WebSocket|EventSource|sendBeacon|https?:\/\/|process\.env|KIE_API_KEY|NEXT_PUBLIC_|api\.kie/i);
+      // Packet 11C B2b (Addendum B, D1; deliberate, exactly one file): the browser shell client is the only AI module with a network call,
+      // its single same-origin POST to the relative path /api/ai/shell. Every other AI module still has none.
+      if (file === BROWSER_SHELL_CLIENT) expect(source.match(/\bfetch\s*\(/g), file).toHaveLength(1);
+      else expect(source, file).not.toMatch(/\bfetch\s*\(/i);
     }
     // Packet 11B: only the server-only Kie modules and the AI route may name the credential.
     for (const file of walk("src").filter((path) => !/\.test\.tsx?$/.test(path))) {
@@ -185,16 +261,31 @@ describe("Packet 11A scope", () => {
       expect(source, file).not.toMatch(/NEXT_PUBLIC_KIE/);
       if (!file.startsWith("src/ai/kie/") && !file.startsWith("src/app/api/ai/")) expect(source, file).not.toMatch(/KIE_API_KEY/);
     }
-    expect(walk("src/app/api").filter((file) => /(^|\/)ai(\/|-)/i.test(file))).toEqual(["src/app/api/ai/task/ai-task-handler.ts", "src/app/api/ai/task/route.test.ts", "src/app/api/ai/task/route.ts"]);
+    // Packet 11C B2a (deliberate retarget): the value-blind shell route is added beside the retired legacy task route.
+    expect(walk("src/app/api").filter((file) => /(^|\/)ai(\/|-)/i.test(file))).toEqual([
+      "src/app/api/ai/shell/ai-shell-handler.ts",
+      "src/app/api/ai/shell/route.test.ts",
+      "src/app/api/ai/shell/route.ts",
+      "src/app/api/ai/task/ai-task-handler.ts",
+      "src/app/api/ai/task/route.test.ts",
+      "src/app/api/ai/task/route.ts",
+    ]);
   });
 
   it("adds no AI route, screen or control and keeps provider modules out of the runtime", () => {
     expect([...ALL_SCREENS].filter((screen) => /AI_|ASSIST/.test(screen))).toEqual([]);
     expect(walk("src/components").filter((file) => /(^|\/)ai(\/|-)/i.test(file))).toEqual([]);
-    // Only the local audit row and its Packet 10 reconciliation enter the client runtime.
-    expect(CLIENT_GRAPH.filter((file) => /(^|\/)ai(\/|-)/.test(file))).toEqual(["src/application/ai/ai-audit-lifecycle.ts", "src/domain/ai/ai-invocation-audit.ts", "src/domain/ai/ai-task-contracts.ts"]);
-    // Packet 11B: the Kie adapter is reachable only from its own server route.
-    expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/ai/") && !importGraph(["src/app/api/ai/task/route.ts"]).includes(file))).toEqual([]);
+    // Packet 11A: only the local audit row and its Packet 10 reconciliation entered the client runtime. Packet 11C B2b (D1, deliberate
+    // retarget): the client graph's AI modules are now exactly the enumerated B2b closure, and nothing under src/ai or src/app/api.
+    expect(CLIENT_GRAPH.filter((file) => /(^|\/)ai(\/|-)/.test(file))).toEqual(CLIENT_AI_FILES);
+    expect(CLIENT_GRAPH.filter((file) => /^src\/(application|domain)\/ai\//.test(file))).toEqual(CLIENT_AI_FILES);
+    // Packet 11B: the provider adapters are reachable only from the server AI route. Packet 11C B2a (deliberate retarget): that route is
+    // now the value-blind POST /api/ai/shell; the retired POST /api/ai/task reaches no provider adapter, AI service or credential reader.
+    expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/ai/") && !importGraph(["src/app/api/ai/shell/route.ts"]).includes(file))).toEqual([]);
+    expect(importGraph(["src/app/api/ai/task/route.ts"]).filter((file) => /^src\/(ai|application\/ai|domain\/ai)\//.test(file))).toEqual([]);
+    // The shared-helper extraction keeps the legacy fact-sending service out of the hybrid service's graph and the shell route's graph.
+    expect(importGraph(["src/application/ai/ai-hybrid-task-service.ts"])).not.toContain("src/application/ai/ai-task-service.ts");
+    expect(importGraph(["src/app/api/ai/shell/route.ts"])).not.toContain("src/application/ai/ai-task-service.ts");
   });
 
   it("imports no Safety, Packet 12 or deferred Packet 7B module", () => {
@@ -229,6 +320,10 @@ const EXISTING_NETWORK_MODULES = [
   "src/ai/kie/kie-model-catalogue.ts",
   "src/ai/kie/kie-responses-provider.ts",
   "src/app/api/onemap/search/onemap-search-handler.ts",
+  // Packet 11C Addendum B, Task B2b (owner-approved design, D1): the browser shell client's single same-origin POST to /api/ai/shell.
+  // It is the one deliberate addition; it sends only after the request passed the client-side checks and an accepted disclosure, and
+  // the interim disclosure never accepts, so the shipped app never reaches it.
+  "src/application/ai/browser-shell-client.ts",
   "src/application/nearby-food/browser-nearby-food.ts",
 ];
 const ENVIRONMENT_READ = /process\.env|import\.meta\.env/;
@@ -253,11 +348,12 @@ describe("Packet 11C Checkpoint 2 guards", () => {
 
   it("keeps every credential and environment read out of the browser graph", () => {
     // Only the two server routes read the environment, and only server-only modules name a provider key.
-    expect(SOURCES.filter((file) => ENVIRONMENT_READ.test(strip(readFileSync(join(ROOT, file), "utf8"))))).toEqual(["src/app/api/ai/task/route.ts", "src/app/api/onemap/search/route.ts"]);
+    // Packet 11C B2a (deliberate retarget): the environment-reading AI route is now the value-blind shell route; the retired legacy task
+    // route reads no environment and names no key. The shell route reads its credential only through readDeepSeekToken (catalogue).
+    expect(SOURCES.filter((file) => ENVIRONMENT_READ.test(strip(readFileSync(join(ROOT, file), "utf8"))))).toEqual(["src/app/api/ai/shell/route.ts", "src/app/api/onemap/search/route.ts"]);
     expect(SOURCES.filter((file) => PROVIDER_KEY_NAME.test(readFileSync(join(ROOT, file), "utf8")))).toEqual([
       "src/ai/deepseek/deepseek-catalogue.ts",
       "src/ai/kie/kie-route-config.ts",
-      "src/app/api/ai/task/route.ts",
       "src/app/api/onemap/search/route.ts",
     ]);
     for (const file of CLIENT_GRAPH) {
@@ -266,16 +362,53 @@ describe("Packet 11C Checkpoint 2 guards", () => {
     expect(CLIENT_GRAPH.filter((file) => file.startsWith("src/ai/") || file.startsWith("src/app/api/"))).toEqual([]);
   });
 
-  it("puts the Checkpoint 2 screens in the browser graph without the AI use case, the hybrid service or the care-draft renderer", () => {
+  /**
+   * Checkpoint 2 kept the AI use case, the hybrid service and the care-draft renderer out of the browser graph. Packet 11C B2b (D1,
+   * deliberate retarget): the history explanation is now wired, so they are in it as part of the exact enumerated closure above; the
+   * legacy fact-sending service stays out.
+   */
+  it("puts the Checkpoint 2 screens and the wired history explanation in the browser graph, never the legacy fact-sending service", () => {
     expect(CLIENT_GRAPH).toEqual(expect.arrayContaining(["src/components/jagaon/history/PatternExplanationPanel.tsx", "src/components/jagaon/screens/CareSummaryPreviewScreen.tsx", "src/components/jagaon/screens/RecordedHistoryScreen.tsx"]));
-    for (const file of [
-      "src/application/ai/explain-pattern.ts",
-      "src/application/ai/explain-pattern-request.ts",
-      "src/application/ai/ai-hybrid-task-service.ts",
-      "src/application/ai/ai-task-service.ts",
-      "src/application/ai/language/care-draft-notices.ts",
-    ]) {
-      expect(CLIENT_GRAPH, file).not.toContain(file);
+    expect(CLIENT_GRAPH).toEqual(expect.arrayContaining(["src/application/ai/browser-history-explainer.ts", "src/application/ai/explain-pattern.ts", "src/application/ai/explain-pattern-request.ts", "src/application/ai/ai-hybrid-task-service.ts", "src/application/ai/browser-shell-client.ts"]));
+    expect(CLIENT_GRAPH).not.toContain("src/application/ai/ai-task-service.ts");
+    // The wiring enters through the app shell only: the history screen and the panel import no AI module themselves.
+    for (const file of ["src/components/jagaon/screens/RecordedHistoryScreen.tsx", "src/components/jagaon/history/PatternExplanationPanel.tsx"]) {
+      expect([...readFileSync(join(ROOT, file), "utf8").matchAll(IMPORT)].map((match) => match[1] ?? match[2]!).filter((specifier) => /\/ai\//.test(specifier)), file).toEqual([]);
     }
+  });
+});
+
+/**
+ * Packet 11C Addendum B, Task B2b (D1 and the B-boundary): what the browser graph may and may not do with its AI modules.
+ */
+describe("Packet 11C B2b browser boundary", () => {
+  const source = (file: string) => readFileSync(join(ROOT, file), "utf8");
+  const importsOf = (file: string) => [...source(file).matchAll(IMPORT)].map((match) => match[1] ?? match[2]!);
+
+  it("keeps server-only and legacy modules out: no src/ai, src/app/api, legacy service, legacy route client, credential or environment reader", () => {
+    expect(CLIENT_GRAPH.filter((file) => file.startsWith("src/ai/") || file.startsWith("src/app/api/"))).toEqual([]);
+    expect(CLIENT_GRAPH).not.toContain("src/application/ai/ai-task-service.ts");
+    for (const file of CLIENT_GRAPH) {
+      expect(strip(source(file)), file).not.toMatch(/\/api\/ai\/task|createAiTaskService|readKieToken|readDeepSeekToken|create\w*ResponsesProvider|process\.env|import\.meta\.env/);
+      expect(importsOf(file).filter((specifier) => specifier.startsWith("@/ai/") || specifier.startsWith("@/app/") || /ai-task-service$/.test(specifier)), file).toEqual([]);
+    }
+  });
+
+  it("6A follow-up: no browser module sends projectProviderTaskPayload output; only the planner and the output validator import the projector, and none of them sends", () => {
+    const importers = CLIENT_GRAPH.filter((file) => file !== DETACHED_PROJECTOR && importsOf(file).some((specifier) => /detached-payload-projector$/.test(specifier)));
+    expect(importers).toEqual(["src/application/ai/ai-output-validator.ts", "src/application/ai/language/slot-planner.ts"]);
+    const mentions = CLIENT_GRAPH.filter((file) => file !== DETACHED_PROJECTOR && /projectProviderTaskPayload/.test(strip(source(file))));
+    expect(mentions).toEqual(importers);
+    // Neither the projector nor any module that imports it is a network call site.
+    for (const file of [DETACHED_PROJECTOR, ...importers]) expect(strip(source(file)), file).not.toMatch(NETWORK_CALL_SITE);
+    // The only AI network call site in the browser graph is the shell client. It imports neither the projector nor any of its importers,
+    // and it sends exactly the strictly parsed value-blind ShellTaskRequest it was given, to the relative shell route path.
+    expect(CLIENT_AI_FILES.filter((file) => NETWORK_CALL_SITE.test(strip(source(file))))).toEqual([BROWSER_SHELL_CLIENT]);
+    const client = source(BROWSER_SHELL_CLIENT);
+    expect(importsOf(BROWSER_SHELL_CLIENT).filter((specifier) => /detached-payload-projector|slot-planner|ai-output-validator/.test(specifier))).toEqual([]);
+    expect(client).not.toMatch(/projectProviderTaskPayload|ProviderTaskRequest\b/);
+    expect(client).toMatch(/shellTaskRequestSchema\.safeParse\(input\)/);
+    expect(client).toMatch(/const body = JSON\.stringify\(parsed\.data\);/);
+    expect(client).toMatch(/fetcher\(AI_SHELL_ROUTE_PATH, \{ method: "POST", headers: \{ "content-type": "application\/json" \}, body, cache: "no-store", redirect: "error", signal \}\)/);
   });
 });
