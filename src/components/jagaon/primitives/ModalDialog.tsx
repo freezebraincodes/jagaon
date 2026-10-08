@@ -13,6 +13,8 @@ type ModalDialogProps = {
   actions: ReactNode;
   /** Optional element to receive focus first; defaults to the first focusable control. */
   initialFocusSelector?: string;
+  /** Optional extra class on the dialog element, for styles scoped to one dialog (Packet 11C B3). */
+  className?: string;
 };
 
 const FOCUSABLE = "button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])";
@@ -23,7 +25,7 @@ const FOCUSABLE = "button:not([disabled]), [href], input:not([disabled]), textar
  * focus returns to the control that opened it. If that control is gone, focus
  * moves to the screen heading instead of being lost.
  */
-export function ModalDialog({ title, description, children, onClose, actions, initialFocusSelector }: ModalDialogProps) {
+export function ModalDialog({ title, description, children, onClose, actions, initialFocusSelector, className }: ModalDialogProps) {
   const id = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -83,7 +85,7 @@ export function ModalDialog({ title, description, children, onClose, actions, in
     <div className="dialog-backdrop">
       <div
         ref={dialogRef}
-        className="alert-dialog modal-dialog"
+        className={className ? `alert-dialog modal-dialog ${className}` : "alert-dialog modal-dialog"}
         role="dialog"
         aria-modal="true"
         aria-labelledby={`${id}-title`}

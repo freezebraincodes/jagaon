@@ -269,10 +269,15 @@ describe("Packet 9 permanent-deletion boundary (Corrective Pass B)", () => {
     ]);
     expect(RUNTIME_GRAPH.filter((file) => /^src\/(application|domain)\/ai\//.test(file))).toEqual([...packet11cBrowserAi]);
     expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/ai/"))).toEqual([]);
+    // Packet 11C Addendum B, Task B3 (deliberate retarget): the shared AI disclosure dialog, an AI-free presentation component (no AI
+    // module in its own graph; pinned in packet-11a-manifest.test.ts). It is the only AI-path component.
+    const packet11cAiComponents = new Set(["src/components/jagaon/ai/AiDisclosureDialog.tsx"]);
+    expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/components/") && /(^|\/)ai\//.test(file))).toEqual([...packet11cAiComponents]);
     const forbidden = RUNTIME_GRAPH.filter(
       (file) =>
         !packet10.test(file) &&
         !packet11cBrowserAi.has(file) &&
+        !packet11cAiComponents.has(file) &&
         /backup|restore|import-export|data-export|packet-?1[0-2]|(^|\/)ai\/|ai-assist|routine-shift|recurring-barrier|prescribed-timing|barrier-learning/i.test(file),
     );
     expect(forbidden, forbidden.join("\n")).toEqual([]);

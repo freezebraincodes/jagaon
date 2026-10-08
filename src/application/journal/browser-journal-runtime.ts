@@ -55,6 +55,7 @@ import type { CarePreparationCommandPort, CarePreparationQueryPort } from "@/app
 import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
 import { createCarePreparationQuery } from "@/application/care-preparation/care-preparation-query";
 import { createCareSummaryInvalidation } from "@/application/care-preparation/care-summary-invalidation";
+import { projectValidatedAiCareSummary } from "@/application/care-preparation/ai-care-summary-replacement";
 import { createAiInvocationAuditRepository } from "@/application/ai/ai-audit-persistence";
 import type { AiInvocationAuditPort } from "@/application/ai/ai-provider-port";
 import type {
@@ -250,7 +251,9 @@ export async function createBrowserJournalRuntime(
     recordActivity: afterCommit(journalCommands.recordActivity),
   });
 
-  const carePreparationService = createCarePreparationService(database, { now, ids });
+  // Packet 11C B4b: the AI-assisted replacement's projection is exactly `projectValidatedAiCareSummary` (pinned in the runtime test). It
+  // re-plans and re-validates a composition against the stored snapshot; it never reaches a provider and composes nothing itself.
+  const carePreparationService = createCarePreparationService(database, { now, ids, projectAiCareSummary: projectValidatedAiCareSummary });
   const carePreparationQuery = createCarePreparationQuery(database);
   const careSummaryInvalidation = createCareSummaryInvalidation(database, { now, newCommandId: createCommandId, leaseToken, instanceId: "browser", service: carePreparationService });
 
@@ -425,8 +428,9 @@ export async function createBrowserJournalRuntime(
         approve: carePreparationService.approve,
         invalidate: carePreparationService.invalidate,
         supersede: carePreparationService.supersede,
-        // Packet 11C B1b: the port's AI-assisted replacement. This runtime's service has no AI projection configured (B4b wires one),
-        // so it refuses every request (SUMMARY_AI_VALIDATION_MISSING); nothing here imports an AI module or reaches a provider.
+        // Packet 11C B1b/B4b: the port's AI-assisted replacement, with the projection wired above. It replaces only the current
+        // unapproved deterministic preview from an ACCEPTED local AI audit row and a composition that re-validates against it; with the
+        // shipped manifest no such row can exist, so it never replaces. Nothing here reaches a provider.
         replaceWithAiAssistedPreview: carePreparationService.replaceWithAiAssistedPreview,
         requestPrintExport: carePreparationService.requestPrintExport,
         completePrintExport: carePreparationService.completePrintExport,

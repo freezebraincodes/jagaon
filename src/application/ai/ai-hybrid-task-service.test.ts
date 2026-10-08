@@ -350,3 +350,147 @@ describe("usage carried by a FAILED result", () => {
     expect(run.rows[0]!.measurements).toMatchObject({ inputTokens: null, outputTokens: null, costMicroUsd: null });
   });
 });
+
+/**
+ * Packet 11C Addendum B, Task B3: a provider that carries a remote-use disclosure (the browser shell client) has it decided by the
+ * service BEFORE the first attempt and before any timer: after the activation, private, offline, provider, eligibility, cancellation and
+ * projection checks, once per request (never again on the repair). Anything but ACCEPTED ends the request deterministically with nothing
+ * sent, and the audit row says so: no attempt, no provider model, no source revision, no usage.
+ */
+describe("remote-use disclosure decided before the first attempt (Packet 11C B3)", () => {
+  type Decide = NonNullable<AiShellProviderPort["remoteUse"]>["decide"];
+  function gated(results: Array<ProviderInvocationResult | Promise<ProviderInvocationResult>>, decide: Decide, overrides: Record<string, unknown> = {}) {
+    const calls: ShellTaskRequest[] = [];
+    const provider: AiShellProviderPort = {
+      providerModel: { providerKey: "test", modelSnapshot: "test-model" },
+      remoteUse: { decide },
+      invoke: async (input) => {
+        calls.push(input);
+        return results.shift()!;
+      },
+    };
+    const run = harness([], { provider, ...overrides });
+    return { ...run, calls, provider };
+  }
+  const NOTHING_SENT = { providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], measurements: { inputTokens: null, outputTokens: null, costMicroUsd: null } };
+
+  it.each([
+    ["NOT_ACCEPTED", async () => "NOT_ACCEPTED" as const],
+    ["a throw", async () => Promise.reject(new Error("boom"))],
+    ["a synchronous throw", () => {
+      throw new Error("boom");
+    }],
+    ["an unknown answer", async () => "accepted" as never],
+  ])("%s: the deterministic composition, no provider call, and an audit row that records nothing sent", async (_label, decide) => {
+    const run = gated([completed(VALID)], decide as Decide);
+    const result = await run.service.execute(EN.request);
+    expect(result).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "REMOTE_NOT_ACCEPTED", reason: "MISSING_CONFIGURATION" });
+    expect(run.calls).toHaveLength(0);
+    expectOneValidRow(run.rows, "MISSING_CONFIGURATION");
+    expect(run.rows[0]).toMatchObject(NOTHING_SENT);
+    // The same atoms as the AI path: a not-accepted request is the ordinary deterministic composition.
+    const ai = await harness([completed(VALID)]).service.execute(EN.request);
+    expect(atomMultiset((result as any).composition)).toEqual(atomMultiset((ai as any).composition));
+  });
+
+  it("Packet 11C B4a: DECLINED (the patient's explicit Cancel) is the same deterministic outcome, audited as REQUEST_CANCELLED with nothing sent", async () => {
+    const run = gated([completed(VALID)], async () => "DECLINED");
+    const result = await run.service.execute(EN.request);
+    expect(result).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "REMOTE_NOT_ACCEPTED", reason: "REQUEST_CANCELLED" });
+    expect(run.calls).toHaveLength(0);
+    expectOneValidRow(run.rows, "REQUEST_CANCELLED");
+    expect(run.rows[0]).toMatchObject(NOTHING_SENT);
+  });
+
+  it("ACCEPTED: asked exactly once, with the request's signal, before the first call; the repair attempt is not asked again", async () => {
+    let callsWhenDecided = -1;
+    const run = gated([completed(`${JSON.stringify(VALID)}}`), completed(VALID)], async () => {
+      callsWhenDecided = run.calls.length;
+      return "ACCEPTED";
+    });
+    const decide = vi.spyOn(run.provider.remoteUse!, "decide");
+    const controller = new AbortController();
+    const result = await run.service.execute(EN.request, controller.signal);
+    expect(result).toMatchObject({ kind: "COMPOSED", source: "AI", mode: "REMOTE_AI", reason: null });
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(decide.mock.calls[0]![0]).toBe(controller.signal);
+    expect(callsWhenDecided).toBe(0);
+    expect(run.calls).toHaveLength(2);
+    expect(run.rows[0]).toMatchObject({ outcomeCode: "ACCEPTED", providerModel: { providerKey: "test", modelSnapshot: "test-model" }, attempts: { count: 2, structuralRepairUsed: true, timedOut: false } });
+  });
+
+  it("is decided before any timer: a decision that takes longer than the overall budget never times the request out", async () => {
+    vi.useFakeTimers();
+    let answer!: (value: "ACCEPTED") => void;
+    const decide = vi.fn<Decide>(() => new Promise((resolve) => (answer = resolve)));
+    const run = gated([completed(VALID)], decide);
+    const pending = run.service.execute(EN.request);
+    const budget = AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN.executionBudget;
+    await vi.advanceTimersByTimeAsync(budget.overallTimeoutMs + budget.perCallTimeoutMs + 1);
+    expect(run.calls).toHaveLength(0);
+    expect(run.rows).toHaveLength(0);
+    answer("ACCEPTED");
+    expect(await pending).toMatchObject({ source: "AI", reason: null });
+    expect(run.rows[0]!.attempts).toEqual({ count: 1, structuralRepairUsed: false, timedOut: false });
+  });
+
+  it("works without a caller signal (the decision still receives an AbortSignal)", async () => {
+    const decide = vi.fn<Decide>(async () => "ACCEPTED");
+    const run = gated([completed(VALID)], decide);
+    expect(await run.service.execute(EN.request)).toMatchObject({ source: "AI" });
+    expect(decide.mock.calls[0]![0]).toBeInstanceOf(AbortSignal);
+  });
+
+  it("an abort while the decision is pending: REQUEST_CANCELLED, nothing sent, the listener released", async () => {
+    const controller = new AbortController();
+    const removed = vi.spyOn(controller.signal, "removeEventListener");
+    const run = gated([completed(VALID)], () => new Promise(() => undefined));
+    const pending = run.service.execute(EN.request, controller.signal);
+    await Promise.resolve();
+    controller.abort();
+    expect(await pending).toMatchObject({ source: "DETERMINISTIC", mode: "REMOTE_AI", reason: "REQUEST_CANCELLED" });
+    expect(run.calls).toHaveLength(0);
+    expect(run.rows[0]).toMatchObject({ outcomeCode: "REQUEST_CANCELLED", ...NOTHING_SENT });
+    expect(removed).toHaveBeenCalledWith("abort", expect.any(Function));
+  });
+
+  it("an acceptance that arrives after the abort is not used", async () => {
+    const controller = new AbortController();
+    const run = gated([completed(VALID)], async () => (controller.abort(), "ACCEPTED"));
+    expect(await run.service.execute(EN.request, controller.signal)).toMatchObject({ source: "DETERMINISTIC", reason: "REQUEST_CANCELLED" });
+    expect(run.calls).toHaveLength(0);
+    expect(run.rows[0]).toMatchObject(NOTHING_SENT);
+  });
+
+  it.each([
+    ["NOT_ACTIVATED", { manifest: AI_ACTIVATION_MANIFEST }, EN.request, "TASK_DISABLED"],
+    ["PRIVATE", { privateMode: () => true }, EN.request, "PRIVACY_REJECTED"],
+    ["OFFLINE", { online: () => false }, EN.request, "TRANSPORT_FAILED"],
+    ["INELIGIBLE", {}, ineligibleRequest(INELIGIBLE_CASES[1][1]), "PAYLOAD_INVALID"],
+  ])("is never asked when the request is %s", async (mode, overrides, request, reason) => {
+    const decide = vi.fn<Decide>(async () => "ACCEPTED");
+    const run = gated([completed(VALID)], decide, overrides);
+    expect(await run.service.execute(request)).toMatchObject({ source: "DETERMINISTIC", mode, reason });
+    expect(decide).not.toHaveBeenCalled();
+    expect(run.calls).toHaveLength(0);
+  });
+
+  it("is never asked when the value-blind request cannot be projected", async () => {
+    projectorSpy.mockImplementationOnce(() => {
+      throw new Error("SHELL_REQUEST_NOT_APPROVED");
+    });
+    const decide = vi.fn<Decide>(async () => "ACCEPTED");
+    const run = gated([completed(VALID)], decide);
+    expect(await run.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", reason: "PAYLOAD_INVALID" });
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it("is never asked for an already-aborted request", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const decide = vi.fn<Decide>(async () => "ACCEPTED");
+    const run = gated([completed(VALID)], decide);
+    expect(await run.service.execute(EN.request, controller.signal)).toMatchObject({ reason: "REQUEST_CANCELLED" });
+    expect(decide).not.toHaveBeenCalled();
+  });
+});

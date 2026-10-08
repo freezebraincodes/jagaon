@@ -13,6 +13,8 @@ import {
   boundaryDayFixture,
   databases,
   FACT,
+  FOREIGN_OFFSET_READINGS,
+  foreignOffsetFixture,
   higherFixture,
   largePeriodFixture,
   NOW,
@@ -89,6 +91,8 @@ const unitText = (unit: "MMOL_L" | "MG_DL") => (unit === "MMOL_L" ? "mmol/L" : "
 const dateTime = (locale: AiLocale, date: string, time: string) => `${careSummaryLocalePack(locale).localDateText(date)}${locale === "zh-SG" ? " " : ", "}${time}`;
 const readingText = (locale: AiLocale, reading: ExplainablePatternView["periods"][number]["readings"][number]) =>
   `${dateTime(locale, reading.localDate, reading.localTime)} ${reading.enteredValue} ${unitText(reading.enteredUnit)}`;
+/** Packet 11C B4: a Singapore-time point as the panel names it ("date, HH:MM Singapore time" / "date 新加坡时间HH:MM"). */
+const singaporeTime = (locale: AiLocale, date: string, time: string) => getMessages(locale).history.explanation.singaporeTime(careSummaryLocalePack(locale).localDateText(date), time);
 
 function periodLists() {
   const region = screen.getByRole("region");
@@ -135,16 +139,20 @@ describe("PatternExplanationPanel (Packet 11C Task 7)", () => {
     // The view's own instants: earlier [23 Aug 10:00, 20 Sep 10:00), recent [20 Sep 10:00, 4 Oct 10:00).
     expect(view.sharedBoundary).toEqual({ instant: "2026-09-20T02:00:00.000Z", localDate: "2026-09-20", localTime: "10:00" });
     renderPanel("en-SG", en);
-    expect(screen.getByText("Supporting readings (14)")).toBeInTheDocument();
+    // Packet 11C B4 (decision 3; wording human acceptance pending): the list is the readings included in this comparison.
+    expect(screen.getByText("Readings included in this comparison (14)")).toBeInTheDocument();
     expect(screen.getByText("Earlier period (8)")).toBeInTheDocument();
     expect(screen.getByText("Recent period (6)")).toBeInTheDocument();
     expect(screen.getByText("8 + 6 = 14 readings, matching the count above.")).toBeInTheDocument();
     const pack = careSummaryLocalePack("en-SG");
     const [aug23, sep20, oct4] = ["2026-08-23", "2026-09-20", "2026-10-04"].map((date) => pack.localDateText(date));
-    expect(screen.getByText(`${aug23}, 10:00 up to, but not including, ${sep20}, 10:00`)).toBeInTheDocument();
-    expect(screen.getByText(`${sep20}, 10:00 up to, but not including, ${oct4}, 10:00`)).toBeInTheDocument();
+    // Packet 11C B4 (decision 2; wording human acceptance pending): every endpoint and the cutoff name Singapore time.
+    expect(screen.getByText(`${aug23}, 10:00 Singapore time up to, but not including, ${sep20}, 10:00 Singapore time`)).toBeInTheDocument();
+    expect(screen.getByText(`${sep20}, 10:00 Singapore time up to, but not including, ${oct4}, 10:00 Singapore time`)).toBeInTheDocument();
     expect(
-      screen.getByText(`The two periods meet at ${sep20}, 10:00. A reading recorded before then is in the earlier period; a reading recorded at or after it is in the recent period.`),
+      screen.getByText(
+        `The two periods meet at ${sep20}, 10:00 Singapore time. A reading recorded before then is in the earlier period; a reading recorded at or after it is in the recent period.`,
+      ),
     ).toBeInTheDocument();
     cleanup();
 
@@ -152,13 +160,13 @@ describe("PatternExplanationPanel (Packet 11C Task 7)", () => {
     renderPanel("zh-SG", zh);
     const zpack = careSummaryLocalePack("zh-SG");
     const [zAug23, zSep20, zOct4] = ["2026-08-23", "2026-09-20", "2026-10-04"].map((date) => zpack.localDateText(date));
-    expect(screen.getByText("支持读数（14 条）")).toBeInTheDocument();
+    expect(screen.getByText("此比较包含的读数（14 条）")).toBeInTheDocument();
     expect(screen.getByText("较早期间（8 条）")).toBeInTheDocument();
     expect(screen.getByText("近期（6 条）")).toBeInTheDocument();
     expect(screen.getByText("8 + 6 = 14 条读数，与上方数量一致。")).toBeInTheDocument();
-    expect(screen.getByText(`${zAug23} 10:00至${zSep20} 10:00之前`)).toBeInTheDocument();
-    expect(screen.getByText(`${zSep20} 10:00起至${zOct4} 10:00之前`)).toBeInTheDocument();
-    expect(screen.getByText(`两个期间以${zSep20} 10:00为分界：在此之前记录的读数属于较早期间，在此时或之后记录的读数属于近期。`)).toBeInTheDocument();
+    expect(screen.getByText(`${zAug23} 新加坡时间10:00至${zSep20} 新加坡时间10:00之前`)).toBeInTheDocument();
+    expect(screen.getByText(`${zSep20} 新加坡时间10:00起至${zOct4} 新加坡时间10:00之前`)).toBeInTheDocument();
+    expect(screen.getByText(`两个期间以${zSep20} 新加坡时间10:00为分界：在此之前记录的读数属于较早期间，在此时或之后记录的读数属于近期。`)).toBeInTheDocument();
   });
 
   it("lists every reading of the view exactly once, grouped exactly as the view groups them, with its own date, time and entered value", async () => {
@@ -242,7 +250,7 @@ describe("PatternExplanationPanel (Packet 11C Task 7)", () => {
     expect(earlierItems).not.toContain(after);
     expect(screen.getByText(t.reconciliation(9, 7, 16))).toBeInTheDocument();
     // The boundary date is shown with its cutoff time, so both claims are exact (07:30 < 10:00 <= 10:30).
-    expect(screen.getByText(t.boundaryNote(dateTime(locale, BOUNDARY_DATE, "10:00")))).toBeInTheDocument();
+    expect(screen.getByText(t.boundaryNote(singaporeTime(locale, BOUNDARY_DATE, "10:00")))).toBeInTheDocument();
   });
 
   it.each([["en-SG"], ["zh-SG"]] as const)("%s BOUNDARY_DAY: supportingReadingsCopy (the offline review page's source) is exactly the copy the panel renders", async (locale) => {
@@ -261,7 +269,7 @@ describe("PatternExplanationPanel (Packet 11C Task 7)", () => {
     expect(texts(".history-explanation-boundary")).toEqual([copy.boundaryNote]);
     expect(texts(".history-explanation-reconciliation")).toEqual([copy.reconciliation]);
     expect(copy.periods.map((period) => period.readings.length)).toEqual([9, 7]);
-    expect(copy.boundaryNote).toBe(getMessages(locale).history.explanation.boundaryNote(dateTime(locale, BOUNDARY_DATE, "10:00")));
+    expect(copy.boundaryNote).toBe(getMessages(locale).history.explanation.boundaryNote(singaporeTime(locale, BOUNDARY_DATE, "10:00")));
   });
 
   it("shows the cutoff as HH:MM only when its seconds and milliseconds are zero, otherwise HH:MM:SS (floored, never rounded across the cutoff)", async () => {
@@ -284,8 +292,8 @@ describe("PatternExplanationPanel (Packet 11C Task 7)", () => {
       ["2026-09-20T02:00:00.250Z", "10:00:00"],
     ] as const) {
       renderPanel("en-SG", withCutoff(instant));
-      expect(screen.getByText(t.boundaryNote(`${sep20}, ${shown}`))).toBeInTheDocument();
-      expect(screen.getByText(t.recentRange(`${sep20}, ${shown}`, `${careSummaryLocalePack("en-SG").localDateText("2026-10-04")}, 10:00`))).toBeInTheDocument();
+      expect(screen.getByText(t.boundaryNote(`${sep20}, ${shown} Singapore time`))).toBeInTheDocument();
+      expect(screen.getByText(t.recentRange(`${sep20}, ${shown} Singapore time`, `${careSummaryLocalePack("en-SG").localDateText("2026-10-04")}, 10:00 Singapore time`))).toBeInTheDocument();
       cleanup();
     }
   });
@@ -348,5 +356,107 @@ describe("PatternExplanationPanel (Packet 11C Task 7)", () => {
       expect(screen.queryByRole("list")).not.toBeInTheDocument();
       cleanup();
     }
+  });
+});
+
+/**
+ * Packet 11C B4a (owner decisions 2 and 3, D7; every new string human acceptance pending). Real evaluator: a +05:30 reading on each side
+ * of the 10:00 Singapore-time cutoff and one at the recent window's outer edge (22:00 +05:30 = 00:30 Singapore time the next day).
+ */
+describe("PatternExplanationPanel: foreign-offset readings and Singapore time (Packet 11C B4a)", () => {
+  const foreignText = (locale: AiLocale, key: keyof typeof FOREIGN_OFFSET_READINGS) => {
+    const entry = FOREIGN_OFFSET_READINGS[key];
+    const t = getMessages(locale).history.explanation;
+    return `${t.offsetReading(dateTime(locale, entry.date, entry.time), "UTC+05:30", singaporeTime(locale, entry.singapore.date, entry.singapore.time))} ${entry.value} mmol/L`;
+  };
+
+  it.each([["en-SG"], ["zh-SG"]] as const)(
+    "%s: every +05:30 reading shows its recorded local time, its actual offset and its Singapore-time equivalent, listed where the view groups it",
+    async (locale) => {
+      const { history } = await foreignOffsetFixture();
+      const explanation = await explain(history, locale);
+      const [earlier, recent] = explanation.view.periods;
+      expect([earlier.count, recent.count, explanation.view.totalCount]).toEqual([9, 8, 17]);
+      renderPanel(locale, explanation);
+      const t = getMessages(locale).history.explanation;
+      const [earlierList, recentList] = periodLists();
+      const earlierItems = within(earlierList!).getAllByRole("listitem").map((item) => item.textContent);
+      const recentItems = within(recentList!).getAllByRole("listitem").map((item) => item.textContent);
+      // Placement is the view's grouping: 07:45 +05:30 is listed as RECENT although its own clock time is before 10:00.
+      expect(earlierItems.at(-1)).toBe(foreignText(locale, "beforeCutoff"));
+      expect(recentItems[0]).toBe(foreignText(locale, "afterCutoff"));
+      expect(recentItems.at(-1)).toBe(foreignText(locale, "outerEdge"));
+      // Exactly the three foreign readings carry an offset label; every +08:00 reading is shown as before (date, time, value).
+      const all = [...earlierItems, ...recentItems];
+      expect(all.filter((text) => text?.includes("UTC+05:30"))).toHaveLength(3);
+      const readings = explanation.view.periods.flatMap((period) => period.readings);
+      expect(readings.filter((reading) => reading.utcOffsetMinutes !== 480)).toHaveLength(3);
+      readings.forEach((reading, index) => {
+        if (reading.utcOffsetMinutes === 480) expect(all[index]).toBe(readingText(locale, reading));
+      });
+      // Counts are the view's included readings; the heading and reconciliation agree.
+      expect(screen.getByText(t.supportingHeading(17))).toBeInTheDocument();
+      expect(screen.getByText(t.reconciliation(9, 8, 17))).toBeInTheDocument();
+      expect(screen.getByText(t.boundaryNote(singaporeTime(locale, BOUNDARY_DATE, "10:00")))).toBeInTheDocument();
+    },
+  );
+
+  it("pins the en-SG and zh-SG rendering of the outer-edge reading: 22:00 +05:30 on 3 Oct = 00:30 Singapore time on 4 Oct", async () => {
+    const { history } = await foreignOffsetFixture();
+    const en = await explain(history, "en-SG");
+    const zh = await explain(history, "zh-SG");
+    const [enOct3, enOct4] = ["2026-10-03", "2026-10-04"].map((date) => careSummaryLocalePack("en-SG").localDateText(date));
+    const [zhOct3, zhOct4] = ["2026-10-03", "2026-10-04"].map((date) => careSummaryLocalePack("zh-SG").localDateText(date));
+    const [enSep20, zhSep20] = [careSummaryLocalePack("en-SG").localDateText(BOUNDARY_DATE), careSummaryLocalePack("zh-SG").localDateText(BOUNDARY_DATE)];
+    const enCopy = supportingReadingsCopy(getMessages("en-SG"), "en-SG", en.view);
+    const zhCopy = supportingReadingsCopy(getMessages("zh-SG"), "zh-SG", zh.view);
+    expect(enCopy.periods[1].readings.at(-1)).toMatchObject({ when: `${enOct3}, 22:00 (UTC+05:30; ${enOct4}, 00:30 Singapore time)`, value: "7.3 mmol/L" });
+    expect(zhCopy.periods[1].readings.at(-1)).toMatchObject({ when: `${zhOct3} 22:00（UTC+05:30；${zhOct4} 新加坡时间00:30）`, value: "7.3 mmol/L" });
+    expect(enCopy.periods[0].readings.at(-1)!.when).toBe(`${enSep20}, 07:15 (UTC+05:30; ${enSep20}, 09:45 Singapore time)`);
+    expect(enCopy.periods[1].readings[0]!.when).toBe(`${enSep20}, 07:45 (UTC+05:30; ${enSep20}, 10:15 Singapore time)`);
+    expect(zhCopy.periods[0].readings.at(-1)!.when).toBe(`${zhSep20} 07:15（UTC+05:30；${zhSep20} 新加坡时间09:45）`);
+    expect(zhCopy.periods[1].readings[0]!.when).toBe(`${zhSep20} 07:45（UTC+05:30；${zhSep20} 新加坡时间10:15）`);
+    expect(enCopy.heading).toBe("Readings included in this comparison (17)");
+    expect(zhCopy.heading).toBe("此比较包含的读数（17 条）");
+  });
+
+  it("labels any other offset exactly (negative, zero, non-whole hours) and computes Singapore time from the instant, never from the local time", async () => {
+    const { history } = await higherFixture();
+    const explanation = await explain(history, "en-SG");
+    const pack = careSummaryLocalePack("en-SG");
+    // Re-express one +08:00 reading (07:30 Singapore time, 23:30Z the day before) at other offsets: same instant, honest local time.
+    const reading = explanation.view.periods[0].readings[0]!;
+    const shifted = (offset: number) => {
+      const local = new Date(Date.parse(reading.instantUtc) + offset * 60_000).toISOString();
+      return { ...reading, utcOffsetMinutes: offset, localDate: local.slice(0, 10) as never, localTime: local.slice(11, 16) };
+    };
+    const sgDate = pack.localDateText(reading.localDate);
+    for (const [offset, label] of [[-300, "UTC-05:00"], [0, "UTC+00:00"], [345, "UTC+05:45"], [-570, "UTC-09:30"], [840, "UTC+14:00"]] as const) {
+      const view = structuredClone(explanation.view);
+      view.periods[0].readings[0] = shifted(offset);
+      const copy = supportingReadingsCopy(getMessages("en-SG"), "en-SG", view);
+      const local = shifted(offset);
+      expect(copy.periods[0].readings[0]!.when).toBe(`${pack.localDateText(local.localDate)}, ${local.localTime} (${label}; ${sgDate}, ${reading.localTime} Singapore time)`);
+    }
+  });
+
+  it.each([["en-SG"], ["zh-SG"]] as const)("%s: a declined disclosure shows the deterministic explanation with the short not-used line and no AI label", async (locale) => {
+    const { history } = await higherFixture();
+    const explanation = await explain(history, locale);
+    const messages = getMessages(locale);
+    renderPanel(locale, explanation);
+    expect(screen.queryByText(messages.ai.remoteNotAccepted)).not.toBeInTheDocument();
+    cleanup();
+
+    renderPanel(locale, { ...explanation, remoteUse: "NOT_ACCEPTED" });
+    const region = screen.getByRole("region", { name: messages.history.explanation.title });
+    expect(within(region).getByText(messages.ai.remoteNotAccepted)).toBeInTheDocument();
+    expect(within(region).queryByText(messages.history.explanation.aiLabel)).not.toBeInTheDocument();
+    const text = region.textContent ?? "";
+    const { headline, observation } = payloadOf(explanation);
+    expect(text.indexOf(headline.text)).toBeLessThan(text.indexOf(messages.ai.remoteNotAccepted));
+    expect(text.indexOf(messages.ai.remoteNotAccepted)).toBeLessThan(text.indexOf(observation.text));
+    // Non-technical: no reason code or provider detail.
+    expect(text).not.toMatch(/MISSING_CONFIGURATION|REQUEST_CANCELLED|REMOTE_NOT_ACCEPTED|NOT_ACCEPTED|DeepSeek/);
   });
 });

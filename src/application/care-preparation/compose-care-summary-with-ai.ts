@@ -19,7 +19,7 @@ import type { CarePreparationCommandPort, CarePreparationQueryPort, ExpectedHead
  * - STALE: the preview or a source changed before or during the request (nothing is written);
  * - CANCELLED: aborted before the replacement was requested (the use case does not wait for a pending `execute` once aborted);
  * - UNAVAILABLE: anything else, fail closed.
- * No UI or app wiring here (B4b).
+ * No UI here. Packet 11C B4b: the browser wiring (`createBrowserAiAssistance`) builds it over the app's one hybrid service.
  */
 
 export type AiHybridTaskService = ReturnType<typeof createAiHybridTaskService>;

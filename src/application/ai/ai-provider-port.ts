@@ -76,9 +76,28 @@ export type AiProviderPort = Readonly<{
   invoke(input: ProviderTaskRequest, signal: AbortSignal): Promise<ProviderInvocationResult>;
 }>;
 
+/**
+ * "DECLINED" (Packet 11C B4a) is the patient's explicit Cancel of the disclosure for this request: like NOT_ACCEPTED nothing is sent, but
+ * the request is audited as REQUEST_CANCELLED (no audit-schema change); NOT_ACCEPTED (no acceptance exists, e.g. the interim fail-closed
+ * path) stays MISSING_CONFIGURATION.
+ */
+export type AiRemoteUseDecision = "ACCEPTED" | "NOT_ACCEPTED" | "DECLINED";
+/**
+ * The patient's remote-use disclosure (Packet 11C B2b interim rule; Task B3). It sees the request's signal so it can stop when the
+ * request ends. Anything but an explicit "ACCEPTED" (a refusal, a decline, an error, an unknown answer, an abort) means nothing is sent.
+ */
+export type AiRemoteUseDisclosure = Readonly<{ decide(signal: AbortSignal): Promise<AiRemoteUseDecision> }>;
+
 /** The hybrid layer's port: it receives only the value-blind shell request and an abort signal (Packet 11B.6). */
 export type AiShellProviderPort = Readonly<{
   providerModel: Readonly<{ providerKey: string; modelSnapshot: string }>;
+  /**
+   * Packet 11C Addendum B, Task B3: a provider that needs the patient's remote-use disclosure (the browser shell client) carries it here.
+   * The hybrid service decides it once per request, after every local check and BEFORE the first attempt and any timer; a request that
+   * is not accepted is never sent and its audit row records no attempt, provider model, source revision or usage. The provider also
+   * re-checks it before each send. The server-side adapters carry none.
+   */
+  remoteUse?: AiRemoteUseDisclosure;
   invoke(input: ShellTaskRequest, signal: AbortSignal): Promise<ProviderInvocationResult>;
 }>;
 

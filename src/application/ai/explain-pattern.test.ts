@@ -395,4 +395,20 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
     expect(await explainer(port, execute).explain({ factId: FACT, locale: "en-SG" })).toEqual({ kind: "UNAVAILABLE", reason: "UNAVAILABLE" });
     expect(execute).not.toHaveBeenCalled();
   });
+
+  it("Packet 11C B3: remote use not accepted is a dedicated UI-level outcome (the deterministic explanation, marked not used); no other mode is marked", async () => {
+    const { history } = await higherFixture();
+    const invoke = vi.fn<AiShellProviderPort["invoke"]>();
+    const provider: AiShellProviderPort = { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, remoteUse: { decide: async () => "NOT_ACCEPTED" }, invoke };
+    const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async () => undefined }, now: () => NOW, monotonicMs: () => 0, manifest: ENABLED, provider });
+    const declined = explained(await explainer(history, service.execute).explain({ factId: FACT, locale: "en-SG" }));
+    expect(declined).toMatchObject({ source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
+    expect(invoke).not.toHaveBeenCalled();
+    const shipped = explained(await explainer(history, hybrid(AI_ACTIVATION_MANIFEST, invoke).execute).explain({ factId: FACT, locale: "en-SG" }));
+    expect(shipped.source).toBe("DETERMINISTIC");
+    expect(shipped).not.toHaveProperty("remoteUse");
+    // The same explanation either way: only the marker differs.
+    expect(declined.composition).toEqual(shipped.composition);
+    expect(declined.limitations).toEqual(shipped.limitations);
+  });
 });

@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { RecordId } from "@/domain/shared";
 import type { CareSummaryExportOutcome } from "@/domain/care-preparation/care-summary-export";
-import type { CarePreparationCommandPort, CarePreparationQueryPort, CareSummaryView, PrintObservation } from "@/application/care-preparation/care-preparation-contracts";
+import type { CareSummarySnapshotPayload } from "@/domain/care-preparation/care-summary-snapshot";
+import type { CarePreparationCommandPort, CarePreparationQueryPort, CareSummaryView, ExpectedHead, PrintObservation } from "@/application/care-preparation/care-preparation-contracts";
 import { printableCareSummary } from "@/application/care-preparation/care-summary-artifact";
 import { isCurrentCareSummaryTemplate } from "@/application/care-preparation/care-summary-locale-pack";
 import { ScreenHeader, Notice } from "../primitives/ScreenHeader";
@@ -13,6 +14,31 @@ import { PrintableCareSummary } from "../care-preparation/PrintableCareSummary";
 import type { PrintPort } from "../care-preparation/PrintPort";
 import { useCareLoad } from "../care-organisation/use-care-load";
 import { formatPointTime, localDateOfPoint, formatLocalDate } from "../care-organisation/care-format";
+import { AiDisclosureDialog } from "../ai/AiDisclosureDialog";
+
+/**
+ * Packet 11C Addendum B, Task B4b: the outcome of one care-summary AI wording request (structurally the `composeCareSummaryWithAi`
+ * outcome; this screen imports no AI module). Reasons are closed codes and are never shown.
+ */
+export type CareSummaryAiWordingOutcome =
+  | Readonly<{ kind: "REPLACED"; recordId: RecordId }>
+  | Readonly<{ kind: "KEPT_DETERMINISTIC"; reason: string }>
+  | Readonly<{ kind: "NOT_ELIGIBLE"; reason: string }>
+  | Readonly<{ kind: "STALE" }>
+  | Readonly<{ kind: "CANCELLED" }>
+  | Readonly<{ kind: "UNAVAILABLE" }>;
+
+/**
+ * Packet 11C B4b: the care-summary AI wording port (the app passes the care half of its one AI wiring; tests pass fakes).
+ * `available()` is true only when the care task is remote-enabled and the device is online (never with the shipped manifest);
+ * `disclosureRequired` is true only when a request could be sent and this app session has not accepted the disclosure.
+ */
+export type CareSummaryAiWordingPort = {
+  available(): boolean;
+  disclosureRequired(current: CareSummarySnapshotPayload): boolean;
+  acceptDisclosure(): void;
+  compose(input: { snapshotRef: ExpectedHead; locale: SupportedLocale; disclosure?: "DECLINED" }, signal?: AbortSignal): Promise<CareSummaryAiWordingOutcome>;
+};
 
 type Props = {
   messages: AppMessages;
@@ -22,9 +48,61 @@ type Props = {
   commands: CarePreparationCommandPort | null;
   print: PrintPort;
   onBack: () => void;
+  /** Packet 11C B4b: the AI wording; absent or null means no AI action. */
+  aiWording?: CareSummaryAiWordingPort | null;
+  /** Packet 11C B4b: an accepted replacement's new snapshot, which this screen shows next (the app keeps its navigation in step). */
+  onReplaced?: (recordId: RecordId) => void;
 };
 
 type Notice = "HASH_MISMATCH" | "SOURCE_CHANGED" | "TEMPLATE_SUPERSEDED" | "FAILED" | null;
+
+/**
+ * Packet 11C B4b: the AI wording states. DISCLOSURE and LOADING belong to the locale they started in (and DISCLOSURE to the snapshot
+ * revision): a locale switch closes the dialog and aborts the request; its late answer is discarded.
+ */
+type AiPhase =
+  | { kind: "IDLE" }
+  | { kind: "DISCLOSURE"; key: string }
+  | { kind: "LOADING"; locale: SupportedLocale }
+  | { kind: "CANCELLED" }
+  | { kind: "NOT_ACCEPTED" }
+  | { kind: "FALLBACK"; retry: boolean }
+  | { kind: "NOT_ELIGIBLE" }
+  | { kind: "STALE" };
+
+const IDLE: AiPhase = { kind: "IDLE" };
+
+/** Closed fallback reasons a new request may overcome (transport, provider and output-validation failures). The rest offer no retry. */
+const RETRYABLE_REASONS: ReadonlySet<string> = new Set([
+  "TRANSPORT_FAILED",
+  "PROVIDER_TIMEOUT",
+  "PROVIDER_REJECTED",
+  "PROVIDER_RATE_LIMITED",
+  "PROVIDER_FAILED",
+  "MODEL_ABSTAINED",
+  "SCHEMA_INVALID",
+  "REFERENCE_MISMATCH",
+  "FACT_FIDELITY_FAILED",
+  "AUTHORITY_BOUNDARY_VIOLATION",
+  "CLINICAL_MEANING_VIOLATION",
+  "LOCALE_INVALID",
+  "OUTPUT_BUDGET_EXCEEDED",
+]);
+
+function aiPhaseFor(outcome: Exclude<CareSummaryAiWordingOutcome, { kind: "REPLACED" }>, declined: boolean): AiPhase {
+  switch (outcome.kind) {
+    case "KEPT_DETERMINISTIC":
+      return declined ? { kind: "NOT_ACCEPTED" } : { kind: "FALLBACK", retry: RETRYABLE_REASONS.has(outcome.reason) };
+    case "NOT_ELIGIBLE":
+      return { kind: "NOT_ELIGIBLE" };
+    case "STALE":
+      return { kind: "STALE" };
+    case "CANCELLED":
+      return { kind: "CANCELLED" };
+    default:
+      return { kind: "FALLBACK", retry: false };
+  }
+}
 
 /** The factual message for one attempt; none implies sending, delivery or review. */
 function outcomeText(messages: AppMessages, outcome: CareSummaryExportOutcome | PrintObservation): string {
@@ -44,16 +122,38 @@ function outcomeText(messages: AppMessages, outcome: CareSummaryExportOutcome | 
  * from the artifact; there is no separate screen-only copy. D3: an unapproved snapshot made with an older template or renderer is
  * shown exactly as stored, is never marked previewed or approved, and the patient is sent back to prepare it again. Human acceptance
  * pending for the new message and its placement.
+ *
+ * Packet 11C Addendum B, Task B4b (original Task 5, care part): the "Organise with AI" action, placed before the approval controls. It
+ * is offered only when the AI wording is `available()` (care task remote-enabled, online; never with the shipped manifest) AND the
+ * snapshot is the current, unapproved, current-template, DETERMINISTIC preview. The disclosure comes before any request (once per app
+ * session; Cancel sends nothing). While a request runs the deterministic preview stays readable, approval waits and Cancel aborts. An
+ * accepted replacement shows the NEW snapshot with the AI label and check notice (from the snapshot's own composition), recorded as
+ * previewed by the ordinary flow; approval remains a separate click and nothing prints on its own. A changed source or head, a fallback,
+ * an ineligible preview and a cancel each show one non-technical line; a late answer after a cancel, locale switch or unmount is
+ * discarded, except a replacement that already committed (the old preview is then superseded, so the new one is shown). New
+ * presentation: human acceptance pending.
  */
-export function CareSummaryPreviewScreen({ messages, locale, recordId, query, commands, print, onBack }: Props) {
+export function CareSummaryPreviewScreen({ messages, locale, recordId, query, commands, print, onBack, aiWording = null, onReplaced }: Props) {
   const copy = messages.careSummary;
-  const loader = useMemo(() => (query ? () => query.loadSummary(recordId) : null), [query, recordId]);
+  const t = messages.ai;
+  // Packet 11C B4b: after an accepted replacement this screen shows the new snapshot (the app keeps its navigation in step).
+  const [replacement, setReplacement] = useState<RecordId | null>(null);
+  const shownRecordId = replacement ?? recordId;
+  const loader = useMemo(() => (query ? () => query.loadSummary(shownRecordId) : null), [query, shownRecordId]);
   const { value: view, reload } = useCareLoad<CareSummaryView>(loader, { status: "UNAVAILABLE" });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [announcement, setAnnouncement] = useState("");
   const previewRecorded = useRef<string | null>(null);
   const mounted = useRef(true);
+  const [aiPhase, setAiPhase] = useState<AiPhase>(IDLE);
+  const aiRequest = useRef<{ controller: AbortController } | null>(null);
+  const aiResultRef = useRef<HTMLElement | null>(null);
+  const focusResultOf = useRef<RecordId | null>(null);
+  // Fix round 1: requests whose compose has not settled yet, including one the patient cancelled while its replacement command was
+  // already running (B1b: that command may still commit). No new request starts, and Approve waits, until every one has settled.
+  const unsettled = useRef(0);
+  const [unsettledCount, setUnsettledCount] = useState(0);
 
   useEffect(() => {
     mounted.current = true;
@@ -62,12 +162,133 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
     };
   }, []);
 
+  // A locale switch (and unmount) aborts a pending AI request; its late answer is discarded.
+  useEffect(
+    () => () => {
+      aiRequest.current?.controller.abort();
+      aiRequest.current = null;
+    },
+    [locale],
+  );
+
   const ready = view?.status === "READY" ? view : null;
   const stale = ready !== null && (!ready.sourcesCurrent || ready.snapshotStatus === "INVALIDATED" || ready.snapshotStatus === "SUPERSEDED");
   const printable = useMemo(() => (ready ? printableCareSummary(ready.payload) : null), [ready]);
   // D3: an unapproved preview from an older template or renderer must be prepared again (the service refuses it as well).
   const superseded = ready !== null && !stale && ready.snapshotStatus !== "APPROVED" && (!isCurrentCareSummaryTemplate(ready.payload) || notice === "TEMPLATE_SUPERSEDED");
   const blocked = stale || notice === "HASH_MISMATCH" || superseded;
+  // Fix round 1: after an accepted replacement and until the NEW snapshot has loaded, the old (now superseded) preview still on screen
+  // is not actionable: no AI action, Approve disabled.
+  const replacing = replacement !== null && ready?.recordId !== replacement;
+  const aiBusy = unsettledCount > 0 || replacing;
+
+  // Packet 11C B4b: the AI wording is offered only on the current, unapproved, current-template, deterministic preview.
+  const aiSnapshot =
+    ready !== null &&
+    !replacing &&
+    !blocked &&
+    commands !== null &&
+    (ready.snapshotStatus === "PREPARED" || ready.snapshotStatus === "PREVIEWED") &&
+    isCurrentCareSummaryTemplate(ready.payload) &&
+    ready.payload.composition.method === "DETERMINISTIC";
+  const aiOffered = aiWording !== null && aiSnapshot && aiWording.available();
+  const aiLoading = aiPhase.kind === "LOADING";
+  const disclosureKey = `${ready?.revisionId ?? ""}|${locale}`;
+  // The dialog or the request belongs to the locale (and, for the dialog, the snapshot revision) it was opened in.
+  if ((aiPhase.kind === "DISCLOSURE" && aiPhase.key !== disclosureKey) || (aiPhase.kind === "LOADING" && aiPhase.locale !== locale)) setAiPhase(IDLE);
+  const aiResult = ready !== null && ready.payload.composition.method === "AI_ASSISTED";
+
+  // After an accepted replacement, focus moves to the new preview's AI label once it is shown.
+  useEffect(() => {
+    if (focusResultOf.current === null || !aiResult || ready?.recordId !== focusResultOf.current) return;
+    focusResultOf.current = null;
+    aiResultRef.current?.focus();
+  }, [aiResult, ready]);
+
+  // Fix round 1: two catalogue sentences are joined with a space in en-SG and directly (full-width punctuation, no space) in zh-SG.
+  const sentences = (first: string, second: string) => (locale === "zh-SG" ? `${first}${second}` : `${first} ${second}`);
+
+  function aiLine(phase: AiPhase): string | null {
+    switch (phase.kind) {
+      case "LOADING":
+        return t.careSummary.loading;
+      case "CANCELLED":
+        return t.cancelled;
+      case "NOT_ACCEPTED":
+        return t.remoteNotAccepted;
+      case "FALLBACK":
+        return sentences(t.unavailable, t.careSummary.fallback);
+      case "NOT_ELIGIBLE":
+        return sentences(t.careSummary.notEligible, t.careSummary.fallback);
+      case "STALE":
+        return t.careSummary.changed;
+      default:
+        return null;
+    }
+  }
+
+  /** One explicit request. `declined`: the patient cancelled the disclosure, so nothing may be sent (audited REQUEST_CANCELLED). */
+  function runAiWording(declined: boolean) {
+    if (!ready || !aiWording || unsettled.current > 0 || replacing) return;
+    aiRequest.current?.controller.abort();
+    const request = { controller: new AbortController() };
+    aiRequest.current = request;
+    unsettled.current += 1;
+    setUnsettledCount(unsettled.current);
+    setAiPhase({ kind: "LOADING", locale });
+    const snapshotRef: ExpectedHead = { recordId: ready.recordId, expectedRevisionId: ready.revisionId, expectedRevisionNumber: ready.revisionNumber };
+    void aiWording
+      .compose({ snapshotRef, locale: ready.payload.locale, ...(declined ? { disclosure: "DECLINED" as const } : {}) }, request.controller.signal)
+      .catch((): CareSummaryAiWordingOutcome => ({ kind: "UNAVAILABLE" }))
+      .then((outcome) => {
+        // Settled (the catch above folds a failure into UNAVAILABLE), in the same update as the resulting state.
+        unsettled.current -= 1;
+        if (!mounted.current) return;
+        setUnsettledCount(unsettled.current);
+        if (outcome.kind === "REPLACED") {
+          // The replacement committed (possibly after a Cancel during the command): the old preview is now superseded, so the new one
+          // is shown, with its AI label; approval stays a separate click.
+          // Focus then moves to the new preview's labelled AI region, which announces it. Any other in-flight request is aborted.
+          if (aiRequest.current && aiRequest.current !== request) aiRequest.current.controller.abort();
+          aiRequest.current = null;
+          setAiPhase(IDLE);
+          setNotice(null);
+          focusResultOf.current = outcome.recordId;
+          setReplacement(outcome.recordId);
+          onReplaced?.(outcome.recordId);
+          return;
+        }
+        // Cancelled, switched locale or superseded by a newer request: the late answer is discarded.
+        if (aiRequest.current !== request || request.controller.signal.aborted) return;
+        aiRequest.current = null;
+        setAiPhase(aiPhaseFor(outcome, declined));
+        // Refresh path: the latest summary is loaded again (a changed source then blocks approval with its own message).
+        if (outcome.kind === "STALE") reload();
+      });
+  }
+
+  function startAiWording() {
+    if (!ready || !aiWording || !aiOffered || aiBusy || unsettled.current > 0) return;
+    if (aiWording.disclosureRequired(ready.payload)) setAiPhase({ kind: "DISCLOSURE", key: disclosureKey });
+    else runAiWording(false);
+  }
+
+  function acceptAiDisclosure() {
+    if (aiPhase.kind !== "DISCLOSURE" || !aiWording) return;
+    aiWording.acceptDisclosure();
+    runAiWording(false);
+  }
+
+  function declineAiDisclosure() {
+    if (aiPhase.kind !== "DISCLOSURE") return;
+    runAiWording(true);
+  }
+
+  function cancelAiWording() {
+    aiRequest.current?.controller.abort();
+    aiRequest.current = null;
+    setAiPhase({ kind: "CANCELLED" });
+  }
 
   // Showing the exact prepared content is the preview; it is recorded once.
   useEffect(() => {
@@ -93,7 +314,8 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
   }
 
   async function approve() {
-    if (!ready || !commands) return;
+    // Fix round 1: never while an AI request is unsettled or the replacement preview is still loading.
+    if (!ready || !commands || unsettled.current > 0 || replacing) return;
     setBusy(true);
     setNotice(null);
     const result = await commands.approve({ recordId: ready.recordId, expectedRevisionId: ready.revisionId, expectedRevisionNumber: ready.revisionNumber, contentHash: ready.payload.rendering.contentHash });
@@ -194,7 +416,40 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
           ) : null}
           {blocked ? backButton : null}
 
+          {aiResult ? (
+            <section className="care-summary-ai-result" aria-labelledby="care-summary-ai-result-title" tabIndex={-1} ref={aiResultRef}>
+              <h2 className="eyebrow" id="care-summary-ai-result-title">
+                {t.careSummary.resultTitle}
+              </h2>
+              {ready.snapshotStatus !== "APPROVED" ? <p>{t.careSummary.resultBody}</p> : null}
+            </section>
+          ) : null}
+
           <PrintableCareSummary lines={printable.lines} locale={ready.payload.locale} />
+
+          {aiWording !== null && (aiOffered || aiPhase.kind !== "IDLE") ? (
+            <div className="care-summary-ai">
+              {/* The state line is its own polite live region, so it is not repeated in the shared announcement. */}
+              <p className="care-summary-ai-line" aria-live="polite">
+                {aiLine(aiPhase) ?? ""}
+              </p>
+              {aiLoading ? (
+                <button type="button" className="btn btn-outline btn-wide" onClick={cancelAiWording}>
+                  {t.cancel}
+                </button>
+              ) : aiOffered ? (
+                aiPhase.kind === "FALLBACK" && aiPhase.retry ? (
+                  <button type="button" className="btn btn-outline btn-wide" disabled={busy || aiBusy || ready.snapshotStatus !== "PREVIEWED"} onClick={startAiWording}>
+                    {t.retry}
+                  </button>
+                ) : aiPhase.kind === "FALLBACK" || aiPhase.kind === "NOT_ELIGIBLE" ? null : (
+                  <button type="button" className="btn btn-outline btn-wide" disabled={busy || aiBusy || ready.snapshotStatus !== "PREVIEWED"} onClick={startAiWording}>
+                    {t.careSummary.action}
+                  </button>
+                )
+              ) : null}
+            </div>
+          ) : null}
 
           {!blocked && commands ? (
             ready.snapshotStatus === "APPROVED" ? (
@@ -202,7 +457,7 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
                 <Notice icon={<CheckIcon size={20} />}>
                   <p>{copy.approvedNote}</p>
                 </Notice>
-                <button type="button" className="btn btn-primary btn-wide" disabled={busy} aria-busy={busy || undefined} onClick={() => void printAttempt()}>
+                <button type="button" className="btn btn-primary btn-wide" disabled={busy || replacing} aria-busy={busy || undefined} onClick={() => void printAttempt()}>
                   {copy.printAction}
                 </button>
               </div>
@@ -211,7 +466,7 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
                 <Notice icon={<InfoIcon size={20} />}>
                   <p>{copy.approvalMeaning}</p>
                 </Notice>
-                <button type="button" className="btn btn-primary btn-wide" disabled={busy || ready.snapshotStatus !== "PREVIEWED"} aria-busy={busy || undefined} onClick={() => void approve()}>
+                <button type="button" className="btn btn-primary btn-wide" disabled={busy || aiLoading || aiBusy || ready.snapshotStatus !== "PREVIEWED"} aria-busy={busy || undefined} onClick={() => void approve()}>
                   <CheckIcon size={20} />
                   {copy.approveAction}
                 </button>
@@ -241,6 +496,7 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
           {!blocked ? backButton : null}
         </>
       ) : null}
+      {aiPhase.kind === "DISCLOSURE" ? <AiDisclosureDialog messages={messages} flow="CARE_SUMMARY" onConfirm={acceptAiDisclosure} onCancel={declineAiDisclosure} /> : null}
     </div>
   );
 }

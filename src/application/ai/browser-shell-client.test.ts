@@ -14,7 +14,7 @@ import { PROVIDER_FAILURE_REASONS, type ProviderInvocationResult } from "./ai-pr
 import { AI_TASK_RUNTIME_BUNDLES } from "./ai-runtime-bundles";
 import { AI_SHELL_ROUTE_PATH } from "./ai-shell-route-contract";
 import * as client from "./browser-shell-client";
-import { BROWSER_SHELL_CLIENT_PROVIDER_MODEL, createBrowserShellClient, INTERIM_FAIL_CLOSED_DISCLOSURE, type AiRemoteUseDisclosure, type BrowserShellFetcher } from "./browser-shell-client";
+import { BROWSER_SHELL_CLIENT_PROVIDER_MODEL, createAiRemoteUseSession, createBrowserShellClient, INTERIM_FAIL_CLOSED_DISCLOSURE, type AiRemoteUseDisclosure, type BrowserShellFetcher } from "./browser-shell-client";
 import { projectProviderTaskPayload } from "./detached-payload-projector";
 import { projectShellTaskRequest } from "./language/shell-projector";
 import { planSlots } from "./language/slot-planner";
@@ -31,7 +31,7 @@ const REQUEST = (): ShellTaskRequest => structuredClone(projectShellTaskRequest(
 const VALID = shellCandidate(EN.plan, new Map<ShellFieldPath, string>([["headline", "A look at {{S1}}."], ["evidence", "This is based on {{S3}}."]]));
 const USAGE = { inputTokens: 600, outputTokens: 80, costMicroUsd: 5 };
 const ENABLED: AiActivationManifest = { ...AI_ACTIVATION_MANIFEST, tasks: { ...AI_ACTIVATION_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED", DRAFT_CARE_PREPARATION_SUMMARY: "SYNTHETIC_REMOTE_ENABLED" } };
-/** Test-only: no production module exports an accepting disclosure until B3. */
+/** Test-only. In production a disclosure accepts only through the session, after the patient accepted the dialog (B3). */
 const ACCEPTED: AiRemoteUseDisclosure = { decide: async () => "ACCEPTED" };
 const SENTINEL = "SENTINEL-technical-detail";
 
@@ -46,8 +46,14 @@ afterEach(() => {
 });
 
 describe("browser shell client: identity and module surface", () => {
-  it("exports exactly the client factory, the frozen route identity and the interim fail-closed disclosure", () => {
-    expect(Object.keys(client).sort()).toEqual(["BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createBrowserShellClient"]);
+  it("exports exactly the client factory, the frozen route identity, the interim fail-closed disclosure and the session disclosure (B3)", () => {
+    expect(Object.keys(client).sort()).toEqual(["BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createAiRemoteUseSession", "createBrowserShellClient"]);
+  });
+
+  it("B3: exposes its disclosure as the port's remoteUse, so the hybrid service decides it before the first attempt", () => {
+    const session = createAiRemoteUseSession();
+    expect(createBrowserShellClient({ disclosure: session.disclosure, fetcher: answering(() => json({})) }).remoteUse).toBe(session.disclosure);
+    expect(createBrowserShellClient({ disclosure: INTERIM_FAIL_CLOSED_DISCLOSURE }).remoteUse).toBe(INTERIM_FAIL_CLOSED_DISCLOSURE);
   });
 
   it("names the D2 route identity (Direct DeepSeek deepseek-flash) for the local audit only, frozen; runtime bundles keep no model pin", () => {
@@ -119,6 +125,58 @@ describe("interim disclosure rule: remote use fails closed without an accepted d
     expect(fetcher).toHaveBeenCalledTimes(2);
     await shell.invoke({ ...REQUEST(), facts: [] } as never, signal());
     expect(decide).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * Packet 11C Addendum B, Task B3 (coordinator ruling: once per app session): the session disclosure. It is in memory only (never
+ * persisted, so a reload starts a new session), answers NOT_ACCEPTED until the patient accepts the disclosure dialog, and ACCEPTED for
+ * the rest of that session, immediately, without asking again (the repair attempt included).
+ */
+describe("session disclosure (Packet 11C B3)", () => {
+  it("answers NOT_ACCEPTED until accept(), then ACCEPTED for the rest of the session", async () => {
+    const session = createAiRemoteUseSession();
+    expect(session.accepted()).toBe(false);
+    expect(await session.disclosure.decide(signal())).toBe("NOT_ACCEPTED");
+    session.accept();
+    expect(session.accepted()).toBe(true);
+    expect(await session.disclosure.decide(signal())).toBe("ACCEPTED");
+    session.accept();
+    expect(await session.disclosure.decide(signal())).toBe("ACCEPTED");
+  });
+
+  it("each session is independent (a new app session, e.g. after a reload, starts not accepted) and the surface is frozen", async () => {
+    const first = createAiRemoteUseSession();
+    first.accept();
+    const second = createAiRemoteUseSession();
+    expect(second.accepted()).toBe(false);
+    expect(await second.disclosure.decide(signal())).toBe("NOT_ACCEPTED");
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first.disclosure)).toBe(true);
+    expect(Object.keys(first).sort()).toEqual(["accept", "accepted", "disclosure"]);
+  });
+
+  it("is never persisted: the module touches no storage", () => {
+    const source = readFileSync(join(process.cwd(), "src/application/ai/browser-shell-client.ts"), "utf8");
+    expect(source).not.toMatch(/localStorage|sessionStorage|indexedDB|document\.cookie|Dexie/);
+  });
+
+  it("gates the client: no POST before acceptance, a POST after it (asked again before every POST, answered without asking the patient)", async () => {
+    const session = createAiRemoteUseSession();
+    const fetcher = answering(() => json({ kind: "CANDIDATE", candidate: VALID, retention: "CONFIRMED_NOT_STORED", usage: USAGE }));
+    const shell = createBrowserShellClient({ disclosure: session.disclosure, fetcher });
+    expect(await shell.invoke(REQUEST(), signal())).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION" });
+    expect(fetcher).not.toHaveBeenCalled();
+    session.accept();
+    expect((await shell.invoke(REQUEST(), signal())).kind).toBe("COMPLETED");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("Packet 11C B4a: a DECLINED answer never POSTs either (only an explicit ACCEPTED sends)", async () => {
+    const fetcher = answering(() => json({ kind: "CANDIDATE", candidate: VALID, retention: "CONFIRMED_NOT_STORED", usage: USAGE }));
+    const shell = createBrowserShellClient({ disclosure: { decide: async () => "DECLINED" }, fetcher });
+    expect(await shell.invoke(REQUEST(), signal())).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION" });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });
 
@@ -263,14 +321,31 @@ describe("the client under the hybrid service", () => {
     expect(run.rows[0]).toMatchObject({ outcomeCode: "TASK_DISABLED", providerModel: null, attempts: { count: 0 } });
   });
 
-  it("activated (test manifest) with the interim gate: deterministic, never a POST", async () => {
+  it("activated (test manifest) with the interim gate: deterministic, never a POST, and the audit row records nothing sent (B3)", async () => {
     const fetcher = answering(() => json({ kind: "CANDIDATE", candidate: VALID, retention: "CONFIRMED_NOT_STORED", usage: USAGE }));
     const run = service({ disclosure: INTERIM_FAIL_CLOSED_DISCLOSURE, fetcher });
-    expect(await run.hybrid.execute(EN.request)).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "REMOTE_AI", reason: "MISSING_CONFIGURATION" });
+    expect(await run.hybrid.execute(EN.request)).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "REMOTE_NOT_ACCEPTED", reason: "MISSING_CONFIGURATION" });
     expect(fetcher).not.toHaveBeenCalled();
     expect(run.rows).toHaveLength(1);
     expect(aiInvocationAuditRowSchema.safeParse(run.rows[0]).success).toBe(true);
+    // Packet 11C B3 (B2b carry): the decision is made before the attempt is counted, so nothing is over-reported.
+    expect(run.rows[0]).toMatchObject({ providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [] });
     expect(run.rows[0]!.measurements).toMatchObject({ inputTokens: null, outputTokens: null, costMicroUsd: null });
+  });
+
+  it("B3: a session not yet accepted is decided before any POST with an honest audit row; once accepted, the repair attempt is not gated by a second ask", async () => {
+    const session = createAiRemoteUseSession();
+    const fetcher = answering(() => json({ kind: "CANDIDATE", candidate: VALID, retention: "CONFIRMED_NOT_STORED", usage: USAGE }));
+    const declined = service({ disclosure: session.disclosure, fetcher });
+    expect(await declined.hybrid.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", mode: "REMOTE_NOT_ACCEPTED" });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(declined.rows[0]).toMatchObject({ providerModel: null, attempts: { count: 0 }, sourceRevisions: [] });
+    session.accept();
+    const repairing = answering(() => json({ kind: "STRUCTURALLY_REJECTED", reason: "SCHEMA_INVALID", repairable: true, retention: "CONFIRMED_NOT_STORED", usage: USAGE }));
+    const accepted = service({ disclosure: session.disclosure, fetcher: repairing });
+    expect(await accepted.hybrid.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", reason: "SCHEMA_INVALID" });
+    expect(repairing).toHaveBeenCalledTimes(2);
+    expect(accepted.rows[0]).toMatchObject({ providerModel: { providerKey: "deepseek" }, attempts: { count: 2, structuralRepairUsed: true } });
   });
 
   it("activated with an accepted disclosure and a fake route: the AI composition, the D2 identity in the audit row", async () => {

@@ -1,8 +1,11 @@
 import { parseStrictJson, toPlainData } from "@/backup/strict-json";
 import { shellTaskRequestSchema, type ShellTaskRequest } from "@/domain/ai";
-import { PROVIDER_FAILURE_REASONS, type AiShellProviderPort, type ProviderFailureReason, type ProviderInvocationResult, type ProviderUsage } from "./ai-provider-port";
+import { decideRemoteUse } from "./ai-call-support";
+import { PROVIDER_FAILURE_REASONS, type AiRemoteUseDecision, type AiRemoteUseDisclosure, type AiShellProviderPort, type ProviderFailureReason, type ProviderInvocationResult, type ProviderUsage } from "./ai-provider-port";
 import { AI_SHELL_MAX_BODY_BYTES, AI_SHELL_ROUTE_PATH, aiShellRouteResponseSchema } from "./ai-shell-route-contract";
 import { isApprovedShellTaskRequest } from "./language/shell-projector";
+
+export type { AiRemoteUseDecision, AiRemoteUseDisclosure };
 
 /**
  * Packet 11C Addendum B, Task B2b: the browser client of the value-blind shell route POST /api/ai/shell (B-boundary, D1, D2, D6).
@@ -13,8 +16,12 @@ import { isApprovedShellTaskRequest } from "./language/shell-projector";
  *    including legacy detached-projector output, is refused here: no disclosure is asked and nothing is sent.
  * 2. Interim rule (owner approval 2026-10-08): remote use fails closed without an accepted disclosure. The injected disclosure is asked
  *    before EVERY send; anything but an explicit "ACCEPTED" (a refusal, an error, an unknown answer, an abort) ends the call with the
- *    closed `MISSING_CONFIGURATION` reason and nothing is sent. Until Task B3 the only disclosure that exists is
- *    `INTERIM_FAIL_CLOSED_DISCLOSURE`, which never accepts.
+ *    closed `MISSING_CONFIGURATION` reason and nothing is sent. `INTERIM_FAIL_CLOSED_DISCLOSURE` never accepts and stays the default of
+ *    any path without the session disclosure.
+ *    Task B3: the client also exposes its disclosure as the port's `remoteUse`, so the hybrid service decides it once per request BEFORE
+ *    the first attempt and any timer (an honest audit row when nothing is sent); the check here stays as a second, per-send guard. The
+ *    app's disclosure is `createAiRemoteUseSession()`: one in-memory acceptance per app session, given only by the patient's acceptance
+ *    of the disclosure dialog, which the screen shows before it asks for any explanation; it then answers at once, without asking again.
  * 3. One same-origin POST of the strictly parsed request to the relative route path: JSON, `cache: "no-store"`, redirects refused, and
  *    the caller's AbortSignal (the hybrid service's per-call timeout and the user's cancellation abort the request).
  * 4. The answer is parsed strictly with the shared route contract and mapped to a provider result: CANDIDATE -> COMPLETED (validated
@@ -30,12 +37,26 @@ import { isApprovedShellTaskRequest } from "./language/shell-projector";
 /** D2: the route's fixed identity (Direct DeepSeek deepseek-flash), recorded in the local audit row only. */
 export const BROWSER_SHELL_CLIENT_PROVIDER_MODEL: Readonly<{ providerKey: string; modelSnapshot: string }> = Object.freeze({ providerKey: "deepseek", modelSnapshot: "deepseek-flash" });
 
-export type AiRemoteUseDecision = "ACCEPTED" | "NOT_ACCEPTED";
-/** The patient's remote-use disclosure (Task B3 supplies the real one). It sees the call's signal so it can stop when the call ends. */
-export type AiRemoteUseDisclosure = Readonly<{ decide(signal: AbortSignal): Promise<AiRemoteUseDecision> }>;
-
-/** The interim fail-closed disclosure: until B3 exists, remote use is never accepted. */
+/** The interim fail-closed disclosure: remote use is never accepted. The default of any path without the session disclosure (B3). */
 export const INTERIM_FAIL_CLOSED_DISCLOSURE: AiRemoteUseDisclosure = Object.freeze({ decide: async (): Promise<AiRemoteUseDecision> => "NOT_ACCEPTED" });
+
+/**
+ * Packet 11C Addendum B, Task B3 (coordinator ruling: once per app session). `disclosure` answers NOT_ACCEPTED until `accept()` is
+ * called, then ACCEPTED for the rest of the session, immediately (it never waits, so it is never a wait inside the hybrid timers).
+ * Only the disclosure dialog's primary action calls `accept()`. In memory only: nothing is persisted, so a reload is a new session.
+ */
+export type AiRemoteUseSession = Readonly<{ disclosure: AiRemoteUseDisclosure; accepted(): boolean; accept(): void }>;
+
+export function createAiRemoteUseSession(): AiRemoteUseSession {
+  let accepted = false;
+  return Object.freeze({
+    disclosure: Object.freeze({ decide: async (): Promise<AiRemoteUseDecision> => (accepted ? "ACCEPTED" : "NOT_ACCEPTED") }),
+    accepted: () => accepted,
+    accept: () => {
+      accepted = true;
+    },
+  });
+}
 
 export type BrowserShellFetcher = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -48,25 +69,6 @@ const MAX_RESPONSE_CHARS = 65_536;
 
 const failed = (reason: ProviderFailureReason, usage?: ProviderUsage): ProviderInvocationResult => (usage ? { kind: "FAILED", reason, usage } : { kind: "FAILED", reason });
 
-/** Resolves with the disclosure's decision, or NOT_ACCEPTED on an error, an unknown answer or an abort; the listener is always released. */
-function decision(disclosure: AiRemoteUseDisclosure, signal: AbortSignal): Promise<AiRemoteUseDecision> {
-  if (signal.aborted) return Promise.resolve("NOT_ACCEPTED");
-  return new Promise((resolve) => {
-    const finish = (value: AiRemoteUseDecision) => {
-      signal.removeEventListener("abort", onAbort);
-      resolve(value);
-    };
-    const onAbort = () => finish("NOT_ACCEPTED");
-    signal.addEventListener("abort", onAbort);
-    Promise.resolve()
-      .then(() => disclosure.decide(signal))
-      .then(
-        (value) => finish(value === "ACCEPTED" ? "ACCEPTED" : "NOT_ACCEPTED"),
-        () => finish("NOT_ACCEPTED"),
-      );
-  });
-}
-
 function statusReason(status: number): ProviderFailureReason {
   if (status === 429) return "PROVIDER_RATE_LIMITED";
   return status >= 400 && status < 500 ? REFUSED_REASON : "PROVIDER_FAILED";
@@ -77,13 +79,15 @@ export function createBrowserShellClient(options: { disclosure: AiRemoteUseDiscl
   const fetcher: BrowserShellFetcher = options.fetcher ?? ((input, init) => fetch(input, init));
   return Object.freeze({
     providerModel: BROWSER_SHELL_CLIENT_PROVIDER_MODEL,
+    // Task B3: decided by the hybrid service before the first attempt (and re-checked below before each send).
+    remoteUse: options.disclosure,
     async invoke(input: ShellTaskRequest, signal: AbortSignal): Promise<ProviderInvocationResult> {
       const parsed = shellTaskRequestSchema.safeParse(input);
       if (!parsed.success || !isApprovedShellTaskRequest(parsed.data)) return failed(REFUSED_REASON);
       const body = JSON.stringify(parsed.data);
       if (new TextEncoder().encode(body).byteLength > AI_SHELL_MAX_BODY_BYTES) return failed(REFUSED_REASON);
 
-      if ((await decision(options.disclosure, signal)) !== "ACCEPTED" || signal.aborted) return failed(NOT_ACCEPTED_REASON);
+      if ((await decideRemoteUse(options.disclosure, signal)) !== "ACCEPTED" || signal.aborted) return failed(NOT_ACCEPTED_REASON);
 
       let response: Response;
       try {

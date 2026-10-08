@@ -112,7 +112,22 @@ const CLIENT_AI_FILES = [
   "src/domain/ai/ai-task-contracts.ts",
   "src/domain/ai/index.ts",
 ];
+/**
+ * Packet 11C Addendum B, Task B4b (D1, deliberate addition): the care-summary AI wording is wired, so exactly the care use case, its
+ * source-closed request builder and the validated projection join the browser graph (they live in care-preparation, outside the
+ * `src/(application|domain)/ai` filter, so CLIENT_AI_FILES is unchanged). Their own AI imports are all inside CLIENT_AI_FILES.
+ */
+const CLIENT_CARE_AI_FILES = [
+  "src/application/care-preparation/ai-care-summary-replacement.ts",
+  "src/application/care-preparation/ai-care-summary-request.ts",
+  "src/application/care-preparation/compose-care-summary-with-ai.ts",
+];
+/** The Packet 11C B1a renderer: the care-preparation module that already reached the approved care-draft notice copy. */
+const CARE_NOTICE_RENDERER = "src/application/care-preparation/deterministic-care-summary-renderer.ts";
 const BROWSER_SHELL_CLIENT = "src/application/ai/browser-shell-client.ts";
+/** Packet 11C B3: the shared AI disclosure dialog, an AI-free presentation component (no AI module in its import graph). */
+const AI_DISCLOSURE_DIALOG = "src/components/jagaon/ai/AiDisclosureDialog.tsx";
+const AI_DISCLOSURE_DIALOG_TEST = "src/components/jagaon/ai/AiDisclosureDialog.test.tsx";
 const DETACHED_PROJECTOR = "src/application/ai/detached-payload-projector.ts";
 
 describe("Packet 11A scope", () => {
@@ -215,11 +230,14 @@ describe("Packet 11A scope", () => {
     // Packet 11B.6 had the hybrid service reuse these helpers from the legacy service. Packet 11C B2a (deliberate retarget) moved them,
     // unchanged, to the shared ai-call-support module, so the legacy service exports only its factory.
     expect(exportsOf(service)).toEqual(["createAiTaskService"]);
-    expect(exportsOf(callSupport)).toEqual(["NO_USAGE", "addUsage", "buildAuditRow", "callOnce"]);
+    // Packet 11C B3 (deliberate): the remote-use decision moved here from the B2b client, shared by the hybrid service and the client.
+    expect(exportsOf(callSupport)).toEqual(["NO_USAGE", "addUsage", "buildAuditRow", "callOnce", "decideRemoteUse"]);
     expect(exportsOf(shellRouteContract)).toEqual(["AI_SHELL_MAX_BODY_BYTES", "AI_SHELL_ROUTE_PATH", "aiShellRouteResponseSchema"]);
-    // Packet 11C B2b: no production module exports a disclosure that accepts remote use (the interim rule; B3 adds the real one).
-    expect(exportsOf(browserShellClient)).toEqual(["BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createBrowserShellClient"]);
-    expect(exportsOf(browserHistoryExplainer)).toEqual(["createBrowserHistoryExplainer"]);
+    // Packet 11C B2b: no production module exports a disclosure that accepts remote use by itself. Packet 11C B3 (deliberate retarget):
+    // the session disclosure accepts only after its accept(), which only the disclosure dialog's primary action calls (pinned below).
+    expect(exportsOf(browserShellClient)).toEqual(["BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createAiRemoteUseSession", "createBrowserShellClient"]);
+    // Packet 11C B4b (deliberate): the one AI wiring of both flows (history explanation and care-summary wording) over one hybrid service.
+    expect(exportsOf(browserHistoryExplainer)).toEqual(["createBrowserAiAssistance", "createBrowserHistoryExplainer"]);
     expect(exportsOf(persistence)).toEqual(["createAiInvocationAuditRepository"]);
     expect(exportsOf(lifecycle)).toEqual(["AI_AUDIT_REFERENCE_KEYS", "aiAuditReferencesIn", "aiAuditsAffectedByDeletion", "validateAiAuditReferences"]);
     for (const name of ["AI_TASK_TYPES", "aiTaskRequestSchema", "aiTaskOutputSchema", "providerTaskRequestSchema", "providerTaskOutputSchema", "AI_REASON_CODES", "aiInvocationAuditRowSchema", "AI_INVOCATION_OUTCOME_CODES"]) {
@@ -274,11 +292,24 @@ describe("Packet 11A scope", () => {
 
   it("adds no AI route, screen or control and keeps provider modules out of the runtime", () => {
     expect([...ALL_SCREENS].filter((screen) => /AI_|ASSIST/.test(screen))).toEqual([]);
-    expect(walk("src/components").filter((file) => /(^|\/)ai(\/|-)/i.test(file))).toEqual([]);
+    // Packet 11C B3 (deliberate retarget): exactly one AI component, the shared disclosure dialog, which is AI-free (pinned below).
+    expect(walk("src/components").filter((file) => /(^|\/)ai(\/|-)/i.test(file))).toEqual([AI_DISCLOSURE_DIALOG_TEST, AI_DISCLOSURE_DIALOG]);
     // Packet 11A: only the local audit row and its Packet 10 reconciliation entered the client runtime. Packet 11C B2b (D1, deliberate
     // retarget): the client graph's AI modules are now exactly the enumerated B2b closure, and nothing under src/ai or src/app/api.
-    expect(CLIENT_GRAPH.filter((file) => /(^|\/)ai(\/|-)/.test(file))).toEqual(CLIENT_AI_FILES);
+    // Packet 11C B3: the path filter also matches the AI-free disclosure dialog component (no AI application module was added).
+    // Packet 11C B4b (deliberate): and the two `ai-` care-preparation modules of the enumerated care closure below.
+    expect(CLIENT_GRAPH.filter((file) => /(^|\/)ai(\/|-)/.test(file))).toEqual([...CLIENT_AI_FILES, AI_DISCLOSURE_DIALOG, ...CLIENT_CARE_AI_FILES.filter((file) => /\/ai-/.test(file))].sort());
     expect(CLIENT_GRAPH.filter((file) => /^src\/(application|domain)\/ai\//.test(file))).toEqual(CLIENT_AI_FILES);
+    // Packet 11C B4b: the care-preparation modules of the browser graph that import an AI module are exactly the B1a notice renderer and
+    // the enumerated care closure; every AI module they import is in CLIENT_AI_FILES.
+    const importsAi = (file: string) => [...readFileSync(join(ROOT, file), "utf8").matchAll(IMPORT)].map((match) => match[1] ?? match[2]!).filter((specifier) => /^@\/(application|domain)\/ai(\/|$)/.test(specifier));
+    expect(CLIENT_GRAPH.filter((file) => file.startsWith("src/application/care-preparation/") && importsAi(file).length > 0)).toEqual([...CLIENT_CARE_AI_FILES, CARE_NOTICE_RENDERER].sort());
+    for (const file of CLIENT_CARE_AI_FILES) expect(CLIENT_GRAPH, file).toContain(file);
+    expect(importGraph(CLIENT_CARE_AI_FILES).filter((file) => /^src\/(application|domain)\/ai\//.test(file)).every((file) => CLIENT_AI_FILES.includes(file))).toBe(true);
+    expect(importGraph(CLIENT_CARE_AI_FILES).filter((file) => file.startsWith("src/ai/") || file.startsWith("src/app/") || file.endsWith("ai-task-service.ts"))).toEqual([]);
+    // The dialog imports no AI module, reads no storage and sends nothing.
+    expect(importGraph([AI_DISCLOSURE_DIALOG]).filter((file) => /^src\/(ai|app|application|domain\/ai)\//.test(file))).toEqual([]);
+    expect(strip(readFileSync(join(ROOT, AI_DISCLOSURE_DIALOG), "utf8"))).not.toMatch(/\bfetch\b|XMLHttpRequest|sendBeacon|localStorage|sessionStorage|indexedDB/);
     // Packet 11B: the provider adapters are reachable only from the server AI route. Packet 11C B2a (deliberate retarget): that route is
     // now the value-blind POST /api/ai/shell; the retired POST /api/ai/task reaches no provider adapter, AI service or credential reader.
     expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/ai/") && !importGraph(["src/app/api/ai/shell/route.ts"]).includes(file))).toEqual([]);
@@ -322,7 +353,7 @@ const EXISTING_NETWORK_MODULES = [
   "src/app/api/onemap/search/onemap-search-handler.ts",
   // Packet 11C Addendum B, Task B2b (owner-approved design, D1): the browser shell client's single same-origin POST to /api/ai/shell.
   // It is the one deliberate addition; it sends only after the request passed the client-side checks and an accepted disclosure, and
-  // the interim disclosure never accepts, so the shipped app never reaches it.
+  // the shipped manifest keeps every task NOT_ACTIVATED, so the shipped app never reaches it (B3: nor is the disclosure ever shown).
   "src/application/ai/browser-shell-client.ts",
   "src/application/nearby-food/browser-nearby-food.ts",
 ];
@@ -370,11 +401,25 @@ describe("Packet 11C Checkpoint 2 guards", () => {
   it("puts the Checkpoint 2 screens and the wired history explanation in the browser graph, never the legacy fact-sending service", () => {
     expect(CLIENT_GRAPH).toEqual(expect.arrayContaining(["src/components/jagaon/history/PatternExplanationPanel.tsx", "src/components/jagaon/screens/CareSummaryPreviewScreen.tsx", "src/components/jagaon/screens/RecordedHistoryScreen.tsx"]));
     expect(CLIENT_GRAPH).toEqual(expect.arrayContaining(["src/application/ai/browser-history-explainer.ts", "src/application/ai/explain-pattern.ts", "src/application/ai/explain-pattern-request.ts", "src/application/ai/ai-hybrid-task-service.ts", "src/application/ai/browser-shell-client.ts"]));
+    // Packet 11C B4b: and the wired care-summary AI wording use case.
+    expect(CLIENT_GRAPH).toContain("src/application/care-preparation/compose-care-summary-with-ai.ts");
     expect(CLIENT_GRAPH).not.toContain("src/application/ai/ai-task-service.ts");
-    // The wiring enters through the app shell only: the history screen and the panel import no AI module themselves.
-    for (const file of ["src/components/jagaon/screens/RecordedHistoryScreen.tsx", "src/components/jagaon/history/PatternExplanationPanel.tsx"]) {
-      expect([...readFileSync(join(ROOT, file), "utf8").matchAll(IMPORT)].map((match) => match[1] ?? match[2]!).filter((specifier) => /\/ai\//.test(specifier)), file).toEqual([]);
-    }
+    // The wiring enters through the app shell only: the history screen and the panel import no AI module themselves. Packet 11C B3
+    // (deliberate retarget): the screen imports exactly the AI-free disclosure dialog component, nothing else under an `ai` path.
+    // Packet 11C B4b (deliberate): so does the care-summary preview screen.
+    const aiImports = (file: string) => [...readFileSync(join(ROOT, file), "utf8").matchAll(IMPORT)].map((match) => match[1] ?? match[2]!).filter((specifier) => /\/ai\/|\/ai-|-ai$/.test(specifier));
+    expect(aiImports("src/components/jagaon/screens/RecordedHistoryScreen.tsx")).toEqual(["../ai/AiDisclosureDialog"]);
+    expect(aiImports("src/components/jagaon/history/PatternExplanationPanel.tsx")).toEqual([]);
+    expect(aiImports("src/components/jagaon/screens/CareSummaryPreviewScreen.tsx")).toEqual(["../ai/AiDisclosureDialog"]);
+    // Only the dialog's primary action accepts remote use: the session's accept() is reached from exactly one place per flow in the app
+    // graph (Packet 11C B4b, deliberate retarget: the care-summary preview's dialog is the second flow).
+    const acceptCallers = CLIENT_GRAPH.filter((file) => !file.startsWith("src/application/ai/") && /\.accept(Disclosure)?\?*\.?\(/.test(strip(readFileSync(join(ROOT, file), "utf8"))));
+    expect(acceptCallers).toEqual(["src/components/jagaon/screens/CareSummaryPreviewScreen.tsx", "src/components/jagaon/screens/RecordedHistoryScreen.tsx"]);
+    expect(strip(readFileSync(join(ROOT, "src/components/jagaon/screens/RecordedHistoryScreen.tsx"), "utf8")).match(/acceptDisclosure\?\.\(\)/g)).toHaveLength(1);
+    const careScreen = strip(readFileSync(join(ROOT, "src/components/jagaon/screens/CareSummaryPreviewScreen.tsx"), "utf8"));
+    expect(careScreen.match(/\.accept(Disclosure)?\?*\.?\(/g)).toHaveLength(1);
+    expect(careScreen).toMatch(/function acceptAiDisclosure\(\) \{\s*if \(aiPhase\.kind !== "DISCLOSURE" \|\| !aiWording\) return;\s*aiWording\.acceptDisclosure\(\);/);
+    expect(careScreen).toMatch(/onConfirm=\{acceptAiDisclosure\}/);
   });
 });
 
@@ -396,9 +441,14 @@ describe("Packet 11C B2b browser boundary", () => {
 
   it("6A follow-up: no browser module sends projectProviderTaskPayload output; only the planner and the output validator import the projector, and none of them sends", () => {
     const importers = CLIENT_GRAPH.filter((file) => file !== DETACHED_PROJECTOR && importsOf(file).some((specifier) => /detached-payload-projector$/.test(specifier)));
-    expect(importers).toEqual(["src/application/ai/ai-output-validator.ts", "src/application/ai/language/slot-planner.ts"]);
+    // Packet 11C B4b (deliberate retarget): the care request builder joins the browser graph. It imports only the projector's
+    // `redactSelectedText`, as a local sendability check (a label or question the projector would redact is never sent); it never calls
+    // or names projectProviderTaskPayload and is not a network call site.
+    const CARE_REQUEST = "src/application/care-preparation/ai-care-summary-request.ts";
+    expect(importers).toEqual(["src/application/ai/ai-output-validator.ts", "src/application/ai/language/slot-planner.ts", CARE_REQUEST]);
+    expect(source(CARE_REQUEST)).toMatch(/^import \{ redactSelectedText \} from "@\/application\/ai\/detached-payload-projector";$/m);
     const mentions = CLIENT_GRAPH.filter((file) => file !== DETACHED_PROJECTOR && /projectProviderTaskPayload/.test(strip(source(file))));
-    expect(mentions).toEqual(importers);
+    expect(mentions).toEqual(importers.filter((file) => file !== CARE_REQUEST));
     // Neither the projector nor any module that imports it is a network call site.
     for (const file of [DETACHED_PROJECTOR, ...importers]) expect(strip(source(file)), file).not.toMatch(NETWORK_CALL_SITE);
     // The only AI network call site in the browser graph is the shell client. It imports neither the projector nor any of its importers,

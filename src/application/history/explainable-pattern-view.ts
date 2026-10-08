@@ -1,4 +1,4 @@
-import type { LocalDate } from "@/domain/shared/time";
+import type { Instant, LocalDate } from "@/domain/shared/time";
 import type { ComparableSlotTrendEvidenceFacts } from "@/domain/patterns";
 import { resolvePatternFamily } from "@/application/intelligence/activation-manifest";
 import type { IntelligenceSnapshot } from "@/application/intelligence/intelligence-snapshot";
@@ -54,7 +54,10 @@ function exactPoint(reading: ResolvedGlucoseReading): { instant: string; offset:
   return { instant: temporal.occurrence.instantUtc, offset: temporal.occurrence.utcOffsetMinutes };
 }
 
-/** Local date and wall-clock time at the reading's own recorded offset. */
+/**
+ * Local date and wall-clock time at the reading's own recorded offset. Packet 11C B4a (D7): plus the source's own instant and offset,
+ * exactly as the journal's exact point records them, so the panel never infers either.
+ */
 function supportingReading(entry: Resolved): SupportingReading {
   const shifted = new Date(instantMs(entry.instant) + entry.offset * 60_000).toISOString();
   const { measurement, measurementMethod } = entry.source.payload;
@@ -62,6 +65,8 @@ function supportingReading(entry: Resolved): SupportingReading {
     ref: { recordType: "GLUCOSE_READING", recordId: entry.source.ref.recordId, revisionId: entry.source.ref.revisionId },
     localDate: shifted.slice(0, 10) as LocalDate,
     localTime: shifted.slice(11, 16),
+    instantUtc: entry.instant as Instant,
+    utcOffsetMinutes: entry.offset,
     enteredValue: measurement.enteredValue,
     enteredUnit: measurement.enteredUnit,
     method: measurementMethod,

@@ -60,9 +60,10 @@ import { OnboardingFlow, type OnboardingExit } from "./onboarding/OnboardingFlow
 import { MyMedicinesScreen, type MyMedicinesView } from "./screens/MyMedicinesScreen";
 import { PreventiveCareScreen } from "./screens/PreventiveCareScreen";
 import { CarePreparationScreen, type CarePreparationSelection } from "./screens/CarePreparationScreen";
-import { CareSummaryPreviewScreen } from "./screens/CareSummaryPreviewScreen";
+import { CareSummaryPreviewScreen, type CareSummaryAiWordingPort } from "./screens/CareSummaryPreviewScreen";
 import { createBrowserPrintPort, type PrintPort } from "./care-preparation/PrintPort";
-import { createBrowserHistoryExplainer } from "@/application/ai/browser-history-explainer";
+import { createBrowserAiAssistance } from "@/application/ai/browser-history-explainer";
+import { createAiRemoteUseSession, type AiRemoteUseSession } from "@/application/ai/browser-shell-client";
 import type { AiInvocationAuditPort } from "@/application/ai/ai-provider-port";
 import type { RecordedHistoryQueryPort } from "@/application/history/recorded-history-contracts";
 import type { PatternExplainerPort } from "./history/PatternExplanationPanel";
@@ -115,12 +116,22 @@ type JagaOnAppProps = {
   printPortFactory?: () => PrintPort;
   /**
    * Packet 11C B2b: builds the history explanation (one hybrid service and one pattern explainer) from an opened runtime's ports.
-   * Called once per runtime; injected in tests to observe that.
+   * Packet 11C B4b: the same wiring also builds the care-summary AI wording over the SAME hybrid service. Called once per runtime;
+   * injected in tests to observe that (and to add a test manifest and a fake route).
    */
-  historyExplainerFactory?: HistoryExplainerFactory;
+  aiAssistanceFactory?: AiAssistanceFactory;
 };
 
-export type HistoryExplainerFactory = (ports: { history: RecordedHistoryQueryPort; audit: AiInvocationAuditPort }) => PatternExplainerPort;
+/**
+ * Packet 11C B3: `remoteUse` is this app session's in-memory AI disclosure session (one per mount; never persisted). Packet 11C B4b:
+ * `carePreparation` is the runtime's care-preparation port pair; `careSummary` is null when no care wording is wired.
+ */
+export type AiAssistanceFactory = (ports: {
+  history: RecordedHistoryQueryPort;
+  carePreparation: JagaOnRuntime["carePreparation"];
+  audit: AiInvocationAuditPort;
+  remoteUse: AiRemoteUseSession;
+}) => { history: PatternExplainerPort; careSummary: CareSummaryAiWordingPort | null };
 
 /** Startup gate: onboarding until setup is completed or explicitly skipped. */
 type Phase =
@@ -147,7 +158,7 @@ export function JagaOnApp({
   printPortFactory = createBrowserPrintPort,
   deleteAllPortFactory = browserDeleteAllPort,
   restorePortFactory = browserRestorePort,
-  historyExplainerFactory = createBrowserHistoryExplainer,
+  aiAssistanceFactory = createBrowserAiAssistance,
 }: JagaOnAppProps = {}) {
   const printPort = useMemo(() => printPortFactory(), [printPortFactory]);
   const appointmentNotes = useMemo<AppointmentNoteSelectionRepository>(
@@ -376,10 +387,23 @@ export function JagaOnApp({
    * re-opened dataset gets a new one). Building it reads, writes and sends nothing: the history screen calls it only on the patient's
    * explicit "Show how this comparison was worked out", and with the shipped manifest that is deterministic and local.
    */
-  const historyExplainer = useMemo<PatternExplainerPort | null>(
-    () => (runtime ? historyExplainerFactory({ history: runtime.history, audit: runtime.aiAudit }) : null),
-    [runtime, historyExplainerFactory],
+  /**
+   * Packet 11C B3 (coordinator ruling: once per app session): one in-memory AI disclosure session for this app session, shared by every
+   * explainer built during it. It is not persisted, so a reload starts a new session that asks again. It accepts only through the
+   * disclosure dialog's primary action, and the dialog appears only before a remote call (never while NOT_ACTIVATED).
+   */
+  const [remoteUse] = useState(createAiRemoteUseSession);
+  /**
+   * Packet 11C B4b: ONE AI wiring per opened runtime (stable identity): the history explainer and the care-summary wording share one
+   * hybrid service, browser shell client, this session's disclosure and the runtime's audit port. Building it reads, writes and sends
+   * nothing; with the shipped manifest the care wording is never available, so the preview never shows its action.
+   */
+  const aiAssistance = useMemo(
+    () => (runtime ? aiAssistanceFactory({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit, remoteUse }) : null),
+    [runtime, aiAssistanceFactory, remoteUse],
   );
+  const historyExplainer: PatternExplainerPort | null = aiAssistance?.history ?? null;
+  const careSummaryWording: CareSummaryAiWordingPort | null = aiAssistance?.careSummary ?? null;
 
   const current = stack[stack.length - 1]!;
   const isTopLevel = TOP_LEVEL_SCREENS.includes(current.screen);
@@ -462,6 +486,18 @@ export function JagaOnApp({
     },
     [runtime, locale, navigate],
   );
+
+  /**
+   * Packet 11C B4b: an accepted AI-assisted replacement takes the superseded preview's place in the navigation stack. The screen
+   * instance is kept (its key stays the first preview's id), so Back still returns to visit preparation, never to the superseded one.
+   */
+  const replacePreview = useCallback((recordId: RecordId) => {
+    setStack((prev) => {
+      const top = prev[prev.length - 1];
+      if (top?.screen !== "CARE_SUMMARY_PREVIEW") return prev;
+      return [...prev.slice(0, -1), { screen: "CARE_SUMMARY_PREVIEW", params: { recordId, previewKey: top.params?.previewKey ?? top.params?.recordId ?? "" } }];
+    });
+  }, []);
 
   const refreshToday = useCallback(async () => {
     if (!runtime) return;
@@ -767,7 +803,7 @@ export function JagaOnApp({
         if (!runtime) return <p role="status">{messages.shared.loading}</p>;
         return (
           <CareSummaryPreviewScreen
-            key={entry.params?.recordId ?? ""}
+            key={entry.params?.previewKey ?? entry.params?.recordId ?? ""}
             messages={messages}
             locale={locale}
             recordId={(entry.params?.recordId ?? "") as RecordId}
@@ -775,6 +811,8 @@ export function JagaOnApp({
             commands={runtime.carePreparation.commands}
             print={printPort}
             onBack={goBack}
+            aiWording={careSummaryWording}
+            onReplaced={replacePreview}
           />
         );
       case "DATA_BACKUP":

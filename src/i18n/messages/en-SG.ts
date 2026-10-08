@@ -3,6 +3,35 @@ import { packet10EnSG } from "./packet10-en-SG";
 
 export const enSGMessages: AppMessages = {
   packet10: packet10EnSG,
+  // Packet 11 shared AI disclosure (11-bilingual-copy-state-matrix.md, APPROVED_PACKET_11 rows; Packet 11C Task B3).
+  ai: {
+    cancel: "Cancel",
+    remoteTitle: "Use AI for this synthetic demo?",
+    // ai-disclosure.11c.1: replaces the approved row (it named Kie.ai and said the selected information is sent); the route is Direct
+    // DeepSeek (D2) and the request is value-blind. Human acceptance pending.
+    remoteBody:
+      "To suggest wording, JagaOn sends DeepSeek a request that contains no values, dates, names or your own text. JagaOn fills in your records itself and checks the result before showing it.",
+    remoteLimit: "Do not enter real patient information in this hackathon demo.",
+    pattern: { confirm: "Generate explanation" },
+    // Packet 11C B4b: the approved care-summary rows (matrix Section 4), exact; `notEligible` is new (ai-care-summary.11c.1), human
+    // acceptance pending.
+    careSummary: {
+      confirm: "Organise selected information",
+      action: "Organise with AI",
+      loading: "Organising your selected information…",
+      resultTitle: "AI-assisted organisation",
+      resultBody: "The selected facts and questions are unchanged. Review every item before approving.",
+      fallback: "Your structured summary is still ready without AI.",
+      changed: "Your selected information changed before the AI result was saved. Review the latest summary and try again if you wish.",
+      notEligible: "AI organisation is not available for this summary.",
+    },
+    // ai-remote-use.11c.1 (Packet 11C B4a): remote use not accepted, nothing sent. Human acceptance pending.
+    remoteNotAccepted: "AI wording was not used. This is JagaOn's standard wording.",
+    // Packet 11C B4b: approved shared rows (matrix Section 2), exact.
+    unavailable: "AI is not available right now. Your recorded information has not changed.",
+    cancelled: "AI request cancelled. Your recorded information has not changed.",
+    retry: "Try AI again",
+  },
   shared: {
     appName: "JagaOn",
     demoBoundary:
@@ -552,8 +581,10 @@ export const enSGMessages: AppMessages = {
       `For comparable ${slot} records, the recent median was ${recent} ${unit}, compared with ${reference} ${unit} in the earlier period.`,
     comparisonLower: (slot, recent, reference, unit) =>
       `For comparable ${slot} records, the recent median was ${recent} ${unit}, compared with ${reference} ${unit} in the earlier period.`,
+    // Packet 11C B4 (owner decision 1): the one deliberate change to approved 7A copy; the value is the evaluator's interquartile range.
+    // Was "the recent recorded spread". Human acceptance pending.
     comparisonVariability: (slot, recent, reference, unit) =>
-      `For comparable ${slot} records, the recent recorded spread was ${recent} ${unit}, compared with ${reference} ${unit} earlier.`,
+      `For comparable ${slot} records, the recent interquartile range (IQR) was ${recent} ${unit}, compared with ${reference} ${unit} earlier.`,
     noMaterialComparison: (slot) =>
       `The comparable ${slot} records did not meet the governed threshold for a numerical difference.`,
     repeatedItem: (label, count, days) => `“${label}” appears in ${count} records across ${days} days.`,
@@ -593,7 +624,10 @@ export const enSGMessages: AppMessages = {
       action: "Show how this comparison was worked out",
       title: "How this comparison was worked out",
       aiLabel: "AI-assisted wording",
-      supportingHeading: (count) => `Supporting readings (${count})`,
+      // history-explanation.11c.2 (Packet 11C B4a): the next three rows are new wording, human acceptance pending.
+      supportingHeading: (count) => `Readings included in this comparison (${count})`,
+      singaporeTime: (date, time) => `${date}, ${time} Singapore time`,
+      offsetReading: (recorded, offset, singapore) => `${recorded} (${offset}; ${singapore})`,
       periodHeading: (role, count) => (role === "EARLIER" ? `Earlier period (${count})` : `Recent period (${count})`),
       reconciliation: (earlier, recent, total) => `${earlier} + ${recent} = ${total} readings, matching the count above.`,
       unavailable: "This comparison cannot be explained right now. The comparison above is unchanged.",

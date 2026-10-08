@@ -1,8 +1,16 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import Dexie from "dexie";
 import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
 import type { Instant } from "@/domain/shared/time";
+import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
+import { projectValidatedAiCareSummary } from "@/application/care-preparation/ai-care-summary-replacement";
 import { createBrowserJournalRuntime } from "./browser-journal-runtime";
+
+// Packet 11C B4b: a pass-through spy on the care-preparation service factory, so the runtime's injected AI projection can be pinned.
+vi.mock("@/application/care-preparation/care-preparation-service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/application/care-preparation/care-preparation-service")>();
+  return { ...actual, createCarePreparationService: vi.fn(actual.createCarePreparationService) };
+});
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;
 const originalIDBKeyRange = Dexie.dependencies.IDBKeyRange;
@@ -39,6 +47,15 @@ async function open(name = `packet-7a-runtime-${crypto.randomUUID()}`) {
 }
 
 describe("browser journal runtime", () => {
+  it("Packet 11C B4b: wires exactly projectValidatedAiCareSummary as the care-preparation AI projection, and nothing else", async () => {
+    const before = vi.mocked(createCarePreparationService).mock.calls.length;
+    await open();
+    const calls = vi.mocked(createCarePreparationService).mock.calls.slice(before);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![1].projectAiCareSummary).toBe(projectValidatedAiCareSummary);
+    expect(Object.keys(calls[0]![1]).sort()).toEqual(["ids", "now", "projectAiCareSummary"]);
+  });
+
   it("bootstraps the synthetic scenario through journal commands and evaluates it", async () => {
     const runtime = await open();
     const today = await runtime.query.loadToday();

@@ -16,6 +16,12 @@ import { databases, dayBefore, FACT, higherFixture, local, NOW, TODAY } from "@/
 import { AI_ACTIVATION_MANIFEST } from "@/application/ai/ai-activation-manifest";
 import { createAiHybridTaskService, type AiHybridExecutionResult } from "@/application/ai/ai-hybrid-task-service";
 import { createPatternExplainer } from "@/application/ai/explain-pattern";
+import { createBrowserHistoryExplainer } from "@/application/ai/browser-history-explainer";
+import { createAiRemoteUseSession, type BrowserShellFetcher } from "@/application/ai/browser-shell-client";
+import type { AiActivationManifest } from "@/application/ai/ai-activation-manifest";
+import { shellPlanView } from "@/application/ai/language/shell-projector";
+import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
+import { shellTaskRequestSchema, slotToken, type AiInvocationAuditRow, type ShellFieldPath } from "@/domain/ai";
 import type { PatternExplainerPort, PatternExplanationResult } from "../history/PatternExplanationPanel";
 import { RecordedHistoryScreen } from "./RecordedHistoryScreen";
 
@@ -420,56 +426,63 @@ describe("Recorded history explanation panel (Packet 11C Task 7)", () => {
     }
   });
 
-  it("discards a late en-SG result after a switch to zh-SG (the old answer arrives first)", async () => {
+  /**
+   * Packet 11C B4a (B3 carry, before any activation): a locale switch CLOSES an open explanation and never explains again by itself; the
+   * pending request is aborted and its late answer discarded. A new explicit action in the new locale is required.
+   */
+  it.each([
+    ["en-SG", "zh-SG"],
+    ["zh-SG", "en-SG"],
+  ] as const)("a switch from %s to %s closes the open panel, aborts the pending request and explains nothing; the late answer is discarded", async (from, to) => {
+    const { history } = await higherFixture();
+    const results = await realResults(history);
+    const held = heldPort(results);
+    const { rerender } = render(screenElement(from, history, held.explainer));
+    await openAction(from);
+    expect(held.calls.map((call) => call.input.locale)).toEqual([from]);
+    rerender(screenElement(to, history, held.explainer));
+    await act(async () => undefined);
+    // No new request, the old one aborted, and the panel closed.
+    expect(held.calls.map((call) => call.input.locale)).toEqual([from]);
+    expect(held.calls[0]!.signal?.aborted).toBe(true);
+    expect(screen.queryByRole("region", { name: getMessages(from).history.explanation.title })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: getMessages(to).history.explanation.title })).not.toBeInTheDocument();
+    const action = screen.getByRole("button", { name: getMessages(to).history.explanation.action });
+    expect(action).toHaveAttribute("aria-expanded", "false");
+
+    // The old answer arrives late: nothing is shown and nothing reopens.
+    await act(async () => held.calls[0]!.resolve());
+    expect(document.body.textContent).not.toContain(headlineOf(results[from]));
+    expect(document.querySelector(".history-explanation")).toBeNull();
+    expect(held.calls).toHaveLength(1);
+
+    // Only a new explicit action explains, in the new locale.
+    await openAction(to);
+    expect(held.calls.map((call) => call.input.locale)).toEqual([from, to]);
+    await act(async () => held.calls[1]!.resolve());
+    expect(within(screen.getByRole("region", { name: getMessages(to).history.explanation.title })).getByRole("status")).toHaveTextContent(headlineOf(results[to]));
+    expect(document.body.textContent).not.toContain(headlineOf(results[from]));
+  });
+
+  it("an answered panel also closes on a locale switch, and switching back does not reopen it", async () => {
     const { history } = await higherFixture();
     const results = await realResults(history);
     const held = heldPort(results);
     const { rerender } = render(screenElement("en-SG", history, held.explainer));
     await openAction("en-SG");
-    expect(held.calls.map((call) => call.input.locale)).toEqual(["en-SG"]);
+    await act(async () => held.calls[0]!.resolve());
+    expect(within(screen.getByRole("region", { name: en.history.explanation.title })).getByRole("status")).toHaveTextContent(headlineOf(results["en-SG"]));
     rerender(screenElement("zh-SG", history, held.explainer));
     await act(async () => undefined);
-    expect(held.calls.map((call) => call.input.locale)).toEqual(["en-SG", "zh-SG"]);
-    expect(held.calls[0]!.signal?.aborted).toBe(true);
-
-    await act(async () => held.calls[0]!.resolve());
-    const panel = screen.getByRole("region", { name: zh.history.explanation.title });
-    expect(within(panel).getByRole("status")).toBeEmptyDOMElement();
-    expect(document.body.textContent).not.toContain(headlineOf(results["en-SG"]));
-
-    await act(async () => held.calls[1]!.resolve());
-    expect(within(panel).getByRole("status")).toHaveTextContent(headlineOf(results["zh-SG"]));
-    expect(document.body.textContent).not.toContain(headlineOf(results["en-SG"]));
-  });
-
-  it("discards a late zh-SG result after a switch to en-SG (the old answer arrives last)", async () => {
-    const { history } = await higherFixture();
-    const results = await realResults(history);
-    const held = heldPort(results);
-    const { rerender } = render(screenElement("zh-SG", history, held.explainer));
-    await openAction("zh-SG");
+    expect(document.querySelector(".history-explanation")).toBeNull();
     rerender(screenElement("en-SG", history, held.explainer));
     await act(async () => undefined);
-    expect(held.calls.map((call) => call.input.locale)).toEqual(["zh-SG", "en-SG"]);
-    expect(held.calls[0]!.signal?.aborted).toBe(true);
-
-    await act(async () => held.calls[1]!.resolve());
-    const status = within(screen.getByRole("region", { name: en.history.explanation.title })).getByRole("status");
-    expect(status).toHaveTextContent(headlineOf(results["en-SG"]));
-    const mutations: MutationRecord[] = [];
-    const observer = new MutationObserver((records) => mutations.push(...records));
-    observer.observe(status, { childList: true, subtree: true, characterData: true });
-    try {
-      await act(async () => held.calls[0]!.resolve());
-      expect(mutations).toHaveLength(0);
-      expect(status).toHaveTextContent(headlineOf(results["en-SG"]));
-      expect(document.body.textContent).not.toContain(headlineOf(results["zh-SG"]));
-    } finally {
-      observer.disconnect();
-    }
+    expect(document.querySelector(".history-explanation")).toBeNull();
+    expect(held.calls).toHaveLength(1);
+    expect(screen.getByRole("button", { name: en.history.explanation.action })).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("discards a late result that arrives right after the locale commit, before that commit's passive effects run", async () => {
+  it("discards a late result that arrives right after the locale commit, before that commit's passive effects run; the panel stays closed", async () => {
     const { history } = await higherFixture();
     const results = await realResults(history);
     const held = heldPort(results);
@@ -503,15 +516,19 @@ describe("Recorded history explanation panel (Packet 11C Task 7)", () => {
       });
       observer.observe(document.body, { childList: true, subtree: true, characterData: true });
       switchLocale("zh-SG");
-      await waitFor(() => expect(held.calls).toHaveLength(2));
+      await waitFor(() => expect(resolvedAfterCommit).toBe(true));
       await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(resolvedAfterCommit).toBe(true);
       expect(englishShown).toBe(false);
-      expect(within(screen.getByRole("region", { name: zh.history.explanation.title })).getByRole("status")).toBeEmptyDOMElement();
+      // Packet 11C B4a: the locale commit closed the panel and asked for nothing.
+      expect(held.calls).toHaveLength(1);
+      expect(held.calls[0]!.signal?.aborted).toBe(true);
+      expect(document.querySelector(".history-explanation")).toBeNull();
     } finally {
       observer?.disconnect();
       reactGlobal.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
     }
+    await openAction("zh-SG");
+    expect(held.calls.map((call) => call.input.locale)).toEqual(["en-SG", "zh-SG"]);
     await act(async () => held.calls[1]!.resolve());
     expect(within(screen.getByRole("region", { name: zh.history.explanation.title })).getByRole("status")).toHaveTextContent(headlineOf(results["zh-SG"]));
     expect(englishShown).toBe(false);
@@ -692,5 +709,193 @@ describe("Recorded history explanation panel (Packet 11C Task 7)", () => {
     await act(async () => undefined);
     await waitFor(() => expect(screen.queryByText(en.history.loading)).not.toBeInTheDocument());
     expect(thisWeek).toHaveFocus();
+  });
+});
+
+/**
+ * Packet 11C Addendum B, Task B3: the shared disclosure in the history flow. It is decided on the patient's action, BEFORE the explainer
+ * (so before the hybrid service and its timers) and only when EXPLAIN_PATTERN is SYNTHETIC_REMOTE_ENABLED and this app session has not
+ * accepted it. Accepted: the explanation runs with the session answering ACCEPTED. Cancelled (or Escape): the explanation still runs,
+ * deterministically, with nothing sent. Activated behaviour uses an injected test manifest and a fake route only.
+ */
+describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)", () => {
+  const ENABLED: AiActivationManifest = { ...AI_ACTIVATION_MANIFEST, tasks: { ...AI_ACTIVATION_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED" } };
+  function fakeRoute() {
+    return vi.fn<BrowserShellFetcher>(async (_url, init) => {
+      const plan = shellPlanView(shellTaskRequestSchema.parse(JSON.parse(init.body as string)));
+      const home = (path: ShellFieldPath) => plan.slots.find((slot) => slot.homeField === path)!.slotId;
+      const candidate = shellCandidate(plan, new Map<ShellFieldPath, string>([["headline", `A look at ${slotToken(home("headline"))}.`], ["evidence", `This is based on ${slotToken(home("evidence"))}.`]]));
+      return new Response(JSON.stringify({ kind: "CANDIDATE", candidate, retention: "CONFIRMED_NOT_STORED", usage: { inputTokens: 1, outputTokens: 1, costMicroUsd: 1 } }), { headers: { "content-type": "application/json" } });
+    });
+  }
+  async function wired(manifest: AiActivationManifest = ENABLED, online: () => boolean = () => true) {
+    const { history } = await higherFixture();
+    const rows: AiInvocationAuditRow[] = [];
+    const fetcher = fakeRoute();
+    const remoteUse = createAiRemoteUseSession();
+    const real = createBrowserHistoryExplainer({ history, audit: { append: async (row) => void rows.push(row) }, manifest, remoteUse, fetcher, online });
+    const explain = vi.fn(real.explain);
+    const explainer = { ...real, explain };
+    return { history, rows, fetcher, remoteUse, explainer, explain };
+  }
+  const dialogOf = (locale: AiLocale = "en-SG") => screen.getByRole("dialog", { name: getMessages(locale).ai.remoteTitle });
+  const panelStatus = (locale: AiLocale = "en-SG") => within(screen.getByRole("region", { name: getMessages(locale).history.explanation.title })).getByRole("status");
+
+  it("activated, not yet accepted: the action opens the disclosure first; nothing is explained, read for AI, audited or sent", async () => {
+    const run = await wired();
+    render(screenElement("en-SG", run.history, run.explainer));
+    const action = await openAction();
+    const dialog = dialogOf();
+    expect(dialog).toHaveAccessibleDescription(`${en.ai.remoteBody} ${en.ai.remoteLimit}`);
+    expect(within(dialog).getByRole("button", { name: en.ai.cancel })).toHaveFocus();
+    expect(within(dialog).getByRole("button", { name: en.ai.pattern.confirm })).toBeInTheDocument();
+    expect(action).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: en.history.explanation.title })).not.toBeInTheDocument();
+    expect(run.explain).not.toHaveBeenCalled();
+    expect(run.rows).toHaveLength(0);
+    expect(run.fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Cancel", () => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.cancel }))],
+    ["Escape", () => fireEvent.keyDown(dialogOf(), { key: "Escape" })],
+  ])("%s: the deterministic explanation opens with nothing sent and an audit row that records no attempt; the next action asks again", async (_label, cancel) => {
+    const run = await wired();
+    render(screenElement("en-SG", run.history, run.explainer));
+    const action = await openAction();
+    act(() => cancel());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(action).toHaveAttribute("aria-expanded", "true");
+    const panel = screen.getByRole("region", { name: en.history.explanation.title });
+    expect(within(panel).getByRole("heading", { level: 3 })).toHaveFocus();
+    await waitFor(() => expect(panelStatus()).not.toBeEmptyDOMElement());
+    expect(panelStatus()).not.toHaveTextContent(en.history.explanation.unavailable);
+    expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
+    // Packet 11C B4a: the short non-technical line says AI wording was not used (human acceptance pending).
+    expect(within(panel).getByText(en.ai.remoteNotAccepted)).toBeInTheDocument();
+    expect(run.explain).toHaveBeenCalledTimes(1);
+    expect(run.explain.mock.calls[0]![0]).toEqual({ factId: FACT, locale: "en-SG", disclosure: "DECLINED" });
+    expect(run.fetcher).not.toHaveBeenCalled();
+    expect(run.remoteUse.accepted()).toBe(false);
+    expect(run.rows).toHaveLength(1);
+    // Packet 11C B4a (coordinator ruling): an explicit decline is audited as REQUEST_CANCELLED (no schema change); nothing was sent.
+    expect(run.rows[0]).toMatchObject({ outcomeCode: "REQUEST_CANCELLED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [] });
+
+    // Not accepted, so the next explicit action asks again.
+    fireEvent.click(action);
+    await openAction();
+    expect(dialogOf()).toBeInTheDocument();
+    expect(run.explain).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepted: the AI explanation from one POST; the rest of the session does not ask again", async () => {
+    const run = await wired();
+    render(screenElement("en-SG", run.history, run.explainer));
+    const action = await openAction();
+    act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.pattern.confirm })));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(run.remoteUse.accepted()).toBe(true);
+    const panel = screen.getByRole("region", { name: en.history.explanation.title });
+    expect(within(panel).getByRole("heading", { level: 3 })).toHaveFocus();
+    await waitFor(() => expect(within(panel).getByText(en.history.explanation.aiLabel)).toBeInTheDocument());
+    expect(run.fetcher).toHaveBeenCalledTimes(1);
+    expect(run.rows[0]).toMatchObject({ outcomeCode: "ACCEPTED", providerModel: { providerKey: "deepseek", modelSnapshot: "deepseek-flash" }, attempts: { count: 1 } });
+
+    fireEvent.click(action);
+    await openAction();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(run.fetcher).toHaveBeenCalledTimes(2));
+    expect(run.explain).toHaveBeenCalledTimes(2);
+  });
+
+  it("NOT_ACTIVATED (shipped manifest): the disclosure never appears, even with a session that has not accepted", async () => {
+    const run = await wired(AI_ACTIVATION_MANIFEST);
+    render(screenElement("en-SG", run.history, run.explainer));
+    await openAction();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(panelStatus()).not.toBeEmptyDOMElement());
+    expect(run.explain).toHaveBeenCalledTimes(1);
+    expect(run.fetcher).not.toHaveBeenCalled();
+    expect(run.rows[0]).toMatchObject({ outcomeCode: "TASK_DISABLED", attempts: { count: 0 } });
+  });
+
+  it("zh-SG: the disclosure shows the zh copy", async () => {
+    const run = await wired();
+    render(screenElement("zh-SG", run.history, run.explainer));
+    await openAction("zh-SG");
+    const dialog = dialogOf("zh-SG");
+    expect(dialog).toHaveAccessibleDescription(`${zh.ai.remoteBody} ${zh.ai.remoteLimit}`);
+    expect(within(dialog).getAllByRole("button").map((button) => button.textContent)).toEqual([zh.ai.pattern.confirm, zh.ai.cancel]);
+  });
+
+  it("a locale or period change while the disclosure is open closes it: nothing is explained, audited or sent; it does not come back", async () => {
+    const run = await wired();
+    const { rerender } = render(screenElement("en-SG", run.history, run.explainer));
+    await openAction();
+    expect(dialogOf()).toBeInTheDocument();
+    rerender(screenElement("zh-SG", run.history, run.explainer));
+    await act(async () => undefined);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    rerender(screenElement("en-SG", run.history, run.explainer));
+    await act(async () => undefined);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await openAction();
+    expect(dialogOf()).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: en.history.periodLastWeek }));
+    await act(async () => undefined);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(en.history.loading)).not.toBeInTheDocument());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(run.explain).not.toHaveBeenCalled();
+    expect(run.rows).toHaveLength(0);
+    expect(run.fetcher).not.toHaveBeenCalled();
+  });
+
+  it("activated + accepted session + open AI panel: a locale switch closes the panel with no POST and no audit row; only a new action explains again", async () => {
+    const run = await wired();
+    const { rerender } = render(screenElement("en-SG", run.history, run.explainer));
+    await openAction();
+    act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.pattern.confirm })));
+    const panel = screen.getByRole("region", { name: en.history.explanation.title });
+    await waitFor(() => expect(within(panel).getByText(en.history.explanation.aiLabel)).toBeInTheDocument());
+    expect(run.fetcher).toHaveBeenCalledTimes(1);
+    expect(run.rows).toHaveLength(1);
+
+    rerender(screenElement("zh-SG", run.history, run.explainer));
+    await act(async () => undefined);
+    await act(async () => undefined);
+    expect(screen.queryByRole("region", { name: zh.history.explanation.title })).not.toBeInTheDocument();
+    expect(document.querySelector(".history-explanation")).toBeNull();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(run.explain).toHaveBeenCalledTimes(1);
+    expect(run.fetcher).toHaveBeenCalledTimes(1);
+    expect(run.rows).toHaveLength(1);
+    expect(screen.getByRole("button", { name: zh.history.explanation.action })).toHaveAttribute("aria-expanded", "false");
+
+    // A new explicit action in the new locale: the session already accepted, so it explains (one more POST) in zh-SG.
+    await openAction("zh-SG");
+    await waitFor(() => expect(run.fetcher).toHaveBeenCalledTimes(2));
+    expect(run.explain.mock.calls[1]![0]).toEqual({ factId: FACT, locale: "zh-SG" });
+  });
+
+  it("activated but offline: the disclosure is not shown (nothing would be sent); the explanation is deterministic", async () => {
+    const run = await wired(ENABLED, () => false);
+    expect(run.explainer.disclosureRequired()).toBe(false);
+    render(screenElement("en-SG", run.history, run.explainer));
+    await openAction();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(panelStatus()).not.toBeEmptyDOMElement());
+    expect(run.fetcher).not.toHaveBeenCalled();
+    expect(run.rows[0]).toMatchObject({ outcomeCode: "TRANSPORT_FAILED", attempts: { count: 0 } });
+    expect(screen.queryByText(en.ai.remoteNotAccepted)).not.toBeInTheDocument();
+  });
+
+  it("an explainer without the disclosure methods (no session) never shows the dialog", async () => {
+    const run = await wired();
+    render(screenElement("en-SG", run.history, { explain: run.explain }));
+    await openAction();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(run.explain).toHaveBeenCalledTimes(1);
   });
 });

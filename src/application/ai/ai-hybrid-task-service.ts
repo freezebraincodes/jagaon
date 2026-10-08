@@ -3,7 +3,7 @@ import { AI_ACTIVATION_MANIFEST, resolveAiTaskActivation, type AiActivationManif
 import { createDeterministicFallback, type AiFallbackResult } from "./ai-fallbacks";
 import { resolveAiHybridBundle, type AiHybridRuntimeBundle } from "./ai-hybrid-runtime-bundles";
 import { renderExplainLimitations, type RenderedLimitation } from "./ai-meaning-registry";
-import { addUsage, buildAuditRow, callOnce, NO_USAGE, type Attempts } from "./ai-call-support";
+import { addUsage, buildAuditRow, callOnce, decideRemoteUse, NO_USAGE, type Attempts } from "./ai-call-support";
 import { PROVIDER_FAILURE_REASONS, SHELL_STRUCTURAL_REJECTION_REASONS, type AiInvocationAuditPort, type AiShellProviderPort } from "./ai-provider-port";
 import { composeAiResult } from "./language/ai-composition";
 import type { AiComposition } from "./language/assembler";
@@ -27,8 +27,16 @@ import { planSlots } from "./language/slot-planner";
  * Packet 11C Addendum B, Task B2a (D6): the provider may answer with a typed structural rejection from the server shell gates; it is handled
  * exactly like a local shell-gate rejection (usage counted, at most one structural repair within maxAttempts), so the repair happens here
  * once and never in the route. The provider-call helpers come from the shared ai-call-support module, not from the legacy service.
+ * Packet 11C Addendum B, Task B3: a provider that carries a remote-use disclosure (`provider.remoteUse`, the browser shell client) has it
+ * decided here once per request, after the activation, private, offline, provider, eligibility, cancellation and projection checks and
+ * BEFORE the first attempt is counted and before any timer starts (so a pending decision can never time the request out, and a repair
+ * never asks again). Anything but ACCEPTED composes deterministically in mode REMOTE_NOT_ACCEPTED (the closed reason stays
+ * MISSING_CONFIGURATION, as in B2b; the provider-failure list is unchanged) with nothing sent: the audit row records no attempt, provider
+ * model, source revision or usage. An abort while it is pending is REQUEST_CANCELLED, with nothing sent either.
+ * Packet 11C B4a (coordinator ruling): a DECLINED decision (the patient's explicit Cancel) is the same outcome with the closed reason
+ * REQUEST_CANCELLED; the audit schema and the provider-failure list are unchanged.
  */
-export type AiLanguageMode = "REMOTE_AI" | "PRIVATE" | "OFFLINE" | "NOT_ACTIVATED" | "NO_PROVIDER" | "INELIGIBLE";
+export type AiLanguageMode = "REMOTE_AI" | "PRIVATE" | "OFFLINE" | "NOT_ACTIVATED" | "NO_PROVIDER" | "INELIGIBLE" | "REMOTE_NOT_ACCEPTED";
 export type AiHybridExecutionResult =
   | Readonly<{ kind: "COMPOSED"; source: "AI" | "DETERMINISTIC"; mode: AiLanguageMode; composition: AiComposition; reason: AiReasonCode | null; auditRef: string; limitations?: readonly RenderedLimitation[]; limitationCopyComplete?: boolean; notices?: readonly CareDraftNotice[] }>
   | Readonly<{ kind: "FALLBACK"; fallback: AiFallbackResult; auditRef: string }>
@@ -140,6 +148,16 @@ export function createAiHybridTaskService(dependencies: AiHybridTaskServiceDepen
       } catch {
         // An unapprovable value-blind request never reaches the provider; fail closed to the deterministic text.
         return finish("REMOTE_AI", { kind: "DETERMINISTIC", reason: "PAYLOAD_INVALID" });
+      }
+      // Packet 11C B3: the remote-use disclosure, decided before the first attempt and before any timer (attempts.count is still 0).
+      const remoteUse = dependencies.provider.remoteUse;
+      if (remoteUse) {
+        const decided = await decideRemoteUse(remoteUse, signal ?? new AbortController().signal);
+        if (signal?.aborted) return finish("REMOTE_AI", { kind: "DETERMINISTIC", reason: "REQUEST_CANCELLED" });
+        // Packet 11C B4a (coordinator ruling): the patient's explicit decline is audited as REQUEST_CANCELLED; any other non-acceptance
+        // (no acceptance exists) stays MISSING_CONFIGURATION. Either way nothing is sent and the mode is REMOTE_NOT_ACCEPTED.
+        if (decided === "DECLINED") return finish("REMOTE_NOT_ACCEPTED", { kind: "DETERMINISTIC", reason: "REQUEST_CANCELLED" });
+        if (decided !== "ACCEPTED") return finish("REMOTE_NOT_ACCEPTED", { kind: "DETERMINISTIC", reason: "MISSING_CONFIGURATION" });
       }
       return finish("REMOTE_AI", await invokeShells(request, planned.plan, planned.atoms, bundle, dependencies.provider, shellRequest, attempts, signal));
     },

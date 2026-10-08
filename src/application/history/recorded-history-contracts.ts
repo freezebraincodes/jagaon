@@ -136,14 +136,27 @@ export const EXPLAINABLE_INELIGIBLE_REASONS = Object.freeze([
   "UNAVAILABLE",
 ] as const);
 
-const supportingReadingSchema = z.strictObject({
-  ref: glucoseReadingRefSchema,
-  localDate: localDateSchema,
-  localTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
-  enteredValue: decimalStringSchema,
-  enteredUnit: z.enum(["MMOL_L", "MG_DL"]),
-  method: z.string().min(1).max(64),
-});
+/**
+ * One supporting reading. `localDate` / `localTime` are its wall-clock date and time at its OWN recorded offset. Packet 11C B4a (D7): it
+ * also carries the source's actual `instantUtc` and `utcOffsetMinutes` (from the journal's exact point, never inferred), so a reading
+ * recorded away from +08:00 can be shown with its real offset and its exact Singapore-time equivalent. The local date and time must be
+ * that instant at that offset (minute precision, floored); a disagreeing reading is refused. None of these fields enters an AI request.
+ */
+const supportingReadingSchema = z
+  .strictObject({
+    ref: glucoseReadingRefSchema,
+    localDate: localDateSchema,
+    localTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+    instantUtc: instantSchema,
+    utcOffsetMinutes: z.number().int().safe(),
+    enteredValue: decimalStringSchema,
+    enteredUnit: z.enum(["MMOL_L", "MG_DL"]),
+    method: z.string().min(1).max(64),
+  })
+  .refine((reading) => {
+    const shifted = Date.parse(reading.instantUtc) + reading.utcOffsetMinutes * 60_000;
+    return Number.isFinite(shifted) && new Date(shifted).toISOString().slice(0, 16) === `${reading.localDate}T${reading.localTime}`;
+  }, "LOCAL_TIME_DISAGREES_WITH_INSTANT");
 
 export type SupportingReading = z.infer<typeof supportingReadingSchema>;
 

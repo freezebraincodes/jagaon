@@ -2,7 +2,16 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import Dexie from "dexie";
 import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
-import { aiInvocationAuditRowSchema } from "@/domain/ai";
+import { aiInvocationAuditRowSchema, shellTaskRequestSchema, slotToken, type AiInvocationAuditRow, type ShellFieldPath } from "@/domain/ai";
+import { AI_ACTIVATION_MANIFEST, type AiActivationManifest } from "@/application/ai/ai-activation-manifest";
+import { createBrowserAiAssistance } from "@/application/ai/browser-history-explainer";
+import type { BrowserShellFetcher } from "@/application/ai/browser-shell-client";
+import { createAiInvocationAuditRepository } from "@/application/ai/ai-audit-persistence";
+import { closeCarePreparationHarnesses, createCarePreparationHarness, ENABLED_CARE_MANIFEST, exact, fakeModelCareShells, testIds } from "@/application/care-preparation/care-preparation-test-support";
+import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
+import { projectValidatedAiCareSummary } from "@/application/care-preparation/ai-care-summary-replacement";
+import { shellPlanView } from "@/application/ai/language/shell-projector";
+import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
 import { databases as historyDatabases, higherFixture } from "@/application/history/history-test-support";
 import type {
   GlucoseRecordViewModel,
@@ -13,7 +22,7 @@ import type {
 import type { BrowserJournalRuntimeOptions, JagaOnRuntime } from "@/application/journal/browser-journal-runtime";
 import { getMessages } from "@/i18n/get-messages";
 import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-fixture";
-import { JagaOnApp, type DeleteAllPortFactory, type HistoryExplainerFactory } from "./JagaOnApp";
+import { JagaOnApp, type AiAssistanceFactory, type DeleteAllPortFactory } from "./JagaOnApp";
 import { createDeleteDatasetService } from "@/storage/delete-dataset";
 import { JagaOnStorageLockedError, LocalStateCleanupUnconfirmedError } from "@/application/journal/browser-journal-runtime";
 import { lockStateFor } from "@/application/storage/integrity-gate";
@@ -750,7 +759,9 @@ describe("JagaOnApp journal integration", () => {
     expect(runtime.carePreparation.commands.prepare).toHaveBeenCalledWith(
       expect.objectContaining({ locale: "en-SG", appointment: null, groups: [{ key: "GLUCOSE", sources: [expect.objectContaining({ recordType: "GLUCOSE_READING" })] }], questions: [], notSelected: [] }),
     );
-    expect(runtime.carePreparation.query.loadSummary).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000401");
+    // Packet 11C B4b (race fix, diagnosed): the preview loads in a passive effect plus a microtask after its heading commits
+    // (`use-care-load.ts`), so the heading can appear before the load starts. Wait for the load itself; the assertion is unchanged.
+    await waitFor(() => expect(runtime.carePreparation.query.loadSummary).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000401"));
     fireEvent.click(await screen.findByRole("button", { name: en.careSummary.backToPreparation }));
     expect(await screen.findByRole("heading", { level: 1, name: en.carePreparation.title })).toBeInTheDocument();
   });
@@ -1206,8 +1217,9 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
     const en = getMessages("en-SG");
     const runtime = fakeRuntime();
     const explainer = { explain: vi.fn() };
-    const factory = vi.fn<HistoryExplainerFactory>(() => explainer);
-    const props = { runtimeFactory: async () => runtime, onboardingRepositoryFactory: completed(), historyExplainerFactory: factory };
+    // Packet 11C B4b (deliberate retarget): one AI wiring per runtime serves both flows (history explanation, care-summary wording).
+    const factory = vi.fn<AiAssistanceFactory>(() => ({ history: explainer, careSummary: null }));
+    const props = { runtimeFactory: async () => runtime, onboardingRepositoryFactory: completed(), aiAssistanceFactory: factory };
     const { rerender } = render(<JagaOnApp {...props} />);
     await screen.findByRole("button", { name: en.today.recordReading });
     const nav = screen.getByRole("navigation");
@@ -1218,7 +1230,10 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
     rerender(<JagaOnApp {...props} />);
     await act(async () => undefined);
     expect(factory).toHaveBeenCalledTimes(1);
-    expect(factory).toHaveBeenCalledWith({ history: runtime.history, audit: runtime.aiAudit });
+    // Packet 11C B3: plus this app session's in-memory disclosure session (not yet accepted).
+    // Packet 11C B4b: plus the runtime's care-preparation ports (the care-summary wording uses the same wiring).
+    expect(factory).toHaveBeenCalledWith({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit, remoteUse: expect.objectContaining({ disclosure: expect.any(Object) }) });
+    expect(factory.mock.calls[0]![0].remoteUse.accepted()).toBe(false);
     // Nothing is explained without the patient's explicit action (this runtime's history offers none).
     expect(explainer.explain).not.toHaveBeenCalled();
   });
@@ -1252,6 +1267,276 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(rows).toHaveLength(1);
     expect(aiInvocationAuditRowSchema.parse(rows[0])).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcomeCode: "TASK_DISABLED", providerModel: null, attempts: { count: 0 } });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Packet 11C Addendum B, Task B3: the disclosure in the wired app. One in-memory disclosure session per app session (per mount; never
+ * persisted, so a reload asks again). Activated behaviour only through an injected factory that adds a test manifest and a fake route
+ * to the real browser wiring; the shipped app never shows the dialog.
+ */
+describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
+  const originalIndexedDB = Dexie.dependencies.indexedDB;
+  const originalIDBKeyRange = Dexie.dependencies.IDBKeyRange;
+  beforeAll(() => {
+    Dexie.dependencies.indexedDB = fakeIndexedDB;
+    Dexie.dependencies.IDBKeyRange = FDBKeyRange;
+  });
+  afterAll(() => {
+    Dexie.dependencies.indexedDB = originalIndexedDB;
+    Dexie.dependencies.IDBKeyRange = originalIDBKeyRange;
+  });
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    for (const database of historyDatabases) database.close();
+    for (const database of historyDatabases.splice(0)) await Dexie.delete(database.name);
+  });
+
+  const ENABLED: AiActivationManifest = { ...AI_ACTIVATION_MANIFEST, tasks: { ...AI_ACTIVATION_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED" } };
+  function fakeRoute() {
+    return vi.fn<BrowserShellFetcher>(async (_url, init) => {
+      const plan = shellPlanView(shellTaskRequestSchema.parse(JSON.parse(init.body as string)));
+      const home = (path: ShellFieldPath) => plan.slots.find((slot) => slot.homeField === path)!.slotId;
+      const candidate = shellCandidate(plan, new Map<ShellFieldPath, string>([["headline", `A look at ${slotToken(home("headline"))}.`], ["evidence", `This is based on ${slotToken(home("evidence"))}.`]]));
+      return new Response(JSON.stringify({ kind: "CANDIDATE", candidate, retention: "CONFIRMED_NOT_STORED", usage: { inputTokens: 1, outputTokens: 1, costMicroUsd: 1 } }), { headers: { "content-type": "application/json" } });
+    });
+  }
+  async function activatedApp() {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { history } = await higherFixture();
+    const runtime = fakeRuntime();
+    runtime.history = history;
+    const rows: AiInvocationAuditRow[] = [];
+    runtime.aiAudit = { append: vi.fn(async (row: AiInvocationAuditRow) => void rows.push(row)) };
+    const fetcher = fakeRoute();
+    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: ENABLED, fetcher });
+    const props = { runtimeFactory: async () => runtime, onboardingRepositoryFactory: completed(), aiAssistanceFactory: factory };
+    return { props, rows, fetcher, fetchSpy };
+  }
+  async function toHistoryAction() {
+    const en = getMessages("en-SG");
+    await screen.findByRole("button", { name: en.today.recordReading });
+    fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navHistory }));
+    return screen.findByRole("button", { name: en.history.explanation.action });
+  }
+
+  it("cancelled: no POST, the deterministic explanation, one audit row with no attempt, provider model or source", async () => {
+    const en = getMessages("en-SG");
+    const app = await activatedApp();
+    render(<JagaOnApp {...app.props} />);
+    const action = await toHistoryAction();
+    action.focus();
+    fireEvent.click(action);
+    const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    expect(app.rows).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole("button", { name: en.ai.cancel }));
+    const panel = await screen.findByRole("region", { name: en.history.explanation.title });
+    await waitFor(() => expect(within(panel).getByRole("status")).not.toBeEmptyDOMElement());
+    expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
+    expect(app.fetcher).not.toHaveBeenCalled();
+    expect(app.fetchSpy).not.toHaveBeenCalled();
+    expect(app.rows).toHaveLength(1);
+    // Packet 11C B4a: the explicit decline is audited as REQUEST_CANCELLED, and the panel says AI wording was not used.
+    expect(within(panel).getByText(en.ai.remoteNotAccepted)).toBeInTheDocument();
+    expect(aiInvocationAuditRowSchema.parse(app.rows[0])).toMatchObject({ outcomeCode: "REQUEST_CANCELLED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], measurements: { inputTokens: null, outputTokens: null, costMicroUsd: null } });
+  });
+
+  it("accepted once per app session: navigation keeps the acceptance; a new app session (reload) asks again", async () => {
+    const en = getMessages("en-SG");
+    const app = await activatedApp();
+    const { unmount } = render(<JagaOnApp {...app.props} />);
+    fireEvent.click(await toHistoryAction());
+    fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.pattern.confirm }));
+    const panel = await screen.findByRole("region", { name: en.history.explanation.title });
+    await waitFor(() => expect(within(panel).getByText(en.history.explanation.aiLabel)).toBeInTheDocument());
+    expect(app.fetcher).toHaveBeenCalledTimes(1);
+    expect(app.rows[0]).toMatchObject({ outcomeCode: "ACCEPTED", providerModel: { providerKey: "deepseek", modelSnapshot: "deepseek-flash" } });
+
+    // Leave and come back: the same session, no second disclosure.
+    fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navToday }));
+    await act(async () => undefined);
+    fireEvent.click(await toHistoryAction());
+    await act(async () => undefined);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(app.fetcher).toHaveBeenCalledTimes(2));
+
+    // A reload is a new app session: nothing was persisted, so the disclosure is asked again before any POST.
+    unmount();
+    render(<JagaOnApp {...app.props} />);
+    fireEvent.click(await toHistoryAction());
+    expect(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).toBeInTheDocument();
+    expect(app.fetcher).toHaveBeenCalledTimes(2);
+    expect(app.fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Packet 11C Addendum B, Task B4b: the care-summary AI wording in the wired app. The preview gets the care wording of the same AI wiring
+ * as the history explanation (one hybrid service, browser shell client, session disclosure and audit port). With the shipped manifest
+ * the action is never shown and nothing is called at startup, screen load, preview, approval or print. Activated behaviour only through
+ * an injected factory that adds a test manifest and a fake route to the real wiring, over a real care-preparation service with the AI
+ * projection (the shipped runtime's projector is pinned in browser-journal-runtime.test.ts).
+ */
+describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
+  const originalIndexedDB = Dexie.dependencies.indexedDB;
+  const originalIDBKeyRange = Dexie.dependencies.IDBKeyRange;
+  beforeAll(() => {
+    Dexie.dependencies.indexedDB = fakeIndexedDB;
+    Dexie.dependencies.IDBKeyRange = FDBKeyRange;
+  });
+  afterAll(() => {
+    Dexie.dependencies.indexedDB = originalIndexedDB;
+    Dexie.dependencies.IDBKeyRange = originalIDBKeyRange;
+  });
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    for (const database of historyDatabases) database.close();
+    for (const database of historyDatabases.splice(0)) await Dexie.delete(database.name);
+    await closeCarePreparationHarnesses();
+  });
+
+  const LATER = "2026-10-04T02:05:00.000Z";
+  const BOTH: AiActivationManifest = { ...ENABLED_CARE_MANIFEST, tasks: { ...ENABLED_CARE_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED" } };
+  const glucosePayload = { measurement: { enteredValue: "6.6" as never, enteredUnit: "MMOL_L" as const, normalization: null }, measurementMethod: "FINGERSTICK_METER" as const, context: { kind: "PATIENT_SELECTED_SLOT" as const, slot: "BEDTIME" as const } };
+
+  /** A fake runtime whose care preparation is real (prepared preview; the AI projection configured) and whose AI audit is persisted. */
+  async function careRuntime() {
+    const h = await createCarePreparationHarness();
+    const service = createCarePreparationService(h.database, { now: () => LATER as never, ids: testIds, projectAiCareSummary: projectValidatedAiCareSummary });
+    const reading = await h.journal.recordGlucose({ payload: glucosePayload, temporal: { kind: "POINT", occurrence: exact("2026-10-03T13:00:00.000Z") }, recordedAt: LATER as never });
+    const question = await h.organisation.createCareQuestion({ questionText: { text: "Can I keep the pen in my bag? (demo)", language: "en-SG" } });
+    if (reading.kind !== "COMMITTED" || question.kind !== "COMMITTED") throw new Error("fixture");
+    const prepared = await service.prepare(await h.selection());
+    if (prepared.kind !== "COMMITTED") throw new Error(JSON.stringify(prepared));
+    const runtime = fakeRuntime();
+    const prepare = vi.fn(async () => prepared);
+    runtime.carePreparation = { commands: { ...service, prepare }, query: h.query };
+    runtime.careOrganisation.query.loadVisitPreparation = vi.fn(async () => ({
+      status: "READY" as const,
+      appointment: null,
+      questions: [],
+      period: { startAt: "2026-09-04T16:00:00.000Z" as never, endAtExclusive: "2026-10-04T16:00:00.000Z" as never, startDate: "2026-09-05", endDate: "2026-10-04" },
+      factGroups: [
+        { key: "GLUCOSE" as const, sources: [{ recordType: "GLUCOSE_READING" as const, recordId: reading.recordId, revisionId: reading.revisionId }] },
+        { key: "INSULIN" as const, sources: [] },
+        { key: "MEALS" as const, sources: [] },
+        { key: "WALKS" as const, sources: [] },
+      ],
+    }));
+    const audits = createAiInvocationAuditRepository(h.database);
+    runtime.aiAudit = { append: vi.fn(audits.append) };
+    return { h, runtime, prepared, audits };
+  }
+
+  /** A fake POST /api/ai/shell answering valid shells for either flow's approved value-blind request. */
+  function fakeRoute() {
+    return vi.fn<BrowserShellFetcher>(async (_url, init) => {
+      const plan = shellPlanView(shellTaskRequestSchema.parse(JSON.parse(init.body as string)));
+      const home = (path: ShellFieldPath) => plan.slots.find((slot) => slot.homeField === path)!.slotId;
+      const texts = plan.taskType === "EXPLAIN_PATTERN" ? new Map<ShellFieldPath, string>([["headline", `A look at ${slotToken(home("headline"))}.`], ["evidence", `This is based on ${slotToken(home("evidence"))}.`]]) : fakeModelCareShells(plan);
+      return new Response(JSON.stringify({ kind: "CANDIDATE", candidate: shellCandidate(plan, texts), retention: "CONFIRMED_NOT_STORED", usage: { inputTokens: 1, outputTokens: 1, costMicroUsd: 1 } }), { headers: { "content-type": "application/json" } });
+    });
+  }
+
+  async function toCarePreview() {
+    const en = getMessages("en-SG");
+    await screen.findByRole("button", { name: en.today.recordReading });
+    fireEvent.click(screen.getByRole("button", { name: en.today.prepareAppointment }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: new RegExp(en.carePreparation.glucoseReadings) }));
+    fireEvent.click(screen.getByRole("button", { name: en.carePreparation.previewSummary }));
+    await screen.findByRole("heading", { level: 1, name: en.careSummary.title });
+    return screen.findByRole("article");
+  }
+
+  it("shipped manifest: no AI action, dialog, audit row or network call at startup, preview, approval or print", async () => {
+    const en = getMessages("en-SG");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const care = await careRuntime();
+    const print = vi.fn(async () => "DIALOG_OPENED" as const);
+    render(<JagaOnApp runtimeFactory={async () => care.runtime} onboardingRepositoryFactory={completed()} printPortFactory={() => ({ print })} />);
+    await toCarePreview();
+    const approve = (await screen.findByRole("button", { name: en.careSummary.approveAction })) as HTMLButtonElement;
+    await waitFor(() => expect(approve.disabled).toBe(false));
+    expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).not.toBeInTheDocument();
+    fireEvent.click(approve);
+    fireEvent.click(await screen.findByRole("button", { name: en.careSummary.printAction }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByText(en.ai.careSummary.resultTitle)).not.toBeInTheDocument();
+    expect(care.runtime.aiAudit.append).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("activated (test manifest, fake route): a declined disclosure sends nothing, keeps the preview and writes one REQUEST_CANCELLED row", async () => {
+    const en = getMessages("en-SG");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const care = await careRuntime();
+    const fetcher = fakeRoute();
+    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, fetcher, now: () => LATER as never });
+    render(<JagaOnApp runtimeFactory={async () => care.runtime} onboardingRepositoryFactory={completed()} printPortFactory={() => ({ print: vi.fn() })} aiAssistanceFactory={factory} />);
+    const before = (await toCarePreview()).textContent;
+    const action = (await screen.findByRole("button", { name: en.ai.careSummary.action })) as HTMLButtonElement;
+    await waitFor(() => expect(action.disabled).toBe(false));
+    fireEvent.click(action);
+    const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    expect(care.runtime.aiAudit.append).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: en.ai.cancel }));
+    expect(await screen.findByText(en.ai.remoteNotAccepted)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: en.ai.careSummary.resultTitle })).not.toBeInTheDocument();
+    expect(screen.getByRole("article").textContent).toBe(before);
+    const rows = await care.audits.list();
+    expect(rows.map((row) => [row.taskType, row.outcomeCode, row.attempts.count, row.providerModel, row.sourceRevisions.length])).toEqual([["DRAFT_CARE_PREPARATION_SUMMARY", "REQUEST_CANCELLED", 0, null, 0]]);
+    expect(await care.h.database.table("recordHeads").where("recordType").equals("CARE_SUMMARY_SNAPSHOT").count()).toBe(1);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("activated (test manifest, fake route): one session across both flows; the accepted replacement opens in place of the old preview", async () => {
+    const en = getMessages("en-SG");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const care = await careRuntime();
+    const { history } = await higherFixture();
+    care.runtime.history = history;
+    const fetcher = fakeRoute();
+    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, fetcher, now: () => LATER as never });
+    render(<JagaOnApp runtimeFactory={async () => care.runtime} onboardingRepositoryFactory={completed()} printPortFactory={() => ({ print: vi.fn() })} aiAssistanceFactory={factory} />);
+
+    // The disclosure is accepted once, in the history flow.
+    fireEvent.click(within(await screen.findByRole("navigation")).getByRole("button", { name: en.shared.navHistory }));
+    fireEvent.click(await screen.findByRole("button", { name: en.history.explanation.action }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.pattern.confirm }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navToday }));
+
+    // The care flow in the same app session does not ask again.
+    const before = (await toCarePreview()).textContent;
+    const action = (await screen.findByRole("button", { name: en.ai.careSummary.action })) as HTMLButtonElement;
+    await waitFor(() => expect(action.disabled).toBe(false));
+    fireEvent.click(action);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const region = await screen.findByRole("region", { name: en.ai.careSummary.resultTitle });
+    expect(within(region).getByText(en.ai.careSummary.resultBody)).toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.getByRole("article").textContent).not.toBe(before));
+    const rows = await care.audits.list();
+    expect(rows.map((row) => `${row.taskType}:${row.outcomeCode}`).sort()).toEqual(["DRAFT_CARE_PREPARATION_SUMMARY:ACCEPTED", "EXPLAIN_PATTERN:ACCEPTED"]);
+    // Approval is still the patient's own click: the new preview is not approved and nothing printed.
+    const replaced = (await care.h.database.table("recordHeads").where("recordType").equals("CARE_SUMMARY_SNAPSHOT").toArray()).map((head) => head.recordId).find((id) => id !== care.prepared.recordId)!;
+    await waitFor(async () => {
+      const view = await care.h.query.loadSummary(replaced);
+      expect(view.status === "READY" && [view.snapshotStatus, view.payload.composition.method]).toEqual(["PREVIEWED", "AI_ASSISTED"]);
+    });
+    expect(care.runtime.carePreparation.commands.prepare).toHaveBeenCalledTimes(1);
+    // The replaced preview took the old one's place: Back returns to visit preparation, not to the superseded preview.
+    fireEvent.click(screen.getAllByRole("button", { name: en.careSummary.backToPreparation }).at(-1)!);
+    expect(await screen.findByRole("heading", { level: 1, name: en.carePreparation.title })).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

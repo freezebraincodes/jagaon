@@ -35,14 +35,24 @@ export function local(date: string, time: string) {
   return { kind: "POINT" as const, occurrence: { kind: "EXACT" as const, instantUtc: instant, timeZoneId: "Asia/Singapore", utcOffsetMinutes: 480 } };
 }
 
-export async function reading(journal: JournalCommandService, date: string, time: string, value: string, slot = "BEFORE_BREAKFAST") {
+/**
+ * Packet 11C B4a: a wall-clock time recorded at another UTC offset (for example +05:30 in Asia/Kolkata). The instant is the one that
+ * local time and offset name; nothing about it is inferred from Singapore time.
+ */
+export function atOffset(date: string, time: string, utcOffsetMinutes: number, timeZoneId: string) {
+  const localMs = Date.parse(`${date}T${time}:00.000Z`);
+  const instant = new Date(localMs - utcOffsetMinutes * 60_000).toISOString() as Instant;
+  return { kind: "POINT" as const, occurrence: { kind: "EXACT" as const, instantUtc: instant, timeZoneId, utcOffsetMinutes } };
+}
+
+export async function reading(journal: JournalCommandService, date: string, time: string, value: string, slot = "BEFORE_BREAKFAST", temporal = local(date, time)) {
   const result = await journal.recordGlucose({
     payload: {
       measurement: { enteredValue: value as never, enteredUnit: "MMOL_L", normalization: null },
       measurementMethod: "FINGERSTICK_METER",
       context: { kind: "PATIENT_SELECTED_SLOT", slot: slot as never },
     },
-    temporal: local(date, time),
+    temporal,
     recordedAt: "2026-10-04T01:00:00.000Z" as Instant,
   });
   if (result.kind !== "COMMITTED") throw new Error("reading failed");
@@ -101,6 +111,33 @@ export async function boundaryDayFixture() {
   const after = await reading(harness.journal, BOUNDARY_DATE, ...BOUNDARY_DAY_READINGS.after);
   await harness.coordinator.processPending();
   return { ...harness, boundary: { before, after } };
+}
+
+/**
+ * Packet 11C B4a (D7) foreign-offset case, on top of the HIGHER readings: three before-breakfast readings recorded at +05:30
+ * (Asia/Kolkata). The evaluator alone places them, by instant:
+ * - `beforeCutoff`: 07:15 +05:30 on BOUNDARY_DATE = 09:45 Singapore time, before the 10:00 cutoff (EARLIER);
+ * - `afterCutoff`: 07:45 +05:30 on BOUNDARY_DATE = 10:15 Singapore time, after the cutoff (RECENT), although its own wall-clock time is
+ *   earlier than 10:00;
+ * - `outerEdge`: 22:00 +05:30 on the day before TODAY = 00:30 Singapore time on TODAY, the recent window's end date (RECENT, last).
+ */
+export const FOREIGN_OFFSET_MINUTES = 330;
+export const FOREIGN_TIME_ZONE = "Asia/Kolkata";
+export const FOREIGN_OFFSET_READINGS = Object.freeze({
+  beforeCutoff: Object.freeze({ date: BOUNDARY_DATE, time: "07:15", value: "6.0", singapore: Object.freeze({ date: BOUNDARY_DATE, time: "09:45" }) }),
+  afterCutoff: Object.freeze({ date: BOUNDARY_DATE, time: "07:45", value: "7.4", singapore: Object.freeze({ date: BOUNDARY_DATE, time: "10:15" }) }),
+  outerEdge: Object.freeze({ date: dayBefore(TODAY, 1), time: "22:00", value: "7.3", singapore: Object.freeze({ date: TODAY, time: "00:30" }) }),
+});
+
+export async function foreignOffsetFixture() {
+  const harness = await setup();
+  for (const [d, v] of [...REFERENCE, ...RECENT]) await reading(harness.journal, dayBefore(TODAY, d), "07:30", v);
+  const foreign: Record<keyof typeof FOREIGN_OFFSET_READINGS, Awaited<ReturnType<typeof reading>>> = {} as never;
+  for (const [key, entry] of Object.entries(FOREIGN_OFFSET_READINGS) as Array<[keyof typeof FOREIGN_OFFSET_READINGS, (typeof FOREIGN_OFFSET_READINGS)[keyof typeof FOREIGN_OFFSET_READINGS]]>) {
+    foreign[key] = await reading(harness.journal, entry.date, entry.time, entry.value, "BEFORE_BREAKFAST", atOffset(entry.date, entry.time, FOREIGN_OFFSET_MINUTES, FOREIGN_TIME_ZONE));
+  }
+  await harness.coordinator.processPending();
+  return { ...harness, foreign };
 }
 
 /**

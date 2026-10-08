@@ -11,8 +11,13 @@ import {
   BOUNDARY_DAY_READINGS,
   boundaryDayFixture,
   databases,
+  atOffset,
   dayBefore,
   FACT,
+  FOREIGN_OFFSET_MINUTES,
+  FOREIGN_OFFSET_READINGS,
+  FOREIGN_TIME_ZONE,
+  foreignOffsetFixture,
   higherFixture,
   largePeriodFixture,
   LARGE_PERIOD_TIMES,
@@ -307,6 +312,65 @@ describe("Packet 11C Task 6R: the shared period boundary and included-reading co
     expect(earlier.count).toBe(earlier.readings.length);
     expect(recent.count).toBe(recent.readings.length);
     expect(view.totalCount).toBe(earlier.count + recent.count);
+  });
+});
+
+describe("Packet 11C B4a (D7): each supporting reading carries its source instant and recorded UTC offset (real evaluator)", () => {
+  it("a Singapore reading carries its own instant and +08:00 (480), exactly as the journal recorded it", async () => {
+    const { history, recorded } = await higherFixture();
+    const view = explainable(await history.loadExplainablePattern({ factId: FACT }));
+    const first = view.periods[0].readings[0]!;
+    expect(first).toEqual({
+      ref: { recordType: "GLUCOSE_READING", recordId: first.ref.recordId, revisionId: first.ref.revisionId },
+      localDate: dayBefore(TODAY, 33),
+      localTime: "07:30",
+      instantUtc: local(dayBefore(TODAY, 33), "07:30").occurrence.instantUtc,
+      utcOffsetMinutes: 480,
+      enteredValue: "6.3",
+      enteredUnit: "MMOL_L",
+      method: "FINGERSTICK_METER",
+    });
+    expect(recorded.map((entry) => entry.recordId)).toContain(first.ref.recordId);
+  });
+
+  it("+05:30 readings on each side of the cutoff and at the outer window edge: the evaluator places them by instant; the view keeps their actual offset", async () => {
+    const { database, history, foreign } = await foreignOffsetFixture();
+    const view = explainable(await history.loadExplainablePattern({ factId: FACT }));
+    const [earlier, recent] = view.periods;
+    const find = (key: keyof typeof FOREIGN_OFFSET_READINGS) => view.periods.flatMap((p) => p.readings.map((r) => ({ role: p.role, r }))).find(({ r }) => r.ref.recordId === foreign[key].recordId)!;
+    for (const key of Object.keys(FOREIGN_OFFSET_READINGS) as Array<keyof typeof FOREIGN_OFFSET_READINGS>) {
+      const entry = FOREIGN_OFFSET_READINGS[key];
+      const { r } = find(key);
+      // The recorded local date and time at its own offset, and the source instant (never re-derived from Singapore time).
+      expect(r).toMatchObject({ localDate: entry.date, localTime: entry.time, utcOffsetMinutes: FOREIGN_OFFSET_MINUTES, instantUtc: atOffset(entry.date, entry.time, FOREIGN_OFFSET_MINUTES, FOREIGN_TIME_ZONE).occurrence.instantUtc });
+      expect(new Date(Date.parse(r.instantUtc) + 480 * 60_000).toISOString().slice(0, 16)).toBe(`${entry.singapore.date}T${entry.singapore.time}`);
+    }
+    // 07:15 +05:30 (09:45 Singapore time) is before the 10:00 cutoff; 07:45 +05:30 (10:15 Singapore time) is at or after it.
+    expect(find("beforeCutoff").role).toBe("EARLIER");
+    expect(find("afterCutoff").role).toBe("RECENT");
+    expect(earlier.readings.at(-1)!.ref.recordId).toBe(foreign.beforeCutoff.recordId);
+    expect(recent.readings[0]!.ref.recordId).toBe(foreign.afterCutoff.recordId);
+    // 22:00 +05:30 on 3 Oct is 00:30 Singapore time on 4 Oct, the recent window's end date: the last recent reading.
+    expect(find("outerEdge").role).toBe("RECENT");
+    expect(recent.readings.at(-1)!.ref.recordId).toBe(foreign.outerEdge.recordId);
+    expect(find("outerEdge").r.localDate).toBe(dayBefore(TODAY, 1));
+    // The evaluator agrees (placement comes from its assignments only), and the counts are the included readings.
+    const { facts } = comparisonChain(await loadIntelligenceSnapshot(database, NOW));
+    expect(facts.reference.assignments.map((a) => a.reading.recordId)).toContain(foreign.beforeCutoff.recordId);
+    expect(facts.recent.assignments.map((a) => a.reading.recordId)).toEqual(expect.arrayContaining([foreign.afterCutoff.recordId, foreign.outerEdge.recordId]));
+    expect(view.periods.map((p) => [p.role, p.count, p.readings.length])).toEqual([["EARLIER", 9, 9], ["RECENT", 8, 8]]);
+    expect(view.totalCount).toBe(17);
+  });
+
+  it("the view schema refuses a reading whose recorded local date and time disagree with its instant and offset", async () => {
+    const { history } = await foreignOffsetFixture();
+    const view = explainable(await history.loadExplainablePattern({ factId: FACT }));
+    expect(explainablePatternViewSchema.safeParse(view).success).toBe(true);
+    for (const change of [{ utcOffsetMinutes: 480 }, { localTime: "07:46" }, { instantUtc: "2026-09-20T02:16:00.000Z" }, { utcOffsetMinutes: 330.5 }]) {
+      const broken = structuredClone(view);
+      Object.assign(broken.periods[1].readings[0]!, change);
+      expect(explainablePatternViewSchema.safeParse(broken).success, JSON.stringify(change)).toBe(false);
+    }
   });
 });
 

@@ -82,10 +82,14 @@ describe("Packet 7A history catalogue", () => {
     expect(en.comparisonHigher("before breakfast", "7.3", "6", "mmol/L")).toBe(comparison);
     expect(en.comparisonLower("before breakfast", "7.3", "6", "mmol/L")).toBe(comparison);
     expect(zh.comparisonHigher("早餐前", "7.3", "6", "mmol/L")).toBe("在可比较的早餐前记录中，近期中位数为7.3 mmol/L，较早期间为6 mmol/L。");
+    expect(zh.comparisonLower("早餐前", "7.3", "6", "mmol/L")).toBe("在可比较的早餐前记录中，近期中位数为7.3 mmol/L，较早期间为6 mmol/L。");
+    // Packet 11C B4 (owner decision 1, deliberate change to this ONE approved 7A message; wording human acceptance pending): the
+    // VARIABILITY value is the evaluator's interquartile range, so the card labels it as the IQR. Was "recent recorded spread" /
+    // "近期记录范围"; the sentence structure is unchanged and every other 7A string stays byte-identical.
     expect(en.comparisonVariability("bedtime", "1.2", "0.4", "mmol/L")).toBe(
-      "For comparable bedtime records, the recent recorded spread was 1.2 mmol/L, compared with 0.4 mmol/L earlier.",
+      "For comparable bedtime records, the recent interquartile range (IQR) was 1.2 mmol/L, compared with 0.4 mmol/L earlier.",
     );
-    expect(zh.comparisonVariability("睡前", "1.2", "0.4", "mmol/L")).toBe("在可比较的睡前记录中，近期记录范围为1.2 mmol/L，较早期间为0.4 mmol/L。");
+    expect(zh.comparisonVariability("睡前", "1.2", "0.4", "mmol/L")).toBe("在可比较的睡前记录中，近期四分位距为1.2 mmol/L，较早期间为0.4 mmol/L。");
     expect(en.noMaterialComparison("before dinner")).toBe(
       "The comparable before dinner records did not meet the governed threshold for a numerical difference.",
     );
@@ -114,6 +118,21 @@ describe("Packet 7A history catalogue", () => {
     expect(zh.incompleteStamp("9月29日", 1)).toBe("9月29日的两个显示位置中有1个记录。");
     expect(en.disabledFamily("ROUTINE_SHIFT")).toBe("ROUTINE_SHIFT is not enabled in this demo. No conclusion was produced.");
     expect(zh.disabledFamily("ROUTINE_SHIFT")).toBe("本演示未启用ROUTINE_SHIFT。系统没有作出结论。");
+  });
+
+  it("pins every 7A key in both locales: the static rows, the parameterised rows above and the label groups (Packet 11C B4)", () => {
+    // Every 7A key is covered by an exact pin in this file; only `explanation` (Packet 11C panel copy) is pinned elsewhere
+    // (bilingual-evidence.test.ts). A new or renamed 7A key fails here until it is pinned.
+    const PARAMETERISED = [
+      "readingsTitle", "chartDescription", "periodRange", "readingCount", "valueRange", "slotCount", "comparisonHigher", "comparisonLower",
+      "comparisonVariability", "noMaterialComparison", "repeatedItem", "repeatedContext", "notRecordedPosition", "notRecordedPositions",
+      "sourceSummary", "correctionSummary", "evidenceWindow", "completeStamp", "incompleteStamp", "disabledFamily",
+    ];
+    const LABEL_GROUPS = ["slotLabels", "positionLabels", "periodLabels"];
+    expect([...Object.keys(STATIC), ...PARAMETERISED, ...LABEL_GROUPS, "explanation"].sort()).toEqual(Object.keys(en).sort());
+    // The only 7A message that is not the copy-matrix row is comparisonVariability (IQR); comparisonHigher/Lower keep "median".
+    expect(en.comparisonVariability("X", "1", "2", "U")).not.toMatch(/spread|median/);
+    expect(zh.comparisonVariability("X", "1", "2", "U")).not.toMatch(/记录范围|中位数/);
   });
 
   it("keeps patient-entered labels verbatim in both locales", () => {

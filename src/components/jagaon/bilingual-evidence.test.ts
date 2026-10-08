@@ -211,7 +211,7 @@ describe("catalogue wording boundaries", () => {
     const zh = getMessages("zh-SG").history.explanation;
     expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort());
     expect(Object.keys(en).sort()).toEqual(
-      ["action", "aiLabel", "boundaryNote", "earlierRange", "periodHeading", "reconciliation", "recentRange", "stale", "supportingHeading", "title", "unavailable"].sort(),
+      ["action", "aiLabel", "boundaryNote", "earlierRange", "offsetReading", "periodHeading", "reconciliation", "recentRange", "singaporeTime", "stale", "supportingHeading", "title", "unavailable"].sort(),
     );
     const pairs: Array<[string, string, string]> = [
       ["action", en.action, zh.action],
@@ -226,12 +226,19 @@ describe("catalogue wording boundaries", () => {
       ["earlierRange", en.earlierRange("S", "C"), zh.earlierRange("S", "C")],
       ["recentRange", en.recentRange("C", "E"), zh.recentRange("C", "E")],
       ["boundaryNote", en.boundaryNote("C"), zh.boundaryNote("C")],
+      ["singaporeTime", en.singaporeTime("D", "T"), zh.singaporeTime("D", "T")],
+      ["offsetReading", en.offsetReading("R", "O", "S"), zh.offsetReading("R", "O", "S")],
     ];
     expect(Object.fromEntries(pairs.map(([key, english, chinese]) => [key, [english, chinese]]))).toEqual({
       action: ["Show how this comparison was worked out", "查看这项比较的依据"],
       title: ["How this comparison was worked out", "这项比较的依据"],
       aiLabel: ["AI-assisted wording", "AI 辅助措辞"],
-      supportingHeading: ["Supporting readings (14)", "支持读数（14 条）"],
+      // history-explanation.11c.2 (Packet 11C B4, owner decisions 2 and 3 and D7; wording human acceptance pending): the list heading
+      // names the readings included in this comparison; endpoints and the cutoff name Singapore time; a reading recorded at another
+      // offset shows its own local time and offset label, then its Singapore-time equivalent.
+      supportingHeading: ["Readings included in this comparison (14)", "此比较包含的读数（14 条）"],
+      singaporeTime: ["D, T Singapore time", "D 新加坡时间T"],
+      offsetReading: ["R (O; S)", "R（O；S）"],
       "periodHeading.EARLIER": ["Earlier period (8)", "较早期间（8 条）"],
       "periodHeading.RECENT": ["Recent period (6)", "近期（6 条）"],
       reconciliation: ["8 + 6 = 14 readings, matching the count above.", "8 + 6 = 14 条读数，与上方数量一致。"],
@@ -300,6 +307,114 @@ describe("catalogue wording boundaries", () => {
     expect(zh).toContain("您");
     // Non-technical: no version label, code or template wording.
     expect(`${en} ${zh}`).not.toMatch(/9c|11c|template|renderer|SUMMARY_|模板/i);
+  });
+
+  it("pins the Packet 11 shared AI disclosure copy (ai.*): the approved rows exactly, the corrected remoteBody (ai-disclosure.11c.1), en/zh parity", () => {
+    const en = getMessages("en-SG").ai;
+    const zh = getMessages("zh-SG").ai;
+    // Packet 11C B4b (deliberate): plus the shared fallback rows and the care-summary flow rows (pinned in the next test).
+    expect(Object.keys(en).sort()).toEqual(["cancel", "cancelled", "careSummary", "pattern", "remoteBody", "remoteLimit", "remoteNotAccepted", "remoteTitle", "retry", "unavailable"]);
+    expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort());
+    expect(Object.keys(en.pattern)).toEqual(["confirm"]);
+    expect(Object.keys(en.careSummary)).toEqual(["confirm", "action", "loading", "resultTitle", "resultBody", "fallback", "changed", "notEligible"]);
+    expect(Object.keys(zh.pattern)).toEqual(["confirm"]);
+    expect(Object.keys(zh.careSummary)).toEqual(Object.keys(en.careSummary));
+    const disclosureOnly = (messages: typeof en) => ({ cancel: messages.cancel, remoteTitle: messages.remoteTitle, remoteLimit: messages.remoteLimit, pattern: messages.pattern, careSummary: { confirm: messages.careSummary.confirm }, remoteBody: messages.remoteBody, remoteNotAccepted: messages.remoteNotAccepted });
+    expect({ en: disclosureOnly(en), zh: disclosureOnly(zh) }).toEqual({
+      en: {
+        // APPROVED_PACKET_11 rows (11-bilingual-copy-state-matrix.md Sections 2-4), exact.
+        cancel: "Cancel",
+        remoteTitle: "Use AI for this synthetic demo?",
+        remoteLimit: "Do not enter real patient information in this hackathon demo.",
+        pattern: { confirm: "Generate explanation" },
+        careSummary: { confirm: "Organise selected information" },
+        // ai-disclosure.11c.1 (coordinator ruling, human acceptance pending): replaces the approved row, which named Kie.ai and said the
+        // selected information is sent. The route is Direct DeepSeek (D2) and the request is value-blind.
+        remoteBody: "To suggest wording, JagaOn sends DeepSeek a request that contains no values, dates, names or your own text. JagaOn fills in your records itself and checks the result before showing it.",
+        // ai-remote-use.11c.1 (Packet 11C B4a; human acceptance pending): the result when the disclosure was not accepted (nothing sent).
+        remoteNotAccepted: "AI wording was not used. This is JagaOn's standard wording.",
+      },
+      zh: {
+        cancel: "取消",
+        remoteTitle: "是否在此模拟演示中使用 AI？",
+        remoteLimit: "请勿在此黑客松演示中输入真实病患资料。",
+        pattern: { confirm: "生成说明" },
+        careSummary: { confirm: "整理所选资料" },
+        remoteBody: "为了建议措辞，JagaOn 会向 DeepSeek 发送一个不包含数值、日期、姓名或您自己文字的请求。JagaOn 会自行填入您的记录，并在显示前检查结果。",
+        remoteNotAccepted: "未使用 AI 措辞。以下是 JagaOn 的标准措辞。",
+      },
+    });
+    const zhStrings = [zh.cancel, zh.remoteTitle, zh.remoteBody, zh.remoteLimit, zh.pattern.confirm, zh.careSummary.confirm, zh.remoteNotAccepted];
+    const enStrings = [en.cancel, en.remoteTitle, en.remoteBody, en.remoteLimit, en.pattern.confirm, en.careSummary.confirm, en.remoteNotAccepted];
+    for (const text of zhStrings) {
+      // Full-width punctuation only; where the reader is addressed it is 您, never 你.
+      expect(text).not.toMatch(/[()[\]:;,!?]|\.(?!\d)/);
+      expect(text).not.toMatch(/你/);
+    }
+    expect(zh.remoteBody).toContain("您");
+    // The old route name is gone; the disclosure names the evaluated route and claims no consent, confidentiality, storage or deletion.
+    for (const text of [...enStrings, ...zhStrings]) {
+      expect(text).not.toMatch(/Kie/i);
+      expect(text).not.toMatch(/consent|agree|confidential|private|privacy|secure|safe|stored|store|retain|delete|encrypt|medical advice|diagnos|recommend/i);
+      expect(text).not.toMatch(/同意|保密|隐私|安全|保存|储存|删除|加密|建议您|诊断/);
+    }
+    expect(en.remoteBody).toMatch(/DeepSeek/);
+    expect(zh.remoteBody).toMatch(/DeepSeek/);
+    // Value-blind: the body denies sending values, dates, names and the person's own text, in both locales.
+    expect(en.remoteBody).toMatch(/contains no values, dates, names or your own text/);
+    expect(zh.remoteBody).toMatch(/不包含数值、日期、姓名或您自己文字/);
+  });
+
+  it("pins the Packet 11C B4b care-summary AI wording copy: the approved rows exactly, one new row (ai-care-summary.11c.1), en/zh parity", () => {
+    const en = getMessages("en-SG").ai;
+    const zh = getMessages("zh-SG").ai;
+    const flow = (messages: typeof en) => ({ unavailable: messages.unavailable, cancelled: messages.cancelled, retry: messages.retry, careSummary: messages.careSummary });
+    expect({ en: flow(en), zh: flow(zh) }).toEqual({
+      en: {
+        // APPROVED_PACKET_11 rows (11-bilingual-copy-state-matrix.md Sections 2 and 4), exact.
+        unavailable: "AI is not available right now. Your recorded information has not changed.",
+        cancelled: "AI request cancelled. Your recorded information has not changed.",
+        retry: "Try AI again",
+        careSummary: {
+          confirm: "Organise selected information",
+          action: "Organise with AI",
+          loading: "Organising your selected information…",
+          resultTitle: "AI-assisted organisation",
+          resultBody: "The selected facts and questions are unchanged. Review every item before approving.",
+          fallback: "Your structured summary is still ready without AI.",
+          changed: "Your selected information changed before the AI result was saved. Review the latest summary and try again if you wish.",
+          // ai-care-summary.11c.1 (Packet 11C B4b; new wording, human acceptance pending): a preview the AI path cannot organise
+          // (B1b NOT_ELIGIBLE, e.g. more facts than one request may carry). Nothing was sent.
+          notEligible: "AI organisation is not available for this summary.",
+        },
+      },
+      zh: {
+        unavailable: "AI 目前无法使用。您已记录的资料没有改变。",
+        cancelled: "已取消 AI 请求。您已记录的资料没有改变。",
+        retry: "再次尝试 AI",
+        careSummary: {
+          confirm: "整理所选资料",
+          action: "使用 AI 整理",
+          loading: "正在整理您选择的资料…",
+          resultTitle: "AI 辅助整理",
+          resultBody: "所选的事实和问题没有改变。批准前，请检查每一项。",
+          fallback: "即使不使用 AI，您的结构化摘要仍可使用。",
+          changed: "保存 AI 结果前，您选择的资料已有更改。请检查最新摘要；如有需要，可再试一次。",
+          notEligible: "此摘要无法使用 AI 整理。",
+        },
+      },
+    });
+    for (const text of [zh.unavailable, zh.cancelled, zh.retry, ...Object.values(zh.careSummary)]) {
+      // Full-width punctuation only; where the reader is addressed it is 您, never 你.
+      expect(text).not.toMatch(/[()[\]:;,!?]|\.(?!\d)/);
+      expect(text).not.toMatch(/你/);
+    }
+    // Non-technical, and no claim of consent, confidentiality, medical review or advice.
+    for (const text of [en.unavailable, en.cancelled, en.retry, ...Object.values(en.careSummary), zh.unavailable, zh.cancelled, zh.retry, ...Object.values(zh.careSummary)]) {
+      expect(text).not.toMatch(/[A-Z]{2,}_[A-Z]|SUMMARY_|TOO_MANY|\b32\b|Kie|DeepSeek/);
+      expect(text).not.toMatch(/consent|confidential|privacy|medical advice|diagnos|recommend|reviewed by|clinician/i);
+      expect(text).not.toMatch(/同意|保密|隐私|诊断|医护人员已审/);
+    }
   });
 
   it("uses the design's compact bilingual boundary", () => {

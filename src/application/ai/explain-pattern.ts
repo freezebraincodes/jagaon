@@ -37,8 +37,12 @@ export type PatternLimitation = NonNullable<Composed["limitations"]>[number];
 type ViewReason = Extract<ExplainablePatternResult, { kind: "INELIGIBLE" }>["reason"];
 export type PatternExplanationUnavailableReason = ViewReason | "STALE_RESULT" | "CANCELLED";
 
+/**
+ * `remoteUse: "NOT_ACCEPTED"` (Packet 11C B3) is the dedicated, non-technical UI-level outcome for a request whose remote-use disclosure
+ * was not accepted: the explanation is the ordinary deterministic one and nothing was sent. It is present only in that case.
+ */
 export type PatternExplanation =
-  | { kind: "EXPLAINED"; source: "AI" | "DETERMINISTIC"; view: ExplainablePatternView; composition: AiComposition; limitations: readonly PatternLimitation[]; summaryRoleNotice: string }
+  | { kind: "EXPLAINED"; source: "AI" | "DETERMINISTIC"; view: ExplainablePatternView; composition: AiComposition; limitations: readonly PatternLimitation[]; summaryRoleNotice: string; remoteUse?: "NOT_ACCEPTED" }
   | { kind: "UNAVAILABLE"; reason: PatternExplanationUnavailableReason };
 
 export type PatternExplainerDependencies = {
@@ -143,6 +147,7 @@ export function createPatternExplainer(deps: PatternExplainerDependencies): { ex
           composition,
           limitations,
           summaryRoleNotice: renderSummaryRoleNotice(input.locale),
+          ...(result.mode === "REMOTE_NOT_ACCEPTED" ? { remoteUse: "NOT_ACCEPTED" as const } : {}),
         };
       } catch {
         // A storage failure, an invalid view or a failed execute never becomes an explanation.

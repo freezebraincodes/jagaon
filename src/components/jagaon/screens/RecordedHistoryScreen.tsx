@@ -27,6 +27,7 @@ import { HistoryFactsCard, type HistoryFact } from "../history/HistoryFactsCard"
 import { BookletStamps } from "../history/BookletStamps";
 import { formatDateRange, formatList, formatPosition } from "../history/history-format";
 import { PatternExplanationPanel, type PatternExplainerPort, type PatternExplanationResult } from "../history/PatternExplanationPanel";
+import { AiDisclosureDialog } from "../ai/AiDisclosureDialog";
 
 type Props = {
   messages: AppMessages;
@@ -40,8 +41,13 @@ type Props = {
   explainer?: PatternExplainerPort | null;
 };
 
-/** One opened explanation: `nonce` makes every opening its own request. */
-type OpenExplanation = { factId: string; nonce: number };
+/**
+ * One opened explanation: `nonce` makes every opening its own request. `locale` is the locale it was opened in (Packet 11C B4a: a
+ * locale switch closes it). `declined` marks an opening that followed a cancelled AI disclosure (explained with the standard wording).
+ */
+type OpenExplanation = { factId: string; nonce: number; locale: SupportedLocale; declined: boolean };
+/** Packet 11C B3: the AI disclosure shown for one comparison, valid only for the view load and locale it was asked in. */
+type PendingDisclosure = { factId: string; key: string };
 
 const panelIdFor = (factId: string) => `history-explanation-${factId.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 
@@ -158,12 +164,20 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
    * of these changes or the screen unmounts, and an answer is shown only while its key is still the current one — checked at render
    * time, so a late answer is discarded even if it lands before React has run the cleanup of the commit that superseded it.
    */
+  /**
+   * Packet 11C B4a (B3 carry, before any activation): a locale switch CLOSES an open explanation; it is never explained again in the new
+   * locale by itself (that would be a new request, possibly a new POST, without the patient asking). Closing it here, during render,
+   * means the switched commit never runs the request effect for it; the pending request is aborted by the effect cleanup and its late
+   * answer is discarded by the key check. A new explicit action in the new locale is required.
+   */
+  if (opened !== null && opened.locale !== locale) setOpened(null);
   const answerKey = explainer && opened ? `${viewToken}|${opened.factId}|${opened.nonce}|${locale}` : null;
   useEffect(() => {
-    if (!explainer || !opened) return;
+    if (!explainer || !opened || opened.locale !== locale) return;
     const key = `${viewToken}|${opened.factId}|${opened.nonce}|${locale}`;
     const controller = new AbortController();
-    explainer.explain({ factId: opened.factId, locale }, controller.signal).then(
+    const input = opened.declined ? { factId: opened.factId, locale, disclosure: "DECLINED" as const } : { factId: opened.factId, locale };
+    explainer.explain(input, controller.signal).then(
       (explanation) => {
         if (!controller.signal.aborted) setAnswer({ key, explanation });
       },
@@ -203,23 +217,61 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
     );
   }, [history, period, staleFactId, answerKey, msg, noteFocusBeforeRemoval]);
 
+  /**
+   * Packet 11C Addendum B, Task B3: the AI disclosure is decided here, on the patient's action and BEFORE the explainer is called (so
+   * before the hybrid service and its timers), only when the explainer says the next explanation would use the remote route and this
+   * app session has not accepted it (never while NOT_ACTIVATED). Accepting records the session's acceptance and opens the explanation;
+   * Cancel or Escape opens it too, composed deterministically with nothing sent. A view reload, period change or locale change while
+   * it is open makes the request moot: the disclosure closes, nothing is explained, and it does not come back.
+   */
+  const [pendingDisclosure, setPendingDisclosure] = useState<PendingDisclosure | null>(null);
+  const disclosureKey = `${viewToken}|${locale}`;
+  if (pendingDisclosure !== null && pendingDisclosure.key !== disclosureKey) setPendingDisclosure(null);
+  const shownDisclosure = explainer && pendingDisclosure?.key === disclosureKey ? pendingDisclosure : null;
+
+  const openExplanation = useCallback(
+    (factId: string, declined = false) => {
+      const nonce = openings + 1;
+      setOpenings(nonce);
+      setOpened({ factId, nonce, locale, declined });
+    },
+    [openings, locale],
+  );
+
   const toggleExplanation = useCallback(
     (factId: string) => {
       if (opened?.factId === factId) {
         setOpened(null);
         return;
       }
-      const nonce = openings + 1;
-      setOpenings(nonce);
-      setOpened({ factId, nonce });
+      if (explainer?.disclosureRequired?.() === true) {
+        setPendingDisclosure({ factId, key: disclosureKey });
+        return;
+      }
+      openExplanation(factId);
     },
-    [opened, openings],
+    [opened, explainer, disclosureKey, openExplanation],
   );
+
+  const acceptDisclosure = useCallback(() => {
+    if (!shownDisclosure) return;
+    explainer?.acceptDisclosure?.();
+    setPendingDisclosure(null);
+    openExplanation(shownDisclosure.factId);
+  }, [shownDisclosure, explainer, openExplanation]);
+
+  // Packet 11C B4a: an explicit decline is passed with the request (audited as a cancelled request; nothing is sent).
+  const cancelDisclosure = useCallback(() => {
+    if (!shownDisclosure) return;
+    setPendingDisclosure(null);
+    openExplanation(shownDisclosure.factId, true);
+  }, [shownDisclosure, openExplanation]);
 
   const changePeriod = useCallback(
     (next: HistoryPeriod) => {
       noteFocusBeforeRemoval();
       setOpened(null);
+      setPendingDisclosure(null);
       setPeriod(next);
     },
     [noteFocusBeforeRemoval],
@@ -438,6 +490,7 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
         </>
       ) : null}
       <p className="history-note history-note--footer">{msg.loggingLimitation}</p>
+      {shownDisclosure ? <AiDisclosureDialog messages={messages} flow="PATTERN" onConfirm={acceptDisclosure} onCancel={cancelDisclosure} /> : null}
     </div>
   );
 }

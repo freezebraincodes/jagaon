@@ -1,0 +1,143 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { useState } from "react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { getMessages } from "@/i18n/get-messages";
+import type { SupportedLocale } from "@/i18n/types";
+import { AiDisclosureDialog, type AiDisclosureFlow } from "./AiDisclosureDialog";
+
+/**
+ * Packet 11C Addendum B, Task B3 (original Task 4): the shared AI disclosure dialog. It is shown only before a remote call (never while
+ * NOT_ACTIVATED; the caller decides that), its copy is the Packet 11 catalogue's (approved rows; corrected remoteBody ai-disclosure.11c.1),
+ * and it is a modal dialog: heading and description association, initial focus on the safe action (Cancel), a focus trap, Escape as
+ * Cancel and focus return. Opening it sends nothing. Presentation: human acceptance pending.
+ */
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+function open(locale: SupportedLocale = "en-SG", flow: AiDisclosureFlow = "PATTERN") {
+  const onConfirm = vi.fn();
+  const onCancel = vi.fn();
+  render(<AiDisclosureDialog messages={getMessages(locale)} flow={flow} onConfirm={onConfirm} onCancel={onCancel} />);
+  return { onConfirm, onCancel, dialog: screen.getByRole("dialog") };
+}
+
+describe("AiDisclosureDialog (Packet 11C B3)", () => {
+  it.each<[SupportedLocale, AiDisclosureFlow, string]>([
+    ["en-SG", "PATTERN", "Generate explanation"],
+    ["en-SG", "CARE_SUMMARY", "Organise selected information"],
+    ["zh-SG", "PATTERN", "生成说明"],
+    ["zh-SG", "CARE_SUMMARY", "整理所选资料"],
+  ])("%s %s: a modal dialog named by its heading and described by the exact disclosure copy", (locale, flow, confirm) => {
+    const ai = getMessages(locale).ai;
+    const { dialog } = open(locale, flow);
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveAccessibleName(ai.remoteTitle);
+    expect(screen.getByRole("heading", { level: 2, name: ai.remoteTitle })).toBeInTheDocument();
+    expect(dialog).toHaveAccessibleDescription(`${ai.remoteBody} ${ai.remoteLimit}`);
+    expect(screen.getByText(ai.remoteBody)).toBeInTheDocument();
+    expect(screen.getByText(ai.remoteLimit)).toBeInTheDocument();
+    // Exactly two actions: the flow's approved primary action and the shared Cancel.
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([confirm, ai.cancel]);
+    expect(dialog).toHaveClass("ai-disclosure-dialog");
+  });
+
+  it("puts initial focus on the safe action (Cancel)", () => {
+    open();
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+  });
+
+  it("traps focus: Tab and Shift+Tab cycle between the two actions only", () => {
+    const { dialog } = open();
+    const confirm = screen.getByRole("button", { name: "Generate explanation" });
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(confirm).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(cancel).toHaveFocus();
+  });
+
+  it("Escape is Cancel: onCancel once, never onConfirm", () => {
+    const { dialog, onCancel, onConfirm } = open();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("Cancel and the primary action each call only their own handler", () => {
+    const first = open();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(first.onCancel).toHaveBeenCalledTimes(1);
+    expect(first.onConfirm).not.toHaveBeenCalled();
+    cleanup();
+    const second = open();
+    fireEvent.click(screen.getByRole("button", { name: "Generate explanation" }));
+    expect(second.onConfirm).toHaveBeenCalledTimes(1);
+    expect(second.onCancel).not.toHaveBeenCalled();
+  });
+
+  it("returns focus to the control that opened it when it closes (cancelled, accepted, or dismissed by the caller while pending)", () => {
+    function Harness() {
+      const [shown, setShown] = useState(false);
+      return (
+        <main>
+          <h1>Screen</h1>
+          <button type="button" onClick={() => setShown(true)}>
+            Opener
+          </button>
+          <button type="button" onClick={() => setShown(false)}>
+            Elsewhere
+          </button>
+          {shown ? <AiDisclosureDialog messages={getMessages("en-SG")} flow="PATTERN" onConfirm={() => setShown(false)} onCancel={() => setShown(false)} /> : null}
+        </main>
+      );
+    }
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "Opener" });
+    for (const close of [() => fireEvent.click(screen.getByRole("button", { name: "Cancel" })), () => fireEvent.click(screen.getByRole("button", { name: "Generate explanation" })), () => fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })]) {
+      opener.focus();
+      fireEvent.click(opener);
+      expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+      act(() => close());
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(opener).toHaveFocus();
+    }
+  });
+
+  it("sends nothing when it opens, renders or closes", () => {
+    const fetchSpy = vi.fn();
+    const beacon = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    vi.stubGlobal("navigator", { ...navigator, sendBeacon: beacon });
+    const { onCancel } = open("zh-SG");
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onCancel).toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(beacon).not.toHaveBeenCalled();
+  });
+
+  it("is an AI-free presentation component: it imports only React, the i18n types and the shared modal primitive", () => {
+    const source = readFileSync(join(process.cwd(), "src/components/jagaon/ai/AiDisclosureDialog.tsx"), "utf8");
+    const imports = [...source.matchAll(/from\s+["']([^"']+)["']/g)].map((match) => match[1]);
+    expect(imports).toContain("../primitives/ModalDialog");
+    for (const specifier of imports) expect(["../primitives/ModalDialog", "@/i18n/types", "react"]).toContain(specifier);
+    expect(source).not.toMatch(/\bfetch\b|XMLHttpRequest|sendBeacon|localStorage|sessionStorage|@\/application\/|@\/ai\//);
+  });
+
+  it("has scoped styles that wrap long words and keep the actions reachable at 390 px and 200% text zoom", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    const rules = [...css.matchAll(/(^|\n)([^{}\n]*\.ai-disclosure[^{}]*)\{([^}]*)\}/g)].map((match) => ({ selector: match[2]!.trim(), body: match[3]! }));
+    expect(rules.length).toBeGreaterThan(0);
+    // Every rule is scoped to the disclosure, so no other dialog changes.
+    for (const rule of rules) for (const selector of rule.selector.split(",")) expect(selector.trim()).toMatch(/^\.ai-disclosure/);
+    const all = rules.map((rule) => rule.body).join("\n");
+    expect(all).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(all).toMatch(/white-space:\s*normal/);
+    // No fixed widths or heights that would force horizontal scrolling; sizes are relative.
+    expect(all).not.toMatch(/(^|[^-])(width|height):\s*\d+px/);
+  });
+});

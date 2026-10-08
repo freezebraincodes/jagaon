@@ -1,18 +1,26 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import Dexie from "dexie";
 import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
 import { getMessages } from "@/i18n/get-messages";
 import type { SupportedLocale } from "@/i18n/types";
-import type { RecordHead, RecordId } from "@/domain/shared";
-import { NOW, closeCarePreparationHarnesses, createCarePreparationHarness, exact, rewriteAsLegacy9c1Snapshot } from "@/application/care-preparation/care-preparation-test-support";
-import type { CarePreparationCommandPort } from "@/application/care-preparation/care-preparation-contracts";
+import type { Instant, RecordHead, RecordId } from "@/domain/shared";
+import { NOW, closeCarePreparationHarnesses, createCarePreparationHarness, ENABLED_CARE_MANIFEST, exact, fakeModelCareShells, rewriteAsLegacy9c1Snapshot, testIds } from "@/application/care-preparation/care-preparation-test-support";
+import type { CarePreparationCommandPort, CarePreparationQueryPort } from "@/application/care-preparation/care-preparation-contracts";
 import { printableCareSummary } from "@/application/care-preparation/care-summary-artifact";
-import type { AiTaskRequest } from "@/domain/ai";
+import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
+import { projectValidatedAiCareSummary } from "@/application/care-preparation/ai-care-summary-replacement";
+import { shellTaskRequestSchema, type AiTaskRequest } from "@/domain/ai";
 import { renderCareDraftNotices } from "@/application/ai/language/care-draft-notices";
 import { AI_LANGUAGE_COPY } from "@/application/ai/language/ai-language-copy";
+import { shellPlanView } from "@/application/ai/language/shell-projector";
+import { createAiInvocationAuditRepository } from "@/application/ai/ai-audit-persistence";
+import { createBrowserAiAssistance } from "@/application/ai/browser-history-explainer";
+import { createAiRemoteUseSession, type BrowserShellFetcher } from "@/application/ai/browser-shell-client";
+import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
 import type { PrintPort } from "../care-preparation/PrintPort";
-import { CareSummaryPreviewScreen } from "./CareSummaryPreviewScreen";
+import { CareSummaryPreviewScreen, type CareSummaryAiWordingOutcome, type CareSummaryAiWordingPort } from "./CareSummaryPreviewScreen";
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;
 const originalKeyRange = Dexie.dependencies.IDBKeyRange;
@@ -390,6 +398,441 @@ describe("Care-summary preview: an older-version preview must be prepared again 
     expect(screen.getByRole("article").textContent).toBe(printableCareSummaryText(legacy));
     const after = await h.query.loadSummary(recordId);
     expect(after.status === "READY" && [after.snapshotStatus, after.payload.rendering.contentHash, after.exports.map((entry) => entry.outcome.state)]).toEqual(["APPROVED", legacy.rendering.contentHash, ["EXPORTED"]]);
+  });
+});
+
+/**
+ * Packet 11C Addendum B, Task B4b (original Task 5, care part): the "Organise with AI" action on the preview. Shown only when the care
+ * task is remote-enabled and online, on the current, unapproved, current-template, deterministic preview; never while NOT_ACTIVATED. The
+ * disclosure comes before any request; the deterministic preview stays readable while a request runs; an accepted replacement loads the
+ * NEW preview with the AI label and check notice; approval stays a separate click; nothing prints on its own. New presentation: human
+ * acceptance pending. Activated behaviour only with a fake port or an injected test manifest and a fake route.
+ */
+type Deferred = { input: { snapshotRef: { recordId: RecordId; expectedRevisionId: string; expectedRevisionNumber: number }; locale: string; disclosure?: "DECLINED" }; signal?: AbortSignal; resolve: (outcome: CareSummaryAiWordingOutcome) => void };
+
+function fakeWording(options: { available?: boolean; required?: boolean } = {}) {
+  let required = options.required ?? false;
+  const calls: Deferred[] = [];
+  const port = {
+    available: vi.fn(() => options.available ?? true),
+    disclosureRequired: vi.fn(() => required),
+    acceptDisclosure: vi.fn(() => {
+      required = false;
+    }),
+    compose: vi.fn((input: Deferred["input"], signal?: AbortSignal) => new Promise<CareSummaryAiWordingOutcome>((resolve) => void calls.push({ input, signal, resolve }))),
+  } satisfies CareSummaryAiWordingPort;
+  return { port, calls };
+}
+
+/** Renders the preview as the app does: a replacement moves the same screen to the new snapshot's record. */
+function AiPreviewHarness(props: { h: Awaited<ReturnType<typeof prepared>>["h"]; recordId: RecordId; locale: SupportedLocale; aiWording: CareSummaryAiWordingPort | null; commands?: CarePreparationCommandPort; print?: PrintPort; onReplaced?: (recordId: RecordId) => void; query?: CarePreparationQueryPort }) {
+  const [recordId, setRecordId] = useState(props.recordId);
+  return (
+    <CareSummaryPreviewScreen
+      messages={getMessages(props.locale)}
+      locale={props.locale}
+      recordId={recordId}
+      query={props.query ?? props.h.query}
+      commands={props.commands ?? props.h.service}
+      print={props.print ?? { print: vi.fn(async () => "DIALOG_OPENED" as const) }}
+      onBack={vi.fn()}
+      aiWording={props.aiWording}
+      onReplaced={(next) => {
+        props.onReplaced?.(next);
+        setRecordId(next);
+      }}
+    />
+  );
+}
+
+function renderAi(h: Awaited<ReturnType<typeof prepared>>["h"], recordId: RecordId, aiWording: CareSummaryAiWordingPort | null, options: { locale?: SupportedLocale; commands?: CarePreparationCommandPort; print?: PrintPort; onReplaced?: (recordId: RecordId) => void; query?: CarePreparationQueryPort } = {}) {
+  const locale = options.locale ?? "en-SG";
+  const result = render(<AiPreviewHarness h={h} recordId={recordId} locale={locale} aiWording={aiWording} commands={options.commands} print={options.print} onReplaced={options.onReplaced} query={options.query} />);
+  return { ...result, rerenderLocale: (next: SupportedLocale) => result.rerender(<AiPreviewHarness h={h} recordId={recordId} locale={next} aiWording={aiWording} commands={options.commands} print={options.print} onReplaced={options.onReplaced} query={options.query} />) };
+}
+
+/** The action, once the preview has been recorded (like approval, it is enabled on the PREVIEWED snapshot only). */
+async function aiAction(locale: SupportedLocale = "en-SG") {
+  const button = (await screen.findByRole("button", { name: getMessages(locale).ai.careSummary.action })) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  return button;
+}
+
+/** A preview the AI path can phrase: the appointment, one reading and the questions (en-SG question text). */
+async function aiPrepared(locale: SupportedLocale = "en-SG") {
+  const h = await createCarePreparationHarness();
+  const reading = await h.journal.recordGlucose({ payload: glucosePayload, temporal: { kind: "POINT", occurrence: exact("2026-10-03T13:00:00.000Z") }, recordedAt: NOW });
+  const question = await h.organisation.createCareQuestion({ questionText: { text: "Can I keep the pen in my bag? (demo)", language: "en-SG" } });
+  if (reading.kind !== "COMMITTED" || question.kind !== "COMMITTED") throw new Error("fixture");
+  const result = await h.service.prepare({ ...(await h.selection()), locale });
+  if (result.kind !== "COMMITTED") throw new Error(JSON.stringify(result));
+  return { h, recordId: result.recordId, reading };
+}
+
+describe("Care-summary preview: AI wording action (Packet 11C B4b)", () => {
+  it("is absent without the wording port, and while the care task is not activated (shipped manifest: nothing offered or sent)", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      for (const shippedPort of [false, true]) {
+        const { h, recordId } = await prepared();
+        const audit = { append: vi.fn(async () => undefined) };
+        const port = shippedPort ? createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands: h.service }, audit, remoteUse: createAiRemoteUseSession() }).careSummary : null;
+        const view = renderAi(h, recordId, port);
+        // Before and after approval: no action, no dialog, no AI label; the ordinary preview flow is unchanged.
+        await screen.findByRole("article");
+        expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).toBeNull();
+        await approveWhenPreviewed(en.careSummary.approveAction);
+        expect(await screen.findByRole("button", { name: en.careSummary.printAction })).toBeTruthy();
+        expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).toBeNull();
+        expect(screen.queryByRole("dialog")).toBeNull();
+        expect(screen.queryByText(en.ai.careSummary.resultTitle)).toBeNull();
+        expect(audit.append).not.toHaveBeenCalled();
+        view.unmount();
+      }
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("is offered on the current unapproved deterministic preview, before the approval controls, and never while offline", async () => {
+    const { h, recordId } = await prepared();
+    const { port } = fakeWording();
+    renderAi(h, recordId, port);
+    const action = await aiAction();
+    const approve = screen.getByRole("button", { name: en.careSummary.approveAction });
+    expect(action.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(port.compose).not.toHaveBeenCalled();
+    cleanup();
+    const offline = fakeWording({ available: false });
+    renderAi(h, recordId, offline.port);
+    await approveWhenPreviewed(en.careSummary.approveAction);
+    expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).toBeNull();
+  });
+
+  it("is never offered on an approved, source-changed or older-version snapshot (the D3 re-prepare message instead)", async () => {
+    const approved = await prepared();
+    const one = fakeWording();
+    renderAi(approved.h, approved.recordId, one.port);
+    await approveWhenPreviewed(en.careSummary.approveAction);
+    await screen.findByRole("button", { name: en.careSummary.printAction });
+    expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).toBeNull();
+    cleanup();
+
+    const stale = await prepared();
+    await stale.h.journal.correctGlucoseTime({ recordId: stale.reading.recordId, expectedRevisionId: stale.reading.revisionId, expectedRevisionNumber: 1, payload: glucosePayload, temporal: { kind: "POINT", occurrence: exact("2026-10-03T12:00:00.000Z") }, recordedAt: NOW });
+    renderAi(stale.h, stale.recordId, fakeWording().port);
+    expect(await screen.findByText(en.careSummary.sourceChanged)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).toBeNull();
+    cleanup();
+
+    const outdated = await prepared();
+    await rewriteAsLegacy9c1Snapshot(outdated.h.database, outdated.recordId);
+    renderAi(outdated.h, outdated.recordId, fakeWording().port);
+    expect(await screen.findByText(en.careSummary.templateSuperseded)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).toBeNull();
+  });
+
+  it("shows the disclosure before any request; Cancel sends nothing and keeps the standard wording", async () => {
+    const { h, recordId } = await prepared();
+    const { port, calls } = fakeWording({ required: true });
+    renderAi(h, recordId, port);
+    fireEvent.click(await aiAction());
+    const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    expect(within(dialog).getByRole("button", { name: en.ai.careSummary.confirm })).toBeTruthy();
+    expect(port.compose).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: en.ai.cancel }));
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+    expect(calls[0]!.input).toMatchObject({ snapshotRef: { recordId }, locale: "en-SG", disclosure: "DECLINED" });
+    expect(port.acceptDisclosure).not.toHaveBeenCalled();
+    act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "REQUEST_CANCELLED" }));
+    expect(await screen.findByText(en.ai.remoteNotAccepted)).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByText(en.ai.careSummary.resultTitle)).toBeNull();
+    expect(screen.queryByRole("button", { name: en.ai.retry })).toBeNull();
+  });
+
+  it("loading keeps the deterministic preview readable with Cancel; approval waits; Cancel aborts and discards the late answer", async () => {
+    const { h, recordId } = await prepared();
+    const { port, calls } = fakeWording({ required: true });
+    renderAi(h, recordId, port);
+    const before = (await screen.findByRole("article")).textContent;
+    fireEvent.click(await aiAction());
+    fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.careSummary.confirm }));
+    expect(port.acceptDisclosure).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+    expect(calls[0]!.input.disclosure).toBeUndefined();
+    expect(await screen.findByText(en.ai.careSummary.loading)).toBeTruthy();
+    expect(screen.getByRole("article").textContent).toBe(before);
+    expect((screen.getByRole("button", { name: en.careSummary.approveAction }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: en.ai.cancel }));
+    expect(calls[0]!.signal?.aborted).toBe(true);
+    expect(await screen.findByText(en.ai.cancelled)).toBeTruthy();
+    act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "PROVIDER_FAILED" }));
+    await act(async () => undefined);
+    expect(screen.queryByText(en.ai.unavailable, { exact: false })).toBeNull();
+    expect(screen.getByRole("article").textContent).toBe(before);
+    await waitFor(() => expect((screen.getByRole("button", { name: en.careSummary.approveAction }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("a provider or validator fallback keeps the preview with the unavailable and fallback lines and a retry; no technical code", async () => {
+    const { h, recordId } = await prepared();
+    const { port, calls } = fakeWording();
+    renderAi(h, recordId, port);
+    fireEvent.click(await aiAction());
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+    act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "SCHEMA_INVALID" }));
+    expect(await screen.findByText(`${en.ai.unavailable} ${en.ai.careSummary.fallback}`)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/SCHEMA_INVALID|PROVIDER_|KEPT_DETERMINISTIC/);
+    fireEvent.click(screen.getByRole("button", { name: en.ai.retry }));
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => calls[1]!.resolve({ kind: "UNAVAILABLE" }));
+    expect(await screen.findByText(`${en.ai.unavailable} ${en.ai.careSummary.fallback}`)).toBeTruthy();
+    // A closed, non-recoverable outcome offers no retry.
+    expect(screen.queryByRole("button", { name: en.ai.retry })).toBeNull();
+  });
+
+  it("a preview that cannot be organised says so in plain words, with no disclosure and no retry", async () => {
+    const { h, recordId } = await prepared();
+    const { port, calls } = fakeWording({ required: false });
+    renderAi(h, recordId, port);
+    fireEvent.click(await aiAction());
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+    act(() => calls[0]!.resolve({ kind: "NOT_ELIGIBLE", reason: "TOO_MANY_FACTS" }));
+    expect(await screen.findByText(`${en.ai.careSummary.notEligible} ${en.ai.careSummary.fallback}`)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: en.ai.retry })).toBeNull();
+    expect(document.body.textContent).not.toMatch(/TOO_MANY|NOT_ELIGIBLE/);
+  });
+
+  it("a changed source or head discards the result, says so and reloads the latest summary (which then blocks approval)", async () => {
+    const { h, recordId, reading } = await prepared();
+    const { port, calls } = fakeWording();
+    const loads = vi.fn(h.query.loadSummary);
+    renderAi(h, recordId, port, { query: { loadSummary: loads } });
+    fireEvent.click(await aiAction());
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+    await h.journal.correctGlucoseTime({ recordId: reading.recordId, expectedRevisionId: reading.revisionId, expectedRevisionNumber: 1, payload: glucosePayload, temporal: { kind: "POINT", occurrence: exact("2026-10-03T12:00:00.000Z") }, recordedAt: NOW });
+    const loadsBefore = loads.mock.calls.length;
+    act(() => calls[0]!.resolve({ kind: "STALE" }));
+    expect(await screen.findByText(en.ai.careSummary.changed)).toBeTruthy();
+    await waitFor(() => expect(loads.mock.calls.length).toBeGreaterThan(loadsBefore));
+    expect(await screen.findByText(en.careSummary.sourceChanged)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: en.careSummary.approveAction })).toBeNull();
+    expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).toBeNull();
+  });
+
+  it("a locale switch closes an open disclosure and aborts a pending request; nothing is shown from the late answer", async () => {
+    const { h, recordId } = await prepared();
+    const { port, calls } = fakeWording({ required: true });
+    const view = renderAi(h, recordId, port);
+    fireEvent.click(await aiAction());
+    await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    view.rerenderLocale("zh-SG");
+    await act(async () => undefined);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(port.compose).not.toHaveBeenCalled();
+    view.rerenderLocale("en-SG");
+    await act(async () => undefined);
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    fireEvent.click(await aiAction());
+    fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.careSummary.confirm }));
+    await screen.findByText(en.ai.careSummary.loading);
+    view.rerenderLocale("zh-SG");
+    await waitFor(() => expect(calls[0]!.signal?.aborted).toBe(true));
+    expect(screen.queryByText(zh.ai.careSummary.loading)).toBeNull();
+    act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "PROVIDER_FAILED" }));
+    await act(async () => undefined);
+    expect(screen.queryByText(zh.ai.unavailable, { exact: false })).toBeNull();
+    expect(screen.queryByText(zh.ai.cancelled)).toBeNull();
+  });
+
+  it("unmounting aborts a pending request", async () => {
+    const { h, recordId } = await prepared();
+    const { port, calls } = fakeWording();
+    const view = renderAi(h, recordId, port);
+    fireEvent.click(await aiAction());
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+    view.unmount();
+    expect(calls[0]!.signal?.aborted).toBe(true);
+    act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "PROVIDER_FAILED" }));
+    await act(async () => undefined);
+  });
+
+  it.each(["en-SG", "zh-SG"] as const)("states in %s use the catalogue copy", async (locale) => {
+    const { h, recordId } = await prepared(locale);
+    const messages = getMessages(locale);
+    const { port, calls } = fakeWording();
+    renderAi(h, recordId, port, { locale });
+    fireEvent.click(await aiAction(locale));
+    expect(await screen.findByText(messages.ai.careSummary.loading)).toBeTruthy();
+    expect(screen.getByRole("button", { name: messages.ai.cancel })).toBeTruthy();
+    act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "PROVIDER_TIMEOUT" }));
+    // Fix round 1: en-SG joins the two sentences with a space; zh-SG joins them directly (no ASCII space after "。").
+    const line = locale === "zh-SG" ? `${messages.ai.unavailable}${messages.ai.careSummary.fallback}` : `${messages.ai.unavailable} ${messages.ai.careSummary.fallback}`;
+    expect(await screen.findByText(line)).toBeTruthy();
+    if (locale === "zh-SG") {
+      expect(line).toBe("AI 目前无法使用。您已记录的资料没有改变。即使不使用 AI，您的结构化摘要仍可使用。");
+      expect(document.body.textContent).not.toMatch(/。 /);
+    }
+    fireEvent.click(screen.getByRole("button", { name: messages.ai.retry }));
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(2));
+    act(() => calls[1]!.resolve({ kind: "STALE" }));
+    expect(await screen.findByText(messages.ai.careSummary.changed)).toBeTruthy();
+  });
+});
+
+describe("Care-summary preview: accepted AI wording (Packet 11C B4b; injected test manifest and fake route)", () => {
+  const LATER = "2026-10-04T02:05:00.000Z" as Instant;
+
+  /** The real wiring (one hybrid service, the browser shell client, a session) over a care service with the AI projection. */
+  async function activated(locale: SupportedLocale = "en-SG") {
+    const { h, recordId } = await aiPrepared(locale);
+    const commands = createCarePreparationService(h.database, { now: () => LATER, ids: testIds, projectAiCareSummary: projectValidatedAiCareSummary });
+    const audits = createAiInvocationAuditRepository(h.database);
+    const fetcher = vi.fn<BrowserShellFetcher>(async (_url, init) => {
+      const plan = shellPlanView(shellTaskRequestSchema.parse(JSON.parse(init.body as string)));
+      return new Response(JSON.stringify({ kind: "CANDIDATE", candidate: shellCandidate(plan, fakeModelCareShells(plan)), retention: "CONFIRMED_NOT_STORED", usage: { inputTokens: 1, outputTokens: 1, costMicroUsd: 1 } }), { headers: { "content-type": "application/json" } });
+    });
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands }, audit: audits, remoteUse: createAiRemoteUseSession(), manifest: ENABLED_CARE_MANIFEST, fetcher, now: () => LATER }).careSummary!;
+    return { h, recordId, commands, audits, fetcher, wording };
+  }
+
+  it.each(["en-SG", "zh-SG"] as const)("loads the NEW preview with the AI label and check notice; approval stays a separate click; nothing prints (%s)", async (locale) => {
+    const messages = getMessages(locale);
+    const ai = await activated(locale);
+    const print = { print: vi.fn(async () => "DIALOG_OPENED" as const) };
+    const onReplaced = vi.fn();
+    renderAi(ai.h, ai.recordId, ai.wording, { locale, commands: ai.commands, print, onReplaced });
+    const before = (await screen.findByRole("article")).textContent;
+    fireEvent.click(await aiAction(locale));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: messages.ai.remoteTitle })).getByRole("button", { name: messages.ai.careSummary.confirm }));
+    const region = await screen.findByRole("region", { name: messages.ai.careSummary.resultTitle });
+    expect(within(region).getByText(messages.ai.careSummary.resultBody)).toBeTruthy();
+    // Focus moves to the labelled AI region of the new preview (it is announced by its label).
+    await waitFor(() => expect(document.activeElement).toBe(region));
+    expect(ai.fetcher).toHaveBeenCalledTimes(1);
+    expect(onReplaced).toHaveBeenCalledTimes(1);
+    const newId = onReplaced.mock.calls[0]![0] as RecordId;
+    expect(newId).not.toBe(ai.recordId);
+    await waitFor(() => expect(screen.getByRole("article").textContent).not.toBe(before));
+    // The new snapshot is AI-assisted, recorded as previewed by the ordinary flow, and NOT approved.
+    await waitFor(async () => {
+      const view = await ai.h.query.loadSummary(newId);
+      expect(view.status === "READY" && [view.snapshotStatus, view.payload.composition.method, view.payload.patientApproval.state]).toEqual(["PREVIEWED", "AI_ASSISTED", "NOT_APPROVED"]);
+    });
+    const old = await ai.h.query.loadSummary(ai.recordId);
+    expect(old.status === "READY" && old.snapshotStatus).toBe("SUPERSEDED");
+    // No second AI action on an AI-assisted preview; approval is the patient's own, separate click.
+    expect(screen.queryByRole("button", { name: messages.ai.careSummary.action })).toBeNull();
+    expect(screen.queryByRole("button", { name: messages.careSummary.printAction })).toBeNull();
+    expect(print.print).not.toHaveBeenCalled();
+    await approveWhenPreviewed(messages.careSummary.approveAction);
+    expect(await screen.findByRole("button", { name: messages.careSummary.printAction })).toBeTruthy();
+    expect(print.print).not.toHaveBeenCalled();
+    const approved = await ai.h.query.loadSummary(newId);
+    expect(approved.status === "READY" && approved.snapshotStatus).toBe("APPROVED");
+    // The approved AI-assisted summary keeps its AI label; the check notice is for review before approval.
+    expect(screen.getByRole("region", { name: messages.ai.careSummary.resultTitle })).toBeTruthy();
+    expect(screen.queryByText(messages.ai.careSummary.resultBody)).toBeNull();
+  });
+
+  it("a Cancel during the replacement command still shows the new preview (the replacement committed)", async () => {
+    const ai = await activated();
+    const gate: { release: () => void; started: boolean } = { release: () => undefined, started: false };
+    const commands: CarePreparationCommandPort = {
+      ...ai.commands,
+      replaceWithAiAssistedPreview: async (input) => {
+        await new Promise<void>((resolve) => {
+          gate.release = resolve;
+          gate.started = true;
+        });
+        return ai.commands.replaceWithAiAssistedPreview(input);
+      },
+    };
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: ai.h.query, commands }, audit: ai.audits, remoteUse: createAiRemoteUseSession(), manifest: ENABLED_CARE_MANIFEST, fetcher: ai.fetcher, now: () => LATER }).careSummary!;
+    wording.acceptDisclosure();
+    const onReplaced = vi.fn();
+    renderAi(ai.h, ai.recordId, wording, { commands, onReplaced });
+    fireEvent.click(await aiAction());
+    await waitFor(() => expect(gate.started).toBe(true));
+    expect(ai.fetcher).toHaveBeenCalledTimes(1);
+    expect((await ai.audits.list()).map((row) => row.outcomeCode)).toEqual(["ACCEPTED"]);
+    fireEvent.click(screen.getByRole("button", { name: en.ai.cancel }));
+    // Fix round 1: while the cancelled request's replacement command is still running, no second request can start and approval waits.
+    expect(await screen.findByText(en.ai.cancelled)).toBeTruthy();
+    const action = screen.getByRole("button", { name: en.ai.careSummary.action }) as HTMLButtonElement;
+    expect(action.disabled).toBe(true);
+    fireEvent.click(action);
+    expect((screen.getByRole("button", { name: en.careSummary.approveAction }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => undefined);
+    expect(ai.fetcher).toHaveBeenCalledTimes(1);
+    expect((await ai.audits.list()).map((row) => row.outcomeCode)).toEqual(["ACCEPTED"]);
+    await act(async () => gate.release());
+    expect(await screen.findByRole("region", { name: en.ai.careSummary.resultTitle })).toBeTruthy();
+    expect(onReplaced).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(en.ai.cancelled)).toBeNull();
+    expect(ai.fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("a Cancel whose request then settles without a replacement lets a new request start (and only then)", async () => {
+    const { h, recordId } = await prepared();
+    const { port, calls } = fakeWording();
+    renderAi(h, recordId, port);
+    fireEvent.click(await aiAction());
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: en.ai.cancel }));
+    const action = (await screen.findByRole("button", { name: en.ai.careSummary.action })) as HTMLButtonElement;
+    expect(action.disabled).toBe(true);
+    fireEvent.click(action);
+    expect(port.compose).toHaveBeenCalledTimes(1);
+    act(() => calls[0]!.resolve({ kind: "CANCELLED" }));
+    await waitFor(() => expect(action.disabled).toBe(false));
+    expect(screen.getByText(en.ai.cancelled)).toBeTruthy();
+    fireEvent.click(action);
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(2));
+  });
+
+  it("until the NEW snapshot has loaded, the superseded preview still on screen is not actionable (no AI action, Approve disabled)", async () => {
+    const { h, recordId } = await prepared();
+    // A second, real snapshot stands in for the replacement; its load is held so the post-replacement window is observable.
+    const next = await h.service.prepare(await h.selection());
+    if (next.kind !== "COMMITTED") throw new Error(JSON.stringify(next));
+    const held: { release: () => void } = { release: () => undefined };
+    const gate = new Promise<void>((resolve) => (held.release = resolve));
+    const query: CarePreparationQueryPort = {
+      loadSummary: async (id) => {
+        if (id === next.recordId) await gate;
+        return h.query.loadSummary(id);
+      },
+    };
+    const { port, calls } = fakeWording();
+    const onReplaced = vi.fn();
+    renderAi(h, recordId, port, { query, onReplaced });
+    const before = (await screen.findByRole("article")).textContent;
+    fireEvent.click(await aiAction());
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+    act(() => calls[0]!.resolve({ kind: "REPLACED", recordId: next.recordId }));
+    await waitFor(() => expect(onReplaced).toHaveBeenCalledWith(next.recordId));
+    await act(async () => undefined);
+    // The old preview is still shown, but nothing on it can be acted on.
+    expect(screen.getByRole("article").textContent).toBe(before);
+    expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).toBeNull();
+    expect((screen.getByRole("button", { name: en.careSummary.approveAction }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: en.careSummary.approveAction }));
+    const old = await h.query.loadSummary(recordId);
+    expect(old.status === "READY" && old.snapshotStatus).toBe("PREVIEWED");
+    expect(port.compose).toHaveBeenCalledTimes(1);
+    // Once the new snapshot has loaded it is the actionable preview.
+    await act(async () => held.release());
+    await waitFor(async () => {
+      const view = await h.query.loadSummary(next.recordId);
+      expect(view.status === "READY" && view.snapshotStatus).toBe("PREVIEWED");
+    });
+    await waitFor(() => expect((screen.getByRole("button", { name: en.careSummary.approveAction }) as HTMLButtonElement).disabled).toBe(false));
   });
 });
 

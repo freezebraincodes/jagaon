@@ -6,6 +6,34 @@ import { packet10ZhSG } from "./packet10-zh-SG";
 // provider and source names are data and are never translated here.
 export const zhSGMessages: AppMessages = {
   packet10: packet10ZhSG,
+  // Packet 11 shared AI disclosure (11-bilingual-copy-state-matrix.md, APPROVED_PACKET_11 rows; Packet 11C Task B3).
+  ai: {
+    cancel: "取消",
+    remoteTitle: "是否在此模拟演示中使用 AI？",
+    // ai-disclosure.11c.1: replaces the approved row (it named Kie.ai and said the selected information is sent); the route is Direct
+    // DeepSeek (D2) and the request is value-blind. 您 register, full-width punctuation. Human acceptance pending.
+    remoteBody: "为了建议措辞，JagaOn 会向 DeepSeek 发送一个不包含数值、日期、姓名或您自己文字的请求。JagaOn 会自行填入您的记录，并在显示前检查结果。",
+    remoteLimit: "请勿在此黑客松演示中输入真实病患资料。",
+    pattern: { confirm: "生成说明" },
+    // Packet 11C B4b: the approved care-summary rows (matrix Section 4), exact; `notEligible` is new (ai-care-summary.11c.1; it does not
+    // address the reader; full-width punctuation), human acceptance pending.
+    careSummary: {
+      confirm: "整理所选资料",
+      action: "使用 AI 整理",
+      loading: "正在整理您选择的资料…",
+      resultTitle: "AI 辅助整理",
+      resultBody: "所选的事实和问题没有改变。批准前，请检查每一项。",
+      fallback: "即使不使用 AI，您的结构化摘要仍可使用。",
+      changed: "保存 AI 结果前，您选择的资料已有更改。请检查最新摘要；如有需要，可再试一次。",
+      notEligible: "此摘要无法使用 AI 整理。",
+    },
+    // ai-remote-use.11c.1 (Packet 11C B4a): remote use not accepted, nothing sent. Full-width punctuation. Human acceptance pending.
+    remoteNotAccepted: "未使用 AI 措辞。以下是 JagaOn 的标准措辞。",
+    // Packet 11C B4b: approved shared rows (matrix Section 2), exact.
+    unavailable: "AI 目前无法使用。您已记录的资料没有改变。",
+    cancelled: "已取消 AI 请求。您已记录的资料没有改变。",
+    retry: "再次尝试 AI",
+  },
   shared: {
     appName: "JagaOn",
     demoBoundary:
@@ -537,8 +565,10 @@ export const zhSGMessages: AppMessages = {
       `在可比较的${slot}记录中，近期中位数为${recent} ${unit}，较早期间为${reference} ${unit}。`,
     comparisonLower: (slot, recent, reference, unit) =>
       `在可比较的${slot}记录中，近期中位数为${recent} ${unit}，较早期间为${reference} ${unit}。`,
+    // Packet 11C B4 (owner decision 1): the one deliberate change to approved 7A copy; the value is the evaluator's interquartile range.
+    // Was "近期记录范围". Human acceptance pending.
     comparisonVariability: (slot, recent, reference, unit) =>
-      `在可比较的${slot}记录中，近期记录范围为${recent} ${unit}，较早期间为${reference} ${unit}。`,
+      `在可比较的${slot}记录中，近期四分位距为${recent} ${unit}，较早期间为${reference} ${unit}。`,
     noMaterialComparison: (slot) => `可比较的${slot}记录未达到受控规则所设的数值差异门槛。`,
     repeatedItem: (label, count, days) => `“${label}”在${days}天内的${count}条记录中出现。`,
     repeatedContext: (label, count, days) => `记录情境“${label}”在${days}天内出现${count}次。`,
@@ -576,7 +606,10 @@ export const zhSGMessages: AppMessages = {
       action: "查看这项比较的依据",
       title: "这项比较的依据",
       aiLabel: "AI 辅助措辞",
-      supportingHeading: (count) => `支持读数（${count} 条）`,
+      // history-explanation.11c.2 (Packet 11C B4a): the next three rows are new wording, human acceptance pending.
+      supportingHeading: (count) => `此比较包含的读数（${count} 条）`,
+      singaporeTime: (date, time) => `${date} 新加坡时间${time}`,
+      offsetReading: (recorded, offset, singapore) => `${recorded}（${offset}；${singapore}）`,
       periodHeading: (role, count) => (role === "EARLIER" ? `较早期间（${count} 条）` : `近期（${count} 条）`),
       reconciliation: (earlier, recent, total) => `${earlier} + ${recent} = ${total} 条读数，与上方数量一致。`,
       unavailable: "目前无法说明这项比较。上方的比较保持不变。",

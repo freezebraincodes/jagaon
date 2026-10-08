@@ -17,6 +17,11 @@ import { InfoIcon } from "../primitives/Icons";
  * come from the use case; the supporting readings are listed exactly as `view.periods[i].readings` groups them (never re-sorted by
  * time strings), each with its own recorded local date and time; the period endpoints and the shared cutoff are derived from the
  * view's instants. One date formatter is used throughout: the care-summary locale pack's `localDateText`, with 24-hour times.
+ *
+ * Packet 11C B4a (owner decisions 2 and 3, D7, B3 carries; every new string and its presentation human acceptance pending): the endpoints
+ * and the cutoff are named in Singapore time; every reading recorded at an offset other than +08:00 also shows its actual offset label
+ * and its exact Singapore-time equivalent (from its source instant); the list is headed "Readings included in this comparison (n)";
+ * an explanation whose remote use was not accepted shows a short non-technical line beside the standard wording.
  */
 export type PatternExplanationResult =
   | {
@@ -26,11 +31,24 @@ export type PatternExplanationResult =
       composition: { taskType: string; output: { taskType: string; payload: unknown } };
       limitations: readonly { limitationRef: string; code: string; text: string }[];
       summaryRoleNotice: string;
+      /** Packet 11C B3: present only when the remote-use disclosure was not accepted (the deterministic explanation; nothing sent). */
+      remoteUse?: "NOT_ACCEPTED";
     }
   | { kind: "UNAVAILABLE"; reason: string };
 
 export type PatternExplainerPort = {
-  explain(input: { factId: string; locale: SupportedLocale }, signal?: AbortSignal): Promise<PatternExplanationResult>;
+  /**
+   * `disclosure: "DECLINED"` (Packet 11C B4a) marks a request the patient asked for after cancelling the AI disclosure: it is explained
+   * with the standard wording, nothing is sent, and it is audited as a cancelled request. Absent otherwise.
+   */
+  explain(input: { factId: string; locale: SupportedLocale; disclosure?: "DECLINED" }, signal?: AbortSignal): Promise<PatternExplanationResult>;
+  /**
+   * Packet 11C B3: true when the next explanation would use the remote route and this app session has not accepted the AI disclosure;
+   * the screen then shows the disclosure BEFORE calling `explain`. Absent or false: no disclosure (never while NOT_ACTIVATED).
+   */
+  disclosureRequired?(): boolean;
+  /** Packet 11C B3: records this app session's acceptance (the disclosure's primary action only). */
+  acceptDisclosure?(): void;
 };
 
 type Props = {
@@ -48,18 +66,42 @@ function dateTimeText(localDateText: (date: string) => string, locale: Supported
   return `${localDateText(date)}${locale === "zh-SG" ? " " : ", "}${time}`;
 }
 
+/** Singapore's fixed UTC offset (+08:00, no daylight saving): the evaluator's home offset and the cutoff's time zone. */
+const SINGAPORE_OFFSET_MINUTES = 480;
+
 /**
- * A period endpoint, derived from its instant. The home offset is the bound's own (its local wall-clock minute minus the instant's
- * minute). The time is HH:MM when the instant has no seconds or milliseconds, otherwise HH:MM:SS, floored: it never rounds up across
- * the cutoff, so "before" / "at or after" stay exact.
+ * Packet 11C B4a (owner decision 2, D7): an instant as a Singapore-time point ("date, HH:MM Singapore time" / "date 新加坡时间HH:MM"),
+ * computed from the instant alone. The time is HH:MM when the instant has no seconds or milliseconds, otherwise HH:MM:SS (`withSeconds`),
+ * floored: it never rounds up across the cutoff, so "before" / "at or after" stay exact.
  */
-function boundaryText(localDateText: (date: string) => string, locale: SupportedLocale, bound: PeriodBoundary): string {
-  const instantMs = Date.parse(bound.instant);
-  const minuteMs = Math.floor(instantMs / 60_000) * 60_000;
-  const offsetMs = Date.parse(`${bound.localDate}T${bound.localTime}:00.000Z`) - minuteMs;
-  const local = new Date(instantMs + offsetMs).toISOString();
-  const time = instantMs === minuteMs ? local.slice(11, 16) : local.slice(11, 19);
-  return dateTimeText(localDateText, locale, local.slice(0, 10), time);
+function singaporeTimeText(t: AppMessages["history"]["explanation"], localDateText: (date: string) => string, instant: string, withSeconds: boolean): string {
+  const instantMs = Date.parse(instant);
+  const local = new Date(instantMs + SINGAPORE_OFFSET_MINUTES * 60_000).toISOString();
+  const time = withSeconds && instantMs % 60_000 !== 0 ? local.slice(11, 19) : local.slice(11, 16);
+  return t.singaporeTime(localDateText(local.slice(0, 10)), time);
+}
+
+/** A period endpoint (Task 6R), derived from its instant and named in Singapore time (B4a). */
+function boundaryText(t: AppMessages["history"]["explanation"], localDateText: (date: string) => string, bound: PeriodBoundary): string {
+  return singaporeTimeText(t, localDateText, bound.instant, true);
+}
+
+/** "UTC+05:30" / "UTC-09:30" / "UTC+00:00": the reading's actual recorded offset, never inferred. */
+function offsetLabel(utcOffsetMinutes: number): string {
+  const sign = utcOffsetMinutes < 0 ? "-" : "+";
+  const minutes = Math.abs(utcOffsetMinutes);
+  return `UTC${sign}${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+/**
+ * A supporting reading's "when": its recorded local date and time. Packet 11C B4a (D7): EVERY reading recorded at an offset other than
+ * +08:00 also shows its actual offset label and its exact Singapore-time equivalent, computed from its source instant. Its period is
+ * never decided here: the caller lists it where the view groups it.
+ */
+function readingWhen(t: AppMessages["history"]["explanation"], localDateText: (date: string) => string, locale: SupportedLocale, reading: SupportingReading): string {
+  const recorded = dateTimeText(localDateText, locale, reading.localDate, reading.localTime);
+  if (reading.utcOffsetMinutes === SINGAPORE_OFFSET_MINUTES) return recorded;
+  return t.offsetReading(recorded, offsetLabel(reading.utcOffsetMinutes), singaporeTimeText(t, localDateText, reading.instantUtc, false));
 }
 
 /**
@@ -84,7 +126,7 @@ export function supportingReadingsCopy(messages: AppMessages, locale: SupportedL
   const t = messages.history.explanation;
   const { localDateText } = careSummaryLocalePack(locale);
   const [earlier, recent] = view.periods;
-  const cutoff = view.sharedBoundary ? boundaryText(localDateText, locale, view.sharedBoundary) : null;
+  const cutoff = view.sharedBoundary ? boundaryText(t, localDateText, view.sharedBoundary) : null;
   return {
     heading: t.supportingHeading(view.totalCount),
     periods: view.periods.map((period) => ({
@@ -94,11 +136,11 @@ export function supportingReadingsCopy(messages: AppMessages, locale: SupportedL
         cutoff === null
           ? null
           : period.role === "EARLIER"
-            ? t.earlierRange(boundaryText(localDateText, locale, period.bounds.start), cutoff)
-            : t.recentRange(cutoff, boundaryText(localDateText, locale, period.bounds.end)),
+            ? t.earlierRange(boundaryText(t, localDateText, period.bounds.start), cutoff)
+            : t.recentRange(cutoff, boundaryText(t, localDateText, period.bounds.end)),
       readings: period.readings.map((reading) => ({
         key: `${reading.ref.recordId}:${reading.ref.revisionId}`,
-        when: dateTimeText(localDateText, locale, reading.localDate, reading.localTime),
+        when: readingWhen(t, localDateText, locale, reading),
         value: `${reading.enteredValue} ${UNIT_TEXT[reading.enteredUnit]}`,
       })),
     })),
@@ -151,6 +193,7 @@ export function PatternExplanationPanel({ messages, locale, explanation, panelId
       </p>
       {shown ? (
         <>
+          {shown.remoteUse === "NOT_ACCEPTED" ? <p className="history-explanation-notice history-explanation-remote-use">{messages.ai.remoteNotAccepted}</p> : null}
           <p className="history-explanation-text">{shown.text.observation}</p>
           <p className="history-explanation-text">{shown.text.evidence}</p>
           <p className="history-explanation-notice">{shown.summaryRoleNotice}</p>

@@ -598,15 +598,24 @@ export type HistoryMessages = {
 };
 
 /**
- * Packet 11C Task 7 explanation-panel copy (history-explanation.11c.1). `start`, `cutoff` and `end` are "date, time" strings derived
- * from the view's own period instants; counts are the view's included readings.
+ * Packet 11C Task 7 explanation-panel copy, history-explanation.11c.2 (Packet 11C B4a: `supportingHeading` reworded, `singaporeTime` and
+ * `offsetReading` added; every B4a string is human acceptance pending). `start`, `cutoff` and `end` are Singapore-time points
+ * (`singaporeTime`) derived from the view's own period instants; counts are the view's included readings.
  */
 export type HistoryExplanationMessages = {
   action: string;
   /** The panel heading (focus target on open). */
   title: string;
   aiLabel: string;
+  /** Owner decision 3: "the readings included in this comparison" (the evaluator's included readings; excluded duplicates never added). */
   supportingHeading: (count: number) => string;
+  /** Owner decision 2: a point in Singapore time, from a "date" and an "HH:MM" (or "HH:MM:SS") string. */
+  singaporeTime: (date: string, time: string) => string;
+  /**
+   * D7: a reading recorded at an offset other than +08:00: its recorded local "date, time", its actual offset label (e.g. "UTC+05:30")
+   * and its exact Singapore-time equivalent (`singaporeTime`, computed from the source instant).
+   */
+  offsetReading: (recorded: string, offset: string, singapore: string) => string;
   periodHeading: (role: "EARLIER" | "RECENT", count: number) => string;
   reconciliation: (earlier: number, recent: number, total: number) => string;
   unavailable: string;
@@ -887,9 +896,45 @@ export type CareSummaryMessages = {
   templateSuperseded: string;
 };
 
+/**
+ * Packet 11 shared AI disclosure copy (11-bilingual-copy-state-matrix.md, APPROVED_PACKET_11; Packet 11C Addendum B, Task B3). Every
+ * key is the approved row of the same name (`ai.cancel`, `ai.remoteTitle`, `ai.remoteLimit`, `ai.pattern.confirm`,
+ * `ai.careSummary.confirm`) EXCEPT `remoteBody`. The disclosure appears only before a remote call, never while NOT_ACTIVATED.
+ */
+export type AiMessages = {
+  cancel: string;
+  remoteTitle: string;
+  /**
+   * ai-disclosure.11c.1 (coordinator ruling 2026-10-08; human acceptance pending). Replaces the approved row, which named Kie.ai and
+   * said the selected synthetic information is sent: the route is Direct DeepSeek (D2) and the request is value-blind (approved
+   * glosses, headings, slot ids and budgets only; no value, date, name or the person's own text). No consent or confidentiality claim.
+   */
+  remoteBody: string;
+  remoteLimit: string;
+  /** The disclosure's primary action in the Recorded-history explanation flow. */
+  pattern: { confirm: string };
+  /**
+   * The care-summary organisation flow (Packet 11C Task B4b). Every key is the approved row of the same name (`ai.careSummary.*`,
+   * matrix Section 4) EXCEPT `notEligible` (ai-care-summary.11c.1, new wording, human acceptance pending): the plain line for a preview
+   * the AI path cannot organise (nothing is sent). Presentation (placement and order of these lines): human acceptance pending.
+   */
+  careSummary: { confirm: string; action: string; loading: string; resultTitle: string; resultBody: string; fallback: string; changed: string; notEligible: string };
+  /**
+   * ai-remote-use.11c.1 (Packet 11C B4a; human acceptance pending): the short, non-technical line shown with the standard (deterministic)
+   * wording when remote use was not accepted (the disclosure was cancelled, or no acceptance exists). Nothing was sent.
+   */
+  remoteNotAccepted: string;
+  /** Approved shared rows (matrix Section 2), first used by the care-summary flow (Packet 11C B4b). */
+  unavailable: string;
+  cancelled: string;
+  retry: string;
+};
+
 export type AppMessages = {
   /** Packet 10 data, backup, restore, deletion and integrity copy. */
   packet10: Packet10Messages;
+  /** Packet 11 shared AI disclosure copy (Task B3). */
+  ai: AiMessages;
   shared: SharedMessages;
   today: TodayMessages;
   glucose: GlucoseMessages;

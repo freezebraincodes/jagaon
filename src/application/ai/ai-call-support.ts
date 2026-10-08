@@ -1,13 +1,37 @@
 import type { AiInvocationAuditRow, AiTaskRequest } from "@/domain/ai";
 import type { AiActivationManifest } from "./ai-activation-manifest";
-import type { ProviderInvocationResult, ProviderUsage } from "./ai-provider-port";
+import type { AiRemoteUseDecision, AiRemoteUseDisclosure, ProviderInvocationResult, ProviderUsage } from "./ai-provider-port";
 import type { AiTaskRuntimeBundle } from "./ai-runtime-bundles";
 
 /**
  * Provider-call helpers shared by the legacy task service and the hybrid task service (Packet 11C Addendum B, Task B2a). Moved
  * unchanged out of ai-task-service.ts so that the hybrid service, which may enter the browser graph (D1), never imports the legacy
  * fact-sending service. No behaviour change: the bounded call, the usage folding and the audit row are byte-identical.
+ * Packet 11C B3 adds `decideRemoteUse`, the remote-use decision shared by the hybrid service (before the first attempt) and the
+ * browser shell client (before each send); it moved here from the B2b client unchanged in behaviour.
  */
+
+/**
+ * Resolves with the disclosure's decision, or NOT_ACCEPTED on an error (also a synchronous throw), an unknown answer or an abort; the
+ * abort listener is always released.
+ */
+export function decideRemoteUse(disclosure: AiRemoteUseDisclosure, signal: AbortSignal): Promise<AiRemoteUseDecision> {
+  if (signal.aborted) return Promise.resolve("NOT_ACCEPTED");
+  return new Promise((resolve) => {
+    const finish = (value: AiRemoteUseDecision) => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(value);
+    };
+    const onAbort = () => finish("NOT_ACCEPTED");
+    signal.addEventListener("abort", onAbort);
+    Promise.resolve()
+      .then(() => disclosure.decide(signal))
+      .then(
+        (value) => finish(value === "ACCEPTED" ? "ACCEPTED" : value === "DECLINED" ? "DECLINED" : "NOT_ACCEPTED"),
+        () => finish("NOT_ACCEPTED"),
+      );
+  });
+}
 
 export type Attempts = { count: number; structuralRepairUsed: boolean; timedOut: boolean; usage: ProviderUsage };
 export type CallOutcome = { kind: "RESULT"; result: ProviderInvocationResult } | { kind: "TIMEOUT" } | { kind: "CANCELLED" };

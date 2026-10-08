@@ -4593,6 +4593,37 @@ button.summary-tile:hover:not(:disabled) {
   outline: none;
 }
 
+/*
+ * Packet 11C B3: the shared AI disclosure (human acceptance pending). Scoped to this dialog only. Long words and the untranslated
+ * product names wrap, and the action labels wrap instead of overflowing, so nothing scrolls sideways at 390 px or 200% text zoom;
+ * the sheet itself scrolls vertically (.alert-dialog max-height).
+ */
+.ai-disclosure-dialog .alert-dialog-title {
+  overflow-wrap: anywhere;
+}
+
+.ai-disclosure-dialog .modal-dialog-description {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  color: var(--ink);
+}
+
+.ai-disclosure-dialog .alert-dialog-body:empty {
+  display: none;
+}
+
+.ai-disclosure-limit {
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.ai-disclosure-dialog .btn {
+  min-height: 3.5rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .schedule-amount {
   display: flex;
   flex-direction: column;
@@ -5415,6 +5446,49 @@ button.summary-tile:hover:not(:disabled) {
   font-size: 0.875rem;
   font-weight: 700;
   color: var(--ink-2);
+}
+
+/* Packet 11C B4b: the care-summary AI wording action, its state line and the AI-assisted label (human acceptance pending). */
+.care-summary-ai {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.care-summary-ai .btn {
+  min-height: 3.5rem;
+  white-space: normal;
+}
+
+.care-summary-ai-line {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.care-summary-ai-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card-2);
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.care-summary-ai-result p {
+  margin: 0;
+}
+
+.care-summary-ai-result:focus-visible {
+  outline: 3px solid var(--terracotta);
+  outline-offset: 2px;
 }
 
 @media print {
