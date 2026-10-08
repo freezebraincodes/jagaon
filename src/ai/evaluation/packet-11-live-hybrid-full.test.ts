@@ -76,7 +76,8 @@ const REQUIRED_CONTRACT = Object.freeze({
   explainBundle: "ai.explain-pattern@11b.18",
   careBundle: "ai.draft-care-preparation-summary@11b.18",
   providerSchema: "kie-schema.11b.6",
-  slotPlan: "ai-slot-plan.11b.8",
+  // Packet 11C phase 2 (option (a), 2026-10-08, offline): eligibility accounting only; request bodies differ only in this version field.
+  slotPlan: "ai-slot-plan.11b.9",
   fixtureSet: "packet11-fixtures.11b.16",
   harness: "packet11-eval.18",
   fullEvaluationPolicy: "hybrid-full-policy.2",
@@ -547,7 +548,10 @@ describe("Packet 11 hybrid shell FULL runner (offline)", () => {
       expect(tracer.spend().billedFromUpperBound, String(ceilingMicro)).toBeGreaterThan(0);
       expect(tracer.calls().at(-1)).toMatchObject({ sequence: null, refusal: "TRACE_SPEND_CEILING" });
     }
-  });
+    // Offline test execution allowance only: this test plans and captures all 70 fixtures locally and builds six traced
+    // runs, which can exceed Vitest's 5 s default under full-suite load. It is not a production timeout and does not
+    // relax spend enforcement; every ceiling, refusal and billed-spend assertion above is unchanged.
+  }, 20_000);
 
   it("a full fake run of the 70 fixtures through the real harness and tracer: call map, verdict pending human review, artifact", async () => {
     const fixtures = hybridFixturesForPhase("FULL");

@@ -2,6 +2,11 @@ import { z } from "zod";
 import { localDateSchema } from "@/domain/shared/time";
 import { decimalStringSchema } from "@/domain/health-records/measurement";
 import { patternFamilySchema, type PatternFamily } from "@/domain/patterns";
+import {
+  glucoseReadingRefSchema,
+  patternEvidenceSnapshotRefSchema,
+  patternObservationRefSchema,
+} from "@/domain/patterns/pattern-comparable";
 
 /**
  * Packet 7A Recorded-history view model (design Sections 5.3 and 8; copy
@@ -106,6 +111,89 @@ export const recordedHistoryViewSchema = z.discriminatedUnion("status", [
 
 export type RecordedHistoryView = z.infer<typeof recordedHistoryViewSchema>;
 
+/**
+ * Packet 11C Addendum A1 source projection. Built only from a stored
+ * SUPPORTED COMPARABLE_SLOT_TREND observation and its evidence snapshot,
+ * reconciled against the current journal revisions. It carries both periods,
+ * their exact counts, the role-labelled summary value (a median, or the
+ * interquartile range for VARIABILITY; never a reading) and every supporting
+ * reading, never truncated. It stays local: readings, dates and source links
+ * never enter an AI request.
+ */
+export const EXPLAINABLE_PERIOD_ROLES = Object.freeze(["EARLIER", "RECENT"] as const);
+export const EXPLAINABLE_SUMMARY_KINDS = Object.freeze(["MEDIAN", "IQR"] as const);
+export const EXPLAINABLE_PATTERN_KINDS = Object.freeze(["HIGHER", "LOWER", "VARIABILITY"] as const);
+export const EXPLAINABLE_INELIGIBLE_REASONS = Object.freeze([
+  "NOT_FOUND",
+  "NOT_SUPPORTED",
+  "NO_MATERIAL",
+  "FAMILY_UNAVAILABLE",
+  "STALE_SOURCE",
+  "COUNT_MISMATCH",
+  "METHOD_MISMATCH",
+  "MISSING_READING",
+  "UNSUPPORTED_SUMMARY",
+  "UNAVAILABLE",
+] as const);
+
+const supportingReadingSchema = z.strictObject({
+  ref: glucoseReadingRefSchema,
+  localDate: localDateSchema,
+  localTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+  enteredValue: decimalStringSchema,
+  enteredUnit: z.enum(["MMOL_L", "MG_DL"]),
+  method: z.string().min(1).max(64),
+});
+
+export type SupportingReading = z.infer<typeof supportingReadingSchema>;
+
+const explainablePeriodSchema = z
+  .strictObject({
+    role: z.enum(EXPLAINABLE_PERIOD_ROLES),
+    window: dateRangeSchema,
+    count: z.number().int().positive().safe(),
+    summary: z.strictObject({ kind: z.enum(EXPLAINABLE_SUMMARY_KINDS), valueMmolL: decimalStringSchema }),
+    /** Every supporting reading, sorted by instant; no cap and no truncation. */
+    readings: z.array(supportingReadingSchema).min(1),
+  })
+  .refine((period) => period.readings.length === period.count, "READING_COUNT_DISAGREES");
+
+export type ExplainablePeriod = z.infer<typeof explainablePeriodSchema>;
+
+export const explainablePatternViewSchema = z
+  .strictObject({
+    factId: factIdSchema,
+    slot: slotSchema,
+    kind: z.enum(EXPLAINABLE_PATTERN_KINDS),
+    periods: z.tuple([explainablePeriodSchema, explainablePeriodSchema]),
+    totalCount: z.number().int().positive().safe(),
+    observationRef: patternObservationRefSchema,
+    snapshotRef: patternEvidenceSnapshotRefSchema,
+  })
+  .superRefine((view, ctx) => {
+    const [earlier, recent] = view.periods;
+    const fail = (message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+    if (view.factId !== `COMPARISON:${view.slot}`) fail("FACT_ID_DISAGREES_WITH_SLOT");
+    if (earlier.role !== "EARLIER" || recent.role !== "RECENT") fail("PERIOD_ORDER");
+    if (earlier.window.endDate > recent.window.startDate) fail("PERIODS_OUT_OF_ORDER");
+    if (view.totalCount !== earlier.count + recent.count) fail("TOTAL_DISAGREES");
+    const summaryKind = view.kind === "VARIABILITY" ? "IQR" : "MEDIAN";
+    if (earlier.summary.kind !== summaryKind || recent.summary.kind !== summaryKind) fail("SUMMARY_KIND_DISAGREES");
+    const keys = [...earlier.readings, ...recent.readings].map((reading) => `${reading.ref.recordId}:${reading.ref.revisionId}`);
+    if (new Set(keys).size !== keys.length) fail("DUPLICATE_READING");
+  });
+
+export type ExplainablePatternView = z.infer<typeof explainablePatternViewSchema>;
+
+export const explainablePatternResultSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("EXPLAINABLE"), view: explainablePatternViewSchema }),
+  z.strictObject({ kind: z.literal("INELIGIBLE"), reason: z.enum(EXPLAINABLE_INELIGIBLE_REASONS) }),
+]);
+
+export type ExplainablePatternResult = z.infer<typeof explainablePatternResultSchema>;
+
+export type ExplainablePatternRequest = { factId: string };
+
 export type RecordedHistoryRequest = {
   period: HistoryPeriod;
   /** Families the screen wants to describe; disabled ones come back as unavailable. */
@@ -115,4 +203,6 @@ export type RecordedHistoryRequest = {
 /** The narrow port React depends on: no Dexie, evaluator or evidence internals. */
 export type RecordedHistoryQueryPort = {
   load(request: RecordedHistoryRequest): Promise<RecordedHistoryView>;
+  /** Packet 11C A1: the source projection of one READY comparison, or why it cannot be explained. */
+  loadExplainablePattern(request: ExplainablePatternRequest): Promise<ExplainablePatternResult>;
 };

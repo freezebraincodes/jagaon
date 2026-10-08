@@ -15,10 +15,13 @@ import { AI_LANGUAGE_COPY, type LanguageCopy } from "./ai-language-copy";
  * Observation ownership (2026-10-07): only the plan's REMOTE fields cross the boundary — their paths, budgets, slots (with glosses)
  * and the remote token inventory. An application-owned (LOCAL) field, its slots, glosses and budget are never sent; slot ids keep
  * the plan numbering. A care plan has no local field, so its request is unchanged.
+ * Packet 11C (2026-10-08): PERIOD_SUMMARY has no approved gloss, so it can never be projected: a request carrying it is never approved
+ * (SHELL_REQUEST_NOT_APPROVED), even if a plan were forced to make its field remote.
  */
 export const GLOSSES_BY_KIND: Readonly<Record<AtomKind, readonly GlossKey[]>> = deepFreeze({
   MEANING: ["MEANING_CLAUSE"], DECIMAL_LIST: ["RECORDED_VALUES"], DECIMAL: ["RECORDED_VALUE"], COUNT: ["EVIDENCE_COUNT"], DATE: ["RECORDED_DATE"],
   DATE_RANGE: ["RECORDED_DATE_RANGE"], TIME: ["RECORDED_TIME"], LABEL: ["RECORDED_ITEM", "APPOINTMENT_SERVICE"], QUOTED_TEXT: ["PATIENT_QUESTION"],
+  PERIOD_SUMMARY: [],
 });
 const FORBIDDEN_IN_TEXT = /[0-9０-９%％]|\b(?:fact|claim|option|record|section|limitation)-|\b(?:MMOL_L|MG_DL)\b|mmol\s*\/\s*l|mg\s*\/\s*dl/i;
 

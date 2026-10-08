@@ -13,7 +13,8 @@ describe("strict shell provider schema kie-schema.11b.6", () => {
     const schema = shellOutputJsonSchema("EXPLAIN_PATTERN", "en-SG") as any;
     expect(schema).toMatchObject({ type: "object", additionalProperties: false, required: ["schemaVersion", "slotPlanVersion", "tokenInventory", "taskType", "outcome", "locale", "abstentionReason", "shells"] });
     expect(schema.properties.schemaVersion.enum).toEqual(["ai-shell.explain-pattern@11b.8"]);
-    expect(schema.properties.slotPlanVersion).toEqual({ type: "string", enum: ["ai-slot-plan.11b.8"] });
+    // Packet 11C phase 2: the one-value echo enum follows SLOT_PLAN_VERSION (11b.9); the schema's structure and version are unchanged.
+    expect(schema.properties.slotPlanVersion).toEqual({ type: "string", enum: ["ai-slot-plan.11b.9"] });
     expect(schema.properties.shells.anyOf[0]).toEqual({ type: "object", additionalProperties: false, required: ["headline", "evidence"], properties: { headline: { type: "string", minLength: 1, maxLength: 400 }, evidence: { type: "string", minLength: 1, maxLength: 400 } } });
     expect((shellOutputJsonSchema("DRAFT_CARE_PREPARATION_SUMMARY", "zh-SG") as any).properties.schemaVersion.enum).toEqual(["ai-shell.draft-care-preparation-summary@11b.7"]);
     expect(schema.properties.tokenInventory).toEqual({ type: "array", minItems: 1, maxItems: 32, items: { type: "string", pattern: "^S([1-9]|[12][0-9]|3[0-2])$" } });
@@ -24,7 +25,7 @@ describe("strict shell provider schema kie-schema.11b.6", () => {
     for (const task of ["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"] as const) expect(JSON.stringify(shellOutputJsonSchema(task, "en-SG"))).not.toMatch(/Refs|inputRefsUsed|sectionRef|fact-|claim-/);
   });
   it("describes exactly what the domain shell schema accepts", () => {
-    const sample = { schemaVersion: "ai-shell.explain-pattern@11b.8", slotPlanVersion: "ai-slot-plan.11b.8", tokenInventory: ["S1", "S3"], taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcome: "SUCCESS", abstentionReason: null, shells: { headline: "A look at {{S1}}.", evidence: "Based on {{S3}}." } };
+    const sample = { schemaVersion: "ai-shell.explain-pattern@11b.8", slotPlanVersion: "ai-slot-plan.11b.9", tokenInventory: ["S1", "S3"], taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcome: "SUCCESS", abstentionReason: null, shells: { headline: "A look at {{S1}}.", evidence: "Based on {{S3}}." } };
     expect(shellOutputSchema("EXPLAIN_PATTERN").safeParse({ ...sample, shells: { ...sample.shells, observation: "Values: {{S2}}." } }).success).toBe(false);
     expect(shellOutputSchema("EXPLAIN_PATTERN").safeParse(sample).success).toBe(true);
     const required = (shellOutputJsonSchema("EXPLAIN_PATTERN", "en-SG") as any).properties.shells.anyOf[0].required;

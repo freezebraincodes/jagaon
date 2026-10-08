@@ -20,12 +20,24 @@ describe("value-blind shell projector", () => {
     expect(() => (GLOSSES_BY_KIND.LABEL as string[]).push("PATIENT_QUESTION")).toThrow(TypeError);
     expect(GLOSSES_BY_KIND.LABEL).toEqual(["RECORDED_ITEM", "APPOINTMENT_SERVICE"]);
   });
+  it("Packet 11C: the application-only PERIOD_SUMMARY atom kind has no approved gloss, so a request carrying it is never approved", () => {
+    expect(GLOSSES_BY_KIND.PERIOD_SUMMARY).toEqual([]);
+    expect(Object.isFrozen(GLOSSES_BY_KIND.PERIOD_SUMMARY)).toBe(true);
+    const { plan } = plannedFixture("p11.explain-pattern.en-sg.ordinary");
+    const approved = structuredClone(projectShellTaskRequest(plan)) as any;
+    expect(isApprovedShellTaskRequest(approved)).toBe(true);
+    for (const gloss of [AI_LANGUAGE_COPY.glosses.RECORDED_VALUES["en-SG"], AI_LANGUAGE_COPY.glosses.EVIDENCE_COUNT["en-SG"]]) {
+      const request = structuredClone(approved);
+      request.slots[1] = { ...request.slots[1], atomKind: "PERIOD_SUMMARY", gloss };
+      expect(isApprovedShellTaskRequest(request)).toBe(false);
+    }
+  });
   it("projects the plan's REMOTE fields, their slots and sections with approved glosses only (observation ownership, @11b.8)", () => {
     const { plan } = plannedFixture("p11.explain-pattern.en-sg.ordinary");
     const request = projectShellTaskRequest(plan);
     expect(request.shellInputVersion).toBe("ai-shell-input.explain-pattern@11b.8");
     expect(request.shellSchemaVersion).toBe("ai-shell.explain-pattern@11b.8");
-    expect(request.slotPlanVersion).toBe("ai-slot-plan.11b.8");
+    expect(request.slotPlanVersion).toBe("ai-slot-plan.11b.9");
     // The application-owned observation (S2, its gloss and its budget) never crosses the boundary; ids keep the plan numbering.
     expect(request.tokenInventory).toEqual(["S1", "S3"]);
     expect(request.fields.map((field) => [field.path, field.requiredSlots, field.maxCodePoints, field.maxSentences])).toEqual([["headline", ["S1"], 60, 1], ["evidence", ["S3"], 80, 1]]);
@@ -40,7 +52,7 @@ describe("value-blind shell projector", () => {
   it("projects the care token inventory in plan field order and the care versions", () => {
     const { plan } = plannedFixture("p11.draft-care-preparation-summary.zh-sg.ordinary");
     const request = projectShellTaskRequest(plan);
-    expect(request).toMatchObject({ shellInputVersion: "ai-shell-input.draft-care-preparation-summary@11b.7", shellSchemaVersion: "ai-shell.draft-care-preparation-summary@11b.7", slotPlanVersion: "ai-slot-plan.11b.8" });
+    expect(request).toMatchObject({ shellInputVersion: "ai-shell-input.draft-care-preparation-summary@11b.7", shellSchemaVersion: "ai-shell.draft-care-preparation-summary@11b.7", slotPlanVersion: "ai-slot-plan.11b.9" });
     // Care has no application-owned field: every plan field and slot is projected.
     expect(request.fields.map((field) => field.path)).toEqual(plan.fields.map((field) => field.path));
     expect(request.slots.map((slot) => slot.slotId)).toEqual(plan.slots.map((slot) => slot.slotId));

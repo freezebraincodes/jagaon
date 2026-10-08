@@ -97,6 +97,9 @@ describe("Packet 11A scope", () => {
         "src/application/ai/ai-hybrid-runtime-bundles.ts",
         "src/application/ai/ai-hybrid-task-service.test.ts",
         "src/application/ai/ai-hybrid-task-service.ts",
+        // Packet 11C Task 3: the source-backed EXPLAIN_PATTERN request builder.
+        "src/application/ai/explain-pattern-request.test.ts",
+        "src/application/ai/explain-pattern-request.ts",
         "src/application/ai/language/ai-language-copy.test.ts",
         "src/application/ai/language/ai-language-copy.ts",
         "src/application/ai/language/assembler.test.ts",

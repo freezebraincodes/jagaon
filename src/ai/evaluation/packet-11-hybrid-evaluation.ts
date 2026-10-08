@@ -153,12 +153,15 @@ export const APPROVED_HYBRID_CONTRACT = Object.freeze({
   promptVersion: "11b.18",
   providerSchemaVersion: "kie-schema.11b.6",
   shellRulesRevision: "ai-shell-rules.11b.15-r8",
-  slotPlanVersion: "ai-slot-plan.11b.8",
-  atomRendererVersion: "ai-atoms.11b.6",
+  // Packet 11C phase 2 (owner decision option (a), 2026-10-08, offline): slot plan 11b.9 (eligibility accounting; bodies differ only in
+  // this version field) and atoms 11b.7 (version record for PERIOD_SUMMARY and its lead joiner).
+  slotPlanVersion: "ai-slot-plan.11b.9",
+  atomRendererVersion: "ai-atoms.11b.7",
   // Presentation correction P1/P3 (owner instruction 2026-10-08, offline): application copy and default shells only; no model-facing
   // request byte, remote eligibility, bundle key, prompt, rule or threshold changed.
-  defaultShellVersion: "ai-shells-default.11b.7",
-  languageCopyRevision: "ai-language-copy.11b.8",
+  // Packet 11C Task 4 (2026-10-08, offline): copy 11b.9 and default shells 11b.8 (the LOCAL PERIOD_SUMMARY observation); application only.
+  defaultShellVersion: "ai-shells-default.11b.8",
+  languageCopyRevision: "ai-language-copy.11b.9",
   validatorRulesRevision: "11b.2-meaning-r7",
   approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
   fixtureSetRevision: "packet11-fixtures.11b.16",

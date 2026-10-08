@@ -72,6 +72,52 @@ export function requestFixture(taskType: AiTaskType): Record<string, unknown> & 
   return structuredClone({ ...BASE, taskType, runtimeBundleKey: `ai.${taskType.toLowerCase().replaceAll("_", "-")}@${BUNDLE_VERSION(taskType)}`, ...byTask[taskType] }) as never;
 }
 
+// --- Packet 11C source-backed EXPLAIN_PATTERN request ---
+
+const periodSource = (n: number) => ({
+  recordType: "GLUCOSE_READING",
+  recordId: `0b1c2d3e-4f50-4617-8829-3a4b5c6d7e${(80 + n).toString(16)}`,
+  revisionId: `1c2d3e4f-5061-4728-9930-4b5c6d7e8f${(16 + n).toString(16)}`,
+});
+const periodInterval = (ref: string, startDate: string, endDate: string, n: number) => ({ ref, field: "EFFECTIVE_INTERVAL", value: { kind: "DATE_RANGE", startDate, endDate }, sources: [periodSource(n)] });
+const periodCount = (ref: string, value: number, n: number) => ({ ref, field: "EVIDENCE_COUNT", value: { kind: "COUNT", value }, sources: [periodSource(n)] });
+const periodMedian = (ref: string, value: string, n: number) => ({ ref, field: "MEASUREMENT_VALUE", value: { kind: "DECIMAL", value, unit: "MMOL_L" }, sources: [periodSource(n)] });
+
+/**
+ * A valid source-backed EXPLAIN_PATTERN request (bundle 11b.18): an earlier and a recent period (interval, count,
+ * median value) plus the total evidence count (8 + 6 = 14), bound by `taskPayload.periodSummary`. Typed loosely so
+ * tests can mutate it.
+ */
+export function sourceBackedRequest(): Record<string, unknown> & AiTaskRequest {
+  return structuredClone({
+    ...BASE,
+    taskType: "EXPLAIN_PATTERN",
+    runtimeBundleKey: "ai.explain-pattern@11b.18",
+    facts: [
+      periodInterval("fact-1", "2026-09-01", "2026-09-14", 1),
+      periodCount("fact-2", 8, 2),
+      periodMedian("fact-3", "6.25", 3),
+      periodInterval("fact-4", "2026-09-15", "2026-09-28", 4),
+      periodCount("fact-5", 6, 5),
+      periodMedian("fact-6", "7.35", 6),
+      periodCount("fact-7", 14, 7),
+    ],
+    taskPayload: {
+      claim: { ref: "claim-1", family: "COMPARABLE_SLOT_TREND", factRefs: ["fact-1", "fact-2", "fact-3", "fact-4", "fact-5", "fact-6", "fact-7"] },
+      limitations: [{ ref: "limitation-1", code: "DOES_NOT_ESTABLISH_CAUSE" }],
+      periodSummary: {
+        slot: "BEFORE_BREAKFAST",
+        summaryKind: "MEDIAN",
+        periods: [
+          { role: "EARLIER", intervalRef: "fact-1", countRef: "fact-2", summaryRef: "fact-3" },
+          { role: "RECENT", intervalRef: "fact-4", countRef: "fact-5", summaryRef: "fact-6" },
+        ],
+        totalCountRef: "fact-7",
+      },
+    },
+  }) as never;
+}
+
 const SCHEMA_VERSION = (taskType: AiTaskType) => `ai-output.${taskType.toLowerCase().replaceAll("_", "-")}@${VERSION(taskType)}`;
 
 /** One valid SUCCESS output per task, matching `requestFixture`. */

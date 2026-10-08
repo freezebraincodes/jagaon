@@ -1593,8 +1593,9 @@ describe("shell rules ai-shell-rules.11b.12-r5 (clinical labels)", () => {
       legacy.quotes = { "en-SG": ["", ""], "zh-SG": ["", ""] };
       return [fixture.id, planned.plan, planned.atoms, composeDeterministic(fixture.request, planned.plan, planned.atoms, bundleOf, legacy)];
     });
-    // Observation ownership (ai-slot-plan.11b.8) adds only the field owner and the plan version: both are normalised away.
-    const text = JSON.stringify(rows, replacer).replace(/@11b\.\d+/g, "@BUNDLE").replace(/,"owner":"(?:REMOTE|LOCAL)"/g, "").replaceAll("ai-slot-plan.11b.8", "ai-slot-plan.11b.7");
+    // Observation ownership (ai-slot-plan.11b.8) adds only the field owner and the plan version: both are normalised away. Packet 11C
+    // phase 2 moved the plan version again (11b.9, eligibility accounting only); it is normalised to the same 11b.7 reference.
+    const text = JSON.stringify(rows, replacer).replace(/@11b\.\d+/g, "@BUNDLE").replace(/,"owner":"(?:REMOTE|LOCAL)"/g, "").replaceAll("ai-slot-plan.11b.9", "ai-slot-plan.11b.7");
     expect(createHash("sha256").update(text).digest("hex")).toBe("ab33b2e66822afe51cab5d1dd70f8a47357a0620f0fb3df27f8d5fbdbf8d2077");
   });
 });

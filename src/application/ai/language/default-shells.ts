@@ -9,8 +9,10 @@ import { composeObservationShell, OBSERVATION_PATH } from "./observation-compose
  * wording, byte-identical), so the deterministic fallback never uses an AI-path variant. Version unchanged (no text changed).
  * ai-shells-default.11b.7 (presentation correction P1, ai-language-copy.11b.8, owner instruction 2026-10-08, offline): the default
  * observation names supplied items as the person's own words and quotes each item; every other default shell is unchanged.
+ * ai-shells-default.11b.8 (Packet 11C source-backed explanations, ai-language-copy.11b.9, 2026-10-08, offline): the default observation
+ * of a source-backed plan is the approved `periods` frame around its PERIOD_SUMMARY atom; every other default shell is unchanged.
  */
-export const AI_DEFAULT_SHELLS_VERSION = "ai-shells-default.11b.7";
+export const AI_DEFAULT_SHELLS_VERSION = "ai-shells-default.11b.8";
 
 /**
  * Verify that each field's text contains exactly its requiredSlots, each exactly once.

@@ -7,7 +7,7 @@ import { BARE_SLOT_ID, localFields, remoteFields, remoteTokenInventory, SHELL_IN
 const explainRequest = () => ({
   shellInputVersion: "ai-shell-input.explain-pattern@11b.8",
   shellSchemaVersion: "ai-shell.explain-pattern@11b.8",
-  slotPlanVersion: "ai-slot-plan.11b.8",
+  slotPlanVersion: "ai-slot-plan.11b.9",
   taskType: "EXPLAIN_PATTERN", locale: "en-SG", runtimeBundleKey: "ai.explain-pattern@11b.18", claimFamily: "COMPARABLE_SLOT_TREND",
   tokenInventory: ["S1", "S3"],
   fields: [
@@ -20,7 +20,7 @@ const explainRequest = () => ({
 const careRequest = () => ({
   shellInputVersion: "ai-shell-input.draft-care-preparation-summary@11b.7",
   shellSchemaVersion: "ai-shell.draft-care-preparation-summary@11b.7",
-  slotPlanVersion: "ai-slot-plan.11b.8",
+  slotPlanVersion: "ai-slot-plan.11b.9",
   taskType: "DRAFT_CARE_PREPARATION_SUMMARY", locale: "zh-SG", runtimeBundleKey: "ai.draft-care-preparation-summary@11b.18", claimFamily: null,
   tokenInventory: ["S1"],
   fields: [
@@ -31,11 +31,11 @@ const careRequest = () => ({
   sections: [{ sectionSlot: "C1", heading: "h", introPath: "sections[0].intro", bulletPaths: ["sections[0].bullets[0]"] }],
 });
 
-describe("contract versions (observation ownership: EXPLAIN @11b.8, care @11b.7, slot plan 11b.8)", () => {
+describe("contract versions (observation ownership: EXPLAIN @11b.8, care @11b.7; slot plan 11b.9 since Packet 11C phase 2)", () => {
   it("pins the shell input, shell output and slot plan versions", () => {
     expect(SHELL_INPUT_VERSIONS).toEqual({ EXPLAIN_PATTERN: "ai-shell-input.explain-pattern@11b.8", DRAFT_CARE_PREPARATION_SUMMARY: "ai-shell-input.draft-care-preparation-summary@11b.7" });
     expect(SHELL_OUTPUT_VERSIONS).toEqual({ EXPLAIN_PATTERN: "ai-shell.explain-pattern@11b.8", DRAFT_CARE_PREPARATION_SUMMARY: "ai-shell.draft-care-preparation-summary@11b.7" });
-    expect(SLOT_PLAN_VERSION).toBe("ai-slot-plan.11b.8");
+    expect(SLOT_PLAN_VERSION).toBe("ai-slot-plan.11b.9");
   });
   it("the field owner helpers: remote fields and the remote token inventory in plan order, local fields apart", () => {
     const plan = { fields: [
@@ -119,7 +119,7 @@ describe("slot token grammar", () => {
 });
 
 describe("shell output contract", () => {
-  const success = { schemaVersion: "ai-shell.explain-pattern@11b.8", slotPlanVersion: "ai-slot-plan.11b.8", tokenInventory: ["S1", "S3"], taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcome: "SUCCESS", abstentionReason: null, shells: { headline: "A look at {{S1}}.", evidence: "Based on {{S3}}." } };
+  const success = { schemaVersion: "ai-shell.explain-pattern@11b.8", slotPlanVersion: "ai-slot-plan.11b.9", tokenInventory: ["S1", "S3"], taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcome: "SUCCESS", abstentionReason: null, shells: { headline: "A look at {{S1}}.", evidence: "Based on {{S3}}." } };
   it("enforces the exclusive outcome contract and the exact version", () => {
     expect(shellOutputSchema("EXPLAIN_PATTERN").safeParse(success).success).toBe(true);
     expect(shellOutputSchema("EXPLAIN_PATTERN").safeParse({ ...success, abstentionReason: "AMBIGUOUS_INPUT" }).success).toBe(false);

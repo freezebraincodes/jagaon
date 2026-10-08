@@ -1,13 +1,9 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import Dexie from "dexie";
 import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
-import { createJagaOnDatabase, type JagaOnDatabase } from "@/storage/database";
-import { createJournalCommandService } from "@/application/journal/journal-command-service";
-import type { JournalCommandService } from "@/application/journal/journal-contracts";
-import { createIntelligenceCoordinator } from "@/application/intelligence/intelligence-coordinator";
 import type { Instant } from "@/domain/shared/time";
-import { createRecordedHistoryQuery } from "./recorded-history-query";
 import { recordedHistoryViewSchema, type RecordedHistoryView } from "./recorded-history-contracts";
+import { databases, dayBefore, local, reading, setup } from "./history-test-support";
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;
 const originalIDBKeyRange = Dexie.dependencies.IDBKeyRange;
@@ -19,50 +15,10 @@ afterAll(() => {
   Dexie.dependencies.indexedDB = originalIndexedDB;
   Dexie.dependencies.IDBKeyRange = originalIDBKeyRange;
 });
-const databases: JagaOnDatabase[] = [];
 afterEach(async () => {
   for (const database of databases) database.close();
   for (const database of databases.splice(0)) await Dexie.delete(database.name);
 });
-
-// Sunday 4 Oct 2026, 10:00 in Singapore.
-const NOW = "2026-10-04T02:00:00.000Z" as Instant;
-const uuid = () => crypto.randomUUID() as never;
-
-async function setup() {
-  const database = createJagaOnDatabase(`history-${crypto.randomUUID()}`);
-  databases.push(database);
-  await database.open();
-  const ids = { commandId: uuid, correlationId: uuid, recordId: uuid, revisionId: uuid, auditEventId: uuid, transactionId: uuid, domainEventId: uuid };
-  const journal = createJournalCommandService(database, { now: () => "2026-10-04T01:00:00.000Z" as Instant, ids });
-  const coordinator = createIntelligenceCoordinator(database, { now: () => NOW, ids: { ...ids, evaluationId: uuid, leaseToken: uuid }, instanceId: "t" });
-  const history = createRecordedHistoryQuery(database, { now: () => NOW });
-  return { database, journal, coordinator, history };
-}
-
-/** Local Singapore wall-clock time on a date. */
-function local(date: string, time: string) {
-  const instant = new Date(`${date}T${time}:00+08:00`).toISOString() as Instant;
-  return { kind: "POINT" as const, occurrence: { kind: "EXACT" as const, instantUtc: instant, timeZoneId: "Asia/Singapore", utcOffsetMinutes: 480 } };
-}
-
-async function reading(journal: JournalCommandService, date: string, time: string, value: string, slot = "BEFORE_BREAKFAST") {
-  const result = await journal.recordGlucose({
-    payload: {
-      measurement: { enteredValue: value as never, enteredUnit: "MMOL_L", normalization: null },
-      measurementMethod: "FINGERSTICK_METER",
-      context: { kind: "PATIENT_SELECTED_SLOT", slot: slot as never },
-    },
-    temporal: local(date, time),
-    recordedAt: "2026-10-04T01:00:00.000Z" as Instant,
-  });
-  if (result.kind !== "COMMITTED") throw new Error("reading failed");
-  return result;
-}
-
-function dayBefore(date: string, days: number): string {
-  return new Date(Date.parse(`${date}T00:00:00Z`) - days * 86_400_000).toISOString().slice(0, 10);
-}
 
 function ready(view: RecordedHistoryView) {
   if (view.status !== "READY" && view.status !== "INSUFFICIENT_EVIDENCE") throw new Error(`unexpected ${view.status}`);

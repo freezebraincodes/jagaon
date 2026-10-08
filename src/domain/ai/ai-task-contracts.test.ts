@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   AI_TASK_TYPES,
+  COMPARISON_PERIOD_ROLES,
+  COMPARISON_SLOTS,
+  COMPARISON_SUMMARY_KINDS,
   aiTaskOutputSchema,
   aiTaskRequestSchema,
   providerTaskOutputSchema,
   providerTaskRequestSchema,
   type AiTaskType,
 } from "./ai-task-contracts";
-import { abstainFixture, outputFixture, requestFixture } from "./ai-test-fixtures";
+import { abstainFixture, outputFixture, requestFixture, sourceBackedRequest } from "./ai-test-fixtures";
 
 /** Packet 11A Task 1: the closed six-task registry and strict envelopes (ai-system-spec Sections 3, 7, 8). */
 
@@ -152,5 +155,112 @@ describe("request-local references and provider-visible identifiers", () => {
       request.taskPayload.sections[0]!.sectionId = sectionId;
       expect(aiTaskRequestSchema.safeParse(request).success).toBe(false);
     }
+  });
+});
+
+describe("closed comparison vocabularies", () => {
+  it("exposes the frozen period roles, summary kinds (median and interquartile range) and slots", () => {
+    expect([...COMPARISON_PERIOD_ROLES]).toEqual(["EARLIER", "RECENT"]);
+    expect([...COMPARISON_SUMMARY_KINDS]).toEqual(["MEDIAN", "IQR"]);
+    expect([...COMPARISON_SLOTS]).toEqual(["BEFORE_BREAKFAST", "BEFORE_LUNCH", "BEFORE_DINNER", "BEDTIME"]);
+    for (const list of [COMPARISON_PERIOD_ROLES, COMPARISON_SUMMARY_KINDS, COMPARISON_SLOTS]) expect(Object.isFrozen(list)).toBe(true);
+  });
+});
+
+describe("source-backed EXPLAIN binding", () => {
+  type Loose = Record<string, any>;
+  const base = sourceBackedRequest();
+  /** Every issue message (rule code) the internal request schema reports. */
+  const issueCodes = (request: unknown): string[] => {
+    const result = aiTaskRequestSchema.safeParse(request);
+    return result.success ? [] : result.error.issues.map((issue) => issue.message);
+  };
+
+  it("accepts a complete binding whose refs are the claim facts exactly once", () => {
+    expect(aiTaskRequestSchema.safeParse(base).success).toBe(true);
+    expect(issueCodes(base)).toEqual([]);
+  });
+
+  it("accepts the interquartile-range summary kind and every closed slot", () => {
+    for (const summaryKind of ["MEDIAN", "IQR"]) {
+      const request = structuredClone(base) as Loose;
+      request.taskPayload.periodSummary.summaryKind = summaryKind;
+      expect(aiTaskRequestSchema.safeParse(request).success).toBe(true);
+    }
+    for (const slot of COMPARISON_SLOTS) {
+      const request = structuredClone(base) as Loose;
+      request.taskPayload.periodSummary.slot = slot;
+      expect(aiTaskRequestSchema.safeParse(request).success).toBe(true);
+    }
+  });
+
+  // Each rejection is pinned to its intended rule: the named code must be reported and the mutation must not
+  // fail merely because a reference is undeclared.
+  it.each<[string, (r: Loose) => void, string, string[]]>([
+    ["periods out of order", (r) => r.taskPayload.periodSummary.periods.reverse(), "PERIOD_ORDER", ["UNRESOLVED_FACT_REFERENCE"]],
+    ["a ref outside the claim", (r) => (r.taskPayload.periodSummary.periods[0].countRef = "fact-9"), "PERIOD_BINDING_REFS", ["PERIOD_BINDING_FAMILY", "PERIOD_TOTAL_MISMATCH"]],
+    ["a ref used twice", (r) => (r.taskPayload.periodSummary.periods[1].countRef = r.taskPayload.periodSummary.periods[0].countRef), "PERIOD_BINDING_REFS", ["PERIOD_BINDING_FAMILY", "UNRESOLVED_FACT_REFERENCE"]],
+    [
+      "a declared claim fact that is not bound",
+      (r) => {
+        r.facts.push({ ref: "fact-8", field: "EVIDENCE_COUNT", value: { kind: "COUNT", value: 3 }, sources: [] });
+        r.taskPayload.claim.factRefs.push("fact-8");
+      },
+      "PERIOD_BINDING_REFS",
+      ["UNRESOLVED_FACT_REFERENCE", "PERIOD_BINDING_FAMILY", "PERIOD_BINDING_KIND"],
+    ],
+    ["wrong fact kind for an interval (count ref swapped in)", (r) => (r.taskPayload.periodSummary.periods[0].intervalRef = r.taskPayload.periodSummary.periods[0].countRef), "PERIOD_BINDING_KIND", ["UNRESOLVED_FACT_REFERENCE"]],
+    [
+      "interval and count refs swapped",
+      (r) => {
+        const period = r.taskPayload.periodSummary.periods[0];
+        [period.intervalRef, period.countRef] = [period.countRef, period.intervalRef];
+      },
+      "PERIOD_BINDING_KIND",
+      ["PERIOD_BINDING_REFS", "PERIOD_TOTAL_MISMATCH", "UNRESOLVED_FACT_REFERENCE"],
+    ],
+    ["a summary fact in the wrong unit", (r) => (r.facts[2].value.unit = "MG_DL"), "PERIOD_BINDING_KIND", ["PERIOD_BINDING_REFS", "PERIOD_TOTAL_MISMATCH"]],
+    ["a summary fact that is not a measurement value", (r) => (r.facts[5].field = "EVIDENCE_COUNT"), "PERIOD_BINDING_KIND", ["PERIOD_BINDING_REFS", "PERIOD_TOTAL_MISMATCH"]],
+    ["total count not equal to the sum", (r) => (r.facts[6].value.value = 15), "PERIOD_TOTAL_MISMATCH", ["PERIOD_BINDING_REFS", "PERIOD_BINDING_KIND", "PERIOD_BINDING_FAMILY"]],
+    ["a period count that changes the sum", (r) => (r.facts[1].value.value = 9), "PERIOD_TOTAL_MISMATCH", ["PERIOD_BINDING_REFS", "PERIOD_BINDING_KIND", "PERIOD_BINDING_FAMILY"]],
+    ["FAMILIAR family with a binding", (r) => (r.taskPayload.claim.family = "FAMILIAR_OR_FREQUENT_ITEM"), "PERIOD_BINDING_FAMILY", ["PERIOD_BINDING_REFS", "PERIOD_BINDING_KIND", "PERIOD_TOTAL_MISMATCH"]],
+  ])("rejects %s", (_label, mutate, expected, absent) => {
+    const request = structuredClone(base) as Loose;
+    mutate(request);
+    expect(aiTaskRequestSchema.safeParse(request).success).toBe(false);
+    const codes = issueCodes(request);
+    expect(codes).toContain(expected);
+    for (const code of absent) expect(codes).not.toContain(code);
+  });
+
+  it("rejects an unknown slot, summary kind, role or extra binding field", () => {
+    const mutations: Array<(r: Loose) => void> = [
+      (r) => (r.taskPayload.periodSummary.slot = "AFTER_MEAL"),
+      (r) => (r.taskPayload.periodSummary.summaryKind = "SPREAD"),
+      (r) => (r.taskPayload.periodSummary.periods[0].role = "MIDDLE"),
+      (r) => (r.taskPayload.periodSummary.value = "6.25"),
+      (r) => (r.taskPayload.periodSummary.periods[0].recordId = "0b1c2d3e-4f50-4617-8829-3a4b5c6d7e8f"),
+      (r) => r.taskPayload.periodSummary.periods.pop(),
+      (r) => delete r.taskPayload.periodSummary.totalCountRef,
+    ];
+    for (const mutate of mutations) {
+      const request = structuredClone(base) as Loose;
+      mutate(request);
+      expect(aiTaskRequestSchema.safeParse(request).success).toBe(false);
+    }
+  });
+
+  it("leaves a request without a binding valid and the provider payload binding-free", () => {
+    const request = structuredClone(base) as Loose;
+    delete request.taskPayload.periodSummary;
+    expect(aiTaskRequestSchema.safeParse(request).success).toBe(true);
+    const { requestId: _id, requestedAt: _at, releaseProfile: _profile, facts, ...rest } = structuredClone(base) as Loose;
+    void [_id, _at, _profile];
+    const provider = {
+      ...rest,
+      facts: facts.map(({ sources: _sources, ...fact }: Loose) => (void _sources, fact)),
+      taskPayload: { claim: { ...rest.taskPayload.claim, approvedMeaning: "Approved claim meaning." }, periodSummary: rest.taskPayload.periodSummary },
+    };
+    expect(providerTaskRequestSchema.safeParse(provider).success).toBe(false);
   });
 });

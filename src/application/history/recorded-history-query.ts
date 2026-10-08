@@ -16,9 +16,12 @@ import {
 import { canonicalDecimal, compareRational, decimal, instantMs, localDateOf } from "@/application/intelligence/metrics";
 import { evaluateComparableSlotTrend } from "@/patterns/comparable-slot-trend-evaluator";
 import type { ResolvedGlucoseReading } from "@/patterns/pattern-evaluator-contracts";
+import { projectExplainablePattern } from "./explainable-pattern-view";
 import {
   HISTORY_LABELLED_SLOTS,
   recordedHistoryViewSchema,
+  type ExplainablePatternRequest,
+  type ExplainablePatternResult,
   type HistoryChartPosition,
   type HistoryComparison,
   type HistoryDisplayPosition,
@@ -81,7 +84,8 @@ function readingPoint(reading: ResolvedGlucoseReading): { instant: string; offse
   return occurrencePoint(reading.temporal as never);
 }
 
-function windowDates(window: { start: string; end: string }): DateRange {
+/** A half-open instant window `[start, end)` as inclusive home-timezone local dates. */
+export function windowDates(window: { start: string; end: string }): DateRange {
   return {
     startDate: localDateOf(window.start, HOME_OFFSET_MINUTES) as LocalDate,
     endDate: localDateOf(new Date(instantMs(window.end) - 1).toISOString(), HOME_OFFSET_MINUTES) as LocalDate,
@@ -297,5 +301,15 @@ export function createRecordedHistoryQuery(database: JagaOnDatabase, dependencie
     }
   }
 
-  return Object.freeze({ load });
+  /** Packet 11C A1: any integrity or storage failure leaves the factual card only. */
+  async function loadExplainablePattern(request: ExplainablePatternRequest): Promise<ExplainablePatternResult> {
+    try {
+      const snapshot = await loadIntelligenceSnapshot(database, dependencies.now());
+      return projectExplainablePattern(snapshot, request.factId);
+    } catch {
+      return { kind: "INELIGIBLE", reason: "UNAVAILABLE" };
+    }
+  }
+
+  return Object.freeze({ load, loadExplainablePattern });
 }

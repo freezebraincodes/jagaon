@@ -4,7 +4,7 @@ import { plannedFixture } from "@/ai/evaluation/packet-11-hybrid-test-support";
 import { slotTokenMatcher, type AiLocale, type AtomKind, type ShellFieldPath, type ShellTexts, type SlotPlan } from "@/domain/ai";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "../ai-hybrid-runtime-bundles";
 import { verifyComposition } from "./assembler";
-import { AI_LANGUAGE_COPY, type LanguageCopy } from "./ai-language-copy";
+import { AI_LANGUAGE_COPY, OBSERVATION_GROUPS, type LanguageCopy } from "./ai-language-copy";
 import { composeAiResult } from "./ai-composition";
 import { atomMultiset, composeDeterministic } from "./deterministic-composition";
 import { defaultShells } from "./default-shells";
@@ -35,7 +35,7 @@ function syntheticPlan(locale: AiLocale, groups: ReadonlyArray<readonly [AtomKin
   const of = (path: string) => slots.filter((slot) => slot.homeField === path).map((slot) => slot.slotId);
   const budgets = locale === "en-SG" ? { headline: 60, observation: 120, evidence: 80 } : { headline: 50, observation: 90, evidence: 60 };
   return {
-    planVersion: "ai-slot-plan.11b.8", taskType: "EXPLAIN_PATTERN", locale, runtimeBundleKey: BUNDLE.bundleKey, claimFamily: "COMPARABLE_SLOT_TREND",
+    planVersion: "ai-slot-plan.11b.9", taskType: "EXPLAIN_PATTERN", locale, runtimeBundleKey: BUNDLE.bundleKey, claimFamily: "COMPARABLE_SLOT_TREND",
     fields: [
       { path: "headline", requiredSlots: of("headline"), maxCodePoints: budgets.headline, maxSentences: 1, mayBeAtomOnly: false, owner: "REMOTE" },
       { path: "observation", requiredSlots: of("observation"), maxCodePoints: budgets.observation, maxSentences: 2, mayBeAtomOnly: false, owner: "LOCAL" },
@@ -161,7 +161,12 @@ describe("observation composer (ai-language-copy.11b.7)", () => {
     const LINKS = /\b(?:for|alongside|with|noted|note|notes|linked|because|after|before|during|reading|readings|earlier|recent|cause|caused|related)\b|对应|由于|因为|之后|之前|读数|备注|较早|近期/i;
     for (const locale of ["en-SG", "zh-SG"] as const) {
       for (const variant of AI_LANGUAGE_COPY.explainObservationVariants[locale]) {
-        for (const group of Object.values(variant)) for (const position of Object.values(group)) for (const text of Object.values(position)) expect(text, text).not.toMatch(LINKS);
+        // Packet 11C (11b.9): the `periods` group is excluded here. Its one approved template ("Readings by period — …" /
+        // "按期间的读数：…", pinned exactly in ai-language-copy.test.ts) frames the PERIOD_SUMMARY atom, which is by design a summary of
+        // readings per period; it is the same in the default and every variant, so no variant adds a link or a label.
+        const groups = Object.entries(variant).filter(([name]) => name !== "periods").map(([, group]) => group);
+        expect(groups).toHaveLength(5);
+        for (const group of groups) for (const position of Object.values(group)) for (const text of Object.values(position)) expect(text, text).not.toMatch(LINKS);
       }
     }
   });
@@ -198,6 +203,21 @@ describe("observation composer (ai-language-copy.11b.7)", () => {
           expect(countSentences(prose(text))).toBeLessThanOrEqual(2);
           expect([...text.matchAll(slotTokenMatcher())].map((match) => match[1])).toEqual([...observationSlots(plan)]);
         }
+      }
+    }
+  });
+
+  it("Packet 11C (11b.9): a PERIOD_SUMMARY slot is the periods group, last in order, with one approved template in the default and every variant", () => {
+    expect(OBSERVATION_GROUPS).toEqual(["values", "dates", "ranges", "times", "items", "periods"]);
+    const expected = { "en-SG": "Readings by period — {{S2}}.", "zh-SG": "按期间的读数：{{S2}}。" } as const;
+    for (const locale of ["en-SG", "zh-SG"] as const) {
+      const plan = syntheticPlan(locale, [["PERIOD_SUMMARY", 1]]);
+      for (let variant = 0; variant <= observationVariantCount(locale); variant += 1) expect(composeObservationShell(plan, variant), `${locale} v${variant}`).toBe(expected[locale]);
+      expect(defaultShells(plan).get("observation")).toBe(expected[locale]);
+      for (let variant = 1; variant <= observationVariantCount(locale); variant += 1) {
+        const text = composeLocalShells(plan, variant).get("observation")!;
+        expect([...prose(text)].length).toBeLessThanOrEqual(locale === "en-SG" ? 120 : 90);
+        expect(countSentences(prose(text))).toBe(1);
       }
     }
   });

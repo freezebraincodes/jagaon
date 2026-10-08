@@ -13,9 +13,10 @@ import { composeAiResult } from "@/application/ai/language/ai-composition";
 import { projectShellTaskRequest } from "@/application/ai/language/shell-projector";
 import { validateShellCandidate } from "@/application/ai/language/shell-validator";
 import { planSlots } from "@/application/ai/language/slot-planner";
-import type { ShellTask } from "@/domain/ai";
+import { SLOT_PLAN_VERSION, type ShellTask } from "@/domain/ai";
 import { buildHybridHumanReview, escapeReviewHtml, HYBRID_REVIEW_PAGE_PARTS, type HumanReviewBlock, type HumanReviewEntry, type HumanReviewItem } from "./packet-11-hybrid-human-review";
 import { hybridFixturesForPhase } from "./packet-11-hybrid-fixtures";
+import { HISTORICAL_SLOT_PLAN_VERSION } from "./packet-11-slot-plan-version-normalisation";
 
 /**
  * OFFLINE PRESENTATION REPLAY (owner instruction 2026-10-08, offline): the presentation correction (P1 quoted EXPLAIN items, P3 care
@@ -27,7 +28,19 @@ import { hybridFixturesForPhase } from "./packet-11-hybrid-fixtures";
  * It writes a labelled before/after page for the owner's 12 concerns (before = the confirmation run's review page as shown; after =
  * the replayed final wording) plus a closed-code JSON summary. Skipped unless RUN_OFFLINE_PRESENTATION_REPLAY=1; refused while a
  * provider key is set.
+ *
+ * HISTORICAL TOOL, SUPERSEDED CONTRACT (Packet 11C P2b, coordinator ruling 2026-10-08): the stored confirmation run was sent under
+ * ai-slot-plan.11b.8. Since ai-slot-plan.11b.9 (owner option (a), eligibility accounting only) every current body differs from the stored
+ * one in the two slot-plan version fields, so the byte-identical fetcher below can no longer match, and every stored response's 11b.8
+ * echo fails the current output schema (S2:SCHEMA_INVALID). This tool is deliberately NOT adapted to the new contract: under its gate it
+ * refuses with HISTORICAL_CONTRACT_SUPERSEDED before any work. Its expected outcomes and its historical pages are left untouched; the
+ * Checkpoint 1 pages remain the evidence of what it showed under 11b.8. The ungated test at the end pins the refusal condition.
  */
+export const STORED_RUN_SLOT_PLAN_VERSION = HISTORICAL_SLOT_PLAN_VERSION;
+/** Refuses (throws) unless the current slot plan version is the stored run's; the historical replay can only ever run under 11b.8. */
+export function assertHistoricalContractCurrent(current: string = SLOT_PLAN_VERSION): void {
+  if (current !== STORED_RUN_SLOT_PLAN_VERSION) throw new Error(`HISTORICAL_CONTRACT_SUPERSEDED: stored run is ${STORED_RUN_SLOT_PLAN_VERSION}, current is ${current}`);
+}
 const LABEL = "OFFLINE_PRESENTATION_REPLAY";
 const TRACE = "test-results/packet-11-hybrid-live-trace/20261007T131032Z-6a13e8630a3464c8";
 const BEFORE_PAGE = "test-results/packet-11-hybrid-review/20261007T131152Z-8c772333-full-human-review.html";
@@ -61,8 +74,9 @@ const REMAINING: Readonly<Record<string, readonly string[]>> = {
 };
 const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 
-type StoredCall = { sequence: number; fixtureId: string; bodyText: string; endpoint: string; method: string; headers: Record<string, string>; raw: string; httpStatus: number; contentType: string };
-function loadStored(): StoredCall[] {
+/** Exported (Packet 11C Task 5, no behaviour change): the source-backed offline replay reads the same stored calls with this loader. */
+export type StoredCall = { sequence: number; fixtureId: string; bodyText: string; endpoint: string; method: string; headers: Record<string, string>; raw: string; httpStatus: number; contentType: string };
+export function loadStored(): StoredCall[] {
   const callMap = JSON.parse(readFileSync(join(TRACE, "99-call-map.json"), "utf8")) as { callMap: { entries: Array<{ sequence: number; fixtureId: string; attempt: number }> } };
   const files = readdirSync(TRACE);
   return callMap.callMap.entries.map((entry) => {
@@ -73,7 +87,7 @@ function loadStored(): StoredCall[] {
     return { sequence: entry.sequence, fixtureId: entry.fixtureId, bodyText: request.bodyText, endpoint: request.endpoint, method: request.method, headers: request.headers, raw: response.raw, httpStatus: response.httpStatus, contentType: response.contentType };
   });
 }
-function deepSeekFlash() {
+export function deepSeekFlash() {
   const selection = selectEvaluationCandidates({ requested: "deepseek-flash", listing: [], documented: DEEPSEEK_DOCUMENTED_MODELS, now: () => "2026-10-08T00:00:00.000Z" });
   if (selection.kind !== "SELECTED" || selection.candidates.length !== 1) throw new Error("DEEPSEEK_FLASH_NOT_SELECTABLE");
   return selection.candidates[0]!;
@@ -92,6 +106,7 @@ const blockText = (pieces: ReadonlyArray<{ text: string }>) => pieces.map((piece
 
 describe.runIf(process.env.RUN_OFFLINE_PRESENTATION_REPLAY === "1")("OFFLINE presentation replay of the INDEPENDENT_CONFIRMATION_RUN (RUN_OFFLINE_PRESENTATION_REPLAY=1)", () => {
   it("replays all 70 stored responses byte-identically under the corrected presentation, with unchanged outcomes, and writes the 12-concern before/after page", async () => {
+    assertHistoricalContractCurrent();
     if (process.env.DEEPSEEK_API_KEY || process.env.KIE_API_KEY) throw new Error("REPLAY_REQUIRES_PROVIDER_KEYS_UNSET");
     const network = vi.fn(() => { throw new Error("NETWORK_FORBIDDEN_IN_REPLAY"); });
     vi.stubGlobal("fetch", network);
@@ -196,4 +211,13 @@ ${cards}
     console.log(JSON.stringify({ presentationReplay: { ...summary, visibleChange: { changed: summary.visibleChange.changed.length, unchanged: summary.visibleChange.unchanged } } }));
     vi.unstubAllGlobals();
   }, 300_000);
+});
+
+describe("OFFLINE presentation replay: historical contract refusal (ungated)", () => {
+  it("refuses under the current slot plan version with HISTORICAL_CONTRACT_SUPERSEDED, and would run only under the stored run's 11b.8", () => {
+    expect(STORED_RUN_SLOT_PLAN_VERSION).toBe("ai-slot-plan.11b.8");
+    expect(SLOT_PLAN_VERSION).not.toBe(STORED_RUN_SLOT_PLAN_VERSION);
+    expect(() => assertHistoricalContractCurrent()).toThrow(`HISTORICAL_CONTRACT_SUPERSEDED: stored run is ai-slot-plan.11b.8, current is ${SLOT_PLAN_VERSION}`);
+    expect(() => assertHistoricalContractCurrent(STORED_RUN_SLOT_PLAN_VERSION)).not.toThrow();
+  });
 });

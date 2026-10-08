@@ -1,12 +1,14 @@
 import { deepFreeze } from "@/application/deep-freeze";
-import { aiTaskRequestSchema, sectionBulletPath, sectionIntroPath, SLOT_PLAN_VERSION, slotTokenMatcher, type AiLocale, type AiTaskRequest, type AtomEntry, type AtomKind, type AtomTable, type GlossKey, type PlannedSection, type ProviderFact, type RemoteEligibility, type ShellFieldPath, type ShellFieldSpec, type ShellTask, type SlotDefinition, type SlotId, type SlotPlan } from "@/domain/ai";
+import { aiTaskRequestSchema, sectionBulletPath, sectionIntroPath, SLOT_PLAN_VERSION, slotTokenMatcher, type AiLocale, type AiTaskRequest, type AtomEntry, type AtomKind, type AtomTable, type FieldOwner, type GlossKey, type PlannedSection, type ProviderFact, type RemoteEligibility, type ShellFieldPath, type ShellFieldSpec, type ShellTask, type SlotDefinition, type SlotId, type SlotPlan } from "@/domain/ai";
+import type { PeriodSummaryBinding } from "@/domain/ai/ai-task-contracts";
 import type { AiHybridRuntimeBundle } from "../ai-hybrid-runtime-bundles";
 import { OUTPUT_CODE_POINTS_PER_TOKEN } from "../ai-output-validator";
 import { projectProviderTaskPayload } from "../detached-payload-projector";
 import { AI_LANGUAGE_COPY, type LanguageCopy } from "./ai-language-copy";
-import { validationViewJoin } from "./assembler";
+import { assembleField, validationViewJoin } from "./assembler";
 import { isDisplayUnit, renderAtom, type AtomSource } from "./atom-renderer";
 import { defaultShells } from "./default-shells";
+import { composeLocalShells, isObservationCompositionError, observationVariantCount } from "./observation-composer";
 import { approvedSectionHeading } from "./shell-projector";
 
 /**
@@ -25,6 +27,21 @@ import { approvedSectionHeading } from "./shell-projector";
  * ai-slot-plan.11b.8 (observation ownership, owner instruction 2026-10-07, offline): every field names its owner. The EXPLAIN
  * headline and evidence are REMOTE (model-written); the EXPLAIN observation is LOCAL (composed by the application's observation
  * composer); every care field is REMOTE. Fields, slots, slot ids, order, budgets and eligibility are otherwise unchanged.
+ *
+ * Packet 11C (2026-10-08, offline): a source-backed EXPLAIN request (one carrying the local `periodSummary` binding) takes its own
+ * branch (`sourceBackedExplainPlan`), which keeps the existing S1 MEANING headline / S3 COUNT evidence remote shape and puts every period
+ * fact into one LOCAL PERIOD_SUMMARY observation atom. Requests without the binding are planned exactly as before.
+ *
+ * ai-slot-plan.11b.9 (Packet 11C phase 2, owner decision option (a), 2026-10-08, offline): remote eligibility reserves an application-owned
+ * (LOCAL) field at its actual final wording instead of its fixed budget: the code points of the text the observation composer and the
+ * assembler will emit (approved prose, spacing, punctuation and each atom exactly once, so no atom cost is added on top), as the maximum
+ * over every permitted local variant (`remoteBudgetAccount`). The variant is not fixed by the plan: the AI-path composition step
+ * (`composeAiResult`) uses the variant selected from the requestId, or one its caller supplies (the evaluation replays compose every plan in
+ * variants 1 and 2), and `composeLocalShells` accepts 0..N; eligibility must not depend on the requestId. A LOCAL field one of whose
+ * permitted variants cannot be composed is never remote-eligible. REMOTE fields keep their fixed budget + atoms + ATOM_SPACING_RESERVE;
+ * FIXED_FIELD_BUDGETS, FIELD_SCHEMA_LIMITS, the output ceiling, the default-shell checks and deterministicFits are unchanged, and every
+ * field's maxCodePoints is still its fixed budget. The rule changes for every plan, hence the version; the only model-facing difference is
+ * this version string (documented and enforced by the evaluation version-only guard).
  */
 export type FieldKind = "headline" | "observation" | "evidence" | "intro" | "bullet";
 export const FIXED_FIELD_BUDGETS = deepFreeze({
@@ -88,6 +105,51 @@ function explainPlan(request: Extract<AiTaskRequest, { taskType: "EXPLAIN_PATTER
   };
 }
 
+/**
+ * Packet 11C source-backed EXPLAIN branch, taken only when the request carries the local `periodSummary` binding (it is never projected).
+ * The claim binds to MEANING S1 (headline, REMOTE); all six period facts (each period's interval, count and summary value, EARLIER then
+ * RECENT) bind to one application-owned PERIOD_SUMMARY S2 (observation, LOCAL, glossKey RECORDED_VALUES, never projectable); the total
+ * binds to COUNT S3 (evidence, REMOTE, EVIDENCE_COUNT, READINGS noun). So the remote request keeps the existing S1/S3 shape. Every other
+ * combination (a fact outside the binding, a wrong kind or unit, a total that is not the sum, another family) is PAYLOAD_INVALID.
+ */
+function sourceBackedExplainPlan(request: Extract<AiTaskRequest, { taskType: "EXPLAIN_PATTERN" }>, facts: readonly ProviderFact[], binding: PeriodSummaryBinding): { drafts: Draft[]; fields: DraftField[] } {
+  const claim = request.taskPayload.claim;
+  if (claim.family !== "COMPARABLE_SLOT_TREND") stop("PAYLOAD_INVALID");
+  const byRef = new Map(facts.map((fact) => [fact.ref, fact]));
+  const periodRefs = binding.periods.flatMap((period) => [period.intervalRef, period.countRef, period.summaryRef]);
+  const bound = [...periodRefs, binding.totalCountRef];
+  // Exact-once binding: the bound refs are exactly the claim facts and the supplied facts, each once.
+  if (new Set(bound).size !== bound.length || bound.length !== claim.factRefs.length || bound.length !== facts.length || bound.some((ref) => !claim.factRefs.includes(ref) || !byRef.has(ref))) stop("PAYLOAD_INVALID");
+  const valueOf = (ref: string, key: string) => {
+    const fact = byRef.get(ref) ?? stop("PAYLOAD_INVALID");
+    if (`${fact.field}:${fact.value.kind}` !== key) stop("PAYLOAD_INVALID");
+    return fact.value as Record<string, unknown>;
+  };
+  const periods = binding.periods.map((period, index) => {
+    if (period.role !== (["EARLIER", "RECENT"] as const)[index]) stop("PAYLOAD_INVALID");
+    const interval = valueOf(period.intervalRef, "EFFECTIVE_INTERVAL:DATE_RANGE");
+    const count = valueOf(period.countRef, "EVIDENCE_COUNT:COUNT");
+    const summary = valueOf(period.summaryRef, "MEASUREMENT_VALUE:DECIMAL");
+    if (summary.unit !== "MMOL_L") stop("PAYLOAD_INVALID");
+    return { role: period.role, startDate: interval.startDate as string, endDate: interval.endDate as string, count: count.value as number, value: summary.value as string };
+  });
+  const total = valueOf(binding.totalCountRef, "EVIDENCE_COUNT:COUNT").value as number;
+  if (periods.length !== 2 || periods.reduce((sum, period) => sum + period.count, 0) !== total) stop("PAYLOAD_INVALID");
+  const drafts: Draft[] = [
+    { slotId: "S1", atomKind: "MEANING", homeField: "headline", boundRefs: [claim.ref], orderGroup: null, glossKey: "MEANING_CLAUSE", source: { kind: "MEANING", family: claim.family } },
+    { slotId: "S2", atomKind: "PERIOD_SUMMARY", homeField: "observation", boundRefs: periodRefs, orderGroup: null, glossKey: "RECORDED_VALUES", source: { kind: "PERIOD_SUMMARY", slot: binding.slot, summaryKind: binding.summaryKind, periods } },
+    { slotId: "S3", atomKind: "COUNT", homeField: "evidence", boundRefs: [binding.totalCountRef], orderGroup: null, glossKey: "EVIDENCE_COUNT", source: { kind: "COUNT", value: total, noun: "READINGS" } },
+  ];
+  return {
+    drafts,
+    fields: [
+      { path: "headline", requiredSlots: ["S1"], maxSentences: 1, mayBeAtomOnly: false, owner: "REMOTE", kind: "headline" },
+      { path: "observation", requiredSlots: ["S2"], maxSentences: 2, mayBeAtomOnly: false, owner: "LOCAL", kind: "observation" },
+      { path: "evidence", requiredSlots: ["S3"], maxSentences: 1, mayBeAtomOnly: false, owner: "REMOTE", kind: "evidence" },
+    ],
+  };
+}
+
 function careAtom(fact: ProviderFact): { atomKind: AtomKind; glossKey: GlossKey; source: AtomSource } {
   const key = `${fact.field}:${fact.value.kind}`;
   const value = fact.value as Record<string, unknown>;
@@ -147,6 +209,36 @@ function carePlan(request: Extract<AiTaskRequest, { taskType: "DRAFT_CARE_PREPAR
   return { drafts, fields, sections, deterministicOnly };
 }
 
+export type FieldReservation = Readonly<{ path: ShellFieldPath; owner: FieldOwner; reserved: number }>;
+export type RemoteBudgetAccount = Readonly<{ ceiling: number; total: number; fields: readonly FieldReservation[] }>;
+
+/**
+ * ai-slot-plan.11b.9: the code points a LOCAL field's final wording occupies, as the maximum over every permitted local variant (0..N), each
+ * composed by the observation composer and assembled with the plan's atoms by the assembler, exactly as the AI path does. Throws
+ * OBSERVATION_COMPOSITION_INVALID when a permitted variant cannot be composed.
+ */
+function localReservation(plan: SlotPlan, atoms: AtomTable, path: ShellFieldPath, copy: LanguageCopy): number {
+  let reserved = 0;
+  for (let variant = 0; variant <= observationVariantCount(plan.locale, copy); variant += 1) {
+    const shell = composeLocalShells(plan, variant, copy).get(path);
+    if (shell === undefined) throw new Error("OBSERVATION_COMPOSITION_INVALID");
+    reserved = Math.max(reserved, cp(assembleField(shell, atoms, plan.locale).text));
+  }
+  return reserved;
+}
+
+/**
+ * ai-slot-plan.11b.9 remote-eligibility account of a plan: per field, the code points reserved for it under the output ceiling (REMOTE: the
+ * fixed budget, which is the field's maxCodePoints, plus every atom and ATOM_SPACING_RESERVE per atom; LOCAL: `localReservation`), their
+ * total and the ceiling floor(outputTokenCeiling x OUTPUT_CODE_POINTS_PER_TOKEN) minus the care validation-view joins.
+ */
+export function remoteBudgetAccount(plan: SlotPlan, atoms: AtomTable, bundle: AiHybridRuntimeBundle, copy: LanguageCopy = AI_LANGUAGE_COPY): RemoteBudgetAccount {
+  const atomCost = (slots: readonly SlotId[]) => slots.reduce((sum, slot) => sum + cp(atoms[slot]!.text) + ATOM_SPACING_RESERVE, 0);
+  const fields = plan.fields.map((field) => Object.freeze({ path: field.path, owner: field.owner, reserved: field.owner === "LOCAL" ? localReservation(plan, atoms, field.path, copy) : field.maxCodePoints + atomCost(field.requiredSlots) }));
+  const ceiling = Math.floor(bundle.executionBudget.outputTokenCeiling * OUTPUT_CODE_POINTS_PER_TOKEN) - plan.sections.length * cp(validationViewJoin(plan.locale));
+  return Object.freeze({ ceiling, total: fields.reduce((sum, field) => sum + field.reserved, 0), fields: Object.freeze(fields) });
+}
+
 export function planSlots(request: AiTaskRequest, bundle: AiHybridRuntimeBundle, copy: LanguageCopy = AI_LANGUAGE_COPY): SlotPlanResult {
   try {
     const parsed = aiTaskRequestSchema.safeParse(request);
@@ -156,7 +248,12 @@ export function planSlots(request: AiTaskRequest, bundle: AiHybridRuntimeBundle,
     const projection = projectProviderTaskPayload(request, bundle);
     if (projection.kind === "FALLBACK") return { kind: "UNPLANNABLE", reason: projection.reason };
     const facts = projection.payload.facts;
-    const built = request.taskType === "EXPLAIN_PATTERN" ? { ...explainPlan(request, facts), sections: [] as PlannedSection[], deterministicOnly: false } : request.taskType === "DRAFT_CARE_PREPARATION_SUMMARY" ? carePlan(request, facts, request.locale, copy) : stop("PAYLOAD_INVALID");
+    const explain = (explainRequest: Extract<AiTaskRequest, { taskType: "EXPLAIN_PATTERN" }>) => {
+      // Packet 11C: the source-backed branch only when the local binding is present; otherwise the existing branch, unchanged.
+      const binding = explainRequest.taskPayload.periodSummary;
+      return { ...(binding === undefined ? explainPlan(explainRequest, facts) : sourceBackedExplainPlan(explainRequest, facts, binding)), sections: [] as PlannedSection[], deterministicOnly: false };
+    };
+    const built = request.taskType === "EXPLAIN_PATTERN" ? explain(request) : request.taskType === "DRAFT_CARE_PREPARATION_SUMMARY" ? carePlan(request, facts, request.locale, copy) : stop("PAYLOAD_INVALID");
     const atoms: Partial<Record<SlotId, AtomEntry>> = {};
     for (const draft of built.drafts) {
       let text: string;
@@ -186,12 +283,22 @@ export function planSlots(request: AiTaskRequest, bundle: AiHybridRuntimeBundle,
       built.fields.reduce((sum, field) => sum + prose(field.path) + atomCost(field.requiredSlots), 0) <= ceiling;
     if (!deterministicFits) stop("BUDGET_EXCEEDED");
 
-    // Remote eligibility under the fixed budgets (decision 3). A failed check never shrinks a budget.
+    // Remote eligibility (decision 3; ai-slot-plan.11b.9): REMOTE fields at their fixed budgets, LOCAL fields at their final composed
+    // wording (`remoteBudgetAccount`). A failed check never shrinks a budget; a LOCAL variant that cannot be composed is not eligible.
     const introBudget = request.taskType === "DRAFT_CARE_PREPARATION_SUMMARY" ? budgetOf("intro") : 0;
+    const account = ((): RemoteBudgetAccount | null => {
+      try {
+        return remoteBudgetAccount(draftPlan, atoms, bundle, copy);
+      } catch (error) {
+        if (!isObservationCompositionError(error) && !(error instanceof Error && error.message === "OBSERVATION_COMPOSITION_INVALID")) throw error;
+        return null;
+      }
+    })();
     const fixedFits =
+      account !== null &&
       built.fields.every((field) => budgetOf(field.kind) >= cp((defaults.get(field.path) ?? "").replace(slotTokenMatcher(), "").trim())) &&
-      built.fields.every((field) => budgetOf(field.kind) + atomCost(field.requiredSlots) + (field.first ? introBudget + join : 0) <= limitOf(field.kind)) &&
-      built.fields.reduce((sum, field) => sum + budgetOf(field.kind) + atomCost(field.requiredSlots), 0) <= ceiling;
+      built.fields.every((field, index) => account.fields[index]!.reserved + (field.first ? introBudget + join : 0) <= limitOf(field.kind)) &&
+      account.total <= account.ceiling;
     const remote: RemoteEligibility = built.deterministicOnly ? { eligible: false, reason: "PAYLOAD_INVALID" } : fixedFits ? { eligible: true } : { eligible: false, reason: "BUDGET_EXCEEDED" };
     const plan: SlotPlan = Object.freeze({ ...draftPlan, remote: Object.freeze(remote) });
     return { kind: "PLANNED", plan, atoms: Object.freeze(atoms) };

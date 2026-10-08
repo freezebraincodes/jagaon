@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AI_TASK_TYPES, aiTaskRequestSchema, type AiTaskRequest } from "@/domain/ai";
-import { requestFixture } from "@/domain/ai/ai-test-fixtures";
+import { requestFixture, sourceBackedRequest } from "@/domain/ai/ai-test-fixtures";
+import { AI_HYBRID_RUNTIME_BUNDLES } from "./ai-hybrid-runtime-bundles";
 import { AI_TASK_RUNTIME_BUNDLES } from "./ai-runtime-bundles";
 import { AI_FIELD_ALLOWLISTS, projectProviderTaskPayload } from "./detached-payload-projector";
 
@@ -111,6 +112,19 @@ describe("detached payload projection", () => {
     const answer = valid("ANSWER_BOUNDED_RECORD_QUERY") as unknown as Loose;
     answer.facts.push({ ref: "fact-3", field: "OCCURRENCE_TIME", value: { kind: "DATE", localDate: "2026-07-02" }, sources: [] });
     expect(project(answer)).toEqual({ kind: "FALLBACK", reason: "BUDGET_EXCEEDED" });
+  });
+
+  it("drops the local periodSummary binding and every source from the provider payload", () => {
+    const projection = projectProviderTaskPayload(sourceBackedRequest(), AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN);
+    expect(projection.kind).toBe("PROJECTED");
+    // The provider payload is what crosses the boundary; the local reference map legitimately keeps the sources.
+    const json = JSON.stringify((projection as any).payload);
+    expect(json).not.toContain("periodSummary");
+    expect(json).not.toContain("recordId");
+    expect(json).not.toContain("sources");
+    expect((projection as any).payload.taskPayload).toEqual({ claim: expect.objectContaining({ family: "COMPARABLE_SLOT_TREND" }) });
+    // The local reference map still names the sources of the seven facts, and declares the claim; the binding itself never leaves.
+    expect(Object.keys((projection as any).referenceMap).sort()).toEqual(["claim-1", "fact-1", "fact-2", "fact-3", "fact-4", "fact-5", "fact-6", "fact-7"]);
   });
 
   it("rejects unknown fields, an unknown task and a mismatched bundle before projection", () => {

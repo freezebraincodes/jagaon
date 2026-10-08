@@ -392,6 +392,10 @@ export async function createBrowserJournalRuntime(
         await intelligence;
         return historyQuery.load(request);
       },
+      async loadExplainablePattern(request: Parameters<RecordedHistoryQueryPort["loadExplainablePattern"]>[0]) {
+        await intelligence;
+        return historyQuery.loadExplainablePattern(request);
+      },
     }),
     medicationSchedule: Object.freeze({
       ...schedule,

@@ -67,6 +67,13 @@ import { AI_TASK_RUNTIME_BUNDLES, type AiComponentRef, type AiTaskRuntimeBundle 
  * Presentation correction P1/P3 (owner instruction 2026-10-08, offline): application copy ai-language-copy.11b.8 and default shells
  * ai-shells-default.11b.7 only (supplied EXPLAIN items quoted as the person's own words; fixed care-draft notices). Nothing reaches the
  * model: bundle keys stay @11b.18 and every model-facing request byte and remote eligibility is unchanged.
+ * Packet 11C source-backed explanations (2026-10-08, offline): application copy ai-language-copy.11b.9 and default shells
+ * ai-shells-default.11b.8 only (the LOCAL PERIOD_SUMMARY observation atom, its copy and the summary-role notice). Bundle keys, prompt,
+ * rules, request profile, slot plan version, atoms version and every existing model-facing request byte are unchanged.
+ * Packet 11C phase 2 (owner decision option (a), 2026-10-08, offline): slot plan ai-slot-plan.11b.9 (remote eligibility reserves a LOCAL
+ * field at its final composed wording) and atoms ai-atoms.11b.7 (the version record for PERIOD_SUMMARY and its lead joiner). Every
+ * model-facing request body differs from its 11b.8 body only in the slot plan version field (enforced by the evaluation version-only
+ * guard); bundle keys, prompt, rules, request profile, provider schema version, caps, temperature and budgets are unchanged.
  */
 export const AI_HYBRID_BUNDLE_VERSION = "11b.18";
 /** The components unchanged since bundle set 11b.7. */
@@ -75,10 +82,10 @@ const AI_HYBRID_UNCHANGED_COMPONENT_VERSION = "11b.7";
 const AI_HYBRID_VALIDATOR_PROFILE_VERSION = "11b.18";
 export const AI_HYBRID_VERSIONS = deepFreeze({
   slotPlan: SLOT_PLAN_VERSION,
-  atomRenderer: "ai-atoms.11b.6",
-  defaultShells: "ai-shells-default.11b.7",
+  atomRenderer: "ai-atoms.11b.7",
+  defaultShells: "ai-shells-default.11b.8",
   shellRules: "ai-shell-rules.11b.15-r8",
-  languageCopy: "ai-language-copy.11b.8",
+  languageCopy: "ai-language-copy.11b.9",
   prompt: "11b.18",
   providerSchema: "kie-schema.11b.6",
   validatorRules: "11b.2-meaning-r7",

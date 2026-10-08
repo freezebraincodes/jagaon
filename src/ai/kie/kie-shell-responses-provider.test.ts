@@ -34,7 +34,7 @@ const documented = (text: string, extra: Record<string, unknown> = {}) => ({
 const reply = (body: unknown) => vi.fn(async (_url: string, _init: RequestInit) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
 const shellRequest = () => projectShellTaskRequest(plannedFixture("p11.explain-pattern.en-sg.ordinary").plan);
 // Observation ownership (@11b.8): the model's EXPLAIN shells are the headline and the evidence.
-const VALID = JSON.stringify({ schemaVersion: "ai-shell.explain-pattern@11b.8", slotPlanVersion: "ai-slot-plan.11b.8", tokenInventory: ["S1", "S3"], taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcome: "SUCCESS", abstentionReason: null, shells: { headline: "A look at {{S1}}.", evidence: "This is based on {{S3}}." } });
+const VALID = JSON.stringify({ schemaVersion: "ai-shell.explain-pattern@11b.8", slotPlanVersion: "ai-slot-plan.11b.9", tokenInventory: ["S1", "S3"], taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcome: "SUCCESS", abstentionReason: null, shells: { headline: "A look at {{S1}}.", evidence: "This is based on {{S3}}." } });
 
 describe("shell Responses provider (evaluation-only)", () => {
   it("sends the 11b.13 shell prompt as instructions and the value-blind request as the only input message", async () => {

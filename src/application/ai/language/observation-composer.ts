@@ -16,9 +16,11 @@ import { countSentences, stripSlotTokens } from "./shell-validator";
  * P1 presentation correction (ai-language-copy.11b.8, owner instruction 2026-10-08, offline): every item token (supplied patient text)
  * is placed inside the locale quotation marks, in every variant including the default, so the item reads as the person's own words.
  * The atom itself is unchanged and is still substituted verbatim by the assembler.
+ * Packet 11C (ai-language-copy.11b.9, 2026-10-08): a source-backed observation's one PERIOD_SUMMARY slot is the `periods` group (last in
+ * order), with one approved template per locale in the default and every variant ("Readings by period — …" / "按期间的读数：…").
  */
 export const OBSERVATION_PATH: ShellFieldPath = "observation";
-const GROUP_OF: Partial<Record<AtomKind, ObservationGroup>> = { DECIMAL_LIST: "values", DATE: "dates", DATE_RANGE: "ranges", TIME: "times", LABEL: "items" };
+const GROUP_OF: Partial<Record<AtomKind, ObservationGroup>> = { DECIMAL_LIST: "values", DATE: "dates", DATE_RANGE: "ranges", TIME: "times", LABEL: "items", PERIOD_SUMMARY: "periods" };
 
 class ObservationCompositionError extends Error {
   constructor() { super("OBSERVATION_COMPOSITION_INVALID"); }

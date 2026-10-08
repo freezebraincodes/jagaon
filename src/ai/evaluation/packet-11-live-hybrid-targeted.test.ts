@@ -77,7 +77,8 @@ const REQUIRED_CONTRACT = Object.freeze({
   explainBundle: "ai.explain-pattern@11b.18",
   careBundle: "ai.draft-care-preparation-summary@11b.18",
   providerSchema: "kie-schema.11b.6",
-  slotPlan: "ai-slot-plan.11b.8",
+  // Packet 11C phase 2 (option (a), 2026-10-08, offline): eligibility accounting only; request bodies differ only in this version field.
+  slotPlan: "ai-slot-plan.11b.9",
   fixtureSet: "packet11-fixtures.11b.16",
   harness: "packet11-eval.18",
   fullEvaluationPolicy: "hybrid-full-policy.2",

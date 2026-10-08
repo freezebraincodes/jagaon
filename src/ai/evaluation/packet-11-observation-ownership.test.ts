@@ -21,6 +21,7 @@ import { buildHybridHumanReview } from "./packet-11-hybrid-human-review";
 import { PACKET_11_HYBRID_FIXTURES } from "./packet-11-hybrid-fixtures";
 import { captureShellRequestBody } from "./packet-11-hybrid-live-diagnostic";
 import { plannedFixture, shellCandidate } from "./packet-11-hybrid-test-support";
+import { normaliseSlotPlanVersion, SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY } from "./packet-11-slot-plan-version-normalisation";
 
 /**
  * Observation ownership (owner instruction 2026-10-07, offline only, brief obsown-brief.md): the application composes every
@@ -61,8 +62,8 @@ const DETERMINISTIC_70_DIGEST = "82fa4af83f2a0a82ffaad5441dfa6eacf1c5c526b2a0f93
 const CARE_BODIES_11B17_DIGEST = "e5407eae901ebd201dbebeda3ad21980d09fee6aad333140e9eab0999c21f296";
 
 describe("observation ownership: the plan keeps every field and marks its owner", () => {
-  it("ai-slot-plan.11b.8: EXPLAIN headline and evidence are REMOTE, the observation LOCAL; care fields are all REMOTE; slot ids and order unchanged", () => {
-    expect(SLOT_PLAN_VERSION).toBe("ai-slot-plan.11b.8");
+  it("ai-slot-plan.11b.8 (11b.9 since Packet 11C phase 2: eligibility accounting only): EXPLAIN headline and evidence are REMOTE, the observation LOCAL; care fields are all REMOTE; slot ids and order unchanged", () => {
+    expect(SLOT_PLAN_VERSION).toBe("ai-slot-plan.11b.9");
     for (const fixture of EXPLAIN) {
       const { plan } = planOf(fixture.id);
       expect(plan.fields.map((field) => [field.path, field.owner]), fixture.id).toEqual([["headline", "REMOTE"], ["observation", "LOCAL"], ["evidence", "REMOTE"]]);
@@ -122,10 +123,15 @@ describe("observation ownership: the remote request", () => {
       if (body !== null) bodies.push(body);
     }
     expect(bodies).toHaveLength(36);
-    const normalised = bodies.map((body) => body.replaceAll("ai-slot-plan.11b.8", "ai-slot-plan.11b.7").replaceAll("@11b.18", "@11b.17"));
+    // Packet 11C phase 2: the slot plan moved again (11b.9, eligibility accounting only). The documented structural version-only
+    // normalisation first maps 11b.9 back to 11b.8 (exactly the 2 version fields of every body), then the existing historical mapping
+    // takes 11b.8 back to the 11b.17-era 11b.7.
+    const versionNormalised = bodies.map((body) => normaliseSlotPlanVersion(body));
+    expect(versionNormalised.map((entry) => entry.occurrences)).toEqual(bodies.map(() => SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY));
+    const normalised = versionNormalised.map(({ body }) => body.replaceAll("ai-slot-plan.11b.8", "ai-slot-plan.11b.7").replaceAll("@11b.18", "@11b.17"));
     expect(sha256(normalised.join("\n"))).toBe(CARE_BODIES_11B17_DIGEST);
     for (const body of bodies) {
-      expect(body).toContain("ai-slot-plan.11b.8");
+      expect(body).toContain("ai-slot-plan.11b.9");
       expect(body).toContain("ai.draft-care-preparation-summary@11b.18");
       expect(body).toContain("ai-shell-input.draft-care-preparation-summary@11b.7");
     }
@@ -244,7 +250,9 @@ describe("observation ownership: versions", () => {
   it("moves exactly the pins the brief names", () => {
     expect(SHELL_INPUT_VERSIONS).toEqual({ EXPLAIN_PATTERN: "ai-shell-input.explain-pattern@11b.8", DRAFT_CARE_PREPARATION_SUMMARY: "ai-shell-input.draft-care-preparation-summary@11b.7" });
     expect(SHELL_OUTPUT_VERSIONS).toEqual({ EXPLAIN_PATTERN: "ai-shell.explain-pattern@11b.8", DRAFT_CARE_PREPARATION_SUMMARY: "ai-shell.draft-care-preparation-summary@11b.7" });
-    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.8", atomRenderer: "ai-atoms.11b.6", defaultShells: "ai-shells-default.11b.7", shellRules: "ai-shell-rules.11b.15-r8", languageCopy: "ai-language-copy.11b.8", prompt: "11b.18", providerSchema: "kie-schema.11b.6", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.18", shellRequest: "ai-shell-request.11b.11" });
+    // Packet 11C Task 4 (2026-10-08): application-only copy 11b.9 and default shells 11b.8; every model-facing pin is unchanged.
+    // Packet 11C phase 2 (option (a), 2026-10-08): slot plan 11b.9 (eligibility accounting) and atoms 11b.7 (PERIOD_SUMMARY, lead joiner).
+    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.9", atomRenderer: "ai-atoms.11b.7", defaultShells: "ai-shells-default.11b.8", shellRules: "ai-shell-rules.11b.15-r8", languageCopy: "ai-language-copy.11b.9", prompt: "11b.18", providerSchema: "kie-schema.11b.6", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.18", shellRequest: "ai-shell-request.11b.11" });
     expect(AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN.bundleKey).toBe("ai.explain-pattern@11b.18");
     expect(AI_HYBRID_RUNTIME_BUNDLES.DRAFT_CARE_PREPARATION_SUMMARY.bundleKey).toBe("ai.draft-care-preparation-summary@11b.18");
     for (const task of ["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"] as const) {

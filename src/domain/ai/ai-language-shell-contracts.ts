@@ -16,7 +16,11 @@ import { AI_ABSTENTION_REASONS, AI_LOCALES, EXPLAINABLE_PATTERN_FAMILIES, runtim
  */
 export const SHELL_TASKS = Object.freeze(["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"] as const);
 export type ShellTask = (typeof SHELL_TASKS)[number];
-export const ATOM_KINDS = Object.freeze(["MEANING", "DECIMAL", "DECIMAL_LIST", "COUNT", "DATE", "DATE_RANGE", "TIME", "LABEL", "QUOTED_TEXT"] as const);
+/**
+ * Packet 11C (2026-10-08): `PERIOD_SUMMARY` is an application-only atom kind. It is planned only into the LOCAL EXPLAIN observation of a
+ * source-backed request and has no approved gloss, so the projector can never send it (a request carrying it is never approved).
+ */
+export const ATOM_KINDS = Object.freeze(["MEANING", "DECIMAL", "DECIMAL_LIST", "COUNT", "DATE", "DATE_RANGE", "TIME", "LABEL", "QUOTED_TEXT", "PERIOD_SUMMARY"] as const);
 export type AtomKind = (typeof ATOM_KINDS)[number];
 export const GLOSS_KEYS = Object.freeze(["MEANING_CLAUSE", "RECORDED_VALUES", "RECORDED_VALUE", "EVIDENCE_COUNT", "RECORDED_DATE", "RECORDED_DATE_RANGE", "RECORDED_TIME", "RECORDED_ITEM", "APPOINTMENT_SERVICE", "PATIENT_QUESTION"] as const);
 export type GlossKey = (typeof GLOSS_KEYS)[number];
@@ -71,7 +75,12 @@ export type ShellFieldSpec = Readonly<{ path: ShellFieldPath; requiredSlots: rea
 export type SlotDefinition = Readonly<{ slotId: SlotId; atomKind: AtomKind; homeField: ShellFieldPath; boundRefs: readonly string[]; orderGroup: string | null; glossKey: GlossKey }>;
 /** heading is null only for a section that has no approved heading (it is never invented); such a plan is remote-ineligible. */
 export type PlannedSection = Readonly<{ sectionSlot: SectionSlot; sectionRef: string; sectionId: string; heading: string | null; introPath: ShellFieldPath; bulletPaths: readonly ShellFieldPath[] }>;
-export const SLOT_PLAN_VERSION = "ai-slot-plan.11b.8";
+/**
+ * ai-slot-plan.11b.9 (Packet 11C phase 2, owner decision option (a), 2026-10-08, offline): the planner's remote-eligibility accounting
+ * reserves a LOCAL field at its final composed wording (slot-planner.ts). Fields, slots, budgets and the request/response shapes are
+ * unchanged; the model-facing body differs from 11b.8 only in this version (the shell input's `slotPlanVersion` and the output echo).
+ */
+export const SLOT_PLAN_VERSION = "ai-slot-plan.11b.9";
 /** Why a PLANNED slot plan may not be sent to a remote model; it is then composed deterministically. */
 export type RemoteIneligibleReason = "BUDGET_EXCEEDED" | "PAYLOAD_INVALID";
 export type RemoteEligibility = Readonly<{ eligible: true }> | Readonly<{ eligible: false; reason: RemoteIneligibleReason }>;

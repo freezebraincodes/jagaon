@@ -9,8 +9,25 @@ const clone = () => structuredClone(AI_LANGUAGE_COPY) as any;
  * items and each variant's items set to null), computed from the unchanged 11b.7 file before the presentation correction (2026-10-08).
  */
 const COPY_11B7_WITHOUT_ITEMS_DIGEST = "248c8c21bc20283c9d39217c38a016ed912fe9e3821ea80247d1ca5f382d2bc3";
-const withoutPresentation = (copy: unknown) => {
+/**
+ * Packet 11C Task 4: sha256 of JSON.stringify(ai-language-copy.11b.8) without `revision`, computed from the unchanged 11b.8 file before
+ * the 11b.9 additions (2026-10-08).
+ */
+const COPY_11B8_DIGEST = "e37b5e56b0e4f28f0cdb81f6554e6adccf1cb85e78c5ccb7293b20aeec450f66";
+/** The 11b.9 additions (period summary copy, slot labels, the summary-role notice and the "periods" observation group), removed. */
+const without11b9 = (copy: unknown) => {
   const rest = structuredClone(copy) as any;
+  delete rest.comparisonSlotLabels;
+  delete rest.periodSummary;
+  delete rest.summaryRoleNotice;
+  for (const locale of ["en-SG", "zh-SG"]) {
+    delete rest.explainDefaults[locale].periods;
+    for (const variant of rest.explainObservationVariants[locale]) delete variant.periods;
+  }
+  return rest;
+};
+const withoutPresentation = (copy: unknown) => {
+  const rest = without11b9(copy);
   delete rest.revision;
   delete rest.careDraftNotices;
   for (const locale of ["en-SG", "zh-SG"]) {
@@ -19,9 +36,9 @@ const withoutPresentation = (copy: unknown) => {
   }
   return rest;
 };
-describe("language copy ai-language-copy.11b.8", () => {
+describe("language copy ai-language-copy.11b.9", () => {
   it("pins the revision and the approved claim clauses", () => {
-    expect(AI_LANGUAGE_COPY_REVISION).toBe("ai-language-copy.11b.8");
+    expect(AI_LANGUAGE_COPY_REVISION).toBe("ai-language-copy.11b.9");
     expect(AI_LANGUAGE_COPY.claimClauses.COMPARABLE_SLOT_TREND).toEqual({ "en-SG": "your readings from the same time slot in an earlier and a recent period", "zh-SG": "同一时段在较早期间和近期的读数" });
   });
   it("has a gloss for every gloss key and an intro for every AI-organisable section, in both locales", () => {
@@ -37,6 +54,23 @@ describe("language copy ai-language-copy.11b.8", () => {
     ["a wrong revision", (c: any) => (c.revision = "ai-language-copy.x"), "LANGUAGE_COPY_INVALID_REVISION"],
     ["the 11b.6 revision", (c: any) => (c.revision = "ai-language-copy.11b.6"), "LANGUAGE_COPY_INVALID_REVISION"],
     ["the 11b.7 revision", (c: any) => (c.revision = "ai-language-copy.11b.7"), "LANGUAGE_COPY_INVALID_REVISION"],
+    ["the 11b.8 revision", (c: any) => (c.revision = "ai-language-copy.11b.8"), "LANGUAGE_COPY_INVALID_REVISION"],
+    // 11b.9: every new string is checked with checkText; templates after marker removal.
+    ["a slot label with a digit", (c: any) => (c.comparisonSlotLabels.BEDTIME["en-SG"] = "bedtime 2"), "LANGUAGE_COPY_DIGIT"],
+    ["an English slot label in Chinese", (c: any) => (c.comparisonSlotLabels.BEFORE_LUNCH["en-SG"] = "午餐前"), "LANGUAGE_COPY_LOCALE_MISMATCH"],
+    ["a missing slot label", (c: any) => delete c.comparisonSlotLabels.BEFORE_DINNER, "LANGUAGE_COPY_MISSING_ENTRY"],
+    ["a period template with a digit", (c: any) => (c.periodSummary["en-SG"].MEDIAN = "{role}, {range}: median {value} from {count} in 2 periods"), "LANGUAGE_COPY_DIGIT"],
+    ["a period template missing its value marker", (c: any) => (c.periodSummary["en-SG"].IQR = "{role}, {range}: interquartile range from {count}"), "LANGUAGE_COPY_TEMPLATE_INVALID"],
+    ["a period template with an unknown marker", (c: any) => (c.periodSummary["zh-SG"].MEDIAN = "{role}（{range}）{count}的中位数为 {value}{slot}"), "LANGUAGE_COPY_TEMPLATE_INVALID"],
+    ["a Chinese period template without Chinese", (c: any) => (c.periodSummary["zh-SG"].IQR = "{role} ({range}) {count}: {value}"), "LANGUAGE_COPY_LOCALE_MISMATCH"],
+    ["a period lead without its slot marker", (c: any) => (c.periodSummary["en-SG"].lead = "readings"), "LANGUAGE_COPY_TEMPLATE_INVALID"],
+    ["a period role with a reference identifier", (c: any) => (c.periodSummary["en-SG"].roles.EARLIER = "fact-x period"), "LANGUAGE_COPY_REFERENCE"],
+    ["a missing period role", (c: any) => delete c.periodSummary["zh-SG"].roles.RECENT, "LANGUAGE_COPY_MISSING_ENTRY"],
+    ["a period joiner with words", (c: any) => (c.periodSummary["en-SG"].join = " and then "), "LANGUAGE_COPY_TEMPLATE_INVALID"],
+    ["a summary-role notice with a digit", (c: any) => (c.summaryRoleNotice["en-SG"] = "A median of 2 periods is a summary value."), "LANGUAGE_COPY_DIGIT"],
+    ["a Chinese summary-role notice without Chinese", (c: any) => (c.summaryRoleNotice["zh-SG"] = "A summary value."), "LANGUAGE_COPY_LOCALE_MISMATCH"],
+    ["a periods observation template without its marker", (c: any) => (c.explainDefaults["en-SG"].periods = "Readings by period."), "LANGUAGE_COPY_TEMPLATE_INVALID"],
+    ["a periods observation variant with a digit", (c: any) => (c.explainObservationVariants["zh-SG"][1].periods.first.one = "按 2 个期间的读数：{periods}。"), "LANGUAGE_COPY_DIGIT"],
     // 11b.8: the care draft notices are checked like every other entry.
     ["a care draft notice with a digit", (c: any) => (c.careDraftNotices.draft["en-SG"] = "The app sends nothing within 2 days."), "LANGUAGE_COPY_DIGIT"],
     ["an English care draft notice in Chinese", (c: any) => (c.careDraftNotices.questions["en-SG"] = "问题按原话显示。"), "LANGUAGE_COPY_LOCALE_MISMATCH"],
@@ -59,6 +93,51 @@ describe("language copy ai-language-copy.11b.8", () => {
   });
   it("11b.8 keeps every 11b.7 entry byte-identical except the item templates, and adds only the care draft notices", () => {
     expect(createHash("sha256").update(JSON.stringify(withoutPresentation(AI_LANGUAGE_COPY))).digest("hex")).toBe(COPY_11B7_WITHOUT_ITEMS_DIGEST);
+  });
+  it("11b.9 keeps every 11b.8 entry byte-identical and only adds the period summary copy, slot labels, notice and periods group", () => {
+    const rest = without11b9(AI_LANGUAGE_COPY);
+    delete rest.revision;
+    expect(createHash("sha256").update(JSON.stringify(rest)).digest("hex")).toBe(COPY_11B8_DIGEST);
+  });
+  it("11b.9: the exact approved period summary copy, slot labels and summary-role notice (IQR, never a recorded spread)", () => {
+    expect(AI_LANGUAGE_COPY.comparisonSlotLabels).toEqual({
+      BEFORE_BREAKFAST: { "en-SG": "before-breakfast", "zh-SG": "早餐前" },
+      BEFORE_LUNCH: { "en-SG": "before-lunch", "zh-SG": "午餐前" },
+      BEFORE_DINNER: { "en-SG": "before-dinner", "zh-SG": "晚餐前" },
+      BEDTIME: { "en-SG": "bedtime", "zh-SG": "睡前" },
+    });
+    expect(AI_LANGUAGE_COPY.periodSummary).toEqual({
+      "en-SG": { lead: "{slot} readings", MEDIAN: "{role}, {range}: median {value} from {count}", IQR: "{role}, {range}: interquartile range {value} from {count}", roles: { EARLIER: "earlier period", RECENT: "recent period" }, join: "; " },
+      "zh-SG": { lead: "{slot}时段", MEDIAN: "{role}（{range}）{count}的中位数为 {value}", IQR: "{role}（{range}）{count}的四分位距为 {value}", roles: { EARLIER: "较早期间", RECENT: "近期" }, join: "；" },
+    });
+    expect(AI_LANGUAGE_COPY.summaryRoleNotice).toEqual({
+      "en-SG": "A median or an interquartile range (the spread of the middle half of the readings) is a summary value, not a single reading.",
+      "zh-SG": "中位数或四分位距（中间一半读数的分布宽度）是汇总数值，不是单次读数。",
+    });
+    expect(JSON.stringify(AI_LANGUAGE_COPY.periodSummary)).not.toMatch(/SPREAD|recorded spread|记录范围/);
+    expect(Object.isFrozen(AI_LANGUAGE_COPY.periodSummary["zh-SG"].roles)).toBe(true);
+  });
+  it("11b.9: the period joiner is an explicit per-locale allow-list (en ';'/',' with spaces; zh one of '；' '，' '、'), checkText unchanged", () => {
+    const build = (locale: "en-SG" | "zh-SG", join: string) => {
+      const copy = clone();
+      copy.periodSummary[locale].join = join;
+      return () => buildLanguageCopy(copy);
+    };
+    for (const join of ["; ", ";", ", ", " ; "]) expect(build("en-SG", join), JSON.stringify(join)).not.toThrow();
+    for (const join of ["；", "，", "、"]) expect(build("zh-SG", join), JSON.stringify(join)).not.toThrow();
+    for (const join of ["%", "/", "a", "1", "#", "@", ". ", ";;", ";a", "；", "", "  "]) expect(build("en-SG", join), `en ${JSON.stringify(join)}`).toThrow("LANGUAGE_COPY_TEMPLATE_INVALID");
+    // ASCII separators in zh are a locale mismatch: rejected, as are spaces, letters, digits and other symbols.
+    for (const join of [";", "; ", ",", "；；", "； ", "%", "/", "a", "1", "。", ""]) expect(build("zh-SG", join), `zh ${JSON.stringify(join)}`).toThrow("LANGUAGE_COPY_TEMPLATE_INVALID");
+  });
+  it("11b.9: one approved periods observation template per locale, used by the default and every variant (first/next, one/other)", () => {
+    expect(AI_LANGUAGE_COPY.explainDefaults["en-SG"].periods).toBe("Readings by period — {periods}.");
+    expect(AI_LANGUAGE_COPY.explainDefaults["zh-SG"].periods).toBe("按期间的读数：{periods}。");
+    for (const locale of ["en-SG", "zh-SG"] as const) {
+      const template = AI_LANGUAGE_COPY.explainDefaults[locale].periods;
+      for (const variant of AI_LANGUAGE_COPY.explainObservationVariants[locale]) {
+        expect(variant.periods).toEqual({ first: { one: template, other: template }, next: { one: template, other: template } });
+      }
+    }
   });
   it("P1 (11b.8): every item template names the supplied text as the person's own words (default and variants, both locales)", () => {
     expect(AI_LANGUAGE_COPY.explainDefaults["en-SG"].items).toBe("Recorded items, in your own words: {items}.");

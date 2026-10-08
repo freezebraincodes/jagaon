@@ -92,11 +92,38 @@ export const RECORD_QUERY_KINDS = Object.freeze(["RECORDS_IN_PERIOD", "LATEST_RE
 export const AI_ORGANISABLE_SECTIONS = Object.freeze(CARE_SUMMARY_SECTION_ORDER.filter((id) => id !== "SUMMARY_SCOPE" && id !== "DATA_LIMITATIONS" && id !== "SAFETY_HISTORY"));
 export const NON_CLINICAL_INTENTS = Object.freeze(["RECORD_SAVED_ACKNOWLEDGEMENT", "PREFERENCE_UPDATED_ACKNOWLEDGEMENT", "WELCOME_BACK_GREETING"] as const);
 
+/**
+ * Packet 11C local-only source-backed binding. It names which claim facts are each comparison period's interval,
+ * evidence count and summary value (median or interquartile range), plus the total count. It is validated here
+ * and consumed locally by the planner; the detached provider payload schema has no such field and the projector
+ * never copies it, so the model never learns the binding, a value, a date, a slot or a source.
+ */
+export const COMPARISON_PERIOD_ROLES = Object.freeze(["EARLIER", "RECENT"] as const);
+export const COMPARISON_SUMMARY_KINDS = Object.freeze(["MEDIAN", "IQR"] as const);
+export const COMPARISON_SLOTS = Object.freeze(["BEFORE_BREAKFAST", "BEFORE_LUNCH", "BEFORE_DINNER", "BEDTIME"] as const);
+
+const periodBindingSchema = z.strictObject({
+  role: z.enum(COMPARISON_PERIOD_ROLES),
+  intervalRef: factRefSchema,
+  countRef: factRefSchema,
+  summaryRef: factRefSchema,
+});
+export type PeriodBinding = z.infer<typeof periodBindingSchema>;
+
+const periodSummaryBindingSchema = z.strictObject({
+  slot: z.enum(COMPARISON_SLOTS),
+  summaryKind: z.enum(COMPARISON_SUMMARY_KINDS),
+  periods: z.tuple([periodBindingSchema, periodBindingSchema]).refine(([earlier, recent]) => earlier.role === "EARLIER" && recent.role === "RECENT", "PERIOD_ORDER"),
+  totalCountRef: factRefSchema,
+});
+export type PeriodSummaryBinding = z.infer<typeof periodSummaryBindingSchema>;
+
 export const taskPayloadSchemas = {
   EXTRACT_CANDIDATE_FACTS: z.strictObject({ excerptRef: factRefSchema, targetFields: unique(z.enum(EXTRACTION_CANDIDATE_FIELDS), 5, 1) }),
   EXPLAIN_PATTERN: z.strictObject({
     claim: z.strictObject({ ref: claimRefSchema, family: z.enum(EXPLAINABLE_PATTERN_FAMILIES), factRefs: unique(factRefSchema, 12, 1) }),
     limitations: unique(z.strictObject({ ref: limitationRefSchema, code: z.enum(EXPLANATION_LIMITATION_CODES) }), 12, 1),
+    periodSummary: periodSummaryBindingSchema.optional(),
   }),
   DRAFT_NEUTRAL_INQUIRY: z.strictObject({
     purpose: z.enum(INQUIRY_PURPOSES),
@@ -176,6 +203,47 @@ function closeReferences(value: { taskType: AiTaskType; facts: Array<{ ref: stri
   if (usedFacts.some((ref) => !known.has(ref))) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "UNRESOLVED_FACT_REFERENCE", path: ["taskPayload"] });
 }
 
+type BindingFact = { ref: string; field: string; value: AiFactValue };
+
+/**
+ * Closes the Packet 11C `periodSummary` binding against the request's own facts. The four rule codes are
+ * reported independently so each violation is pinned to its rule: the claim family, the bound references
+ * (exactly the claim facts, once each), each reference's fact kind, and the total equal to the period counts.
+ */
+function closePeriodSummary(value: { taskType: AiTaskType; facts: BindingFact[]; taskPayload: unknown }, ctx: z.RefinementCtx) {
+  if (value.taskType !== "EXPLAIN_PATTERN") return;
+  const payload = value.taskPayload as AiTaskPayloadFor<"EXPLAIN_PATTERN">;
+  const binding = payload.periodSummary;
+  if (binding === undefined) return;
+  const issue = (message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: ["taskPayload", "periodSummary"] });
+
+  if (payload.claim.family !== "COMPARABLE_SLOT_TREND") issue("PERIOD_BINDING_FAMILY");
+
+  const [earlier, recent] = binding.periods;
+  const bound = [earlier.intervalRef, earlier.countRef, earlier.summaryRef, recent.intervalRef, recent.countRef, recent.summaryRef, binding.totalCountRef];
+  const claimFacts = new Set(payload.claim.factRefs);
+  if (new Set(bound).size !== bound.length || bound.length !== claimFacts.size || bound.some((ref) => !claimFacts.has(ref))) issue("PERIOD_BINDING_REFS");
+
+  // Unresolvable references are reported by UNRESOLVED_FACT_REFERENCE / PERIOD_BINDING_REFS, never as a kind error.
+  const byRef = new Map<string, BindingFact>();
+  for (const fact of value.facts) if (!byRef.has(fact.ref)) byRef.set(fact.ref, fact);
+  const isInterval = (fact: BindingFact) => fact.field === "EFFECTIVE_INTERVAL" && fact.value.kind === "DATE_RANGE";
+  const isCount = (fact: BindingFact) => fact.field === "EVIDENCE_COUNT" && fact.value.kind === "COUNT";
+  const isMeasurement = (fact: BindingFact) => fact.field === "MEASUREMENT_VALUE" && fact.value.kind === "DECIMAL" && fact.value.unit === "MMOL_L";
+  const expected: Array<[string, (fact: BindingFact) => boolean]> = [
+    [earlier.intervalRef, isInterval], [earlier.countRef, isCount], [earlier.summaryRef, isMeasurement],
+    [recent.intervalRef, isInterval], [recent.countRef, isCount], [recent.summaryRef, isMeasurement],
+    [binding.totalCountRef, isCount],
+  ];
+  if (expected.some(([ref, matches]) => { const fact = byRef.get(ref); return fact !== undefined && !matches(fact); })) issue("PERIOD_BINDING_KIND");
+
+  const counts = [earlier.countRef, recent.countRef, binding.totalCountRef].map((ref) => byRef.get(ref));
+  if (counts.every((fact): fact is BindingFact => fact !== undefined && isCount(fact))) {
+    const number = (fact: BindingFact) => (fact.value.kind === "COUNT" ? fact.value.value : Number.NaN);
+    if (number(counts[0]!) + number(counts[1]!) !== number(counts[2]!)) issue("PERIOD_TOTAL_MISMATCH");
+  }
+}
+
 function requestVariants(provider: boolean) {
   return AI_TASK_TYPES.map((taskType) =>
     z.strictObject({
@@ -204,7 +272,10 @@ export type ProviderTaskRequest = { [T in AiTaskType]: ProviderTaskRequestFor<T>
 
 export const aiTaskRequestSchema = z
   .discriminatedUnion("taskType", requestVariants(false) as never)
-  .superRefine((value, ctx) => closeReferences(value as never, ctx)) as unknown as z.ZodType<AiTaskRequest>;
+  .superRefine((value, ctx) => {
+    closeReferences(value as never, ctx);
+    closePeriodSummary(value as never, ctx);
+  }) as unknown as z.ZodType<AiTaskRequest>;
 export const providerTaskRequestSchema = z
   .discriminatedUnion("taskType", requestVariants(true) as never)
   .superRefine((value, ctx) => closeReferences(value as never, ctx)) as unknown as z.ZodType<ProviderTaskRequest>;

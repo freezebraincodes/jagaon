@@ -13,12 +13,15 @@ describe("hybrid runtime bundles 11b.18 (observation ownership)", () => {
     expect(AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN.shellOutputVersion).toBe("ai-shell.explain-pattern@11b.8");
     expect(AI_HYBRID_RUNTIME_BUNDLES.DRAFT_CARE_PREPARATION_SUMMARY.shellInputVersion).toBe("ai-shell-input.draft-care-preparation-summary@11b.7");
     expect(AI_HYBRID_RUNTIME_BUNDLES.DRAFT_CARE_PREPARATION_SUMMARY.shellOutputVersion).toBe("ai-shell.draft-care-preparation-summary@11b.7");
-    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.8", shellRules: "ai-shell-rules.11b.15-r8", prompt: "11b.18", providerSchema: "kie-schema.11b.6", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.18", shellRequest: "ai-shell-request.11b.11" });
+    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.9", shellRules: "ai-shell-rules.11b.15-r8", prompt: "11b.18", providerSchema: "kie-schema.11b.6", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.18", shellRequest: "ai-shell-request.11b.11" });
     // Unchanged by 11b.9, 11b.10, 11b.11, 11b.12, 11b.13 and 11b.14 (the prompt also stays 11b.15 in 11b.13 and 11b.14): the shell in/out
     // versions, atoms, default shells and language copy. The request profile moved once more in 11b.14 (ai-shell-request.11b.11, temperature 0.2).
     // 11b.18: the language copy adds the observation variants (ai-language-copy.11b.7); atoms and default shells stay.
     // Presentation correction P1/P3 (2026-10-08): application copy 11b.8 and default shells 11b.7; atoms and bundle keys stay.
-    expect(AI_HYBRID_VERSIONS).toMatchObject({ atomRenderer: "ai-atoms.11b.6", defaultShells: "ai-shells-default.11b.7", languageCopy: "ai-language-copy.11b.8" });
+    // Packet 11C Task 4 (2026-10-08): application copy 11b.9 and default shells 11b.8 (local PERIOD_SUMMARY observation); atoms and bundle keys stay.
+    // Packet 11C phase 2 (option (a), 2026-10-08): atoms 11b.7 (the PERIOD_SUMMARY kind and its lead joiner), slot plan 11b.9 (eligibility
+    // accounting); bundle keys, prompt, rules, request profile and provider schema version stay.
+    expect(AI_HYBRID_VERSIONS).toMatchObject({ atomRenderer: "ai-atoms.11b.7", defaultShells: "ai-shells-default.11b.8", languageCopy: "ai-language-copy.11b.9" });
     expect(AI_HYBRID_VERSIONS.shellRequest).toBe(SHELL_PROVIDER_REQUEST_VERSION);
   });
   it("carries the audit component versions (validator profile 11b.18: rules r8 plus field ownership, the others 11b.7) and the domain contract versions", () => {

@@ -91,8 +91,10 @@ function readyView(overrides: Partial<Extract<RecordedHistoryView, { status: "RE
   } as RecordedHistoryView;
 }
 
+const notExplained = vi.fn(async () => ({ kind: "INELIGIBLE" as const, reason: "NOT_FOUND" as const }));
+
 function port(view: RecordedHistoryView | ((period: string) => Promise<RecordedHistoryView>)): RecordedHistoryQueryPort {
-  return { load: vi.fn(async ({ period }) => (typeof view === "function" ? view(period) : view)) };
+  return { load: vi.fn(async ({ period }) => (typeof view === "function" ? view(period) : view)), loadExplainablePattern: notExplained };
 }
 
 function selectionRepository() {
@@ -196,7 +198,7 @@ describe("Recorded history screen", () => {
       .fn()
       .mockResolvedValueOnce({ status: "UNAVAILABLE", code: "STORAGE_UNAVAILABLE" })
       .mockResolvedValueOnce(readyView());
-    await renderScreen({ load });
+    await renderScreen({ load, loadExplainablePattern: notExplained });
     expect(screen.getByRole("heading", { level: 2, name: en.history.unavailableTitle })).toBeInTheDocument();
     expect(screen.getByText(en.history.unavailableBody)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: en.history.retry }));

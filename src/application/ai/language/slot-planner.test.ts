@@ -1,17 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import Dexie from "dexie";
+import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
 import { PACKET_11_FIXTURES } from "@/ai/evaluation/packet-11-fixtures";
+import { hybridFixturesForPhase } from "@/ai/evaluation/packet-11-hybrid-fixtures";
+import { SOURCE_BACKED_SCENARIOS, sourceBackedFixture } from "@/ai/evaluation/packet-11-source-backed-fixtures";
+import type { ExplainablePatternView } from "@/application/history/recorded-history-contracts";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "../ai-hybrid-runtime-bundles";
 import { OUTPUT_CODE_POINTS_PER_TOKEN } from "../ai-output-validator";
+import { buildSourceBackedExplainRequest } from "../explain-pattern-request";
 import { asHybridRequest, shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
-import { AI_ORGANISABLE_SECTIONS, remoteFields, type AiTaskRequest, type ShellFieldPath, type ShellFieldSpec, type SlotPlan } from "@/domain/ai";
+import { AI_ORGANISABLE_SECTIONS, remoteFields, slotTokenMatcher, type AiLocale, type AiTaskRequest, type AtomTable, type ShellFieldPath, type ShellFieldSpec, type ShellTexts, type SlotPlan } from "@/domain/ai";
 import { AI_LANGUAGE_COPY } from "./ai-language-copy";
 import { composeAiResult } from "./ai-composition";
 import { validationViewJoin, verifyComposition } from "./assembler";
 import { defaultShells } from "./default-shells";
 import { composeDeterministic } from "./deterministic-composition";
+import { renderAtom } from "./atom-renderer";
+import { composeObservationShell, observationVariantCount } from "./observation-composer";
 import { approvedSectionHeading } from "./shell-projector";
 import { validateShellCandidate } from "./shell-validator";
-import { ATOM_SPACING_RESERVE, FIELD_SCHEMA_LIMITS, planSlots } from "./slot-planner";
+import { ATOM_SPACING_RESERVE, FIELD_SCHEMA_LIMITS, planSlots, remoteBudgetAccount } from "./slot-planner";
 
 const cp = (text: string) => [...text].length;
 const fixture = (id: string) => PACKET_11_FIXTURES.find((entry) => entry.id === id)!;
@@ -97,13 +105,13 @@ const explainWithLabel = (text: string) => {
   return request as AiTaskRequest;
 };
 
-describe("slot planner ai-slot-plan.11b.8", () => {
+describe("slot planner ai-slot-plan.11b.9", () => {
   it("plans every fixture that expects SUCCESS, in both locales, remote-eligible under the fixed budgets", () => {
     for (const entry of PACKET_11_FIXTURES.filter((item) => item.expectedOutcome === "SUCCESS")) {
       const result = plan(entry.request);
       expect(result.kind, entry.id).toBe("PLANNED");
       if (result.kind !== "PLANNED") continue;
-      expect(result.plan.planVersion, entry.id).toBe("ai-slot-plan.11b.8");
+      expect(result.plan.planVersion, entry.id).toBe("ai-slot-plan.11b.9");
       // ai-slot-plan.11b.8: every field names its owner; only the EXPLAIN observation is application-owned.
       expect(result.plan.fields.filter((field) => field.owner === "LOCAL").map((field) => field.path), entry.id).toEqual(result.plan.taskType === "EXPLAIN_PATTERN" ? ["observation"] : []);
       expect(result.plan.remote, entry.id).toEqual({ eligible: true });
@@ -288,5 +296,252 @@ describe("slot planner ai-slot-plan.11b.8", () => {
   it("refuses a request that does not name the hybrid bundle", () => {
     const request = fixture("p11.explain-pattern.en-sg.ordinary").request; // legacy key @11b.3
     expect(planSlots(request, AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN)).toEqual({ kind: "UNPLANNABLE", reason: "PAYLOAD_INVALID" });
+  });
+});
+
+/**
+ * Packet 11C Task 4: the source-backed EXPLAIN branch, taken only when `taskPayload.periodSummary` is present. Every request comes from the
+ * real evaluator (journal -> coordinator -> history view -> Task 3 builder); nothing below is typed by hand except the deliberate mutations.
+ */
+describe("slot planner: source-backed EXPLAIN branch (Packet 11C)", () => {
+  const originalIndexedDB = Dexie.dependencies.indexedDB;
+  const originalIDBKeyRange = Dexie.dependencies.IDBKeyRange;
+  beforeAll(() => {
+    Dexie.dependencies.indexedDB = fakeIndexedDB;
+    Dexie.dependencies.IDBKeyRange = FDBKeyRange;
+  });
+  afterAll(() => {
+    Dexie.dependencies.indexedDB = originalIndexedDB;
+    Dexie.dependencies.IDBKeyRange = originalIDBKeyRange;
+  });
+  const BUNDLE = AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN;
+
+  it.each([["en-SG"], ["zh-SG"]] as const)("%s: one MEANING headline, one LOCAL PERIOD_SUMMARY observation binding all six period facts, the total as COUNT evidence", async (locale) => {
+    const { view, request } = await sourceBackedFixture(locale);
+    const result = planSlots(request, BUNDLE);
+    if (result.kind !== "PLANNED") throw new Error(`expected PLANNED, got ${result.reason}`);
+    const binding = (request.taskPayload as any).periodSummary;
+    const [earlier, recent] = binding.periods;
+    expect(result.plan.slots).toEqual([
+      { slotId: "S1", atomKind: "MEANING", homeField: "headline", boundRefs: ["claim-1"], orderGroup: null, glossKey: "MEANING_CLAUSE" },
+      { slotId: "S2", atomKind: "PERIOD_SUMMARY", homeField: "observation", boundRefs: [earlier.intervalRef, earlier.countRef, earlier.summaryRef, recent.intervalRef, recent.countRef, recent.summaryRef], orderGroup: null, glossKey: "RECORDED_VALUES" },
+      { slotId: "S3", atomKind: "COUNT", homeField: "evidence", boundRefs: [binding.totalCountRef], orderGroup: null, glossKey: "EVIDENCE_COUNT" },
+    ]);
+    expect(result.plan.fields.map((field) => [field.path, field.requiredSlots, field.owner, field.maxCodePoints])).toEqual([
+      ["headline", ["S1"], "REMOTE", budgetOf(result.plan, "headline")],
+      ["observation", ["S2"], "LOCAL", budgetOf(result.plan, "observation")],
+      ["evidence", ["S3"], "REMOTE", budgetOf(result.plan, "evidence")],
+    ]);
+    const source = { kind: "PERIOD_SUMMARY", slot: view.slot, summaryKind: binding.summaryKind, periods: view.periods.map((period) => ({ role: period.role, startDate: period.window.startDate, endDate: period.window.endDate, count: period.count, value: period.summary.valueMmolL })) } as const;
+    expect(result.atoms.S2).toEqual({ text: renderAtom(source as any, locale), boundRefs: result.plan.slots[1]!.boundRefs });
+    expect(result.atoms.S3!.text).toBe(renderAtom({ kind: "COUNT", value: view.totalCount, noun: "READINGS" }, locale));
+    expect(result.plan.remote).toEqual({ eligible: true });
+  });
+  it("without the binding the same facts take the existing branch unchanged, which refuses them (PAYLOAD_INVALID)", async () => {
+    const { request } = await sourceBackedFixture("en-SG");
+    const unbound = structuredClone(request) as any;
+    delete unbound.taskPayload.periodSummary;
+    expect(planSlots(unbound, BUNDLE)).toEqual({ kind: "UNPLANNABLE", reason: "PAYLOAD_INVALID" });
+  });
+  it.each([
+    ["a summary in mg/dL", (r: any) => (r.facts[2].value.unit = "MG_DL")],
+    ["an interval bound as a count", (r: any) => ([r.taskPayload.periodSummary.periods[0].intervalRef, r.taskPayload.periodSummary.periods[0].countRef] = [r.taskPayload.periodSummary.periods[0].countRef, r.taskPayload.periodSummary.periods[0].intervalRef])],
+    ["a total that is not the sum of the periods", (r: any) => (r.facts[6].value.value += 1)],
+    ["an unbound extra claim fact", (r: any) => { r.facts.push({ ...structuredClone(r.facts[1]), ref: "fact-8" }); r.taskPayload.claim.factRefs.push("fact-8"); }],
+    ["the periods in the wrong order", (r: any) => r.taskPayload.periodSummary.periods.reverse()],
+    ["another claim family", (r: any) => (r.taskPayload.claim.family = "FAMILIAR_OR_FREQUENT_ITEM")],
+    ["an unknown summary kind", (r: any) => (r.taskPayload.periodSummary.summaryKind = "SPREAD")],
+  ])("any other combination is PAYLOAD_INVALID: %s", async (_label, mutate) => {
+    const { request } = await sourceBackedFixture("en-SG");
+    const mutated = structuredClone(request) as any;
+    mutate(mutated);
+    expect(planSlots(mutated, BUNDLE)).toEqual({ kind: "UNPLANNABLE", reason: "PAYLOAD_INVALID" });
+  });
+});
+
+/**
+ * ai-slot-plan.11b.9 (Packet 11C phase 2, owner decision option (a), 2026-10-08, offline): remote eligibility reserves an application-owned
+ * (LOCAL) field at its actual final wording, the text the composer and the assembler will emit (approved prose, spacing, punctuation and
+ * each atom exactly once), taking the maximum over every permitted local variant; a REMOTE field keeps its fixed budget plus its atoms plus
+ * ATOM_SPACING_RESERVE per atom. Every expected number below is computed here from the real composition step (`composeAiResult`: the
+ * observation composer and the assembler) and the fixed budget table, never typed by hand.
+ */
+describe("slot planner ai-slot-plan.11b.9: LOCAL fields reserve their final wording (option (a))", () => {
+  const originalIndexedDB = Dexie.dependencies.indexedDB;
+  const originalIDBKeyRange = Dexie.dependencies.IDBKeyRange;
+  beforeAll(() => {
+    Dexie.dependencies.indexedDB = fakeIndexedDB;
+    Dexie.dependencies.IDBKeyRange = FDBKeyRange;
+  });
+  afterAll(() => {
+    Dexie.dependencies.indexedDB = originalIndexedDB;
+    Dexie.dependencies.IDBKeyRange = originalIDBKeyRange;
+  });
+  const BUNDLE = AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN;
+  const LOCALES = ["en-SG", "zh-SG"] as const;
+  const CASES = LOCALES.flatMap((locale) => SOURCE_BACKED_SCENARIOS.map((scenario) => [locale, scenario] as const));
+  /** These tests build real-evaluator fixtures and compose every variant; under a full parallel run they can exceed the 5 s default. */
+  const SLOW_TEST_TIMEOUT_MS = 30_000;
+  const bundleOf = (plan: SlotPlan) => AI_HYBRID_RUNTIME_BUNDLES[plan.taskType];
+  const ceilingOf = (plan: SlotPlan) => Math.floor(bundleOf(plan).executionBudget.outputTokenCeiling * OUTPUT_CODE_POINTS_PER_TOKEN) - plan.sections.length * cp(validationViewJoin(plan.locale));
+  /** Every variant the AI-path composition step accepts: the default wording (0) and the approved variants 1..N. */
+  const variantsOf = (locale: AiLocale) => Array.from({ length: observationVariantCount(locale) + 1 }, (_, variant) => variant);
+  const remoteDefaultsOf = (plan: SlotPlan) => new Map([...defaultShells(plan)].filter(([path]) => plan.fields.find((field) => field.path === path)?.owner === "REMOTE")) as ShellTexts;
+  const atomCostOf = (field: ShellFieldSpec, atoms: AtomTable) => field.requiredSlots.reduce((sum, slot) => sum + cp(atoms[slot]!.text) + ATOM_SPACING_RESERVE, 0);
+
+  /** The assembled code points of every LOCAL field in every permitted variant, through the real AI-path composition step. */
+  function composedLocal(request: AiTaskRequest, plan: SlotPlan, atoms: AtomTable): Map<ShellFieldPath, number[]> {
+    const lengths = new Map<ShellFieldPath, number[]>(plan.fields.filter((field) => field.owner === "LOCAL").map((field) => [field.path, []]));
+    for (const variant of variantsOf(plan.locale)) {
+      const composed = composeAiResult(request, plan, atoms, remoteDefaultsOf(plan), bundleOf(plan), { variant });
+      if (composed.kind !== "ACCEPTED") throw new Error(`expected ACCEPTED for variant ${variant}, got ${composed.gate} ${composed.reason}`);
+      for (const [path, list] of lengths) list.push(cp(composed.composition.fields.get(path)!.text));
+    }
+    return lengths;
+  }
+  /** The expected account, computed independently: LOCAL = the longest composed variant; REMOTE = fixed budget + atoms + reserve. */
+  function expectedAccount(request: AiTaskRequest, plan: SlotPlan, atoms: AtomTable) {
+    const local = composedLocal(request, plan, atoms);
+    const fields = plan.fields.map((field) => ({ path: field.path, owner: field.owner, reserved: field.owner === "LOCAL" ? Math.max(...local.get(field.path)!) : budgetOf(plan, field.path) + atomCostOf(field, atoms) }));
+    return { ceiling: ceilingOf(plan), total: fields.reduce((sum, field) => sum + field.reserved, 0), fields };
+  }
+  /**
+   * Worst case: maximal compliant remote wording (headline and evidence prose at their full fixed budgets) composed with every permitted
+   * local variant. The assembled output must be accepted by r7 (S10) and fit both the reserved total and the ceiling.
+   */
+  function expectWorstCaseFits(request: AiTaskRequest, plan: SlotPlan, atoms: AtomTable, label: string) {
+    const account = remoteBudgetAccount(plan, atoms, bundleOf(plan));
+    const validated = validateShellCandidate(plan, bundleOf(plan), maximalCandidate(plan));
+    expect(validated.kind === "REJECTED" ? `${validated.gate} ${validated.reason}` : validated.kind, label).toBe("VALID");
+    if (validated.kind !== "VALID") return;
+    for (const field of remoteFields(plan)) expect(cp(validated.shells.get(field.path)!.replace(slotTokenMatcher(), "").trim()), `${label} ${field.path}`).toBe(field.maxCodePoints);
+    for (const variant of variantsOf(plan.locale)) {
+      const composed = composeAiResult(request, plan, atoms, validated.shells, bundleOf(plan), { variant });
+      expect(composed.kind === "REJECTED" ? `${composed.gate} ${composed.reason}` : composed.kind, `${label} v${variant}`).toBe("ACCEPTED");
+      if (composed.kind !== "ACCEPTED") continue;
+      const assembled = plan.fields.map((field) => cp(composed.composition.fields.get(field.path)!.text));
+      plan.fields.forEach((field, index) => expect(assembled[index], `${label} v${variant} ${field.path}`).toBeLessThanOrEqual(account.fields[index]!.reserved));
+      const total = assembled.reduce((sum, length) => sum + length, 0);
+      expect(total, `${label} v${variant}`).toBeLessThanOrEqual(account.total);
+      expect(total, `${label} v${variant}`).toBeLessThanOrEqual(account.ceiling);
+    }
+  }
+  /** A view built from a real one with longer, still-valid values, counts and dates (schema-checked again by the real builder). */
+  function stretchedView(view: ExplainablePatternView, values: readonly [string, string], counts: readonly [number, number], windows: readonly [readonly [string, string], readonly [string, string]]): ExplainablePatternView {
+    const periods = view.periods.map((period, index) => ({
+      ...period,
+      window: { startDate: windows[index]![0], endDate: windows[index]![1] },
+      count: counts[index]!,
+      summary: { ...period.summary, valueMmolL: values[index]! },
+      readings: Array.from({ length: counts[index]! }, (_, n) => {
+        const base = period.readings[n % period.readings.length]!;
+        return { ...base, ref: { ...base.ref, recordId: `${base.ref.recordId.slice(0, 24)}${String(index * 1000 + n).padStart(12, "0")}` } };
+      }),
+    }));
+    return { ...view, periods: periods as unknown as ExplainablePatternView["periods"], totalCount: counts[0] + counts[1] };
+  }
+  /** A valid ordinary EXPLAIN request (the existing explain branch) whose LOCAL observation also lists the person's own item labels. */
+  const explainWithLabels = (labels: readonly string[]) => {
+    const request = asHybridRequest(fixture("p11.explain-pattern.en-sg.ordinary").request) as any;
+    const count = request.facts.find((fact: any) => fact.field === "EVIDENCE_COUNT");
+    const items = labels.map((text, index) => ({ ref: `fact-${index + 10}`, field: "INTAKE_LABEL", value: { kind: "TEXT", text, language: "en-SG" }, sources: structuredClone(request.facts[0].sources) }));
+    request.facts = [...request.facts.filter((fact: any) => fact !== count), ...items, count];
+    request.taskPayload.claim.factRefs = request.facts.map((fact: any) => fact.ref);
+    return request as AiTaskRequest;
+  };
+
+  it.each(CASES)("%s %s: the source-backed plan is remote-eligible; the LOCAL observation reserves exactly its composed wording (atom once) and the sum fits the ceiling", async (locale, scenario) => {
+    const { request } = await sourceBackedFixture(locale, scenario);
+    const result = planned(request);
+    const account = remoteBudgetAccount(result.plan, result.atoms, BUNDLE);
+    const expected = expectedAccount(request, result.plan, result.atoms);
+    expect(account).toEqual(expected);
+    expect(account.ceiling).toBe(Math.floor(BUNDLE.executionBudget.outputTokenCeiling * OUTPUT_CODE_POINTS_PER_TOKEN));
+    // Spacing and punctuation included, atom counted once: each variant's observation is its approved prose plus the atom, exactly.
+    const local = composedLocal(request, result.plan, result.atoms).get("observation")!;
+    variantsOf(locale).forEach((variant, index) => expect(local[index], `v${variant}`).toBe(cp(composeObservationShell(result.plan, variant).replace(slotTokenMatcher(), "")) + cp(result.atoms.S2!.text)));
+    expect(expected.fields.find((field) => field.owner === "LOCAL")!.reserved).toBeLessThanOrEqual(FIELD_SCHEMA_LIMITS.observation);
+    expect(account.total).toBeLessThanOrEqual(account.ceiling);
+    expect(result.plan.remote).toEqual({ eligible: true });
+    expect(result.plan.fields.map((field) => field.maxCodePoints)).toEqual(result.plan.fields.map((field) => budgetOf(result.plan, field.path)));
+    expectWorstCaseFits(request, result.plan, result.atoms, `${locale} ${scenario}`);
+  }, SLOW_TEST_TIMEOUT_MS);
+
+  it("the 70 fixtures: eligibility unchanged (all remote-eligible); every LOCAL observation reserves exactly its longest permitted variant, and the variants differ", () => {
+    const fixtures = hybridFixturesForPhase("FULL");
+    expect(fixtures).toHaveLength(70);
+    let explain = 0;
+    let differing = 0;
+    for (const entry of fixtures) {
+      const result = planned(entry.request);
+      expect(result.plan.remote, entry.id).toEqual({ eligible: true });
+      const account = remoteBudgetAccount(result.plan, result.atoms, bundleOf(result.plan));
+      expect(account, entry.id).toEqual(expectedAccount(entry.request, result.plan, result.atoms));
+      // The 11b.8 rule (every field at its fixed budget) is never looser than the 11b.9 rule, so eligibility cannot have moved.
+      const fixedSum = result.plan.fields.reduce((sum, field) => sum + budgetOf(result.plan, field.path) + atomCostOf(field, result.atoms), 0);
+      expect(account.total, entry.id).toBeLessThanOrEqual(fixedSum);
+      if (result.plan.taskType !== "EXPLAIN_PATTERN") continue;
+      explain += 1;
+      const lengths = composedLocal(entry.request, result.plan, result.atoms).get("observation")!;
+      if (new Set(lengths).size > 1) differing += 1;
+      expectWorstCaseFits(entry.request, result.plan, result.atoms, entry.id);
+    }
+    expect(explain).toBeGreaterThan(0);
+    expect(differing).toBeGreaterThan(0);
+  }, SLOW_TEST_TIMEOUT_MS);
+
+  it.each(LOCALES)("%s: longer valid values, 2–3-digit counts and long date ranges (through the real builder), every permitted variant", async (locale) => {
+    const stretches = [
+      { values: ["10.25", "12.75"], counts: [123, 99], windows: [["2026-09-10", "2026-09-24"], ["2026-09-24", "2026-09-28"]] },
+      { values: ["9.5", "10.25"], counts: [10, 12], windows: [["2026-11-10", "2026-11-24"], ["2026-11-24", "2026-12-28"]] },
+    ] as const;
+    let checked = 0;
+    for (const scenario of ["HIGHER", "VARIABILITY"] as const) {
+      const { view, request: base } = await sourceBackedFixture(locale, scenario);
+      for (const stretch of stretches) {
+        const request = buildSourceBackedExplainRequest({ view: stretchedView(view, stretch.values, stretch.counts, stretch.windows), locale, requestId: base.requestId, requestedAt: base.requestedAt });
+        const result = planned(request);
+        const label = `${locale} ${scenario} ${stretch.values.join("/")} ${stretch.counts.join("+")}`;
+        for (const value of [...stretch.values, `${stretch.counts[0]} `, `${stretch.counts[1]} `, `${stretch.counts[0] + stretch.counts[1]} `]) expect(Object.values(result.atoms).map((atom) => atom!.text).join("|"), label).toContain(value);
+        const account = remoteBudgetAccount(result.plan, result.atoms, BUNDLE);
+        expect(account, label).toEqual(expectedAccount(request, result.plan, result.atoms));
+        expect(account.total, label).toBeLessThanOrEqual(account.ceiling);
+        expect(result.plan.remote, label).toEqual({ eligible: true });
+        expectWorstCaseFits(request, result.plan, result.atoms, label);
+        checked += 1;
+      }
+    }
+    expect(checked).toBe(4);
+  }, SLOW_TEST_TIMEOUT_MS);
+
+  it("genuine overflow stays ineligible (BUDGET_EXCEEDED): a valid ordinary EXPLAIN request whose real local wording plus the fixed remote budgets exceeds the ceiling", () => {
+    const request = explainWithLabels(["Brown rice with steamed vegetables and a bowl of soup", "Wholemeal bread with peanut butter and a banana", "Chicken porridge with ginger and spring onion", "Fried noodles with prawns and bean sprouts"]);
+    const result = planned(request);
+    expect(result.plan.slots.filter((slot) => slot.homeField === "observation").map((slot) => slot.atomKind)).toEqual(["DECIMAL_LIST", "LABEL", "LABEL", "LABEL", "LABEL"]);
+    const account = remoteBudgetAccount(result.plan, result.atoms, BUNDLE);
+    expect(account).toEqual(expectedAccount(request, result.plan, result.atoms));
+    expect(account.total).toBeGreaterThan(account.ceiling);
+    expect(result.plan.remote).toEqual({ eligible: false, reason: "BUDGET_EXCEEDED" });
+    expect(result.plan.fields.map((field) => field.maxCodePoints)).toEqual([60, 120, 80]);
+    // The overflow comes from the fixed remote budgets: counted at their default prose instead, the same plan would (wrongly) fit.
+    const defaults = defaultShells(result.plan);
+    const atDefaultProse = account.fields.reduce((sum, entry, index) => {
+      const field = result.plan.fields[index]!;
+      return sum + (field.owner === "LOCAL" ? entry.reserved : cp(defaults.get(field.path)!.replace(slotTokenMatcher(), "").trim()) + atomCostOf(field, result.atoms));
+    }, 0);
+    expect(atDefaultProse).toBeLessThanOrEqual(account.ceiling);
+    // The deterministic composition used instead of a provider call passes the composition verifier (S10).
+    expect(verifyComposition(request, BUNDLE, composeDeterministic(request, result.plan, result.atoms, BUNDLE))).toMatchObject({ kind: "ACCEPTED" });
+  });
+
+  it("a LOCAL field whose permitted variant cannot be composed is never remote-eligible (BUDGET_EXCEEDED); its budget is unchanged", () => {
+    const request = asHybridRequest(fixture("p11.explain-pattern.en-sg.ordinary").request);
+    const copy = structuredClone(AI_LANGUAGE_COPY) as any;
+    copy.explainObservationVariants["en-SG"][1].values.first.other = `${"Recorded ".repeat(14)}{values}.`;
+    const result = planSlots(request, BUNDLE, copy);
+    if (result.kind !== "PLANNED") throw new Error(`expected PLANNED, got ${result.reason}`);
+    expect(result.plan.remote).toEqual({ eligible: false, reason: "BUDGET_EXCEEDED" });
+    expect(result.plan.fields.map((field) => field.maxCodePoints)).toEqual([60, 120, 80]);
+    expect(planned(request).plan.remote).toEqual({ eligible: true });
   });
 });

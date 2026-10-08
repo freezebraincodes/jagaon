@@ -203,6 +203,7 @@ function fakeRuntime(options?: BrowserJournalRuntimeOptions): JagaOnRuntime {
         range: { startDate: "2026-09-28" as never, endDate: "2026-10-04" as never },
         unavailableFamilies: [],
       })),
+      loadExplainablePattern: vi.fn(async () => ({ kind: "INELIGIBLE" as const, reason: "NOT_FOUND" as const })),
     },
     medicationSchedule: {
       load: vi.fn(async () => ({
