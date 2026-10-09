@@ -1763,6 +1763,53 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  /**
+   * C4 fix round 1 (regression for the C2 fix round 1 disclosure-key race; flake-investigation.md item 1): a click on the care action
+   * handled right after the commit that enables it (PREPARED -> PREVIEWED, a new revision so a new disclosure key), before React's
+   * passive effects of that commit have run, must still open the disclosure. Before the fix the asynchronous disclosure answer was
+   * compared with the stale key and the patient's explicit request was dropped: no dialog, nothing sent, no audit row.
+   */
+  it("C2 regression: a care action click landing right after the action becomes enabled still opens the disclosure", async () => {
+    const en = getMessages("en-SG");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const care = await careRuntime();
+    // The PREPARED -> PREVIEWED commit lands while the test is already waiting for the enabled action (as on a slow worker).
+    const commands = care.runtime.carePreparation!.commands;
+    const markPreviewed = commands.markPreviewed.bind(commands);
+    care.runtime.carePreparation = {
+      ...care.runtime.carePreparation!,
+      commands: {
+        ...commands,
+        markPreviewed: async (input: never) => {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          return markPreviewed(input);
+        },
+      },
+    } as never;
+    const fetcher = fakeRoute();
+    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER as never });
+    render(<JagaOnApp runtimeFactory={async () => care.runtime} onboardingRepositoryFactory={completed()} printPortFactory={() => ({ print: vi.fn() })} aiAssistanceFactory={factory} />);
+    await toCarePreview();
+    const action = (await screen.findByRole("button", { name: en.ai.careSummary.action })) as HTMLButtonElement;
+    expect(action.disabled).toBe(true);
+    // The click lands in the same task as the commit that enables the action, before that commit's passive effects run.
+    await new Promise<void>((resolve) => {
+      const observer = new MutationObserver(() => {
+        if (action.disabled) return;
+        observer.disconnect();
+        fireEvent.click(action);
+        resolve();
+      });
+      observer.observe(document.body, { subtree: true, attributes: true, childList: true });
+    });
+    await screen.findByRole("dialog", { name: en.ai.remoteTitle }, { timeout: 3000 });
+    // The dialog is open and undecided: nothing has been sent or audited yet.
+    expect(await care.audits.list()).toEqual([]);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("activated (test manifest, fake route): C3: a history acceptance never covers the care request (it asks its own); the accepted replacement opens in place of the old preview", async () => {
     const en = getMessages("en-SG");
     const fetchSpy = vi.fn();

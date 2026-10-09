@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { RecordId } from "@/domain/shared";
 import type { CareSummaryExportOutcome } from "@/domain/care-preparation/care-summary-export";
@@ -214,7 +214,9 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
   // C2 fix round 1 (I-1): an asynchronous disclosure check belongs to the preview and locale it was asked for.
   const checkingDisclosure = useRef(false);
   const currentDisclosureKey = useRef(disclosureKey);
-  useEffect(() => {
+  // C4 fix round 1: a layout effect, so the key is current within the commit that changes it. A passive effect left a window (a click
+  // right after the commit that enables the action) in which the answer was compared with the stale key and the request was dropped.
+  useLayoutEffect(() => {
     currentDisclosureKey.current = disclosureKey;
   }, [disclosureKey]);
   // The dialog or the request belongs to the locale (and, for the dialog, the snapshot revision) it was opened in.
