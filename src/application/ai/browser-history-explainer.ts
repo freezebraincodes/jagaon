@@ -14,6 +14,7 @@ import { planSlots } from "./language/slot-planner";
 import { SHIPPED_REQUEST_CLASS_GATE, type AiRequestClassGate } from "./request-class-qualification";
 import type { AiLocale, AiTaskRequest, ShellTask } from "@/domain/ai";
 import { createAiRemoteUseDecisions, createBrowserShellClient, type AiRemoteUseRequestDecision, type BrowserShellFetcher } from "./browser-shell-client";
+import type { AiShellRouteRefusalReason } from "./ai-shell-route-contract";
 import { buildSourceBackedExplainRequest } from "./explain-pattern-request";
 import { createPatternExplainer, type PatternExplanation } from "./explain-pattern";
 
@@ -54,6 +55,16 @@ import { createPatternExplainer, type PatternExplanation } from "./explain-patte
  *
  * Packet 11C Addendum C, Task C1: the one hybrid service gets the request-class gate (shipped: all PENDING, so every request composes
  * deterministically before any disclosure or send, audited REQUEST_CLASS_NOT_QUALIFIED).
+ *
+ * Packet 11C Addendum C, Task C6 (owner approval of Addendum C; C6 amendment):
+ * - Demo passcode: one in-memory entry per runtime (`accessPasscode`, the same object on both flows). The disclosure dialog asks for it
+ *   while `needed()` (it is shown only when a remote attempt could happen, so never with the shipped manifest); the browser shell client
+ *   reads it on each remote POST and sends it only as a request header. It is never persisted (no storage, backup, settings, audit row
+ *   or log). A route ACCESS_DENIED refusal forgets it, so the next disclosure asks again.
+ * - Server switch signal (the smallest truthful design; no pre-flight request, no configuration value reaches the browser): the route's
+ *   own REMOTE_AI_DISABLED refusal sets a boolean for this runtime, so no further disclosure is offered and later requests are audited
+ *   REMOTE_AI_DISABLED without a send; `remoteSwitchKnownOff` stays an additional pluggable check. The route remains the enforcement
+ *   point for the switch, origin, access and spend; every route refusal is audited with its own code and no attempt.
  */
 export type BrowserHistoryExplainerDependencies = Readonly<{
   history: RecordedHistoryQueryPort;
@@ -103,9 +114,18 @@ export type BrowserCareSummaryWording = Readonly<{
    * change, or the screen closed), so that request is moot: one zero-attempt DISCLOSURE_CLOSED_MOOT audit row; nothing is sent.
    */
   disclosureClosed(input: { locale: AiLocale }): Promise<void>;
+  /** Packet 11C Addendum C (C6): the runtime's demo passcode entry (the same object for both flows). */
+  accessPasscode: AiAccessPasscodeEntry;
 }>;
 
 export type BrowserAiAssistance = Readonly<{ history: BrowserHistoryExplainer; careSummary: BrowserCareSummaryWording | null }>;
+
+/**
+ * Packet 11C Addendum C (C6): the demo passcode entry the disclosure dialog uses (structurally the dialog's own prop type). `needed()`:
+ * no passcode is held in this runtime (none entered yet, or the route denied the last one). `provide(passcode)`: holds a sendable
+ * passcode in memory for this runtime; false (and nothing held) for anything that cannot travel as a header. It accepts no remote use.
+ */
+export type AiAccessPasscodeEntry = Readonly<{ needed(): boolean; provide(passcode: string): boolean }>;
 
 export type BrowserHistoryExplainer = Readonly<{
   /**
@@ -126,6 +146,8 @@ export type BrowserHistoryExplainer = Readonly<{
    * locale change, or the screen closed), so that request is moot: one zero-attempt DISCLOSURE_CLOSED_MOOT audit row; nothing is sent.
    */
   disclosureClosed(input: { locale: AiLocale }): Promise<void>;
+  /** Packet 11C Addendum C (C6): the runtime's demo passcode entry (the same object for both flows). */
+  accessPasscode: AiAccessPasscodeEntry;
 }>;
 
 const deviceNow = () => new Date().toISOString() as Instant;
@@ -146,6 +168,24 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
   // no session and no injectable disclosure. (B4a/B5: a declined signal stays DECLINED; a reused signal never carries an acceptance.)
   const decisions = createAiRemoteUseDecisions();
   const requestClassGate = dependencies.requestClassGate ?? SHIPPED_REQUEST_CLASS_GATE;
+  // Packet 11C Addendum C (C6): the demo passcode of this runtime (in memory only) and the server switch learned from the route.
+  const passcode = createPasscodeEntry();
+  let switchOffAtRoute = false;
+  const onRefusal = (reason: AiShellRouteRefusalReason) => {
+    if (reason === "REMOTE_AI_DISABLED") switchOffAtRoute = true;
+    if (reason === "ACCESS_DENIED") passcode.forget();
+  };
+  // Packet 11C B4a: never while offline either (the service would not send, so there is nothing to disclose). Packet 11C Addendum C
+  // (C3): nor while the server-side remote switch is known to be off (pluggable; a throwing check counts as off). C6: known off also
+  // once the route itself refused with REMOTE_AI_DISABLED in this runtime (boolean only; the route stays the enforcement point).
+  const switchKnownOff = () => {
+    if (switchOffAtRoute) return true;
+    try {
+      return dependencies.remoteSwitchKnownOff?.() === true;
+    } catch {
+      return true;
+    }
+  };
   // ONE hybrid service for every flow of this runtime (Packet 11C B4b).
   const service = createAiHybridTaskService({
     releaseProfile: CURRENT_RELEASE_PROFILE,
@@ -153,19 +193,11 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
     now,
     monotonicMs: dependencies.monotonicMs ?? deviceMonotonicMs,
     manifest,
-    provider: createBrowserShellClient({ disclosure: decisions.disclosure, fetcher: dependencies.fetcher }),
+    provider: createBrowserShellClient({ disclosure: decisions.disclosure, fetcher: dependencies.fetcher, accessPasscode: passcode.read, onRefusal }),
     online,
     requestClassGate,
+    remoteSwitchKnownOff: switchKnownOff,
   });
-  // Packet 11C B4a: never while offline either (the service would not send, so there is nothing to disclose). Packet 11C Addendum C
-  // (C3): nor while the server-side remote switch is known to be off (pluggable; a throwing check counts as off).
-  const switchKnownOff = () => {
-    try {
-      return dependencies.remoteSwitchKnownOff?.() === true;
-    } catch {
-      return true;
-    }
-  };
   const remoteEnabled = (taskType: ShellTask) => online() && !switchKnownOff() && resolveAiTaskActivation(taskType, CURRENT_RELEASE_PROFILE, manifest).state === "SYNTHETIC_REMOTE_ENABLED";
   /**
    * Packet 11C Addendum C (C1, C3): whether exactly this request could be sent: the same planner and value-blind projection as the
@@ -220,6 +252,7 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
       decisions.run(input.disclosure, signal, (token) => explainer.explain({ factId: input.factId, locale: input.locale }, token)),
     disclosureRequired: historyRequestAdmissible,
     disclosureClosed: moot("EXPLAIN_PATTERN"),
+    accessPasscode: passcode.entry,
   });
 
   const care = dependencies.carePreparation;
@@ -234,6 +267,27 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
     compose: (input: { snapshotRef: ExpectedHead; locale: AiLocale; disclosure?: AiRemoteUseRequestDecision }, signal?: AbortSignal) =>
       decisions.run(input.disclosure, signal, (token) => composer.composeCareSummaryWithAi({ snapshotRef: input.snapshotRef, locale: input.locale }, token)),
     disclosureClosed: moot("DRAFT_CARE_PREPARATION_SUMMARY"),
+    accessPasscode: passcode.entry,
   });
   return Object.freeze({ history, careSummary });
+}
+
+/** A passcode the route could accept as a header value: 1 to 128 visible ASCII characters (the route itself requires 8 to 128). */
+const SENDABLE_PASSCODE = /^[\x21-\x7e]{1,128}$/;
+
+/**
+ * Packet 11C Addendum C (C6): the demo passcode of one runtime. Held in this closure only: never written to storage, a backup, settings,
+ * an audit row or a log, and gone when the runtime (the app session) ends. The disclosure dialog asks for it while `needed()`.
+ */
+function createPasscodeEntry() {
+  let value: string | null = null;
+  const entry: AiAccessPasscodeEntry = Object.freeze({
+    needed: () => value === null,
+    provide: (passcode: string) => {
+      if (typeof passcode !== "string" || !SENDABLE_PASSCODE.test(passcode)) return false;
+      value = passcode;
+      return true;
+    },
+  });
+  return Object.freeze({ entry, read: () => value, forget: () => void (value = null) });
 }

@@ -76,8 +76,10 @@ export type ProviderInvocationResult =
    * (basis UPPER_BOUND). Absent exactly when nothing was transmitted (a refused, unconfigured or not-accepted call), i.e. nothing billed.
    * `refusal` (Packet 11C Addendum C, C1): the server shell route's closed REFUSED reason (decided before any provider call; the browser
    * client sets it, with reason PROVIDER_REJECTED and no usage). The hybrid service audits it as that audit-only outcome code.
+   * `notSentToProvider` (Packet 11C Addendum C, C6): the route's explicit marker on such a refusal. With a closed `refusal`, the hybrid
+   * service does not count the refused call as an attempt (a first-call refusal is a zero-attempt row, usage basis NONE).
    */
-  | Readonly<{ kind: "FAILED"; reason: ProviderFailureReason; usage?: ProviderUsage; refusal?: AiShellRouteRefusalReason }>;
+  | Readonly<{ kind: "FAILED"; reason: ProviderFailureReason; usage?: ProviderUsage; refusal?: AiShellRouteRefusalReason; notSentToProvider?: true }>;
 
 export type AiProviderPort = Readonly<{
   /** The exact provider and model snapshot this port is pinned to, recorded in the local audit. */

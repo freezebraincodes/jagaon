@@ -34,6 +34,10 @@ export const zhSGMessages: AppMessages = {
     cancelled: "已取消 AI 请求。您已记录的资料没有改变。",
     retry: "再次尝试 AI",
   },
+  // Packet 11C Addendum C (C6): the demo passcode field of the AI disclosure. New wording; human acceptance pending.
+  aiAccess: {
+    passcodeLabel: "演示通行码",
+  },
   shared: {
     appName: "JagaOn",
     demoBoundary:

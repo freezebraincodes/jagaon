@@ -120,6 +120,80 @@ describe("AiDisclosureDialog (Packet 11C B3)", () => {
     expect(beacon).not.toHaveBeenCalled();
   });
 
+  /**
+   * Packet 11C Addendum C, Task C6: the demo passcode field (new wording and presentation; human acceptance pending). It appears only
+   * inside this dialog (so only when a remote attempt could happen; never with the shipped manifest) and only while no passcode is held.
+   */
+  describe("C6: the demo passcode field", () => {
+    const PASSCODE = "TEST-ONLY-passcode-value";
+    function openWith(entry: { needed(): boolean; provide(passcode: string): boolean }, locale: SupportedLocale = "en-SG") {
+      const onConfirm = vi.fn();
+      const onCancel = vi.fn();
+      render(<AiDisclosureDialog messages={getMessages(locale)} flow="PATTERN" passcode={entry} onConfirm={onConfirm} onCancel={onCancel} />);
+      return { onConfirm, onCancel, dialog: screen.getByRole("dialog") };
+    }
+
+    it.each<[SupportedLocale]>([["en-SG"], ["zh-SG"]])("%s: needed, a labelled password field inside the focus trap; Cancel keeps initial focus", (locale) => {
+      const provide = vi.fn(() => true);
+      const { dialog } = openWith({ needed: () => true, provide }, locale);
+      const field = screen.getByLabelText(getMessages(locale).aiAccess.passcodeLabel);
+      expect(field).toHaveAttribute("type", "password");
+      expect(field).toHaveAttribute("autocomplete", "off");
+      expect(field).not.toHaveAttribute("name");
+      expect(dialog).toContainElement(field);
+      expect(screen.getByRole("button", { name: getMessages(locale).ai.cancel })).toHaveFocus();
+    });
+
+    it("an empty field provides nothing; the primary action still answers (the route then refuses without a passcode: fail closed)", () => {
+      const provide = vi.fn(() => true);
+      const { onConfirm } = openWith({ needed: () => true, provide });
+      fireEvent.click(screen.getByRole("button", { name: "Generate explanation" }));
+      expect(provide).not.toHaveBeenCalled();
+      expect(onConfirm).toHaveBeenCalledTimes(1);
+    });
+
+    it("confirming provides the entered passcode once, then accepts; the field keeps no copy elsewhere in the dialog", () => {
+      const provide = vi.fn(() => true);
+      const { onConfirm, dialog } = openWith({ needed: () => true, provide });
+      fireEvent.change(screen.getByLabelText("Demo passcode"), { target: { value: PASSCODE } });
+      expect(dialog.textContent).not.toContain(PASSCODE);
+      fireEvent.click(screen.getByRole("button", { name: "Generate explanation" }));
+      expect(provide.mock.calls).toEqual([[PASSCODE]]);
+      expect(onConfirm).toHaveBeenCalledTimes(1);
+    });
+
+    it("Cancel and Escape never provide the passcode", () => {
+      const provide = vi.fn(() => true);
+      const { onCancel, dialog } = openWith({ needed: () => true, provide });
+      fireEvent.change(screen.getByLabelText("Demo passcode"), { target: { value: PASSCODE } });
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      fireEvent.keyDown(dialog, { key: "Escape" });
+      expect(onCancel).toHaveBeenCalledTimes(2);
+      expect(provide).not.toHaveBeenCalled();
+    });
+
+    it("a passcode already held for the session: no field, the two approved actions only, nothing provided", () => {
+      const provide = vi.fn(() => true);
+      const { onConfirm } = openWith({ needed: () => false, provide });
+      expect(screen.queryByLabelText("Demo passcode")).toBeNull();
+      expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Generate explanation", "Cancel"]);
+      fireEvent.click(screen.getByRole("button", { name: "Generate explanation" }));
+      expect(onConfirm).toHaveBeenCalledTimes(1);
+      expect(provide).not.toHaveBeenCalled();
+    });
+
+    it("an entry that throws when asked shows no field (the route then refuses ACCESS_DENIED; fail closed)", () => {
+      openWith({ needed: () => { throw new Error("x"); }, provide: () => true });
+      expect(screen.queryByLabelText("Demo passcode")).toBeNull();
+    });
+
+    it("the approved disclosure copy is unchanged; the new label lives outside `ai` in both catalogues", () => {
+      expect(getMessages("en-SG").aiAccess).toEqual({ passcodeLabel: "Demo passcode" });
+      expect(getMessages("zh-SG").aiAccess).toEqual({ passcodeLabel: "演示通行码" });
+      expect(Object.keys(getMessages("en-SG").ai)).not.toContain("passcodeLabel");
+    });
+  });
+
   it("is an AI-free presentation component: it imports only React, the i18n types and the shared modal primitive", () => {
     const source = readFileSync(join(process.cwd(), "src/components/jagaon/ai/AiDisclosureDialog.tsx"), "utf8");
     const imports = [...source.matchAll(/from\s+["']([^"']+)["']/g)].map((match) => match[1]);

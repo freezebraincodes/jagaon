@@ -32,6 +32,10 @@ export const enSGMessages: AppMessages = {
     cancelled: "AI request cancelled. Your recorded information has not changed.",
     retry: "Try AI again",
   },
+  // Packet 11C Addendum C (C6): the demo passcode field of the AI disclosure. New wording; human acceptance pending.
+  aiAccess: {
+    passcodeLabel: "Demo passcode",
+  },
   shared: {
     appName: "JagaOn",
     demoBoundary:

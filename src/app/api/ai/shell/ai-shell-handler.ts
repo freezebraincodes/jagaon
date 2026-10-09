@@ -1,7 +1,7 @@
 import { AI_ACTIVATION_MANIFEST, resolveAiTaskActivation, type AiActivationManifest } from "@/application/ai/ai-activation-manifest";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "@/application/ai/ai-hybrid-runtime-bundles";
 import { PROVIDER_FAILURE_REASONS, type ProviderInvocationResult, type ProviderUsage, type ShellStructuralRejectionReason } from "@/application/ai/ai-provider-port";
-import { AI_SHELL_MAX_BODY_BYTES, aiShellRouteResponseSchema, shellRouteCallUpperBound, type AiShellRouteResponse } from "@/application/ai/ai-shell-route-contract";
+import { AI_SHELL_MAX_BODY_BYTES, aiShellRouteResponseSchema, shellRouteCallUpperBound, type AiShellRouteRefusalReason, type AiShellRouteResponse } from "@/application/ai/ai-shell-route-contract";
 import { isApprovedShellTaskRequest, shellPlanView } from "@/application/ai/language/shell-projector";
 import { validateShellCandidate, type ShellValidationReason } from "@/application/ai/language/shell-validator";
 import { FIXED_FIELD_BUDGETS, type FieldKind } from "@/application/ai/language/slot-planner";
@@ -13,6 +13,8 @@ import { createDeepSeekShellResponsesProvider } from "@/ai/deepseek/deepseek-res
 import type { KieModelSnapshot } from "@/ai/kie/kie-model-catalogue";
 import { readLimitedUtf8 } from "@/ai/kie/kie-responses-provider";
 import { HACKATHON_STORAGE_PROFILE } from "@/storage/storage-profile-manifest";
+import { accessGranted, originAllowed, parseAiShellDeploymentConfig, type AiShellDeploymentConfig } from "./ai-shell-deployment-config";
+import { InMemoryDailySpendLedger, type SpendLedger, type SpendReservationToken } from "./ai-spend-ledger";
 
 /**
  * The value-blind shell route POST /api/ai/shell (Packet 11C Addendum B, Task B2a; B-boundary, D1, D2, D6). Server-only.
@@ -36,6 +38,26 @@ import { HACKATHON_STORAGE_PROFILE } from "@/storage/storage-profile-manifest";
  * Packet 11C Addendum C, Task C1: after the activation check and BEFORE the credential read, the received request's class (its canonical
  * digest bound to the current contract) must be QUALIFIED by the injected request-class gate (production: the shipped records, all
  * PENDING). Otherwise the answer is the closed `REFUSED` REQUEST_CLASS_NOT_QUALIFIED (HTTP 403, no usage): nothing is read or sent.
+ * Packet 11C Addendum C, Task C6 (owner approval of Addendum C; C6 amendment): the deployment configuration (ai-shell-deployment-config.ts;
+ * parsed once per route instance, no value has a code default) and the spend ledger (ai-spend-ledger.ts). The full order, every step
+ * before the credential read:
+ *   1. method, content type, body cap, strict JSON, schema, approval, bundle key, fixed field shape (unchanged);
+ *   2. the server-side remote-AI switch (off, missing or invalid: REFUSED REMOTE_AI_DISABLED);
+ *   3. origin protection: Origin in the configured allow-list AND `Sec-Fetch-Site: same-origin` (else ORIGIN_REJECTED);
+ *   4. access authorization: the demo passcode header, compared in constant time (else ACCESS_DENIED);
+ *   5. server activation (unchanged closed FAILED);
+ *   6. request-class qualification (C1: REQUEST_CLASS_NOT_QUALIFIED);
+ *   7. the spend reservation of the request's pre-send upper bound (`shellRouteCallUpperBound`) against the per-instance daily guard
+ *      (SPEND_NOT_CONFIGURED, SPEND_CEILING_REACHED, SPEND_LEDGER_UNAVAILABLE);
+ *   8. the credential read, the rate limit (unchanged), the one bounded call, then the settlement: a call that was never transmitted
+ *      (an answer without usage) releases the whole reservation; a transmitted call commits its reported cost, or the full reserved upper
+ *      bound when its usage is missing or unreadable (never zero), and releases only the unused remainder.
+ * Every refusal in steps 2–4, 6 and 7 is HTTP 403 `REFUSED` with the explicit `notSentToProvider: true` marker and no usage. Origin
+ * protection is not authentication, and the per-instance ledger is a best-effort guard, not a global cap. A settlement error never
+ * changes the answer (the reservation then stays held, which only over-counts).
+ * C6 fix round 1: every closed FAILED decided before the provider call (steps 1, 5 and 8 before the invoke: request checks, activation,
+ * missing credential or model, the rate limit, a cancellation before the call, an adapter failure reported as not transmitted) also
+ * carries `notSentToProvider: true` and no usage; a FAILED after the call may have started carries usage and no marker (C5).
  */
 
 const DEFAULT_RATE_LIMIT = Object.freeze({ maxRequests: 10, windowMs: 60_000 });
@@ -58,12 +80,22 @@ export type AiShellHandlerOptions = {
    * shipped qualification records, all PENDING); route.ts passes none. Test seam only: tests inject test-only QUALIFIED records.
    */
   requestClassGate?: AiRequestClassGate;
+  /**
+   * Packet 11C Addendum C (C6): the spend ledger. Absent means the shipped one: one `InMemoryDailySpendLedger` per route instance over the
+   * configured daily limit (route.ts passes none). Test seam only: tests inject fake or spying ledgers.
+   */
+  spendLedger?: SpendLedger;
 };
 
 function reply(body: AiShellRouteResponse, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 }
-const failed = (reason: AiReasonCode, status = 200) => reply({ kind: "FAILED", reason }, status);
+/** C6 fix round 1: a FAILED decided before the provider call: the closed reason with the explicit "not sent to provider" marker. */
+const failed = (reason: AiReasonCode, status = 200) => reply({ kind: "FAILED", reason, notSentToProvider: true }, status);
+/** Packet 11C Addendum C (C1, C6): a closed refusal before any credential read or provider call, explicitly marked as not sent. */
+const refused = (reason: AiShellRouteRefusalReason) => reply({ kind: "REFUSED", reason, notSentToProvider: true }, 403);
+type Answer = Readonly<{ body: AiShellRouteResponse; status: number }>;
+const answer = (body: AiShellRouteResponse, status = 200): Answer => ({ body, status });
 
 /** The route's model snapshot, built from the documented deepseek-flash entry exactly as the evaluated runners select it. */
 function shellRouteModel(): KieModelSnapshot | null {
@@ -116,8 +148,14 @@ export function createAiShellHandler(options: AiShellHandlerOptions): (request: 
   const limit = options.rateLimit ?? DEFAULT_RATE_LIMIT;
   const requestClassGate = options.requestClassGate ?? SHIPPED_REQUEST_CLASS_GATE;
   const admitted: number[] = [];
+  // Packet 11C Addendum C (C6): the deployment configuration is parsed once, when the first request passes the request checks (the
+  // deployment environment does not change while an instance runs); the shipped ledger is created once over the configured daily limit.
+  let config: AiShellDeploymentConfig | null = null;
+  const deploymentConfig = () => (config ??= parseAiShellDeploymentConfig(options.environment));
+  let instanceLedger: SpendLedger | null = null;
+  const spendLedger = (dailyLimitMicroUsd: number): SpendLedger => options.spendLedger ?? (instanceLedger ??= new InMemoryDailySpendLedger({ dailyLimitMicroUsd }));
 
-  return async function handle(request: Request): Promise<Response> {
+  async function handle(request: Request): Promise<Response> {
     if (request.method !== "POST") return failed("PAYLOAD_INVALID", 405);
     if (!/^application\/json(\s*;|$)/i.test(request.headers.get("content-type") ?? "")) return failed("PAYLOAD_INVALID", 415);
     const declared = Number(request.headers.get("content-length") ?? "0");
@@ -145,6 +183,12 @@ export function createAiShellHandler(options: AiShellHandlerOptions): (request: 
     if (shellRequest.runtimeBundleKey !== bundle.bundleKey || !fixedFieldShape(shellRequest)) return failed("PAYLOAD_INVALID", 400);
     const plan = shellPlanView(shellRequest);
 
+    // Packet 11C Addendum C (C6): the server-side switch, origin protection and access authorization, each with its own closed refusal.
+    const deployment = deploymentConfig();
+    if (!deployment.remoteAiEnabled) return refused("REMOTE_AI_DISABLED");
+    if (!originAllowed(deployment, request.headers)) return refused("ORIGIN_REJECTED");
+    if (!accessGranted(deployment, request.headers)) return refused("ACCESS_DENIED");
+
     // Activation is checked on the server too; the shipped manifest is deterministic-only, so the shipped route stops here.
     const activation = resolveAiTaskActivation(shellRequest.taskType, profile, manifest);
     if (activation.state !== "SYNTHETIC_REMOTE_ENABLED") return failed(activation.reason);
@@ -157,9 +201,50 @@ export function createAiShellHandler(options: AiShellHandlerOptions): (request: 
     } catch {
       classQualified = false;
     }
-    if (!classQualified) return reply({ kind: "REFUSED", reason: "REQUEST_CLASS_NOT_QUALIFIED" }, 403);
+    if (!classQualified) return refused("REQUEST_CLASS_NOT_QUALIFIED");
 
-    // The credential is read only now, after every request check.
+    // Packet 11C Addendum C (C6): reserve the request's pre-send upper bound (the last check before the credential read). Not configured,
+    // refused, a ledger error or an answer that is not a reservation: the closed refusal (fail closed).
+    if (deployment.dailySpendLimitMicroUsd === null) return refused("SPEND_NOT_CONFIGURED");
+    const upperBoundMicroUsd = shellRouteCallUpperBound(shellRequest).costMicroUsd;
+    let ledger: SpendLedger;
+    let reservation: SpendReservationToken;
+    try {
+      ledger = spendLedger(deployment.dailySpendLimitMicroUsd);
+      const reserved = await ledger.reserve(upperBoundMicroUsd, now());
+      if (reserved?.kind === "REFUSED" && (reserved.reason === "SPEND_CEILING_REACHED" || reserved.reason === "SPEND_LEDGER_UNAVAILABLE")) return refused(reserved.reason);
+      if (reserved?.kind !== "RESERVED" || typeof reserved.token !== "object" || reserved.token === null) return refused("SPEND_LEDGER_UNAVAILABLE");
+      reservation = reserved.token;
+    } catch {
+      return refused("SPEND_LEDGER_UNAVAILABLE");
+    }
+
+    let result: Answer;
+    try {
+      result = await callProvider(request, shellRequest, plan, bundle);
+    } catch {
+      result = answer({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: failedUsage(shellRouteCallUpperBound(shellRequest)) });
+    }
+    // The settlement: an answer without usage was never transmitted (release all); a transmitted call commits its reported cost, or the
+    // full reserved upper bound when its usage is missing or unreadable. Best effort: a ledger error never changes the answer.
+    const usage = result.body.kind === "REFUSED" ? undefined : result.body.usage;
+    try {
+      if (!usage) await ledger.release(reservation);
+      else if (usage.basis !== "UPPER_BOUND" && usage.costMicroUsd !== null) await ledger.commit(reservation, usage.costMicroUsd, "REPORTED");
+      else await ledger.commit(reservation, upperBoundMicroUsd, "UPPER_BOUND");
+    } catch {
+      // The reservation stays held: it only over-counts.
+    }
+    return reply(result.body, result.status);
+  }
+
+  /** Steps after the reservation: the credential read, the rate limit and the one bounded call. Never throws a refusal of its own. */
+  async function callProvider(request: Request, shellRequest: ShellTaskRequest, plan: ReturnType<typeof shellPlanView>, bundle: (typeof AI_HYBRID_RUNTIME_BUNDLES)[ShellTaskRequest["taskType"]]): Promise<Answer> {
+    // C6 fix round 1: every answer through `failed` here is decided before the provider call (no credential or model, the rate limit,
+    // a stop before invoke, or an adapter failure it reports as not transmitted): marked not sent, never with usage. Every answer after
+    // the call may have started goes through `failedAfterCall` (usage, no marker).
+    const failed = (reason: AiReasonCode) => answer({ kind: "FAILED", reason, notSentToProvider: true });
+    // The credential is read only now, after every request check and the spend reservation.
     const token = readDeepSeekToken(options.environment);
     if (token.kind === "MISSING_CONFIGURATION") return failed("MISSING_CONFIGURATION");
     const model = shellRouteModel();
@@ -189,7 +274,7 @@ export function createAiShellHandler(options: AiShellHandlerOptions): (request: 
     // C5 fix round 1: the provider threw (possibly after transmitting), so the call counts at the route's upper bound, never zero.
     let threw = false;
     let billed: ProviderUsage | null = null;
-    const failedAfterCall = (reason: AiReasonCode) => reply({ kind: "FAILED", reason, usage: failedUsage(billed ?? shellRouteCallUpperBound(shellRequest)) });
+    const failedAfterCall = (reason: AiReasonCode) => answer({ kind: "FAILED", reason, usage: failedUsage(billed ?? shellRouteCallUpperBound(shellRequest)) });
     try {
       const provider = createDeepSeekShellResponsesProvider({ token: token.token, model, fetcher: options.fetcher });
       const aborted = new Promise<null>((resolve) => controller.signal.addEventListener("abort", () => resolve(null)));
@@ -226,7 +311,7 @@ export function createAiShellHandler(options: AiShellHandlerOptions): (request: 
         gates.kind === "REJECTED"
           ? { kind: "STRUCTURALLY_REJECTED", reason: asRejectionReason(gates.reason), repairable: gates.repairable, retention: "CONFIRMED_NOT_STORED", usage }
           : { kind: "CANDIDATE", candidate: shellOutputSchema(shellRequest.taskType).parse(typeof result.candidate === "string" ? toPlainData(parseStrictJson(result.candidate, { maxDepth: 16, maxLength: 65_536 })) : result.candidate) as never, retention: "CONFIRMED_NOT_STORED", usage };
-      return aiShellRouteResponseSchema.safeParse(body).success ? reply(body) : failedAfterCall("PROVIDER_FAILED");
+      return aiShellRouteResponseSchema.safeParse(body).success ? answer(body) : failedAfterCall("PROVIDER_FAILED");
     } catch {
       // C5: a candidate that fails the re-parse above (after a completed, billed call) keeps that call's usage.
       return called ? failedAfterCall("PROVIDER_FAILED") : failed("PROVIDER_FAILED");
@@ -234,5 +319,7 @@ export function createAiShellHandler(options: AiShellHandlerOptions): (request: 
       clearTimeout(timer);
       request.signal.removeEventListener("abort", onCancel);
     }
-  };
+  }
+
+  return handle;
 }

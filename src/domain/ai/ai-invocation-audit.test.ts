@@ -64,6 +64,8 @@ describe("AI invocation audit row versions (Packet 11C Addendum C, C5)", () => {
       "SPEND_LEDGER_UNAVAILABLE",
       "ORIGIN_REJECTED",
       "ACCESS_DENIED",
+      // Packet 11C Addendum C, C6 (deliberate addition under 11c.2): the server-side remote-AI switch is off.
+      "REMOTE_AI_DISABLED",
     ]);
     expect(AI_INVOCATION_OUTCOME_CODES).toEqual([...AI_INVOCATION_OUTCOME_CODES_11A, ...AI_AUDIT_ONLY_OUTCOME_CODES]);
     for (const code of AI_AUDIT_ONLY_OUTCOME_CODES) expect((AI_REASON_CODES as readonly string[]).includes(code), code).toBe(false);
@@ -102,8 +104,10 @@ describe("AI invocation audit row versions (Packet 11C Addendum C, C5)", () => {
     expect(parse(current({ ...acceptedCareRow(), outcomeCode: code, downstream: null }, "REPORTED")).success).toBe(false);
   });
 
-  it("the C1/C6 refusal codes may follow a transmission to the app's own route (attempt counted, nothing billed by the provider)", () => {
-    for (const code of ["REQUEST_CLASS_NOT_QUALIFIED", "SPEND_CEILING_REACHED", "SPEND_NOT_CONFIGURED", "SPEND_LEDGER_UNAVAILABLE", "ORIGIN_REJECTED", "ACCESS_DENIED"]) {
+  // Packet 11C Addendum C (C6): a route refusal is marked "not sent to provider" and the refused call is not counted, so a first-call
+  // refusal is a zero-attempt row (above); a refusal of the single repair follows one transmitted attempt, which this row shape covers.
+  it("the C1/C6 refusal codes may follow a transmitted attempt (a refused repair: the first call counted, nothing billed for the refusal)", () => {
+    for (const code of ["REQUEST_CLASS_NOT_QUALIFIED", "SPEND_CEILING_REACHED", "SPEND_NOT_CONFIGURED", "SPEND_LEDGER_UNAVAILABLE", "ORIGIN_REJECTED", "ACCESS_DENIED", "REMOTE_AI_DISABLED"]) {
       expect(parse(current({ ...acceptedCareRow(), outcomeCode: code, downstream: null, measurements: { inputTokens: null, outputTokens: null, latencyMs: 10, costMicroUsd: null } }, "REPORTED")).success, code).toBe(true);
     }
   });

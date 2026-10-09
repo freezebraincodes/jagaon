@@ -22,6 +22,7 @@ import { DEEPSEEK_RESPONSES_PROFILE } from "@/ai/deepseek/deepseek-responses-pro
 import { SHELL_PROVIDER_SCHEMA_VERSION, shellOutputJsonSchema, shellOutputSchemaName } from "@/ai/kie/kie-shell-contracts";
 import { PACKET_11_SHELL_PROMPT_VERSION, PACKET_11_SHELL_PROMPTS } from "@/ai/prompts/packet-11-shell-prompts";
 import { createAiShellHandler } from "@/app/api/ai/shell/ai-shell-handler";
+import { TEST_DEPLOYMENT_ENVIRONMENT, testBrowserHeaders } from "@/app/api/ai/shell/ai-shell-route-test-support";
 import { AI_ACTIVATION_MANIFEST, type AiActivationManifest } from "@/application/ai/ai-activation-manifest";
 import { AI_HYBRID_BUNDLE_VERSION, AI_HYBRID_RUNTIME_BUNDLES, AI_HYBRID_VERSIONS } from "@/application/ai/ai-hybrid-runtime-bundles";
 import { AI_MEANING_REGISTRY_REVISION } from "@/application/ai/ai-meaning-registry";
@@ -134,7 +135,9 @@ const FROZEN = Object.freeze({
     legacySchemaVersion: "ai-invocation-audit.11a.1",
     legacyOutcomeCodeCount: 23,
     // Packet 11C Addendum C (C3): + REMOTE_USE_NOT_ACCEPTED (a request that reached the remote decision without its own acceptance).
-    auditOnlyOutcomeCodes: ["REMOTE_USE_DECLINED", "DISCLOSURE_CLOSED_MOOT", "REMOTE_USE_NOT_ACCEPTED", "NOT_ELIGIBLE", "SOURCE_UNAVAILABLE", "REQUEST_CLASS_NOT_QUALIFIED", "SPEND_CEILING_REACHED", "SPEND_NOT_CONFIGURED", "SPEND_LEDGER_UNAVAILABLE", "ORIGIN_REJECTED", "ACCESS_DENIED"],
+    // Packet 11C Addendum C (C6, brief item 5: "add audit-only if missing"; deliberate): + REMOTE_AI_DISABLED (the server-side remote-AI
+    // switch is off). Audit-only: never a provider failure reason or model-facing (checked below on every captured body).
+    auditOnlyOutcomeCodes: ["REMOTE_USE_DECLINED", "DISCLOSURE_CLOSED_MOOT", "REMOTE_USE_NOT_ACCEPTED", "NOT_ELIGIBLE", "SOURCE_UNAVAILABLE", "REQUEST_CLASS_NOT_QUALIFIED", "SPEND_CEILING_REACHED", "SPEND_NOT_CONFIGURED", "SPEND_LEDGER_UNAVAILABLE", "ORIGIN_REJECTED", "ACCESS_DENIED", "REMOTE_AI_DISABLED"],
     unsentOutcomeCodes: ["REMOTE_USE_DECLINED", "DISCLOSURE_CLOSED_MOOT", "REMOTE_USE_NOT_ACCEPTED", "NOT_ELIGIBLE", "SOURCE_UNAVAILABLE"],
     usageBases: ["NONE", "REPORTED", "UPPER_BOUND"],
     providerFailureReasonsUnchanged: ["MISSING_CONFIGURATION", "TRANSPORT_FAILED", "PROVIDER_TIMEOUT", "PROVIDER_REJECTED", "PROVIDER_RATE_LIMITED", "PROVIDER_FAILED", "OPERATIONAL_SPEND_LOCKED"],
@@ -242,7 +245,9 @@ async function routeTransmission() {
   const fixture = plannedFixture("p11.explain-pattern.en-sg.ordinary");
   const sent: Array<{ url: string; body: string }> = [];
   const handler = createAiShellHandler({
-    environment: { DEEPSEEK_API_KEY: SENTINEL },
+    // Packet 11C Addendum C (C6): plus the route's deployment configuration (TEST values only) and, below, a same-origin browser POST
+    // with the demo passcode. Neither is part of the model-facing body (checked by the byte comparison).
+    environment: { DEEPSEEK_API_KEY: SENTINEL, ...TEST_DEPLOYMENT_ENVIRONMENT },
     activationManifest: ENABLED,
     // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING; pinned in `requestClasses`).
     requestClassGate: qualifiedTestRequestClassGate(),
@@ -251,7 +256,7 @@ async function routeTransmission() {
       throw new Error("OFFLINE_CAPTURE_ONLY");
     },
   });
-  const response = await handler(new Request(`http://localhost${AI_SHELL_ROUTE_PATH}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(projectShellTaskRequest(fixture.plan)) }));
+  const response = await handler(new Request(`http://localhost${AI_SHELL_ROUTE_PATH}`, { method: "POST", headers: { "content-type": "application/json", ...testBrowserHeaders() }, body: JSON.stringify(projectShellTaskRequest(fixture.plan)) }));
   const evaluated = (await capture(hybridFixturesForPhase("FULL").find((entry) => entry.id === "p11.explain-pattern.en-sg.ordinary")!)).body;
   return { status: response.status, sent, evaluated };
 }
@@ -439,7 +444,8 @@ describe("Packet 11C frozen contract manifest (Addendum B, Task B5; offline)", (
     // The schema and harness labels (current and the superseded 11b.6 / eval.18), the fixture set and policy never reach a provider.
     // Packet 11C Addendum C (C5): nor the audit schema label, an audit-only outcome code or a usage basis.
     // Packet 11C Addendum C (C1): nor the request-class scheme, the eligibility policy, the contract digest or any class id.
-    const labels = [SHELL_PROVIDER_SCHEMA_VERSION, AI_HYBRID_EVALUATION_REPORT_VERSION, "kie-schema", "packet11-eval", "packet11-fixtures", "hybrid-full-policy", "ai-activation", "care-summary-template", "ai-disclosure", "ai-invocation-audit", "usageBasis", "UPPER_BOUND", ...AI_AUDIT_ONLY_OUTCOME_CODES, "ai-request-class", "ai-remote-eligibility", AI_REQUEST_CLASS_CONTRACT.digest, ...AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.classId)];
+    // Packet 11C Addendum C (C6): nor the passcode header, a deployment variable name or the route's not-sent marker.
+    const labels = [SHELL_PROVIDER_SCHEMA_VERSION, AI_HYBRID_EVALUATION_REPORT_VERSION, "kie-schema", "packet11-eval", "packet11-fixtures", "hybrid-full-policy", "ai-activation", "care-summary-template", "ai-disclosure", "ai-invocation-audit", "usageBasis", "UPPER_BOUND", ...AI_AUDIT_ONLY_OUTCOME_CODES, "ai-request-class", "ai-remote-eligibility", AI_REQUEST_CLASS_CONTRACT.digest, ...AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.classId), "x-jagaon-demo-passcode", "JAGAON_", "notSentToProvider"];
     expect(all.flatMap((body, index) => labels.filter((label) => body.includes(label)).map((label) => `${index}: ${label}`))).toEqual([]);
     // The slot-plan version is the only version echo each body carries twice (the documented version-only difference).
     expect(all.filter((body) => normaliseSlotPlanVersion(body).occurrences !== SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY)).toEqual([]);

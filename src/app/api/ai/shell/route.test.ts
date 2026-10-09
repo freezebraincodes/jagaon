@@ -26,6 +26,8 @@ import { buildCareSummaryAiRequest } from "@/application/care-preparation/ai-car
 import { NOW, syntheticCareDraft } from "@/application/care-preparation/care-preparation-test-support";
 import { renderDeterministicCareSummary } from "@/application/care-preparation/deterministic-care-summary-renderer";
 import { createAiShellHandler } from "./ai-shell-handler";
+import { AI_SHELL_DEPLOYMENT_ENV } from "./ai-shell-deployment-config";
+import { TEST_DEPLOYMENT_ENVIRONMENT, testBrowserHeaders } from "./ai-shell-route-test-support";
 import * as route from "./route";
 
 /**
@@ -34,7 +36,12 @@ import * as route from "./route";
  */
 
 const TOKEN = "deepseek-SENTINEL-route-credential";
-const ENV = { DEEPSEEK_API_KEY: TOKEN };
+// Packet 11C Addendum C (C6): a remote path also needs the deployment configuration (TEST values only, ai-shell-route-test-support.ts) and
+// the headers of a same-origin browser POST with the demo passcode; `post` sends them by default. The C6 checks are tested in
+// route-access-spend.test.ts.
+const ENV = { DEEPSEEK_API_KEY: TOKEN, ...TEST_DEPLOYMENT_ENVIRONMENT };
+/** The provider-credential reads among the recorded environment reads (the C6 configuration keys are not credentials). */
+const credentialReads = (reads: readonly string[]) => reads.filter((key) => !(Object.values(AI_SHELL_DEPLOYMENT_ENV) as readonly string[]).includes(key));
 const ENABLED: AiActivationManifest = {
   ...AI_ACTIVATION_MANIFEST,
   tasks: { ...AI_ACTIVATION_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED", DRAFT_CARE_PREPARATION_SUMMARY: "SYNTHETIC_REMOTE_ENABLED" },
@@ -60,7 +67,7 @@ const deepseek = (candidate: unknown = VALID, extra: Record<string, unknown> = {
 function post(body: unknown, init: { headers?: Record<string, string>; method?: string; signal?: AbortSignal; raw?: string } = {}) {
   return new Request("http://localhost/api/ai/shell", {
     method: init.method ?? "POST",
-    headers: { "content-type": "application/json", ...init.headers },
+    headers: { "content-type": "application/json", ...testBrowserHeaders(), ...init.headers },
     body: init.method === "GET" ? undefined : (init.raw ?? JSON.stringify(body)),
     signal: init.signal,
   });
@@ -97,7 +104,8 @@ describe("route module", () => {
   it("C1: the production wiring passes only the server environment (so the shipped request-class gate, all PENDING, applies)", () => {
     const source = readFileSync(join(process.cwd(), "src/app/api/ai/shell/route.ts"), "utf8");
     expect(source).toMatch(/const handle = createAiShellHandler\(\{ environment: process\.env \}\);/);
-    expect(source).not.toMatch(/requestClassGate|request-class|activationManifest/);
+    // Packet 11C Addendum C (C6): nor a spend ledger (the shipped per-instance ledger applies).
+    expect(source).not.toMatch(/requestClassGate|request-class|activationManifest|spendLedger|SpendLedger/);
   });
 
   it("the shipped route is NOT_ACTIVATED: a valid approved request is refused server-side with no credential read and no fetch", async () => {
@@ -105,8 +113,17 @@ describe("route module", () => {
     const { environment, reads } = recordingEnvironment();
     const response = await createAiShellHandler({ environment, fetcher })(post(shellRequest()));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ kind: "FAILED", reason: "TASK_DISABLED" });
-    expect(reads).toEqual([]);
+    expect(await response.json()).toEqual({ kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true });
+    expect(credentialReads(reads)).toEqual([]);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("C6: without the deployment configuration (no remote-AI switch) the route refuses REMOTE_AI_DISABLED before activation, credential or fetch", async () => {
+    const fetcher = deepseek();
+    const { environment, reads } = recordingEnvironment({ DEEPSEEK_API_KEY: TOKEN });
+    const response = await createAiShellHandler({ environment, fetcher, activationManifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate() })(post(shellRequest()));
+    expect([response.status, await response.json()]).toEqual([403, { kind: "REFUSED", reason: "REMOTE_AI_DISABLED", notSentToProvider: true }]);
+    expect(credentialReads(reads)).toEqual([]);
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -114,22 +131,29 @@ describe("route module", () => {
    * Packet 11C B2b (B2a review follow-up): the route module itself, through its exported POST, with a recording process.env. The module
    * is re-imported after the probe is installed, because it hands process.env to the handler when it is evaluated.
    */
-  it("route.POST (shipped manifest) refuses every request kind with no credential read and no network call", async () => {
+  it.each([
+    // Packet 11C Addendum C (C6): the shipped deployment without its configuration answers the switch's closed refusal; with the
+    // configuration (test values) the shipped manifest still refuses (TASK_DISABLED). Neither reads the credential or sends anything.
+    ["without the deployment configuration", {}, [403, { kind: "REFUSED", reason: "REMOTE_AI_DISABLED", notSentToProvider: true }]],
+    ["with the deployment configuration", TEST_DEPLOYMENT_ENVIRONMENT, [200, { kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true }]],
+  ] as const)("route.POST (shipped manifest, %s) refuses every request kind with no credential read and no network call", async (_label, deployment, approved) => {
     const reads: string[] = [];
     const original = process.env;
     const fetchSpy = vi.fn(async () => new Response("{}"));
     vi.stubGlobal("fetch", fetchSpy);
-    process.env = new Proxy({ ...original, DEEPSEEK_API_KEY: TOKEN, KIE_API_KEY: TOKEN }, { get: (target, key) => (typeof key === "string" && /API_KEY|TOKEN|SECRET/.test(key) && reads.push(key), Reflect.get(target, key)) });
+    const base: Record<string, string | undefined> = { ...original, DEEPSEEK_API_KEY: TOKEN, KIE_API_KEY: TOKEN };
+    for (const key of Object.values(AI_SHELL_DEPLOYMENT_ENV)) delete base[key];
+    process.env = new Proxy({ ...base, ...deployment } as NodeJS.ProcessEnv, { get: (target, key) => (typeof key === "string" && /API_KEY|TOKEN|SECRET/.test(key) && reads.push(key), Reflect.get(target, key)) });
     try {
       vi.resetModules();
       const fresh = await import("./route");
       const make: Array<[string, () => Request, number, unknown]> = [
-        ["an approved request", () => post(shellRequest()), 200, { kind: "FAILED", reason: "TASK_DISABLED" }],
-        ["an approved care request", () => post(shellRequest(CARE)), 200, { kind: "FAILED", reason: "TASK_DISABLED" }],
-        ["raw facts", () => post({ ...shellRequest(), facts: [] }), 400, { kind: "FAILED", reason: "PAYLOAD_INVALID" }],
-        ["the internal source-backed request", () => post(sourceBackedRequest()), 400, { kind: "FAILED", reason: "PAYLOAD_INVALID" }],
-        ["malformed JSON", () => post(undefined, { raw: "{not json" }), 400, { kind: "FAILED", reason: "PAYLOAD_INVALID" }],
-        ["a GET", () => post(undefined, { method: "GET" }), 405, { kind: "FAILED", reason: "PAYLOAD_INVALID" }],
+        ["an approved request", () => post(shellRequest()), approved[0], approved[1]],
+        ["an approved care request", () => post(shellRequest(CARE)), approved[0], approved[1]],
+        ["raw facts", () => post({ ...shellRequest(), facts: [] }), 400, { kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true }],
+        ["the internal source-backed request", () => post(sourceBackedRequest()), 400, { kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true }],
+        ["malformed JSON", () => post(undefined, { raw: "{not json" }), 400, { kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true }],
+        ["a GET", () => post(undefined, { method: "GET" }), 405, { kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true }],
       ];
       for (const [label, request, status, body] of make) {
         const response = await fresh.POST(request());
@@ -151,14 +175,15 @@ describe("route module", () => {
   it("rechecks the exact HACKATHON_DEMO profile on the server", async () => {
     const fetcher = deepseek();
     for (const releaseProfile of ["PRODUCTION", "hackathon_demo", undefined]) {
-      expect((await call(post(shellRequest()), { fetcher, releaseProfile })).body).toEqual({ kind: "FAILED", reason: "PROFILE_NOT_PERMITTED" });
+      expect((await call(post(shellRequest()), { fetcher, releaseProfile })).body).toEqual({ kind: "FAILED", reason: "PROFILE_NOT_PERMITTED", notSentToProvider: true });
     }
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
 
 describe("Packet 11C Addendum C, C1: an unqualified request class is refused before any credential read", () => {
-  const REFUSED = { kind: "REFUSED", reason: "REQUEST_CLASS_NOT_QUALIFIED" };
+  // Packet 11C Addendum C (C6): every REFUSED carries the explicit "not sent to provider" marker.
+  const REFUSED = { kind: "REFUSED", reason: "REQUEST_CLASS_NOT_QUALIFIED", notSentToProvider: true };
   it.each([
     ["the production default (no gate: the shipped, all-PENDING records)", undefined],
     ["a gate over the shipped definitions and records", createRequestClassGate({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS })],
@@ -171,7 +196,7 @@ describe("Packet 11C Addendum C, C1: an unqualified request class is refused bef
       const body = await response.json();
       expect(body).toEqual(REFUSED);
       expect(aiShellRouteResponseSchema.safeParse(body).success).toBe(true);
-      expect(reads).toEqual([]);
+      expect(credentialReads(reads)).toEqual([]);
       expect(fetcher).not.toHaveBeenCalled();
     }
   });
@@ -187,8 +212,8 @@ describe("Packet 11C Addendum C, C1: an unqualified request class is refused bef
     // A request refused earlier is refused for that reason (the gate is never asked); the shipped manifest still answers TASK_DISABLED.
     const admit = vi.fn<AiRequestClassGate["admit"]>(() => ({ admitted: true, classId: id }));
     const spy: AiRequestClassGate = { admit, anyAdmissible: () => true };
-    expect(await call(post({ ...shellRequest(EN), facts: [] }), { requestClassGate: spy })).toMatchObject({ status: 400, body: { kind: "FAILED", reason: "PAYLOAD_INVALID" } });
-    expect(await call(post(shellRequest(EN)), { requestClassGate: spy, activationManifest: AI_ACTIVATION_MANIFEST })).toMatchObject({ status: 200, body: { kind: "FAILED", reason: "TASK_DISABLED" } });
+    expect(await call(post({ ...shellRequest(EN), facts: [] }), { requestClassGate: spy })).toMatchObject({ status: 400, body: { kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true } });
+    expect(await call(post(shellRequest(EN)), { requestClassGate: spy, activationManifest: AI_ACTIVATION_MANIFEST })).toMatchObject({ status: 200, body: { kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true } });
     expect(admit).not.toHaveBeenCalled();
   });
   it("an approved class outside the definitions (other care section counts) is refused; a gate that throws refuses", async () => {
@@ -209,7 +234,7 @@ describe("Packet 11C Addendum C, C1: an unqualified request class is refused bef
       const fetcher = deepseek();
       const response = await createAiShellHandler({ environment, fetcher, activationManifest: ENABLED })(post(request));
       expect([response.status, await response.json()]).toEqual([403, REFUSED]);
-      expect(reads).toEqual([]);
+      expect(credentialReads(reads)).toEqual([]);
       expect(fetcher).not.toHaveBeenCalled();
     }
     const throwing: AiRequestClassGate = { admit: () => { throw new Error("broken"); }, anyAdmissible: () => true };
@@ -218,7 +243,9 @@ describe("Packet 11C Addendum C, C1: an unqualified request class is refused bef
   it("the route contract: REFUSED carries exactly one closed reason and never usage; an audit-only code is never a FAILED reason", () => {
     expect(aiShellRouteResponseSchema.safeParse(REFUSED).success).toBe(true);
     expect(aiShellRouteResponseSchema.safeParse({ ...REFUSED, usage: { inputTokens: 1, outputTokens: 1, costMicroUsd: 1, basis: "REPORTED" } }).success).toBe(false);
-    expect(aiShellRouteResponseSchema.safeParse({ kind: "REFUSED", reason: "TASK_DISABLED" }).success).toBe(false);
+    expect(aiShellRouteResponseSchema.safeParse({ kind: "REFUSED", reason: "TASK_DISABLED", notSentToProvider: true }).success).toBe(false);
+    // C6: the marker is required.
+    expect(aiShellRouteResponseSchema.safeParse({ kind: "REFUSED", reason: "REQUEST_CLASS_NOT_QUALIFIED" }).success).toBe(false);
     expect(aiShellRouteResponseSchema.safeParse({ kind: "FAILED", reason: "REQUEST_CLASS_NOT_QUALIFIED" }).success).toBe(false);
   });
 });
@@ -292,7 +319,7 @@ describe("request admission: only an approved value-blind ShellTaskRequest, refu
   it.each(refusals)("refuses %s with PAYLOAD_INVALID 400 before any credential read or fetch", async (_label, body) => {
     const fetcher = deepseek();
     const { environment, reads } = recordingEnvironment();
-    expect(await call(post(body()), { fetcher, environment })).toMatchObject({ status: 400, body: { kind: "FAILED", reason: "PAYLOAD_INVALID" } });
+    expect(await call(post(body()), { fetcher, environment })).toMatchObject({ status: 400, body: { kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true } });
     expect(reads).toEqual([]);
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -319,7 +346,9 @@ describe("request admission: only an approved value-blind ShellTaskRequest, refu
     const fetcher = deepseek();
     const { environment, reads } = recordingEnvironment();
     expect((await call(post(shellRequest()), { fetcher, environment })).body).toMatchObject({ kind: "CANDIDATE" });
-    expect(reads).toEqual(["DEEPSEEK_API_KEY"]);
+    // Packet 11C Addendum C (C6): besides the deployment configuration (read first, once), the only key read is the DeepSeek key, last.
+    expect(credentialReads(reads)).toEqual(["DEEPSEEK_API_KEY"]);
+    expect(reads.at(-1)).toBe("DEEPSEEK_API_KEY");
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -420,9 +449,9 @@ describe("provider outcomes", () => {
 
   it("falls back on a missing key without a provider call", async () => {
     const fetcher = deepseek();
-    expect((await call(post(shellRequest()), { fetcher, environment: {} })).body).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION" });
+    expect((await call(post(shellRequest()), { fetcher, environment: { ...TEST_DEPLOYMENT_ENVIRONMENT } })).body).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true });
     // Another provider's key is never read as this route's credential.
-    expect((await call(post(shellRequest()), { fetcher, environment: { KIE_API_KEY: TOKEN, NEXT_PUBLIC_DEEPSEEK_API_KEY: TOKEN } })).body).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION" });
+    expect((await call(post(shellRequest()), { fetcher, environment: { ...TEST_DEPLOYMENT_ENVIRONMENT, KIE_API_KEY: TOKEN, NEXT_PUBLIC_DEEPSEEK_API_KEY: TOKEN } })).body).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true });
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -462,18 +491,20 @@ describe("provider outcomes", () => {
       ["raw facts", () => call(post({ ...shellRequest(), facts: [] }), { fetcher: deepseek() })],
       ["the shipped manifest", () => call(post(shellRequest()), { fetcher: deepseek(), activationManifest: AI_ACTIVATION_MANIFEST })],
       ["another release profile", () => call(post(shellRequest()), { fetcher: deepseek(), releaseProfile: "PRODUCTION" })],
-      ["a missing key", () => call(post(shellRequest()), { fetcher: deepseek(), environment: {} })],
+      ["a missing key", () => call(post(shellRequest()), { fetcher: deepseek(), environment: { ...TEST_DEPLOYMENT_ENVIRONMENT } })],
       ["a request cancelled before the call", () => call(post(shellRequest(), { signal: aborted.signal }), { fetcher: deepseek() })],
     ];
     for (const [label, run] of beforeCall) {
       const { body } = await run();
       expect(body, label).toMatchObject({ kind: "FAILED" });
-      expect(Object.keys(body as object).sort(), label).toEqual(["kind", "reason"]);
+      // C6 fix round 1: no usage, and the explicit "not sent to provider" marker.
+      expect(Object.keys(body as object).sort(), label).toEqual(["kind", "notSentToProvider", "reason"]);
+      expect((body as { notSentToProvider?: unknown }).notSentToProvider, label).toBe(true);
     }
     // The rate limit refuses before any call: no usage either.
     const limited = handler({ fetcher: deepseek(), rateLimit: { maxRequests: 1, windowMs: 60_000 }, now: () => new Date("2026-10-08T01:00:00.000Z") });
     await limited(post(shellRequest()));
-    expect(await (await limited(post(shellRequest()))).json()).toEqual({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED" });
+    expect(await (await limited(post(shellRequest()))).json()).toEqual({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED", notSentToProvider: true });
 
     const reported: Array<[string, Record<string, unknown>]> = [
       ["a response reported as stored", { store: true }],
@@ -538,7 +569,7 @@ describe("provider outcomes", () => {
     const limited = handler({ fetcher, rateLimit: { maxRequests: 2, windowMs: 60_000 }, now: () => new Date("2026-10-08T01:00:00.000Z") });
     const bodies = [];
     for (let index = 0; index < 3; index += 1) bodies.push(await (await limited(post(shellRequest()))).json());
-    expect(bodies[2]).toEqual({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED" });
+    expect(bodies[2]).toEqual({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED", notSentToProvider: true });
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 

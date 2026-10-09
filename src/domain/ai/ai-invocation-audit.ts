@@ -43,6 +43,10 @@ export const AI_INVOCATION_OUTCOME_CODES_11A = Object.freeze(["ACCEPTED", ...AI_
  * - REQUEST_CLASS_NOT_QUALIFIED (C1): the request's shape class is not qualified for remote wording.
  * - SPEND_CEILING_REACHED, SPEND_NOT_CONFIGURED, SPEND_LEDGER_UNAVAILABLE (C6): the server-side spend enforcement refused the call.
  * - ORIGIN_REJECTED, ACCESS_DENIED (C6): the request origin or access check refused the call.
+ * - REMOTE_AI_DISABLED (C6, added under 11c.2): the server-side remote-AI switch is off (the route refused the call, or the browser
+ *   already knew the switch was off for an activated, qualified request); nothing reached the provider.
+ * A C1/C6 refusal by the route is marked as not sent to the provider, so the refused call is never counted as an attempt (a first call
+ * refused gives zero attempts and usage basis NONE).
  */
 export const AI_AUDIT_ONLY_OUTCOME_CODES = Object.freeze([
   "REMOTE_USE_DECLINED",
@@ -56,6 +60,7 @@ export const AI_AUDIT_ONLY_OUTCOME_CODES = Object.freeze([
   "SPEND_LEDGER_UNAVAILABLE",
   "ORIGIN_REJECTED",
   "ACCESS_DENIED",
+  "REMOTE_AI_DISABLED",
 ] as const);
 export type AiAuditOnlyOutcomeCode = (typeof AI_AUDIT_ONLY_OUTCOME_CODES)[number];
 /** Audit-only outcomes decided before anything is sent: such a row never records an attempt. */

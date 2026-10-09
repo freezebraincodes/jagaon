@@ -930,11 +930,21 @@ export type AiMessages = {
   retry: string;
 };
 
+/**
+ * Packet 11C Addendum C, Task C6 (new wording, human acceptance pending): the label of the demo passcode field the AI disclosure shows
+ * while no passcode is held for the app session. Kept outside `ai` so the approved and frozen disclosure rows stay byte-identical.
+ */
+export type AiAccessMessages = {
+  passcodeLabel: string;
+};
+
 export type AppMessages = {
   /** Packet 10 data, backup, restore, deletion and integrity copy. */
   packet10: Packet10Messages;
   /** Packet 11 shared AI disclosure copy (Task B3). */
   ai: AiMessages;
+  /** Packet 11C Addendum C (C6): the demo passcode field of the AI disclosure (human acceptance pending). */
+  aiAccess: AiAccessMessages;
   shared: SharedMessages;
   today: TodayMessages;
   glucose: GlucoseMessages;

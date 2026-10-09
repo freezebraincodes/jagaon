@@ -555,6 +555,21 @@ describe("Care-summary preview: AI wording action (Packet 11C B4b)", () => {
     expect(screen.queryByRole("button", { name: en.ai.retry })).toBeNull();
   });
 
+  it("C6: the disclosure shows the demo passcode field while the session holds none; the primary action provides it before the request", async () => {
+    const { h, recordId } = await prepared();
+    const { port, calls } = fakeWording({ required: true });
+    const provide = vi.fn(() => true);
+    renderAi(h, recordId, { ...port, accessPasscode: { needed: () => true, provide } });
+    fireEvent.click(await aiAction());
+    const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    fireEvent.change(within(dialog).getByLabelText(en.aiAccess.passcodeLabel), { target: { value: "TEST-ONLY-passcode-value" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: en.ai.careSummary.confirm }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(provide.mock.calls).toEqual([["TEST-ONLY-passcode-value"]]);
+    expect(calls[0]!.input).toMatchObject({ disclosure: "ACCEPTED" });
+    expect(JSON.stringify(calls[0]!.input)).not.toContain("TEST-ONLY-passcode-value");
+  });
+
   it("loading keeps the deterministic preview readable with Cancel; approval waits; Cancel aborts and discards the late answer", async () => {
     const { h, recordId } = await prepared();
     const { port, calls } = fakeWording({ required: true });

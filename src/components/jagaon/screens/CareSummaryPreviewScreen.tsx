@@ -14,7 +14,7 @@ import { PrintableCareSummary } from "../care-preparation/PrintableCareSummary";
 import type { PrintPort } from "../care-preparation/PrintPort";
 import { useCareLoad } from "../care-organisation/use-care-load";
 import { formatPointTime, localDateOfPoint, formatLocalDate } from "../care-organisation/care-format";
-import { AiDisclosureDialog } from "../ai/AiDisclosureDialog";
+import { AiDisclosureDialog, type AiDisclosurePasscodeEntry } from "../ai/AiDisclosureDialog";
 
 /**
  * Packet 11C Addendum B, Task B4b: the outcome of one care-summary AI wording request (structurally the `composeCareSummaryWithAi`
@@ -47,6 +47,11 @@ export type CareSummaryAiWordingPort = {
    * change, or the screen closed): that moot request's one audit row. Nothing is sent.
    */
   disclosureClosed?(input: { locale: SupportedLocale }): Promise<void>;
+  /**
+   * Packet 11C Addendum C (C6): the app session's demo passcode entry (in memory only), shown in the disclosure while needed. Absent: no
+   * passcode field.
+   */
+  accessPasscode?: AiDisclosurePasscodeEntry;
 };
 
 type Props = {
@@ -543,7 +548,7 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
           {!blocked ? backButton : null}
         </>
       ) : null}
-      {aiPhase.kind === "DISCLOSURE" ? <AiDisclosureDialog messages={messages} flow="CARE_SUMMARY" onConfirm={acceptAiDisclosure} onCancel={declineAiDisclosure} /> : null}
+      {aiPhase.kind === "DISCLOSURE" ? <AiDisclosureDialog messages={messages} flow="CARE_SUMMARY" passcode={aiWording?.accessPasscode ?? null} onConfirm={acceptAiDisclosure} onCancel={declineAiDisclosure} /> : null}
     </div>
   );
 }

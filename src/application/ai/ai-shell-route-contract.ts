@@ -31,8 +31,21 @@ import { PROVIDER_FAILURE_REASONS, SHELL_STRUCTURAL_REJECTION_REASONS } from "./
  * Packet 11C Addendum C, Task C1: a fourth answer, `REFUSED` (HTTP 403), carries one closed refusal reason decided before any credential
  * read or provider call (REQUEST_CLASS_NOT_QUALIFIED: the request's class has no QUALIFIED record under the current contract). It never
  * carries usage. The browser client maps it to a provider refusal that the hybrid service audits with that code.
+ *
+ * Packet 11C Addendum C, Task C6: REFUSED also answers the remote-AI switch, origin protection, access authorization and the spend
+ * reservation (AI_SHELL_ROUTE_REFUSAL_REASONS), and carries the explicit marker `notSentToProvider: true`: the browser then records the
+ * request with zero attempts and usage basis NONE (nothing reached the provider, nothing was billed) and the truthful code.
+ * C6 fix round 1 (brief item 5, C5 carry): a FAILED decided before the provider call (request checks, activation, missing configuration,
+ * the rate limit, a cancellation or an adapter failure before sending) carries the same marker, `notSentToProvider: true`, and never
+ * usage; the browser records it with zero attempts and basis NONE under its closed reason. A FAILED after the call started never
+ * carries the marker (it carries usage: C5).
  */
 export const AI_SHELL_ROUTE_PATH = "/api/ai/shell";
+/**
+ * Packet 11C Addendum C, Task C6: the request header that carries the demo passcode the person entered (in browser memory only, never
+ * persisted). The route compares it in constant time with the configured one; it is never echoed, logged or stored. Not model-facing.
+ */
+export const AI_SHELL_ACCESS_HEADER = "x-jagaon-demo-passcode";
 /** The request body cap in UTF-8 bytes. The largest approved shell request (32 slots, 8 sections) stays well below it. */
 export const AI_SHELL_MAX_BODY_BYTES = 16_384;
 
@@ -84,8 +97,21 @@ export const AI_SHELL_ROUTE_POST_CALL_FAILURE_REASONS = Object.freeze([...PROVID
  * Packet 11C Addendum C, Task C1: the route's closed REFUSED reasons, decided before any credential read or provider call (so a REFUSED
  * answer never carries usage). They are audit-only outcome codes (C5), so they never travel as a FAILED reason; a REFUSED answer is
  * HTTP 403. REQUEST_CLASS_NOT_QUALIFIED: the request's class (under the current contract) has no QUALIFIED record.
+ * Packet 11C Addendum C, Task C6 (owner approval of Addendum C; C6 amendment): the server-side checks, in route order:
+ * REMOTE_AI_DISABLED (the remote-AI switch is off, missing or invalid), ORIGIN_REJECTED (origin protection: Origin not in the configured
+ * allow-list, no list configured, or not `Sec-Fetch-Site: same-origin`), ACCESS_DENIED (access authorization: no or a wrong demo passcode,
+ * or none configured), then, after activation and the class check, SPEND_NOT_CONFIGURED (no valid daily limit), SPEND_CEILING_REACHED
+ * (the call's pre-send upper bound does not fit the per-instance daily guard) and SPEND_LEDGER_UNAVAILABLE (the ledger failed).
  */
-export const AI_SHELL_ROUTE_REFUSAL_REASONS = Object.freeze(["REQUEST_CLASS_NOT_QUALIFIED"] as const satisfies readonly AiAuditOnlyOutcomeCode[]);
+export const AI_SHELL_ROUTE_REFUSAL_REASONS = Object.freeze([
+  "REQUEST_CLASS_NOT_QUALIFIED",
+  "REMOTE_AI_DISABLED",
+  "ORIGIN_REJECTED",
+  "ACCESS_DENIED",
+  "SPEND_NOT_CONFIGURED",
+  "SPEND_CEILING_REACHED",
+  "SPEND_LEDGER_UNAVAILABLE",
+] as const satisfies readonly AiAuditOnlyOutcomeCode[]);
 export type AiShellRouteRefusalReason = (typeof AI_SHELL_ROUTE_REFUSAL_REASONS)[number];
 
 const counts = {
@@ -103,13 +129,18 @@ export const aiShellRouteResponseSchema = z
   .discriminatedUnion("kind", [
     z.strictObject({ kind: z.literal("CANDIDATE"), candidate: z.union([shellOutputSchema("EXPLAIN_PATTERN"), shellOutputSchema("DRAFT_CARE_PREPARATION_SUMMARY")]), retention: retentionSchema, usage: reportedUsageSchema }),
     z.strictObject({ kind: z.literal("STRUCTURALLY_REJECTED"), reason: z.enum(SHELL_STRUCTURAL_REJECTION_REASONS), repairable: z.boolean(), retention: retentionSchema, usage: reportedUsageSchema }),
-    z.strictObject({ kind: z.literal("FAILED"), reason: aiReasonCodeSchema, usage: failedUsageSchema.optional() }),
-    // Packet 11C Addendum C (C1): a closed refusal before any credential read or provider call; never usage.
-    z.strictObject({ kind: z.literal("REFUSED"), reason: z.enum(AI_SHELL_ROUTE_REFUSAL_REASONS) }),
+    // C6 fix round 1: a FAILED decided before the provider call carries the explicit "not sent to provider" marker (never with usage).
+    z.strictObject({ kind: z.literal("FAILED"), reason: aiReasonCodeSchema, usage: failedUsageSchema.optional(), notSentToProvider: z.literal(true).optional() }),
+    // Packet 11C Addendum C (C1): a closed refusal before any credential read or provider call; never usage. C6: with the explicit
+    // "not sent to provider" marker, so the browser records no attempt (zero attempts, usage basis NONE) with the truthful code.
+    z.strictObject({ kind: z.literal("REFUSED"), reason: z.enum(AI_SHELL_ROUTE_REFUSAL_REASONS), notSentToProvider: z.literal(true) }),
   ])
   .superRefine((body, ctx) => {
     if (body.kind === "FAILED" && body.usage !== undefined && !(AI_SHELL_ROUTE_POST_CALL_FAILURE_REASONS as readonly string[]).includes(body.reason)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "USAGE_ON_PRE_CALL_FAILURE" });
+    }
+    if (body.kind === "FAILED" && body.usage !== undefined && body.notSentToProvider !== undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "USAGE_ON_UNSENT_FAILURE" });
     }
   });
 export type AiShellRouteResponse = z.infer<typeof aiShellRouteResponseSchema>;

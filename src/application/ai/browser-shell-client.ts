@@ -2,7 +2,7 @@ import { parseStrictJson, toPlainData } from "@/backup/strict-json";
 import { shellTaskRequestSchema, type ShellTaskRequest } from "@/domain/ai";
 import { decideRemoteUse } from "./ai-call-support";
 import { PROVIDER_FAILURE_REASONS, type AiRemoteUseDecision, type AiRemoteUseDisclosure, type AiShellProviderPort, type ProviderFailureReason, type ProviderInvocationResult, type ProviderUsage } from "./ai-provider-port";
-import { AI_SHELL_MAX_BODY_BYTES, AI_SHELL_ROUTE_PATH, aiShellRouteResponseSchema, shellRouteCallUpperBound } from "./ai-shell-route-contract";
+import { AI_SHELL_ACCESS_HEADER, AI_SHELL_MAX_BODY_BYTES, AI_SHELL_ROUTE_PATH, aiShellRouteResponseSchema, shellRouteCallUpperBound, type AiShellRouteRefusalReason } from "./ai-shell-route-contract";
 import { isApprovedShellTaskRequest } from "./language/shell-projector";
 
 export type { AiRemoteUseDecision, AiRemoteUseDisclosure };
@@ -32,6 +32,9 @@ export type { AiRemoteUseDecision, AiRemoteUseDisclosure };
  *    and a network error are closed failures; no technical text is ever surfaced.
  *    Packet 11C Addendum C (C1): a 403 `REFUSED` answer (the route's class check, before any credential read) is the closed
  *    PROVIDER_REJECTED with its `refusal` (REQUEST_CLASS_NOT_QUALIFIED) and no usage, so the service audits it truthfully.
+ *    Packet 11C Addendum C (C6): the same for every route refusal (switch, origin, access, spend), passed on with the route's
+ *    `notSentToProvider` marker so the service never counts the refused call as an attempt. The POST carries the entered demo passcode
+ *    as one request header (`accessPasscode`; in memory only, never in the body); the browser adds Origin and Sec-Fetch-Site itself.
  *
  * The client never retries (the hybrid service owns the single structural repair) and carries no credential, endpoint, provider
  * setting or caller-chosen model. `providerModel` names the D2 route identity for the local audit only; it is not a runtime-bundle
@@ -107,6 +110,12 @@ const REFUSED_REASON: ProviderFailureReason = "PROVIDER_REJECTED";
 const MAX_RESPONSE_CHARS = 65_536;
 
 const failed = (reason: ProviderFailureReason, usage?: ProviderUsage): ProviderInvocationResult => (usage ? { kind: "FAILED", reason, usage } : { kind: "FAILED", reason });
+/**
+ * C6 fix round 1 (brief item 5, C5 carry): an answer decided before the provider call (the client's own refusals before the POST, any
+ * 4xx from the route, a route FAILED carrying the marker): the closed reason with `notSentToProvider: true` and never usage, so the
+ * hybrid service records no attempt for it.
+ */
+const notSent = (reason: ProviderFailureReason): ProviderInvocationResult => ({ kind: "FAILED", reason, notSentToProvider: true });
 
 function statusReason(status: number): ProviderFailureReason {
   if (status === 429) return "PROVIDER_RATE_LIMITED";
@@ -118,19 +127,43 @@ function statusReason(status: number): ProviderFailureReason {
  * readable `REFUSED` body names its closed refusal (REQUEST_CLASS_NOT_QUALIFIED), which the hybrid service audits; anything else is the
  * plain closed refusal.
  */
-async function refusedByRoute(response: Response): Promise<ProviderInvocationResult> {
+async function refusedByRoute(response: Response, onRefusal: ((reason: AiShellRouteRefusalReason) => void) | undefined): Promise<ProviderInvocationResult> {
   try {
-    if (!/^application\/json(\s*;|$)/i.test(response.headers.get("content-type") ?? "")) return failed(REFUSED_REASON);
+    if (!/^application\/json(\s*;|$)/i.test(response.headers.get("content-type") ?? "")) return notSent(REFUSED_REASON);
     const text = await response.text();
-    if (text.length > MAX_RESPONSE_CHARS) return failed(REFUSED_REASON);
+    if (text.length > MAX_RESPONSE_CHARS) return notSent(REFUSED_REASON);
     const answer = aiShellRouteResponseSchema.safeParse(toPlainData(parseStrictJson(text, { maxDepth: 16, maxLength: MAX_RESPONSE_CHARS })));
-    return answer.success && answer.data.kind === "REFUSED" ? { kind: "FAILED", reason: REFUSED_REASON, refusal: answer.data.reason } : failed(REFUSED_REASON);
+    if (!answer.success || answer.data.kind !== "REFUSED") return notSent(REFUSED_REASON);
+    const refusal = answer.data.reason;
+    // Packet 11C Addendum C (C6): the wiring learns the closed code only (e.g. the switch is off); a throwing listener changes nothing.
+    try {
+      onRefusal?.(refusal);
+    } catch {
+      // ignored
+    }
+    return { kind: "FAILED", reason: REFUSED_REASON, refusal, notSentToProvider: true };
   } catch {
-    return failed(REFUSED_REASON);
+    return notSent(REFUSED_REASON);
   }
 }
 
-export function createBrowserShellClient(options: { disclosure: AiRemoteUseDisclosure; fetcher?: BrowserShellFetcher }): AiShellProviderPort {
+/** A passcode the route could accept as a header value: 1 to 128 visible ASCII characters. Anything else is not sent. */
+const SENDABLE_PASSCODE = /^[\x21-\x7e]{1,128}$/;
+function passcodeHeader(read: (() => string | null) | undefined): Record<string, string> {
+  try {
+    const value = read?.();
+    return typeof value === "string" && SENDABLE_PASSCODE.test(value) ? { [AI_SHELL_ACCESS_HEADER]: value } : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * `accessPasscode` (Packet 11C Addendum C, C6): reads the demo passcode the person entered, held in the app's memory only (never
+ * persisted); read once per POST and sent only as the `x-jagaon-demo-passcode` request header, never in the body. `onRefusal` (C6): told
+ * the closed code of each route REFUSED (so the wiring can learn that the server switch is off, or forget a passcode the route denied).
+ */
+export function createBrowserShellClient(options: { disclosure: AiRemoteUseDisclosure; fetcher?: BrowserShellFetcher; accessPasscode?: () => string | null; onRefusal?: (reason: AiShellRouteRefusalReason) => void }): AiShellProviderPort {
   // The global network primitive is bound lazily, per call; nothing is sent at construction.
   const fetcher: BrowserShellFetcher = options.fetcher ?? ((input, init) => fetch(input, init));
   return Object.freeze({
@@ -139,14 +172,14 @@ export function createBrowserShellClient(options: { disclosure: AiRemoteUseDiscl
     remoteUse: options.disclosure,
     async invoke(input: ShellTaskRequest, signal: AbortSignal, decisionToken?: AbortSignal): Promise<ProviderInvocationResult> {
       const parsed = shellTaskRequestSchema.safeParse(input);
-      if (!parsed.success || !isApprovedShellTaskRequest(parsed.data)) return failed(REFUSED_REASON);
+      if (!parsed.success || !isApprovedShellTaskRequest(parsed.data)) return notSent(REFUSED_REASON);
       const body = JSON.stringify(parsed.data);
-      if (new TextEncoder().encode(body).byteLength > AI_SHELL_MAX_BODY_BYTES) return failed(REFUSED_REASON);
+      if (new TextEncoder().encode(body).byteLength > AI_SHELL_MAX_BODY_BYTES) return notSent(REFUSED_REASON);
 
       // Packet 11C Addendum C (C3): the per-send re-check reads the explicit request's own decision (its token, the same for the repair
       // attempt), never a new question to the patient; without a token the per-call signal is asked, which no per-request decision covers.
       const token = decisionToken ?? signal;
-      if ((await decideRemoteUse(options.disclosure, token)) !== "ACCEPTED" || signal.aborted || token.aborted) return failed(NOT_ACCEPTED_REASON);
+      if ((await decideRemoteUse(options.disclosure, token)) !== "ACCEPTED" || signal.aborted || token.aborted) return notSent(NOT_ACCEPTED_REASON);
 
       // Packet 11C Addendum C (C5): from the POST on, the route may have made a billed provider call. A route refusal (4xx) was decided
       // before any provider call (nothing billed); any other answer without a readable route usage counts this request's pre-send upper
@@ -154,12 +187,13 @@ export function createBrowserShellClient(options: { disclosure: AiRemoteUseDiscl
       const unreadable = (reason: ProviderFailureReason) => failed(reason, shellRouteCallUpperBound(parsed.data));
       let response: Response;
       try {
-        response = await fetcher(AI_SHELL_ROUTE_PATH, { method: "POST", headers: { "content-type": "application/json" }, body, cache: "no-store", redirect: "error", signal });
+        response = await fetcher(AI_SHELL_ROUTE_PATH, { method: "POST", headers: { "content-type": "application/json", ...passcodeHeader(options.accessPasscode) }, body, cache: "no-store", redirect: "error", signal });
       } catch {
         return unreadable("TRANSPORT_FAILED");
       }
-      if (response.status === 403) return refusedByRoute(response);
-      if (!response.ok) return response.status >= 400 && response.status < 500 ? failed(statusReason(response.status)) : unreadable(statusReason(response.status));
+      if (response.status === 403) return refusedByRoute(response, options.onRefusal);
+      // C6 fix round 1: a 4xx is a refusal before any provider call (marked not sent); a 5xx may follow a call (the upper bound counts).
+      if (!response.ok) return response.status >= 400 && response.status < 500 ? notSent(statusReason(response.status)) : unreadable(statusReason(response.status));
       if (!/^application\/json(\s*;|$)/i.test(response.headers.get("content-type") ?? "")) return unreadable("PROVIDER_FAILED");
       let text: string;
       try {
@@ -182,6 +216,8 @@ export function createBrowserShellClient(options: { disclosure: AiRemoteUseDiscl
       // Packet 11C Addendum C (C1): REFUSED is a 403 answer only; with any other status it is a non-conforming answer after the POST.
       if (route.kind === "REFUSED") return unreadable("PROVIDER_FAILED");
       const reason = (PROVIDER_FAILURE_REASONS as readonly string[]).includes(route.reason) ? (route.reason as ProviderFailureReason) : "PROVIDER_FAILED";
+      // C6 fix round 1: the route's own not-sent marker is passed on (the contract never pairs it with usage).
+      if (route.notSentToProvider === true && route.usage === undefined) return notSent(reason);
       return failed(reason, route.usage);
     },
   });

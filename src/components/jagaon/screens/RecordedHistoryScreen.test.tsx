@@ -843,6 +843,33 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     expect(run.disclosureRequired).toHaveBeenCalledTimes(2);
   });
 
+  it("C6: the disclosure asks for the demo passcode while none is held; it travels as a header only; the next dialog does not ask again", async () => {
+    const run = await wired();
+    render(screenElement("en-SG", run.history, run.explainer));
+    const action = await askAction();
+    const field = within(dialogOf()).getByLabelText(en.aiAccess.passcodeLabel);
+    fireEvent.change(field, { target: { value: "TEST-ONLY-passcode-value" } });
+    act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.pattern.confirm })));
+    await waitFor(() => expect(run.fetcher).toHaveBeenCalledTimes(1));
+    const init = run.fetcher.mock.calls[0]![1];
+    expect((init.headers as Record<string, string>)["x-jagaon-demo-passcode"]).toBe("TEST-ONLY-passcode-value");
+    expect(String(init.body)).not.toContain("TEST-ONLY-passcode-value");
+    expect(JSON.stringify(run.rows)).not.toContain("TEST-ONLY-passcode-value");
+    // Held for this app session (in memory): the next request's dialog shows the approved actions only.
+    fireEvent.click(action);
+    await askAction();
+    expect(within(dialogOf()).queryByLabelText(en.aiAccess.passcodeLabel)).toBeNull();
+    expect(within(dialogOf()).getAllByRole("button").map((button) => button.textContent)).toEqual([en.ai.pattern.confirm, en.ai.cancel]);
+  });
+
+  it("C6: NOT_ACTIVATED (shipped manifest): no disclosure, so no passcode field ever appears", async () => {
+    const run = await wired(AI_ACTIVATION_MANIFEST);
+    render(screenElement("en-SG", run.history, run.explainer));
+    await askAction();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByLabelText(en.aiAccess.passcodeLabel)).toBeNull();
+  });
+
   it("C3: a repairable structural rejection under one acceptance: one dialog, repaired once (two POSTs), one audit row", async () => {
     const answer = fakeRoute();
     let posts = 0;

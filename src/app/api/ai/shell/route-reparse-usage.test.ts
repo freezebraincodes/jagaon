@@ -7,6 +7,7 @@ import { aiShellRouteResponseSchema } from "@/application/ai/ai-shell-route-cont
 import { projectShellTaskRequest } from "@/application/ai/language/shell-projector";
 import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 import { createAiShellHandler } from "./ai-shell-handler";
+import { TEST_DEPLOYMENT_ENVIRONMENT, testBrowserHeaders } from "./ai-shell-route-test-support";
 
 /**
  * Packet 11C Addendum C, Task C5: "the route forwards usage for every potentially billed FAILED, including a completed call whose
@@ -29,9 +30,10 @@ describe("a completed call whose accepted candidate fails the route's re-parse (
   it("is FAILED with the call's reported usage, never without it", async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify(envelope(JSON.stringify({ not: "a shell" }))), { status: 200, headers: { "content-type": "application/json" } }));
     // Packet 11C Addendum C (C1): a remote path needs a QUALIFIED class (test-only records; the shipped records are all PENDING).
-    const handler = createAiShellHandler({ environment: { DEEPSEEK_API_KEY: "deepseek-SENTINEL-reparse" }, activationManifest: ENABLED, fetcher, requestClassGate: qualifiedTestRequestClassGate() });
+    // Packet 11C Addendum C (C6): plus the deployment configuration (test values) and a same-origin browser POST with the passcode.
+    const handler = createAiShellHandler({ environment: { DEEPSEEK_API_KEY: "deepseek-SENTINEL-reparse", ...TEST_DEPLOYMENT_ENVIRONMENT }, activationManifest: ENABLED, fetcher, requestClassGate: qualifiedTestRequestClassGate() });
     const request = projectShellTaskRequest(plannedFixture("p11.explain-pattern.en-sg.ordinary").plan);
-    const response = await handler(new Request("http://localhost/api/ai/shell", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) }));
+    const response = await handler(new Request("http://localhost/api/ai/shell", { method: "POST", headers: { "content-type": "application/json", ...testBrowserHeaders() }, body: JSON.stringify(request) }));
     const body = await response.json();
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(body).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { inputTokens: 600, outputTokens: 80, costMicroUsd: deepSeekCostMicroUsd(600, 80), basis: "REPORTED" } });

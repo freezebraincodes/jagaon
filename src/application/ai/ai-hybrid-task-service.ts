@@ -52,16 +52,25 @@ import { SHIPPED_REQUEST_CLASS_GATE, type AiRequestClassGate } from "./request-c
  *   | Where caught                                    | Mode / closed reason (result)         | Audit outcome                | Attempts / usage   |
  *   |-------------------------------------------------|---------------------------------------|------------------------------|--------------------|
  *   | Local gate here, before the disclosure          | CLASS_NOT_QUALIFIED / TASK_DISABLED   | REQUEST_CLASS_NOT_QUALIFIED  | 0 / none (NONE)    |
- *   | Route refusal (403 REFUSED, before credentials) | REMOTE_AI / PROVIDER_REJECTED         | REQUEST_CLASS_NOT_QUALIFIED  | 1 / none, no repair|
+ *   | Route refusal (403 REFUSED, before credentials) | REMOTE_AI / PROVIDER_REJECTED         | REQUEST_CLASS_NOT_QUALIFIED  | 0 / none (NONE)    |
  *
+ * (C6 update of the second row: the route marks every REFUSED "not sent to provider", so the refused call is not counted; before C6 it
+ * was one attempt with no usage. A refused repair leaves the first, transmitted attempt counted.)
  * Both closed reasons are non-technical fallbacks of the same deterministic composition; the audit row carries the precise meaning.
  * Packet 11C Addendum C, Task C3 (owner decision: disclosure acceptance is per explicit request; one permitted structural repair shares
  * that request's decision; a new request needs a new decision): the disclosure is decided once, on the request's own decision token
  * (its signal), and every attempt carries that token to the provider (`invoke`'s `decisionToken`), so the repair re-reads the same
  * decision and never prompts. A request without its own acceptance is audited REMOTE_USE_NOT_ACCEPTED (closed reason unchanged:
  * MISSING_CONFIGURATION).
+ * Packet 11C Addendum C, Task C6: every route REFUSED (the class check, the remote-AI switch, origin protection, access authorization and
+ * the spend reservation) carries the "not sent to provider" marker and is audited with its own audit-only code without counting the
+ * refused call (zero attempts and usage basis NONE for a first call). The client-known switch state (`remoteSwitchKnownOff`) is checked
+ * after the class check and before the disclosure (mode REMOTE_DISABLED, audited REMOTE_AI_DISABLED).
+ * C6 fix round 1 (brief item 5, C5 carry): the same holds for every provider FAILED marked `notSentToProvider` without usage (the route's
+ * pre-call FAILED answers, any 4xx, the browser client's own refusals before its POST): the call is not counted, and the row keeps the
+ * existing closed reason. Anything that may have been transmitted (usage present, a throw) keeps the C5 conservative accounting.
  */
-export type AiLanguageMode = "REMOTE_AI" | "PRIVATE" | "OFFLINE" | "NOT_ACTIVATED" | "NO_PROVIDER" | "INELIGIBLE" | "CLASS_NOT_QUALIFIED" | "REMOTE_NOT_ACCEPTED";
+export type AiLanguageMode = "REMOTE_AI" | "PRIVATE" | "OFFLINE" | "NOT_ACTIVATED" | "NO_PROVIDER" | "INELIGIBLE" | "CLASS_NOT_QUALIFIED" | "REMOTE_DISABLED" | "REMOTE_NOT_ACCEPTED";
 export type AiHybridExecutionResult =
   | Readonly<{ kind: "COMPOSED"; source: "AI" | "DETERMINISTIC"; mode: AiLanguageMode; composition: AiComposition; reason: AiReasonCode | null; auditRef: string; limitations?: readonly RenderedLimitation[]; limitationCopyComplete?: boolean; notices?: readonly CareDraftNotice[] }>
   | Readonly<{ kind: "FALLBACK"; fallback: AiFallbackResult; auditRef: string }>
@@ -82,6 +91,13 @@ export type AiHybridTaskServiceDependencies = Readonly<{
    * shipped qualification records, all PENDING). Test seam: tests of a remote path inject test-only QUALIFIED records.
    */
   requestClassGate?: AiRequestClassGate;
+  /**
+   * Packet 11C Addendum C (C6, coordinator addition): true when the server-side remote-AI switch is known to be off (the browser wiring
+   * learns it from the route's REMOTE_AI_DISABLED refusal; boolean only, no configuration value). An activated, qualified request then
+   * composes deterministically in mode REMOTE_DISABLED (closed reason TASK_DISABLED), audited REMOTE_AI_DISABLED; nothing is sent. Absent
+   * or false: not known off (the route still enforces the switch). A check that throws counts as off.
+   */
+  remoteSwitchKnownOff?: () => boolean;
 }>;
 
 /**
@@ -130,6 +146,13 @@ async function invokeShells(request: AiTaskRequest, plan: SlotPlan, atoms: AtomT
         const reason = (PROVIDER_FAILURE_REASONS as readonly string[]).includes(result.reason) ? result.reason : "PROVIDER_FAILED";
         // Packet 11C Addendum C (C1): the route's closed refusal (before any provider call) is audited with its own code; never repaired.
         const refusal = result.kind === "FAILED" && (AI_SHELL_ROUTE_REFUSAL_REASONS as readonly unknown[]).includes(result.refusal) ? result.refusal : undefined;
+        // Packet 11C Addendum C (C6; fix round 1: any FAILED, not only a route refusal): an answer marked "not sent to provider" (and
+        // carrying no usage; never after a throw) is not a provider attempt: this call is uncounted (a first-call one is a zero-attempt row
+        // with usage basis NONE, audited with its closed reason or refusal code), and a repair that was never sent is not a repair.
+        if (result.kind === "FAILED" && result.notSentToProvider === true && result.usage === undefined && call.threw !== true) {
+          attempts.count -= 1;
+          if (attempts.count < 2) attempts.structuralRepairUsed = false;
+        }
         return refusal ? { kind: "DETERMINISTIC", reason, audit: refusal } : fallback(reason);
       }
       addAttemptUsage(attempts, result.usage, upperBound);
@@ -239,6 +262,15 @@ export function createAiHybridTaskService(dependencies: AiHybridTaskServiceDepen
       }
       if (signal?.aborted) return finish("REMOTE_AI", { kind: "DETERMINISTIC", reason: "REQUEST_CANCELLED" });
       if (!admitted) return finish("CLASS_NOT_QUALIFIED", { kind: "DETERMINISTIC", reason: "TASK_DISABLED", audit: "REQUEST_CLASS_NOT_QUALIFIED" });
+      // Packet 11C Addendum C (C6, coordinator addition): an activated, qualified request while the server-side remote switch is known to
+      // be off is audited with the switch's own code, before the disclosure; nothing is sent. A throwing check counts as off.
+      let switchOff = false;
+      try {
+        switchOff = dependencies.remoteSwitchKnownOff?.() === true;
+      } catch {
+        switchOff = true;
+      }
+      if (switchOff) return finish("REMOTE_DISABLED", { kind: "DETERMINISTIC", reason: "TASK_DISABLED", audit: "REMOTE_AI_DISABLED" });
       // Packet 11C B3: the remote-use disclosure, decided before the first attempt and before any timer (attempts.count is still 0).
       // Packet 11C Addendum C (C3): decided exactly once, on the request's own decision token (its signal; without one, a fresh token that
       // nothing can have accepted); every attempt then carries that same token.

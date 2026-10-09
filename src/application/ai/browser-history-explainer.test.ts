@@ -10,7 +10,7 @@ import type { RecordedHistoryQueryPort } from "@/application/history/recorded-hi
 import { databases, FACT, higherFixture, NOW } from "@/application/history/history-test-support";
 import type { PatternExplainerPort } from "@/components/jagaon/history/PatternExplanationPanel";
 import { AI_ACTIVATION_MANIFEST, type AiActivationManifest } from "./ai-activation-manifest";
-import { AI_SHELL_ROUTE_PATH } from "./ai-shell-route-contract";
+import { AI_SHELL_ACCESS_HEADER, AI_SHELL_ROUTE_PATH } from "./ai-shell-route-contract";
 import * as wiring from "./browser-history-explainer";
 import { createBrowserAiAssistance, createBrowserHistoryExplainer } from "./browser-history-explainer";
 import type { BrowserShellFetcher } from "./browser-shell-client";
@@ -61,6 +61,9 @@ afterEach(async () => {
 const ENABLED: AiActivationManifest = { ...AI_ACTIVATION_MANIFEST, tasks: { ...AI_ACTIVATION_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED" } };
 const USAGE = { inputTokens: 600, outputTokens: 80, costMicroUsd: 5 };
 
+/** Packet 11C Addendum C (C6): a row's usage basis (current rows only; the wiring never writes a legacy row). */
+const basisOf = (row: AiInvocationAuditRow) => ("usageBasis" in row ? row.usageBasis : "LEGACY");
+
 function audit() {
   const rows: AiInvocationAuditRow[] = [];
   return { rows, port: { append: vi.fn(async (row: AiInvocationAuditRow) => void rows.push(row)) } };
@@ -87,7 +90,8 @@ describe("browser history explainer wiring (Packet 11C B2b)", () => {
     // (no session, no injectable disclosure): only a request's own explicit decision can accept remote use.
     expect(source).toMatch(/manifest \?\? AI_ACTIVATION_MANIFEST/);
     expect(source).toMatch(/const decisions = createAiRemoteUseDecisions\(\);/);
-    expect(source).toMatch(/createBrowserShellClient\(\{ disclosure: decisions\.disclosure, fetcher: dependencies\.fetcher \}\)/);
+    // Packet 11C Addendum C (C6, deliberate): plus the in-memory passcode reader and the route-refusal listener (no acceptance seam).
+    expect(source).toMatch(/createBrowserShellClient\(\{ disclosure: decisions\.disclosure, fetcher: dependencies\.fetcher, accessPasscode: passcode\.read, onRefusal \}\)/);
     expect(source).not.toMatch(/AiRemoteUseSession|createAiRemoteUseSession|dependencies\.disclosure|dependencies\.remoteUse|acceptDisclosure/);
   });
 
@@ -268,6 +272,16 @@ describe("browser history explainer: per-request disclosure (Packet 11C Addendum
     expect(await throwing.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
   });
 
+  it("C6 (coordinator addition): with the switch known off, an explicit request is audited REMOTE_AI_DISABLED, not REMOTE_USE_NOT_ACCEPTED; no POST", async () => {
+    const { history } = await higherFixture();
+    const log = audit();
+    const fetcher = fakeRoute();
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher, remoteSwitchKnownOff: () => true });
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG" }, new AbortController().signal)).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(log.rows.map((row) => [row.outcomeCode, row.attempts.count, basisOf(row)])).toEqual([["REMOTE_AI_DISABLED", 0, "NONE"]]);
+  });
+
   it("two consecutive requests need two decisions: an acceptance covers its own request only (one POST); the next is not accepted", async () => {
     const { history } = await higherFixture();
     const log = audit();
@@ -404,11 +418,93 @@ describe("browser history explainer: per-request disclosure (Packet 11C Addendum
     const fetcher = fakeRoute();
     const log = audit();
     const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher, ...({ disclosure: { decide: async () => "ACCEPTED" }, remoteUse: { accepted: () => true } } as object) });
-    expect(Object.keys(explainer).sort()).toEqual(["disclosureClosed", "disclosureRequired", "explain"]);
+    // Packet 11C Addendum C (C6, deliberate): plus the in-memory demo passcode entry (it accepts nothing).
+    expect(Object.keys(explainer).sort()).toEqual(["accessPasscode", "disclosureClosed", "disclosureRequired", "explain"]);
     expect(await explainer.explain({ factId: FACT, locale: "en-SG" })).toMatchObject({ source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
     expect(await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "accepted" as never })).toMatchObject({ source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
     expect(fetcher).not.toHaveBeenCalled();
     expect(log.rows.map((row) => row.outcomeCode)).toEqual(["REMOTE_USE_NOT_ACCEPTED", "REMOTE_USE_NOT_ACCEPTED"]);
+  });
+});
+
+/**
+ * Packet 11C Addendum C, Task C6: the demo passcode (entered in the disclosure, held in this runtime's memory only, sent as a header on
+ * each remote POST) and the server switch learned from the route's own refusal (boolean only; the route stays the enforcement point).
+ */
+describe("browser AI assistance: demo passcode and the server switch (Packet 11C Addendum C, C6)", () => {
+  const PASSCODE = "TEST-ONLY-passcode-value";
+  const refusing = (reason: string) => vi.fn<BrowserShellFetcher>(async () => new Response(JSON.stringify({ kind: "REFUSED", reason, notSentToProvider: true }), { status: 403, headers: { "content-type": "application/json" } }));
+  const headerOf = (fetcher: ReturnType<typeof vi.fn<BrowserShellFetcher>>, call = 0) => (fetcher.mock.calls[call]![1].headers as Record<string, string>)[AI_SHELL_ACCESS_HEADER];
+
+  it("the passcode entry is needed until provided, held in this runtime's memory and sent as a header on each remote POST", async () => {
+    const { history } = await higherFixture();
+    const fetcher = fakeRoute();
+    const assistance = createBrowserAiAssistance({ history, audit: audit().port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
+    const entry = assistance.history.accessPasscode;
+    expect(entry.needed()).toBe(true);
+    // Not a sendable header value: refused, still needed.
+    for (const invalid of ["", "pässcode", "two words", "x".repeat(129)]) expect(entry.provide(invalid), invalid).toBe(false);
+    expect(entry.needed()).toBe(true);
+    // Before any passcode, an accepted request is sent without one (the route refuses it: ACCESS_DENIED).
+    await assistance.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+    expect(headerOf(fetcher, 0)).toBeUndefined();
+    expect(entry.provide(PASSCODE)).toBe(true);
+    expect(entry.needed()).toBe(false);
+    await assistance.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+    await assistance.history.explain({ factId: FACT, locale: "zh-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+    expect([headerOf(fetcher, 1), headerOf(fetcher, 2)]).toEqual([PASSCODE, PASSCODE]);
+    for (const [, init] of fetcher.mock.calls) expect(String(init.body)).not.toContain(PASSCODE);
+    // A new runtime starts without it (never persisted).
+    expect(createBrowserAiAssistance({ history, audit: audit().port, manifest: ENABLED }).history.accessPasscode.needed()).toBe(true);
+  });
+
+  it("an ACCESS_DENIED refusal forgets the passcode (the next disclosure asks again) and is audited ACCESS_DENIED with no attempt", async () => {
+    const { history } = await higherFixture();
+    const log = audit();
+    const fetcher = refusing("ACCESS_DENIED");
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
+    explainer.accessPasscode.provide("TEST-ONLY-wrong-passcode");
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
+    expect(explainer.accessPasscode.needed()).toBe(true);
+    expect(log.rows.map((row) => [row.outcomeCode, row.attempts.count, basisOf(row), row.providerModel])).toEqual([["ACCESS_DENIED", 0, "NONE", null]]);
+  });
+
+  it("a REMOTE_AI_DISABLED refusal is the client's switch signal: no further disclosure or POST; later requests are audited REMOTE_AI_DISABLED", async () => {
+    const { history } = await higherFixture();
+    const log = audit();
+    const fetcher = refusing("REMOTE_AI_DISABLED");
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
+    expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+    await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+    expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+    await explainer.explain({ factId: FACT, locale: "en-SG" }, new AbortController().signal);
+    await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(log.rows.map((row) => [row.outcomeCode, row.attempts.count, basisOf(row)])).toEqual([["REMOTE_AI_DISABLED", 0, "NONE"], ["REMOTE_AI_DISABLED", 0, "NONE"], ["REMOTE_AI_DISABLED", 0, "NONE"]]);
+  });
+
+  it("other refusals change no client state (the route decides every request again)", async () => {
+    const { history } = await higherFixture();
+    for (const reason of ["ORIGIN_REJECTED", "SPEND_CEILING_REACHED", "SPEND_NOT_CONFIGURED", "SPEND_LEDGER_UNAVAILABLE", "REQUEST_CLASS_NOT_QUALIFIED"]) {
+      const log = audit();
+      const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher: refusing(reason) });
+      explainer.accessPasscode.provide(PASSCODE);
+      await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+      expect(explainer.accessPasscode.needed(), reason).toBe(false);
+      expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" }), reason).toBe(true);
+      expect(log.rows.map((row) => [row.outcomeCode, row.attempts.count]), reason).toEqual([[reason, 0]]);
+    }
+  });
+
+  it("the passcode is never persisted or logged: no storage API, no console, nothing in an audit row", async () => {
+    const source = readFileSync(join(process.cwd(), "src/application/ai/browser-history-explainer.ts"), "utf8");
+    expect(source).not.toMatch(/localStorage|sessionStorage|indexedDB|document\.cookie|console\./);
+    const { history } = await higherFixture();
+    const log = audit();
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher: fakeRoute() });
+    explainer.accessPasscode.provide(PASSCODE);
+    await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+    expect(JSON.stringify(log.rows)).not.toContain(PASSCODE);
   });
 });
 

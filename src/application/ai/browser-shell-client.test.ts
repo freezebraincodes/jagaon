@@ -12,7 +12,8 @@ import { AI_HYBRID_RUNTIME_BUNDLES } from "./ai-hybrid-runtime-bundles";
 import { createAiHybridTaskService } from "./ai-hybrid-task-service";
 import { PROVIDER_FAILURE_REASONS, type ProviderInvocationResult } from "./ai-provider-port";
 import { AI_TASK_RUNTIME_BUNDLES } from "./ai-runtime-bundles";
-import { AI_SHELL_ROUTE_PATH, shellRouteCallUpperBound } from "./ai-shell-route-contract";
+import { AI_SHELL_ACCESS_HEADER, AI_SHELL_ROUTE_PATH, AI_SHELL_ROUTE_REFUSAL_REASONS, shellRouteCallUpperBound } from "./ai-shell-route-contract";
+import { TEST_DEPLOYMENT_ENVIRONMENT, TEST_ORIGIN, TEST_PASSCODE } from "@/app/api/ai/shell/ai-shell-route-test-support";
 import * as client from "./browser-shell-client";
 import { BROWSER_SHELL_CLIENT_PROVIDER_MODEL, createAiRemoteUseDecisions, createBrowserShellClient, INTERIM_FAIL_CLOSED_DISCLOSURE, type AiRemoteUseDisclosure, type BrowserShellFetcher } from "./browser-shell-client";
 import { projectProviderTaskPayload } from "./detached-payload-projector";
@@ -92,7 +93,7 @@ describe("interim disclosure rule: remote use fails closed without an accepted d
   ])("%s: a closed FAILED result with no POST and no technical text", async (_label, disclosure) => {
     const fetcher = answering(() => json({ kind: "CANDIDATE", candidate: VALID, retention: "CONFIRMED_NOT_STORED", usage: USAGE }));
     const result = await createBrowserShellClient({ disclosure, fetcher }).invoke(REQUEST(), signal());
-    expect(result).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION" });
+    expect(result).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true });
     expect(PROVIDER_FAILURE_REASONS).toContain(result.kind === "FAILED" ? result.reason : null);
     expect(JSON.stringify(result)).not.toContain(SENTINEL);
     expect(fetcher).not.toHaveBeenCalled();
@@ -232,22 +233,22 @@ describe("per-request remote-use decisions (Packet 11C Addendum C, C3)", () => {
     const fetcher = answering(() => json({ kind: "CANDIDATE", candidate: VALID, retention: "CONFIRMED_NOT_STORED", usage: USAGE }));
     const shell = createBrowserShellClient({ disclosure: decisions.disclosure, fetcher });
     // No decision: no POST.
-    expect(await shell.invoke(REQUEST(), signal())).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION" });
+    expect(await shell.invoke(REQUEST(), signal())).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true });
     const token = signal();
     await decisions.run("ACCEPTED", token, async (own) => {
       // The per-call signal alone carries no decision; the request's token does (the repair attempt sends the same token).
-      expect(await shell.invoke(REQUEST(), signal())).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION" });
+      expect(await shell.invoke(REQUEST(), signal())).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true });
       expect((await shell.invoke(REQUEST(), signal(), own)).kind).toBe("COMPLETED");
       expect((await shell.invoke(REQUEST(), signal(), own)).kind).toBe("COMPLETED");
     });
     expect(fetcher).toHaveBeenCalledTimes(2);
     // After the request settled its token no longer sends.
-    expect(await shell.invoke(REQUEST(), signal(), token)).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION" });
+    expect(await shell.invoke(REQUEST(), signal(), token)).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true });
     // An aborted token never sends, even while its request runs.
     const controller = new AbortController();
     await decisions.run("ACCEPTED", controller.signal, async (own) => {
       controller.abort();
-      expect(await shell.invoke(REQUEST(), signal(), own)).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION" });
+      expect(await shell.invoke(REQUEST(), signal(), own)).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true });
     });
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
@@ -255,7 +256,7 @@ describe("per-request remote-use decisions (Packet 11C Addendum C, C3)", () => {
   it("Packet 11C B4a: a DECLINED answer never POSTs either (only an explicit ACCEPTED sends)", async () => {
     const fetcher = answering(() => json({ kind: "CANDIDATE", candidate: VALID, retention: "CONFIRMED_NOT_STORED", usage: USAGE }));
     const shell = createBrowserShellClient({ disclosure: { decide: async () => "DECLINED" }, fetcher });
-    expect(await shell.invoke(REQUEST(), signal())).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION" });
+    expect(await shell.invoke(REQUEST(), signal())).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true });
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
@@ -314,9 +315,98 @@ describe("the POST: only a validated value-blind ShellTaskRequest", () => {
   ])("refuses %s client-side: closed FAILED, no disclosure asked, no POST", async (_label, body) => {
     const decide = vi.fn<AiRemoteUseDisclosure["decide"]>(async () => "ACCEPTED");
     const fetcher = answering(() => json({}));
-    expect(await createBrowserShellClient({ disclosure: { decide }, fetcher }).invoke(body() as ShellTaskRequest, signal())).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED" });
+    expect(await createBrowserShellClient({ disclosure: { decide }, fetcher }).invoke(body() as ShellTaskRequest, signal())).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", notSentToProvider: true });
     expect(decide).not.toHaveBeenCalled();
     expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * C6 fix round 1 (review item 1): every answer decided before the provider call is marked `notSentToProvider` (never with usage): the
+ * route's own marked FAILED, any 4xx from the route, and the client's own refusals before the POST. Anything that may have been sent (a
+ * 5xx, a network error, an unreadable answer) keeps the C5 conservative accounting.
+ */
+describe("C6 fix round 1: answers decided before the provider call are marked not sent", () => {
+  const run = async (respond: () => Response | Promise<Response>) => createBrowserShellClient({ disclosure: ACCEPTED, fetcher: answering(respond) }).invoke(REQUEST(), signal());
+  it("forwards the route's marker on a pre-call FAILED (the reason mapped as before)", async () => {
+    expect(await run(() => json({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED", notSentToProvider: true }))).toEqual({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED", notSentToProvider: true });
+    expect(await run(() => json({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true }))).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true });
+    expect(await run(() => json({ kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true }))).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", notSentToProvider: true });
+  });
+  it("a non-403 4xx from the route is a refusal before any provider call: marked, no usage", async () => {
+    expect(await run(() => json({ kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true }, 400))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", notSentToProvider: true });
+    expect(await run(() => json(SENTINEL, 413, "text/plain"))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", notSentToProvider: true });
+    expect(await run(() => json(SENTINEL, 429, "text/plain"))).toEqual({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED", notSentToProvider: true });
+    // A 403 that is not a conforming REFUSED is still a refusal before any provider call.
+    expect(await run(() => json(SENTINEL, 403, "text/plain"))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", notSentToProvider: true });
+  });
+  it("anything that may have been transmitted is never marked: a 5xx, a network error, an unreadable 200", async () => {
+    const bound = shellRouteCallUpperBound(REQUEST());
+    expect(await run(() => json(SENTINEL, 502, "text/plain"))).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: bound });
+    expect(await run(() => Promise.reject(new Error(SENTINEL)))).toEqual({ kind: "FAILED", reason: "TRANSPORT_FAILED", usage: bound });
+    expect(await run(() => json(`<html>${SENTINEL}</html>`, 200, "text/html"))).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: bound });
+    // A FAILED body with usage keeps it, unmarked.
+    expect(await run(() => json({ kind: "FAILED", reason: "PROVIDER_TIMEOUT", usage: { ...USAGE, basis: "UPPER_BOUND" } }))).toEqual({ kind: "FAILED", reason: "PROVIDER_TIMEOUT", usage: { ...USAGE, basis: "UPPER_BOUND" } });
+  });
+  it("the client's own refusals before the POST are marked: an invalid request, no acceptance (the body-cap refusal shares the path)", async () => {
+    const fetcher = answering(() => json({}));
+    expect(await createBrowserShellClient({ disclosure: ACCEPTED, fetcher }).invoke(null as never, signal())).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", notSentToProvider: true });
+    expect(await createBrowserShellClient({ disclosure: INTERIM_FAIL_CLOSED_DISCLOSURE, fetcher }).invoke(REQUEST(), signal())).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Packet 11C Addendum C, Task C6: the demo passcode travels only as a request header on the remote POST (read per send from the app's
+ * in-memory entry), and a closed route refusal is reported to the wiring as a closed code only (boolean-level signals; no configuration).
+ */
+describe("C6: the demo passcode header and the route-refusal signal", () => {
+  const PASSCODE = "TEST-ONLY-passcode-value";
+  it("sends the entered passcode as the one extra request header, never in the body", async () => {
+    const fetcher = answering(() => json({ kind: "FAILED", reason: "TASK_DISABLED" }));
+    await createBrowserShellClient({ disclosure: ACCEPTED, fetcher, accessPasscode: () => PASSCODE }).invoke(REQUEST(), signal());
+    const init = fetcher.mock.calls[0]![1];
+    expect(init.headers).toEqual({ "content-type": "application/json", [AI_SHELL_ACCESS_HEADER]: PASSCODE });
+    expect(String(init.body)).not.toContain(PASSCODE);
+    expect(JSON.parse(String(init.body))).toEqual(REQUEST());
+  });
+
+  it("no passcode (none entered, a throwing reader, or a value that is not a valid header) sends no passcode header", async () => {
+    for (const accessPasscode of [() => null, () => "", () => { throw new Error("x"); }, () => "pässcode-unicode", () => "line\nbreak-passcode", () => "x".repeat(129)]) {
+      const fetcher = answering(() => json({ kind: "FAILED", reason: "TASK_DISABLED" }));
+      await createBrowserShellClient({ disclosure: ACCEPTED, fetcher, accessPasscode }).invoke(REQUEST(), signal());
+      expect(fetcher.mock.calls[0]![1].headers).toEqual({ "content-type": "application/json" });
+    }
+  });
+
+  it("the passcode is read only when a POST is made (never for a refused, unaccepted or invalid request)", async () => {
+    const accessPasscode = vi.fn(() => PASSCODE);
+    const fetcher = answering(() => json({}));
+    await createBrowserShellClient({ disclosure: INTERIM_FAIL_CLOSED_DISCLOSURE, fetcher, accessPasscode }).invoke(REQUEST(), signal());
+    await createBrowserShellClient({ disclosure: ACCEPTED, fetcher, accessPasscode }).invoke(null as never, signal());
+    expect(accessPasscode).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("reports each closed route refusal to the wiring (the code only); nothing for any other answer; a throwing listener changes nothing", async () => {
+    for (const reason of AI_SHELL_ROUTE_REFUSAL_REASONS) {
+      const onRefusal = vi.fn();
+      const result = await createBrowserShellClient({ disclosure: ACCEPTED, fetcher: answering(() => json({ kind: "REFUSED", reason, notSentToProvider: true }, 403)), onRefusal }).invoke(REQUEST(), signal());
+      expect(onRefusal.mock.calls).toEqual([[reason]]);
+      expect(result).toMatchObject({ refusal: reason });
+    }
+    const onRefusal = vi.fn();
+    for (const answer of [() => json({ kind: "FAILED", reason: "TASK_DISABLED" }), () => json({ kind: "REFUSED", reason: "ACCESS_DENIED" }, 403), () => json(SENTINEL, 403, "text/plain")]) {
+      await createBrowserShellClient({ disclosure: ACCEPTED, fetcher: answering(answer), onRefusal }).invoke(REQUEST(), signal());
+    }
+    expect(onRefusal).not.toHaveBeenCalled();
+    const throwing = () => { throw new Error(SENTINEL); };
+    expect(await createBrowserShellClient({ disclosure: ACCEPTED, fetcher: answering(() => json({ kind: "REFUSED", reason: "REMOTE_AI_DISABLED", notSentToProvider: true }, 403)), onRefusal: throwing }).invoke(REQUEST(), signal())).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", refusal: "REMOTE_AI_DISABLED", notSentToProvider: true });
+  });
+
+  it("stores nothing: no browser storage API in the client", () => {
+    const source = readFileSync(join(process.cwd(), "src/application/ai/browser-shell-client.ts"), "utf8");
+    expect(source).not.toMatch(/localStorage|sessionStorage|indexedDB|document\.cookie|console\./);
   });
 });
 
@@ -338,14 +428,23 @@ describe("the response: strictly parsed with the shared route contract, closed r
   });
 
   it("C1: the route's 403 REFUSED REQUEST_CLASS_NOT_QUALIFIED is a closed PROVIDER_REJECTED carrying that refusal and no usage", async () => {
-    const refused = { kind: "REFUSED", reason: "REQUEST_CLASS_NOT_QUALIFIED" };
-    expect(await invoke(() => json(refused, 403))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", refusal: "REQUEST_CLASS_NOT_QUALIFIED" });
+    // Packet 11C Addendum C (C6): every REFUSED carries the route's "not sent to provider" marker, passed on to the hybrid service.
+    const refused = { kind: "REFUSED", reason: "REQUEST_CLASS_NOT_QUALIFIED", notSentToProvider: true };
+    expect(await invoke(() => json(refused, 403))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", refusal: "REQUEST_CLASS_NOT_QUALIFIED", notSentToProvider: true });
     // Any other 403 body (or an unknown refusal reason) is the plain closed refusal, still without usage.
-    expect(await invoke(() => json({ kind: "REFUSED", reason: SENTINEL }, 403))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED" });
-    expect(await invoke(() => json(SENTINEL, 403, "text/plain"))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED" });
-    expect(await invoke(() => json({ kind: "FAILED", reason: "PAYLOAD_INVALID" }, 400))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED" });
+    expect(await invoke(() => json({ kind: "REFUSED", reason: SENTINEL }, 403))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", notSentToProvider: true });
+    expect(await invoke(() => json(SENTINEL, 403, "text/plain"))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", notSentToProvider: true });
+    expect(await invoke(() => json({ kind: "FAILED", reason: "PAYLOAD_INVALID" }, 400))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", notSentToProvider: true });
     // REFUSED is a 403 answer only: with 200 it is a non-conforming answer after a POST (the pre-send upper bound counts).
     expect(await invoke(() => json(refused))).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: shellRouteCallUpperBound(REQUEST()) });
+  });
+
+  it("C6: every closed route refusal (with the not-sent marker) is PROVIDER_REJECTED carrying the refusal and the marker, never usage", async () => {
+    for (const reason of AI_SHELL_ROUTE_REFUSAL_REASONS) {
+      expect(await invoke(() => json({ kind: "REFUSED", reason, notSentToProvider: true }, 403)), reason).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", refusal: reason, notSentToProvider: true });
+    }
+    // Without the marker the 403 body is non-conforming: the plain closed refusal, with no refusal code and no marker.
+    expect(await invoke(() => json({ kind: "REFUSED", reason: "ACCESS_DENIED" }, 403))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", notSentToProvider: true });
   });
 
   it.each([["TASK_DISABLED"], ["PROFILE_NOT_PERMITTED"], ["PAYLOAD_INVALID"], ["REQUEST_CANCELLED"], ["BUDGET_EXCEEDED"]])("maps the route reason %s, which is not a provider failure reason, to PROVIDER_FAILED", async (reason) => {
@@ -379,7 +478,8 @@ describe("the response: strictly parsed with the shared route contract, closed r
     // without a readable route usage followed a POST the route may have turned into a billed call: the client counts the request's
     // pre-send upper bound (basis UPPER_BOUND), never zero.
     const refusedByRoute = /\b4\d\d\b/.test(label);
-    expect(result).toEqual(refusedByRoute ? { kind: "FAILED", reason } : { kind: "FAILED", reason, usage: shellRouteCallUpperBound(REQUEST()) });
+    // C6 fix round 1: and marked not sent to the provider.
+    expect(result).toEqual(refusedByRoute ? { kind: "FAILED", reason, notSentToProvider: true } : { kind: "FAILED", reason, usage: shellRouteCallUpperBound(REQUEST()) });
     expect(JSON.stringify(result)).not.toContain(SENTINEL);
   });
 
@@ -396,8 +496,8 @@ describe("the response: strictly parsed with the shared route contract, closed r
 
   it("C5: a request refused or not accepted before any POST carries no usage (nothing sent)", async () => {
     const fetcher = answering(() => json({}));
-    expect(await createBrowserShellClient({ disclosure: INTERIM_FAIL_CLOSED_DISCLOSURE, fetcher }).invoke(REQUEST(), signal())).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION" });
-    expect(await createBrowserShellClient({ disclosure: ACCEPTED, fetcher }).invoke({ ...REQUEST(), facts: [] } as never, signal())).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED" });
+    expect(await createBrowserShellClient({ disclosure: INTERIM_FAIL_CLOSED_DISCLOSURE, fetcher }).invoke(REQUEST(), signal())).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true });
+    expect(await createBrowserShellClient({ disclosure: ACCEPTED, fetcher }).invoke({ ...REQUEST(), facts: [] } as never, signal())).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", notSentToProvider: true });
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
@@ -405,7 +505,7 @@ describe("the response: strictly parsed with the shared route contract, closed r
 /** The client inside the real hybrid service (the service owns the per-call timeout, cancellation and the single repair). */
 describe("the client under the hybrid service", () => {
   // Packet 11C Addendum C (C1): a remote path needs a QUALIFIED class; test-only QUALIFIED records unless `requestClassGate` says otherwise.
-  function service(options: { manifest?: AiActivationManifest; disclosure?: AiRemoteUseDisclosure; fetcher: BrowserShellFetcher; requestClassGate?: AiRequestClassGate | "SHIPPED" }) {
+  function service(options: { manifest?: AiActivationManifest; disclosure?: AiRemoteUseDisclosure; fetcher: BrowserShellFetcher; requestClassGate?: AiRequestClassGate | "SHIPPED"; accessPasscode?: () => string | null }) {
     const rows: AiInvocationAuditRow[] = [];
     const hybrid = createAiHybridTaskService({
       releaseProfile: "HACKATHON_DEMO",
@@ -413,7 +513,8 @@ describe("the client under the hybrid service", () => {
       now: () => "2026-10-08T01:00:00.000Z",
       monotonicMs: () => 0,
       manifest: options.manifest ?? ENABLED,
-      provider: createBrowserShellClient({ disclosure: options.disclosure ?? ACCEPTED, fetcher: options.fetcher }),
+      // Packet 11C Addendum C (C6): the entered demo passcode (test value), sent as a header by the client; the route checks it.
+      provider: createBrowserShellClient({ disclosure: options.disclosure ?? ACCEPTED, fetcher: options.fetcher, accessPasscode: options.accessPasscode ?? (() => TEST_PASSCODE) }),
       ...(options.requestClassGate === "SHIPPED" ? {} : { requestClassGate: options.requestClassGate ?? qualifiedTestRequestClassGate() }),
     });
     return { hybrid, rows };
@@ -541,13 +642,15 @@ describe("the client under the hybrid service", () => {
       store: false, error: null, incomplete_details: null, ...extra,
     });
     // Packet 11C Addendum C (C1): the route side gets test-only QUALIFIED records too, unless `routeGate` is "SHIPPED" (the default).
-    function viaRoute(candidates: Array<{ text: string; extra?: Record<string, unknown> }>, manifest: AiActivationManifest = ENABLED, routeGate: "TEST" | "SHIPPED" = "TEST") {
+    // Packet 11C Addendum C (C6): the route gets the deployment configuration (TEST values; `deployment` overrides single entries), and
+    // the posts carry what a same-origin browser adds itself (Origin, Sec-Fetch-Site); the passcode header comes from the client.
+    function viaRoute(candidates: Array<{ text: string; extra?: Record<string, unknown> }>, manifest: AiActivationManifest = ENABLED, routeGate: "TEST" | "SHIPPED" = "TEST", deployment: Record<string, string | undefined> = {}) {
       const deepseek = vi.fn(async (_url: string, _init: RequestInit) => {
         const next = candidates.shift()!;
         return new Response(JSON.stringify(envelope(next.text, next.extra)), { status: 200, headers: { "content-type": "application/json" } });
       });
-      const handle = createAiShellHandler({ environment: { DEEPSEEK_API_KEY: "deepseek-SENTINEL-test" }, activationManifest: manifest, fetcher: deepseek, ...(routeGate === "TEST" ? { requestClassGate: qualifiedTestRequestClassGate() } : {}) });
-      const posts = vi.fn<BrowserShellFetcher>((url, init) => handle(new Request(`http://localhost${url}`, init)));
+      const handle = createAiShellHandler({ environment: { DEEPSEEK_API_KEY: "deepseek-SENTINEL-test", ...TEST_DEPLOYMENT_ENVIRONMENT, ...deployment }, activationManifest: manifest, fetcher: deepseek, ...(routeGate === "TEST" ? { requestClassGate: qualifiedTestRequestClassGate() } : {}) });
+      const posts = vi.fn<BrowserShellFetcher>((url, init) => handle(new Request(`http://localhost${url}`, { ...init, headers: { ...(init.headers as Record<string, string>), Origin: TEST_ORIGIN, "Sec-Fetch-Site": "same-origin" } })));
       return { deepseek, posts };
     }
     const ROUTE_USAGE = { inputTokens: 600, outputTokens: 80, costMicroUsd: deepSeekCostMicroUsd(600, 80) };
@@ -584,7 +687,62 @@ describe("the client under the hybrid service", () => {
       expect(route.posts).toHaveBeenCalledTimes(1);
       expect(route.deepseek).not.toHaveBeenCalled();
       expect(run.rows).toHaveLength(1);
-      expect(run.rows[0]).toMatchObject({ outcomeCode: "REQUEST_CLASS_NOT_QUALIFIED", attempts: { count: 1, structuralRepairUsed: false }, measurements: { inputTokens: null, outputTokens: null, costMicroUsd: null } });
+      // Packet 11C Addendum C (C6, C5 review carry): the refusal is marked "not sent to provider": zero attempts, usage basis NONE.
+      expect(run.rows[0]).toMatchObject({ outcomeCode: "REQUEST_CLASS_NOT_QUALIFIED", attempts: { count: 0, structuralRepairUsed: false }, providerModel: null, usageBasis: "NONE", measurements: { inputTokens: null, outputTokens: null, costMicroUsd: null } });
+      expect(aiInvocationAuditRowSchema.safeParse(run.rows[0]).success).toBe(true);
+    });
+
+    // C6 fix round 1 (review item 1): answers decided before the provider call record exactly 0 attempts and usage basis NONE.
+    it("fix round 1 end to end: the route's rate limit, a missing credential and server TASK_DISABLED each give 0 attempts / NONE", async () => {
+      const cases: Array<[string, () => ReturnType<typeof viaRoute>, string]> = [
+        ["a missing credential", () => viaRoute([{ text: JSON.stringify(VALID) }], ENABLED, "TEST", { DEEPSEEK_API_KEY: undefined }), "MISSING_CONFIGURATION"],
+        ["server TASK_DISABLED (only the browser is activated)", () => viaRoute([{ text: JSON.stringify(VALID) }], AI_ACTIVATION_MANIFEST), "PROVIDER_FAILED"],
+      ];
+      for (const [label, make, code] of cases) {
+        const route = make();
+        const run = service({ fetcher: route.posts });
+        await run.hybrid.execute(EN.request);
+        expect(route.posts, label).toHaveBeenCalledTimes(1);
+        expect(route.deepseek, label).not.toHaveBeenCalled();
+        expect(run.rows[0], label).toMatchObject({ outcomeCode: code, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, providerModel: null, usageBasis: "NONE" });
+        expect(aiInvocationAuditRowSchema.safeParse(run.rows[0]).success, label).toBe(true);
+      }
+      // The rate limit (default 10 per minute per instance): the 11th request through one route instance.
+      const route = viaRoute(Array.from({ length: 11 }, () => ({ text: JSON.stringify(VALID) })));
+      const run = service({ fetcher: route.posts });
+      for (let index = 0; index < 11; index += 1) await run.hybrid.execute(EN.request);
+      expect(route.deepseek).toHaveBeenCalledTimes(10);
+      expect(run.rows[10]).toMatchObject({ outcomeCode: "PROVIDER_RATE_LIMITED", attempts: { count: 0 }, providerModel: null, usageBasis: "NONE" });
+    });
+
+    it("fix round 1: a 4xx answer and the client's own per-send refusal each give 0 attempts / NONE", async () => {
+      const bad = service({ fetcher: answering(() => json({ kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true }, 400)) });
+      await bad.hybrid.execute(EN.request);
+      expect(bad.rows[0]).toMatchObject({ outcomeCode: "PROVIDER_REJECTED", attempts: { count: 0 }, usageBasis: "NONE" });
+      // The service's decision accepts; the client's per-send re-check does not (e.g. the decision ended): nothing is POSTed.
+      let asked = 0;
+      const fetcher = answering(() => json({}));
+      const perSend = service({ fetcher, disclosure: { decide: async () => (asked++ === 0 ? "ACCEPTED" : "NOT_ACCEPTED") } });
+      await perSend.hybrid.execute(EN.request);
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(perSend.rows[0]).toMatchObject({ outcomeCode: "MISSING_CONFIGURATION", attempts: { count: 0 }, providerModel: null, usageBasis: "NONE" });
+    });
+
+    it.each<[string, Record<string, string | undefined>, (() => string | null) | undefined, string]>([
+      ["the remote-AI switch off", { JAGAON_REMOTE_AI: undefined }, undefined, "REMOTE_AI_DISABLED"],
+      ["no allowed origins configured", { JAGAON_AI_ALLOWED_ORIGINS: undefined }, undefined, "ORIGIN_REJECTED"],
+      ["no passcode entered", {}, () => null, "ACCESS_DENIED"],
+      ["a wrong passcode", {}, () => "TEST-ONLY-wrong-passcode", "ACCESS_DENIED"],
+      ["no daily limit configured", { JAGAON_AI_DAILY_SPEND_LIMIT_USD: undefined }, undefined, "SPEND_NOT_CONFIGURED"],
+      ["a daily limit below one call", { JAGAON_AI_DAILY_SPEND_LIMIT_USD: "0.000001" }, undefined, "SPEND_CEILING_REACHED"],
+    ])("C6 end to end: %s is refused by the route before any provider call and audited truthfully (0 attempts, NONE)", async (_label, deployment, accessPasscode, code) => {
+      const route = viaRoute([{ text: JSON.stringify(VALID) }], ENABLED, "TEST", deployment);
+      const run = service({ fetcher: route.posts, ...(accessPasscode ? { accessPasscode } : {}) });
+      expect(await run.hybrid.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", mode: "REMOTE_AI", reason: "PROVIDER_REJECTED" });
+      expect(route.posts).toHaveBeenCalledTimes(1);
+      expect(route.deepseek).not.toHaveBeenCalled();
+      expect(run.rows).toHaveLength(1);
+      expect(run.rows[0]).toMatchObject({ outcomeCode: code, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, providerModel: null, usageBasis: "NONE" });
       expect(aiInvocationAuditRowSchema.safeParse(run.rows[0]).success).toBe(true);
     });
 

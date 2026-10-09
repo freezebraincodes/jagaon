@@ -145,6 +145,85 @@ describe("hybrid task service", () => {
       expect(run.rows[0]).toMatchObject({ attempts: { count: 1 }, measurements: { inputTokens: null, outputTokens: null, costMicroUsd: null } });
     });
   });
+
+  /**
+   * Packet 11C Addendum C, Task C6 (C5 review carry): a route refusal decided before the provider call carries the explicit "not sent to
+   * provider" marker, so it is never counted as a provider attempt: zero attempts, usage basis NONE, the truthful audit-only code.
+   */
+  describe("C6: route refusals marked not sent to the provider", () => {
+    const REFUSALS = ["REQUEST_CLASS_NOT_QUALIFIED", "REMOTE_AI_DISABLED", "ORIGIN_REJECTED", "ACCESS_DENIED", "SPEND_NOT_CONFIGURED", "SPEND_CEILING_REACHED", "SPEND_LEDGER_UNAVAILABLE"] as const;
+    it.each(REFUSALS.map((code) => [code]))("a first-call %s refusal is a zero-attempt row (basis NONE, no provider model), never repaired", async (code) => {
+      const run = harness([{ kind: "FAILED", reason: "PROVIDER_REJECTED", refusal: code, notSentToProvider: true }, completed(VALID)]);
+      expect(await run.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", mode: "REMOTE_AI", reason: "PROVIDER_REJECTED" });
+      expect(run.calls).toHaveLength(1);
+      expectOneValidRow(run.rows, code);
+      expect(run.rows[0]).toMatchObject({ attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, providerModel: null, usageBasis: "NONE", measurements: { inputTokens: null, outputTokens: null, costMicroUsd: null } });
+    });
+    it("a refusal of the single repair keeps the first transmitted attempt only (its usage, basis REPORTED; the repair was not sent)", async () => {
+      const malformed = `${JSON.stringify(VALID)}}`;
+      const run = harness([completed(malformed), { kind: "FAILED", reason: "PROVIDER_REJECTED", refusal: "SPEND_CEILING_REACHED", notSentToProvider: true }]);
+      expect(await run.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", reason: "PROVIDER_REJECTED" });
+      expect(run.calls).toHaveLength(2);
+      expectOneValidRow(run.rows, "SPEND_CEILING_REACHED");
+      expect(run.rows[0]).toMatchObject({ attempts: { count: 1, structuralRepairUsed: false, timedOut: false }, usageBasis: "REPORTED", measurements: { inputTokens: 10, outputTokens: 5, costMicroUsd: 1 } });
+    });
+    // Fix round 1 (review item 1): every FAILED marked not sent (and carrying no usage) is uncounted, audited with its existing closed
+    // reason; a refusal code outside the closed list is ignored (the closed reason is audited).
+    it.each(["MISSING_CONFIGURATION", "PROVIDER_RATE_LIMITED", "PROVIDER_REJECTED", "PROVIDER_FAILED", "TRANSPORT_FAILED"] as const)("a FAILED %s marked not sent is a zero-attempt row with its closed reason (basis NONE)", async (reason) => {
+      const run = harness([{ kind: "FAILED", reason, notSentToProvider: true }, completed(VALID)]);
+      expect(await run.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", reason });
+      expect(run.calls).toHaveLength(1);
+      expectOneValidRow(run.rows, reason);
+      expect(run.rows[0]).toMatchObject({ attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, providerModel: null, usageBasis: "NONE" });
+      const odd = harness([{ kind: "FAILED", reason: "PROVIDER_REJECTED", refusal: "REMOTE_USE_DECLINED", notSentToProvider: true } as unknown as ProviderInvocationResult]);
+      await odd.service.execute(EN.request);
+      expectOneValidRow(odd.rows, "PROVIDER_REJECTED");
+      expect(odd.rows[0]).toMatchObject({ attempts: { count: 0 }, usageBasis: "NONE" });
+    });
+    it("C5 accounting stays for anything that may have been transmitted: a marked FAILED with usage, an unmarked FAILED, a throw", async () => {
+      const usage = { inputTokens: 1, outputTokens: 1, costMicroUsd: 1, basis: "UPPER_BOUND" as const };
+      const withUsage = harness([{ kind: "FAILED", reason: "PROVIDER_FAILED", usage, notSentToProvider: true } as ProviderInvocationResult]);
+      await withUsage.service.execute(EN.request);
+      expect(withUsage.rows[0]).toMatchObject({ attempts: { count: 1 }, usageBasis: "UPPER_BOUND" });
+      const unmarked = harness([{ kind: "FAILED", reason: "PROVIDER_REJECTED" }]);
+      await unmarked.service.execute(EN.request);
+      expect(unmarked.rows[0]).toMatchObject({ attempts: { count: 1 }, usageBasis: "REPORTED" });
+      const calls: ShellTaskRequest[] = [];
+      const provider: AiShellProviderPort = { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, invoke: async (input) => { calls.push(input); throw new Error("after send"); } };
+      const threw = harness([], { provider });
+      await threw.service.execute(EN.request);
+      expect(threw.rows[0]).toMatchObject({ outcomeCode: "TRANSPORT_FAILED", attempts: { count: 1 }, usageBasis: "UPPER_BOUND" });
+    });
+  });
+
+  describe("C6 coordinator addition: the remote switch known off on the client", () => {
+    it("an activated, qualified request is audited REMOTE_AI_DISABLED (not REMOTE_USE_NOT_ACCEPTED): no disclosure asked, nothing sent", async () => {
+      const decide = vi.fn(async () => "ACCEPTED" as const);
+      const calls: ShellTaskRequest[] = [];
+      const provider: AiShellProviderPort = { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, remoteUse: { decide }, invoke: async (input) => (calls.push(input), completed(VALID)) };
+      const run = harness([], { provider, remoteSwitchKnownOff: () => true });
+      expect(await run.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", mode: "REMOTE_DISABLED", reason: "TASK_DISABLED" });
+      expect(decide).not.toHaveBeenCalled();
+      expect(calls).toHaveLength(0);
+      expectOneValidRow(run.rows, "REMOTE_AI_DISABLED");
+      expect(run.rows[0]).toMatchObject({ attempts: { count: 0 }, providerModel: null, usageBasis: "NONE" });
+    });
+    it("a throwing switch check counts as off; an unqualified class keeps REQUEST_CLASS_NOT_QUALIFIED; not activated keeps its reason", async () => {
+      const throwing = harness([completed(VALID)], { remoteSwitchKnownOff: () => { throw new Error("unknown"); } });
+      expect(await throwing.service.execute(EN.request)).toMatchObject({ mode: "REMOTE_DISABLED" });
+      expectOneValidRow(throwing.rows, "REMOTE_AI_DISABLED");
+      const unqualified = harness([completed(VALID)], { remoteSwitchKnownOff: () => true, requestClassGate: undefined });
+      await unqualified.service.execute(EN.request);
+      expectOneValidRow(unqualified.rows, "REQUEST_CLASS_NOT_QUALIFIED");
+      const shipped = harness([completed(VALID)], { remoteSwitchKnownOff: () => true, manifest: AI_ACTIVATION_MANIFEST });
+      await shipped.service.execute(EN.request);
+      expectOneValidRow(shipped.rows, "TASK_DISABLED");
+    });
+    it("not known off (false or absent): the request proceeds as before", async () => {
+      const run = harness([completed(VALID)], { remoteSwitchKnownOff: () => false });
+      expect(await run.service.execute(EN.request)).toMatchObject({ source: "AI", mode: "REMOTE_AI" });
+    });
+  });
   it.each([
     ["NOT_ACTIVATED (production manifest)", { manifest: AI_ACTIVATION_MANIFEST }, "NOT_ACTIVATED", "TASK_DISABLED"],
     ["PRIVATE", { privateMode: () => true }, "PRIVATE", "PRIVACY_REJECTED"],

@@ -593,7 +593,7 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
         </>
       ) : null}
       <p className="history-note history-note--footer">{msg.loggingLimitation}</p>
-      {shownDisclosure ? <AiDisclosureDialog messages={messages} flow="PATTERN" onConfirm={acceptDisclosure} onCancel={cancelDisclosure} /> : null}
+      {shownDisclosure ? <AiDisclosureDialog messages={messages} flow="PATTERN" passcode={explainer?.accessPasscode ?? null} onConfirm={acceptDisclosure} onCancel={cancelDisclosure} /> : null}
     </div>
   );
 }

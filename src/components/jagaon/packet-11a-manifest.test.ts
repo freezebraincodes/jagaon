@@ -248,6 +248,8 @@ describe("Packet 11A scope", () => {
     // Packet 11C Addendum C, C5 (deliberate): plus the shared pre-send upper bound of one shell call (prices, margin, body overhead, the
     // exact-body and the route-request bounds) and the FAILED reasons that may carry usage. Browser-safe: no credential, prompt or network.
     expect(exportsOf(shellRouteContract)).toEqual([
+      // Packet 11C Addendum C, C6 (deliberate): the request header carrying the demo passcode (a header name only, no value).
+      "AI_SHELL_ACCESS_HEADER",
       "AI_SHELL_INPUT_FRAMING_MARGIN_TOKENS",
       "AI_SHELL_MAX_BODY_BYTES",
       "AI_SHELL_PROVIDER_BODY_OVERHEAD_MAX_BYTES",
@@ -309,8 +311,15 @@ describe("Packet 11A scope", () => {
     }
     // Packet 11C B2a (deliberate retarget): the value-blind shell route is added beside the retired legacy task route.
     // Packet 11C Addendum C, C5 (deliberate): plus one test-only file (the route's re-parse usage path, isolated for its module mock).
+    // Packet 11C Addendum C, C6 (deliberate): the route's server-only deployment configuration and spend ledger modules, their tests and
+    // one test-only support module (test configuration values; in no production graph, pinned below).
     expect(walk("src/app/api").filter((file) => /(^|\/)ai(\/|-)/i.test(file))).toEqual([
+      "src/app/api/ai/shell/ai-shell-deployment-config.ts",
       "src/app/api/ai/shell/ai-shell-handler.ts",
+      "src/app/api/ai/shell/ai-shell-route-test-support.ts",
+      "src/app/api/ai/shell/ai-spend-ledger.test.ts",
+      "src/app/api/ai/shell/ai-spend-ledger.ts",
+      "src/app/api/ai/shell/route-access-spend.test.ts",
       "src/app/api/ai/shell/route-reparse-usage.test.ts",
       "src/app/api/ai/shell/route.test.ts",
       "src/app/api/ai/shell/route.ts",
@@ -348,6 +357,11 @@ describe("Packet 11A scope", () => {
     // Packet 11C Addendum C, C1: the test-only request-class support (test-only QUALIFIED records) and the evaluation-only definitions
     // generator are in no production graph (the browser page and every API route); the route reaches the shipped records only.
     for (const file of ["src/application/ai/request-class-test-support.ts", "src/ai/evaluation/packet-11c-request-class-generator.ts"]) expect(RUNTIME_GRAPH, file).not.toContain(file);
+    // Packet 11C Addendum C, C6: the route's test-only configuration values are in no production graph; the route reaches its server-only
+    // configuration and ledger modules, which the browser graph never reaches.
+    expect(RUNTIME_GRAPH).not.toContain("src/app/api/ai/shell/ai-shell-route-test-support.ts");
+    expect(importGraph(["src/app/api/ai/shell/route.ts"])).toEqual(expect.arrayContaining(["src/app/api/ai/shell/ai-shell-deployment-config.ts", "src/app/api/ai/shell/ai-spend-ledger.ts"]));
+    for (const file of ["src/app/api/ai/shell/ai-shell-deployment-config.ts", "src/app/api/ai/shell/ai-spend-ledger.ts"]) expect(CLIENT_GRAPH, file).not.toContain(file);
     expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/ai/evaluation/"))).toEqual([]);
     expect(importGraph(["src/app/api/ai/shell/route.ts"])).toEqual(expect.arrayContaining(["src/application/ai/request-class-definitions.ts", "src/application/ai/request-class-qualification.ts"]));
     expect(importGraph(["src/application/ai/request-class-definitions.ts"]).filter((file) => file !== "src/application/ai/request-class-definitions.ts" && !file.startsWith("src/domain/"))).toEqual([]);
@@ -541,6 +555,7 @@ describe("Packet 11C B2b browser boundary", () => {
     expect(client).not.toMatch(/projectProviderTaskPayload|ProviderTaskRequest\b/);
     expect(client).toMatch(/shellTaskRequestSchema\.safeParse\(input\)/);
     expect(client).toMatch(/const body = JSON\.stringify\(parsed\.data\);/);
-    expect(client).toMatch(/fetcher\(AI_SHELL_ROUTE_PATH, \{ method: "POST", headers: \{ "content-type": "application\/json" \}, body, cache: "no-store", redirect: "error", signal \}\)/);
+    // Packet 11C Addendum C, C6 (deliberate): plus the one demo-passcode request header (never in the body; the body is unchanged).
+    expect(client).toMatch(/fetcher\(AI_SHELL_ROUTE_PATH, \{ method: "POST", headers: \{ "content-type": "application\/json", \.\.\.passcodeHeader\(options\.accessPasscode\) \}, body, cache: "no-store", redirect: "error", signal \}\)/);
   });
 });

@@ -54,6 +54,11 @@ export type PatternExplainerPort = {
    * period or locale change, or the screen closed): that moot request's one audit row. Nothing is sent.
    */
   disclosureClosed?(input: { locale: SupportedLocale }): Promise<void>;
+  /**
+   * Packet 11C Addendum C (C6): the app session's demo passcode entry (in memory only), shown in the disclosure while needed. Absent: no
+   * passcode field. Declared structurally (this panel imports no `ai` module; it is the disclosure dialog's entry type).
+   */
+  accessPasscode?: Readonly<{ needed(): boolean; provide(passcode: string): boolean }>;
 };
 
 type Props = {
