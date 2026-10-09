@@ -12,8 +12,9 @@ describe("HACKATHON_DEMO storage profile manifest (Packet 10 freeze Section 3)",
     expect(() => (HACKATHON_STORAGE_PROFILE.writableRecordTypes as string[]).push("SAFETY_EVENT")).toThrow();
   });
 
-  it("freezes the 19 writable record types and partitions the catalogue", () => {
-    expect(HACKATHON_STORAGE_PROFILE.writableRecordTypes).toHaveLength(19);
+  // Packet 13 (P13S, Q13-8): + PATIENT_TERMINOLOGY.
+  it("freezes the 20 writable record types and partitions the catalogue", () => {
+    expect(HACKATHON_STORAGE_PROFILE.writableRecordTypes).toHaveLength(20);
     expect([...HACKATHON_STORAGE_PROFILE.writableRecordTypes, ...HACKATHON_STORAGE_PROFILE.notWritableRecordTypes].sort()).toEqual([...RECORD_TYPES].sort());
     expect(HACKATHON_STORAGE_PROFILE.notWritableRecordTypes).toEqual([
       "PATIENT_PROFILE",
@@ -67,7 +68,8 @@ describe("HACKATHON_DEMO storage profile manifest (Packet 10 freeze Section 3)",
   it("freezes versions, deletion order and the reconciliation order", () => {
     expect(HACKATHON_STORAGE_PROFILE.physicalDexieVersion).toBe(2);
     expect(HACKATHON_STORAGE_PROFILE.logicalStorageSchemaVersion).toBe(1);
-    expect(HACKATHON_STORAGE_PROFILE.permanentDeletionTargets).toEqual(["GLUCOSE_READING", "MEDICATION_EVENT", "INTAKE_EVENT", "ACTIVITY_EVENT"]);
+    // Packet 13 (P13S, Q13-8): "forget" a remembered term is a patient permanent deletion.
+    expect(HACKATHON_STORAGE_PROFILE.permanentDeletionTargets).toEqual(["GLUCOSE_READING", "MEDICATION_EVENT", "INTAKE_EVENT", "ACTIVITY_EVENT", "PATIENT_TERMINOLOGY"]);
     expect(HACKATHON_STORAGE_PROFILE.deletionOwnerOrder).toEqual(["HEALTH_RECORDS", "PATTERN_ENGINE", "LEARNING_ENGINE", "INQUIRY", "CARE_PLAN", "CARE_PREPARATION"]);
     expect(HACKATHON_STORAGE_PROFILE.reconciliationSteps.map((step) => step.checkpoint)).toEqual([
       "VERIFY_STORAGE",

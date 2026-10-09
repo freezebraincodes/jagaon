@@ -25,8 +25,9 @@ describe("recordTypeSchema", () => {
     expect(() => recordTypeSchema.parse("UNKNOWN_TYPE")).toThrow();
   });
 
-  it("has exactly 28 record types", () => {
-    expect(RECORD_TYPES).toHaveLength(28);
+  // Packet 13 (P13S, Q13-8): + PATIENT_TERMINOLOGY (owner storage decision 2026-10-09).
+  it("has exactly 29 record types", () => {
+    expect(RECORD_TYPES).toHaveLength(29);
   });
 
   it("contains the expected closed set of literals", () => {
@@ -35,6 +36,7 @@ describe("recordTypeSchema", () => {
         "PATIENT_PROFILE",
         "PATIENT_PREFERENCE",
         "CONDITION",
+        "PATIENT_TERMINOLOGY",
         "MEDICATION",
         "PRESCRIPTION_VERSION",
         "PRESCRIPTION_CHANGE_CANDIDATE",

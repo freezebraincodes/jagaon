@@ -64,6 +64,8 @@ const WRITABLE_RECORD_TYPES: readonly RecordType[] = [
   "PATTERN_EVIDENCE_SNAPSHOT",
   "CARE_SUMMARY_SNAPSHOT",
   "CARE_SUMMARY_EXPORT",
+  // Packet 13 (P13S; owner storage decision 2026-10-09).
+  "PATIENT_TERMINOLOGY",
 ];
 
 const BACKUP_EXCLUDED_TABLES: readonly JagaOnTableName[] = ["appPreferences", "storageMetadata"];
@@ -81,7 +83,8 @@ export const HACKATHON_STORAGE_PROFILE: StorageProfileManifest = deepFreeze({
   appPreferenceKeys: ["language", "keepWordingOnDevice"],
   backupTables: JAGAON_TABLE_NAMES.filter((table) => !BACKUP_EXCLUDED_TABLES.includes(table)),
   backupExcludedTables: [...BACKUP_EXCLUDED_TABLES],
-  permanentDeletionTargets: ["GLUCOSE_READING", "MEDICATION_EVENT", "INTAKE_EVENT", "ACTIVITY_EVENT"],
+  // Packet 13 (P13S): "forget" a remembered term is a patient permanent deletion (no phrase remains in any revision).
+  permanentDeletionTargets: ["GLUCOSE_READING", "MEDICATION_EVENT", "INTAKE_EVENT", "ACTIVITY_EVENT", "PATIENT_TERMINOLOGY"],
   deletionOwnerOrder: ["HEALTH_RECORDS", "PATTERN_ENGINE", "LEARNING_ENGINE", "INQUIRY", "CARE_PLAN", "CARE_PREPARATION"],
   deletionSafetyStep: "NOT_ENABLED_IN_PROFILE",
   reconciliationSteps: RESTORE_CHECKPOINTS.filter((checkpoint): checkpoint is Exclude<RestoreCheckpoint, "COMMITTED"> => checkpoint !== "COMMITTED").map(

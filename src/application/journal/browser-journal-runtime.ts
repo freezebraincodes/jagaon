@@ -64,7 +64,9 @@ import type {
   JournalCommandService,
   JournalCommitResult,
   JournalQueryPort,
+  RecordMedicationEventInput,
 } from "./journal-contracts";
+import { createTerminologyService, type TerminologyService } from "@/application/terminology/terminology-service";
 import { createJournalCommandService } from "./journal-command-service";
 import { createJournalQueryService } from "./journal-query-service";
 
@@ -103,6 +105,14 @@ export type JagaOnRuntime = {
   recordDeletion: {
     prepare(target: DeletionTarget): Promise<PrepareDeletionResult>;
     confirm(plan: DeletionPlan, confirmation: DeletionConfirmation): Promise<ConfirmDeletionResult>;
+  };
+  /**
+   * Packet 13 (P13S, Q13-9): the voice save path for a confirmed medicine occurrence (the existing Packet 8 command) and the
+   * patient-terminology service (remember, change, forget, reuse). Glucose and meals use `commands`.
+   */
+  voice?: {
+    recordMedicationEvent(input: RecordMedicationEventInput): Promise<JournalCommitResult>;
+    terminology: TerminologyService;
   };
   /** Packet 10B: local encrypted backup export (no network, no write). */
   backup: {
@@ -395,10 +405,13 @@ export async function createBrowserJournalRuntime(
     now,
   });
   const aiAudits = createAiInvocationAuditRepository(database);
+  // Packet 13 (P13S, Q13-9): "forget" is the existing permanent deletion of the one terminology record (no dependents).
+  const terminology = createTerminologyService(database, { now, ids, deletion });
   const ports = gate.guard({
     // Append only: the patient-facing runtime never reads, lists or rewrites AI audit rows.
     aiAudit: Object.freeze({ append: aiAudits.append } satisfies AiInvocationAuditPort),
     backup: Object.freeze({ export: backupExport.export }),
+    voice: Object.freeze({ recordMedicationEvent: afterCommit(journalCommands.recordMedicationEvent), terminology }),
     recordDeletion: Object.freeze({
       async prepare(target: DeletionTarget) {
         await intelligence;

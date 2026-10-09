@@ -7,6 +7,8 @@ export const RECORD_TYPES = [
   "PATIENT_PROFILE",
   "PATIENT_PREFERENCE",
   "CONDITION",
+  // Packet 13 (P13S; owner storage decision 2026-10-09): a patient-confirmed phrase → canonical medicine mapping.
+  "PATIENT_TERMINOLOGY",
 
   // Care plan and organisation
   "MEDICATION",
@@ -74,6 +76,7 @@ export const recordOwnerByType: Readonly<Record<RecordType, AuthoritativeOwner>>
     PATIENT_PROFILE: "PATIENT_SETTINGS",
     PATIENT_PREFERENCE: "PATIENT_SETTINGS",
     CONDITION: "PATIENT_SETTINGS",
+    PATIENT_TERMINOLOGY: "PATIENT_SETTINGS",
 
     MEDICATION: "CARE_PLAN",
     PRESCRIPTION_VERSION: "CARE_PLAN",

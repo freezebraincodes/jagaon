@@ -13,6 +13,9 @@ export const PATIENT_SETTINGS_COMMAND_NAMES = [
   "CORRECT_PATIENT_PREFERENCE",
   "RECORD_CONDITION",
   "REVISE_CONDITION",
+  // Packet 13 (P13S): explicit "remember" and "change" of a patient-confirmed term ("forget" is DELETE_PATIENT_RECORD).
+  "REMEMBER_PATIENT_TERM",
+  "CHANGE_PATIENT_TERM",
 ] as const;
 
 export type PatientSettingsCommandName =
@@ -175,6 +178,9 @@ export const PATIENT_SETTINGS_EVENT_NAMES = [
   "PATIENT_PREFERENCE_CORRECTED",
   "CONDITION_RECORDED",
   "CONDITION_REVISED",
+  // Packet 13 (P13S): no consumer; the payload is a closed reason only (never the phrase).
+  "PATIENT_TERM_REMEMBERED",
+  "PATIENT_TERM_CHANGED",
 ] as const;
 
 export type PatientSettingsEventName =

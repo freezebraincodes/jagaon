@@ -5,6 +5,7 @@ import { PERMANENT_DELETION_STORED_ROW_CODECS } from "@/application/deletion/del
 import { INQUIRY_STORED_ROW_CODECS } from "@/application/inquiry/inquiry-persistence";
 import { INTELLIGENCE_STORED_ROW_CODECS } from "@/application/intelligence/intelligence-persistence";
 import { JOURNAL_STORED_ROW_CODECS } from "@/application/journal/journal-stored-rows";
+import { TERMINOLOGY_STORED_ROW_CODECS } from "@/application/terminology/terminology-persistence";
 import { createClosedRowCodecRegistry, createUnionRowCodec, type ClosedRowCodecRegistry } from "@/storage/closed-row-codecs";
 import type { StorageRowCodec } from "@/storage/storage-row-codec";
 
@@ -22,6 +23,8 @@ const OWNERS = [
   INQUIRY_STORED_ROW_CODECS,
   INTELLIGENCE_STORED_ROW_CODECS,
   CARE_PREPARATION_STORED_ROW_CODECS,
+  // Packet 13 (P13S): the patient-terminology owner rows (revision, audit, event).
+  TERMINOLOGY_STORED_ROW_CODECS,
 ] as const;
 
 const codecs = <K extends "revision" | "audit" | "event">(key: K) => OWNERS.map((owner) => owner[key] as StorageRowCodec<unknown>);
