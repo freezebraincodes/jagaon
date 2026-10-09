@@ -27,7 +27,8 @@ function plan(mode: RestorePlan["mode"], extra: Partial<RestorePlan["effects"]> 
     payloadFingerprint: "",
     targetDigest: "",
     effects: { exportedAt: "2026-10-04T02:00:00.000Z" as never, counts, newerRecordsDiscarded: 0, protectedDeletions: 0, runtimePointersReplaced: 0, externalCopiesUnchanged: true, ...extra },
-    target: { tables: {} as never, eventSequenceHighWaterMark: 0 },
+    // Packet 11C Addendum C (C2): every restore target carries the backup's patient settings.
+    target: { tables: {} as never, eventSequenceHighWaterMark: 0, patientSettings: { keepWordingOnDevice: false } },
   };
 }
 

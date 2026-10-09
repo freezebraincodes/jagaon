@@ -288,6 +288,8 @@ function fakeRuntime(options?: BrowserJournalRuntimeOptions): JagaOnRuntime {
     },
     resolveLocale: vi.fn(async () => "en-SG" as const),
     persistLocale: vi.fn(async () => undefined),
+    // Packet 11C Addendum C (C2): the patient's "Keep wording on this device" setting (default off).
+    keepWordingOnDevice: { read: vi.fn(async () => false), persist: vi.fn(async (_keepOnDevice: boolean) => undefined), subscribe: vi.fn((_listener: () => void) => () => undefined) },
     resetDemo,
     aiAudit: { append: vi.fn(async () => undefined) },
     recordDeletion: { prepare: vi.fn(), confirm: vi.fn() },
@@ -1235,8 +1237,13 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
     // Packet 11C B4b: plus the runtime's care-preparation ports (the care-summary wording uses the same wiring).
     // Packet 11C Addendum C, C3 (deliberate retarget): exactly the three runtime ports; the B3 app-session disclosure is gone (acceptance
     // is per explicit request).
-    expect(factory).toHaveBeenCalledWith({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit });
-    expect(Object.keys(factory.mock.calls[0]![0]).sort()).toEqual(["audit", "carePreparation", "history"]);
+    // Packet 11C Addendum C, C2 (deliberate retarget): plus the patient's "Keep wording on this device" setting, as a function the
+    // wiring reads per request (the factory is not rebuilt when it changes).
+    // Fix round 1 (I-1): the awaited per-request value (this tab's choice, else the stored value) and the in-memory hint.
+    expect(factory).toHaveBeenCalledWith({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit, privateMode: expect.any(Function), privateModeHint: expect.any(Function) });
+    expect(Object.keys(factory.mock.calls[0]![0]).sort()).toEqual(["audit", "carePreparation", "history", "privateMode", "privateModeHint"]);
+    expect(await factory.mock.calls[0]![0].privateMode()).toBe(false);
+    expect(factory.mock.calls[0]![0].privateModeHint()).toBe(false);
     // Nothing is explained without the patient's explicit action (this runtime's history offers none).
     expect(explainer.explain).not.toHaveBeenCalled();
   });
@@ -1417,6 +1424,167 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
     expect(app.fetcher).toHaveBeenCalledTimes(2);
     expect(app.rows.map((row) => row.outcomeCode)).toEqual(["ACCEPTED", "ACCEPTED"]);
     expect(app.fetchSpy).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Packet 11C Addendum C, Task C2 (hybrid spec D11): the "Keep wording on this device" toggle on the More screen, wired to the one AI
+   * wiring per runtime and read per request (no reload). When on: no dialog or passcode field, no POST, a deterministic explanation and
+   * one exact PRIVACY_REJECTED row; turning it off again restores the disclosure for the next request.
+   */
+  describe("C2: Keep wording on this device", () => {
+    async function toMore() {
+      const en = getMessages("en-SG");
+      await screen.findByRole("button", { name: en.today.recordReading });
+      fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navMore }));
+      return screen.findByRole("checkbox", { name: en.aiWording.keepOnDeviceLabel });
+    }
+
+    it("loads the stored setting (default off), persists the patient's choice and applies it without rebuilding the AI wiring", async () => {
+      const runtime = fakeRuntime();
+      const factory = vi.fn<AiAssistanceFactory>(() => ({ history: { explain: vi.fn() }, careSummary: null }));
+      render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} aiAssistanceFactory={factory} />);
+      const toggle = await toMore();
+      expect(runtime.keepWordingOnDevice.read).toHaveBeenCalled();
+      expect(toggle).not.toBeChecked();
+      const { privateMode, privateModeHint } = factory.mock.calls[0]![0];
+      expect(await privateMode()).toBe(false);
+      fireEvent.click(toggle);
+      await waitFor(() => expect(runtime.keepWordingOnDevice.persist).toHaveBeenCalledWith(true));
+      expect(toggle).toBeChecked();
+      expect(await privateMode()).toBe(true);
+      expect(privateModeHint()).toBe(true);
+      fireEvent.click(toggle);
+      await waitFor(() => expect(runtime.keepWordingOnDevice.persist).toHaveBeenLastCalledWith(false));
+      expect(await privateMode()).toBe(false);
+      expect(privateModeHint()).toBe(false);
+      expect(factory).toHaveBeenCalledTimes(1);
+    });
+
+    it("a stored on is shown checked and applies from the first request", async () => {
+      const runtime = fakeRuntime();
+      runtime.keepWordingOnDevice.read = vi.fn(async () => true);
+      const factory = vi.fn<AiAssistanceFactory>(() => ({ history: { explain: vi.fn() }, careSummary: null }));
+      render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} aiAssistanceFactory={factory} />);
+      expect(await toMore()).toBeChecked();
+      expect(await factory.mock.calls[0]![0].privateMode()).toBe(true);
+      expect(factory.mock.calls[0]![0].privateModeHint()).toBe(true);
+    });
+
+    it("an unreadable setting keeps the wording on the device (fail closed) and is shown as on", async () => {
+      const runtime = fakeRuntime();
+      runtime.keepWordingOnDevice.read = vi.fn(async () => { throw new Error("storage"); });
+      const factory = vi.fn<AiAssistanceFactory>(() => ({ history: { explain: vi.fn() }, careSummary: null }));
+      render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} aiAssistanceFactory={factory} />);
+      expect(await toMore()).toBeChecked();
+      expect(await factory.mock.calls[0]![0].privateMode()).toBe(true);
+    });
+
+    it("fix round 1 (I-1): the per-request value awaits the stored setting, so another tab's on is honoured without any notice", async () => {
+      const runtime = fakeRuntime();
+      const factory = vi.fn<AiAssistanceFactory>(() => ({ history: { explain: vi.fn() }, careSummary: null }));
+      render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} aiAssistanceFactory={factory} />);
+      expect(await toMore()).not.toBeChecked();
+      const { privateMode } = factory.mock.calls[0]![0];
+      expect(await privateMode()).toBe(false);
+      // Another tab stored "on"; this tab has received nothing.
+      runtime.keepWordingOnDevice.read = vi.fn(async () => true);
+      expect(await privateMode()).toBe(true);
+      runtime.keepWordingOnDevice.read = vi.fn(async () => { throw new Error("storage"); });
+      expect(await privateMode()).toBe(true);
+    });
+
+    it("fix round 1 (I-1): a change notice from another tab re-reads the stored value and updates the checkbox and the in-memory value", async () => {
+      const runtime = fakeRuntime();
+      const listeners: Array<() => void> = [];
+      runtime.keepWordingOnDevice.subscribe = vi.fn((listener: () => void) => (listeners.push(listener), () => undefined));
+      const factory = vi.fn<AiAssistanceFactory>(() => ({ history: { explain: vi.fn() }, careSummary: null }));
+      render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} aiAssistanceFactory={factory} />);
+      const toggle = await toMore();
+      expect(toggle).not.toBeChecked();
+      expect(listeners).toHaveLength(1);
+      runtime.keepWordingOnDevice.read = vi.fn(async () => true);
+      await act(async () => listeners[0]!());
+      await waitFor(() => expect(screen.getByRole("checkbox", { name: getMessages("en-SG").aiWording.keepOnDeviceLabel })).toBeChecked());
+      expect(factory.mock.calls[0]![0].privateModeHint()).toBe(true);
+      runtime.keepWordingOnDevice.read = vi.fn(async () => false);
+      await act(async () => listeners[0]!());
+      await waitFor(() => expect(screen.getByRole("checkbox", { name: getMessages("en-SG").aiWording.keepOnDeviceLabel })).not.toBeChecked());
+      expect(factory.mock.calls[0]![0].privateModeHint()).toBe(false);
+    });
+
+    it("fix round 1 (M-1): disabled while no dataset is open; a choice whose save failed survives the reopen", async () => {
+      const en = getMessages("en-SG");
+      const first = fakeRuntime();
+      first.keepWordingOnDevice.persist = vi.fn(async () => { throw new Error("storage"); });
+      let openSecond!: (runtime: JagaOnRuntime) => void;
+      const second = fakeRuntime();
+      const runtimeFactory = vi.fn().mockResolvedValueOnce(first).mockReturnValueOnce(new Promise<JagaOnRuntime>((resolve) => (openSecond = resolve)));
+      // A delete-all that closes this tab's runtime and then fails: the app reopens the dataset.
+      const failingDelete: DeleteAllPortFactory = (hooks) => ({
+        prepare: () => ({ createdAt: "2026-10-04T02:00:00.000Z" as never, expiresAt: "2099-10-04T02:10:00.000Z" as never }),
+        confirm: async () => {
+          hooks.closeRuntime();
+          return { kind: "FAILED", failure: storageFailure("DELETE_DATASET", "STORAGE_TRANSACTION_ABORTED","2026-10-04T02:00:00.000Z" as never) };
+        },
+      });
+      const factory = vi.fn<AiAssistanceFactory>(() => ({ history: { explain: vi.fn() }, careSummary: null }));
+      render(<JagaOnApp runtimeFactory={runtimeFactory} onboardingRepositoryFactory={completed()} aiAssistanceFactory={factory} deleteAllPortFactory={failingDelete} />);
+      const toggle = await toMore();
+      fireEvent.click(toggle);
+      expect(await screen.findByText(en.shared.storageUnavailable)).toBeInTheDocument();
+      expect(toggle).toBeChecked();
+      confirmDeleteAll(en);
+      await waitFor(() => expect(runtimeFactory).toHaveBeenCalledTimes(2));
+      // No dataset is open: the setting is not shown as known.
+      await waitFor(() => expect(screen.getByRole("checkbox", { name: en.aiWording.keepOnDeviceLabel })).toBeDisabled());
+      // The reopened dataset stores off, but the unsaved "on" from this session is kept (never silently reverted).
+      await act(async () => openSecond(second));
+      await waitFor(() => expect(screen.getByRole("checkbox", { name: en.aiWording.keepOnDeviceLabel })).toBeEnabled());
+      expect(screen.getByRole("checkbox", { name: en.aiWording.keepOnDeviceLabel })).toBeChecked();
+      const latest = factory.mock.calls.at(-1)![0];
+      expect(latest.privateModeHint()).toBe(true);
+      expect(await latest.privateMode()).toBe(true);
+    });
+
+    it.each([
+      ["activated (test manifest, test-only QUALIFIED classes, fake route)", true],
+      ["the shipped manifest", false],
+    ])("on, %s: no dialog or passcode field, no POST, a deterministic explanation and one exact PRIVACY_REJECTED row", async (_label, activated) => {
+      const en = getMessages("en-SG");
+      const app = await activatedApp();
+      const factory: AiAssistanceFactory = activated ? app.props.aiAssistanceFactory : (ports) => createBrowserAiAssistance(ports);
+      render(<JagaOnApp {...app.props} aiAssistanceFactory={factory} />);
+      fireEvent.click(await toMore());
+      await waitFor(() => expect(screen.getByRole("checkbox", { name: en.aiWording.keepOnDeviceLabel })).toBeChecked());
+      fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navHistory }));
+      fireEvent.click(await screen.findByRole("button", { name: en.history.explanation.action }));
+      const panel = await screen.findByRole("region", { name: en.history.explanation.title });
+      await waitFor(() => expect(within(panel).getByRole("status")).not.toBeEmptyDOMElement());
+      expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
+      expect(within(panel).queryByText(en.ai.remoteNotAccepted)).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(en.aiAccess.passcodeLabel)).toBeNull();
+      await waitFor(() => expect(app.rows).toHaveLength(1));
+      expect(aiInvocationAuditRowSchema.parse(app.rows[0])).toMatchObject({ auditSchemaVersion: "ai-invocation-audit.11c.2", taskType: "EXPLAIN_PATTERN", outcomeCode: "PRIVACY_REJECTED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], measurements: { inputTokens: null, outputTokens: null, costMicroUsd: null }, usageBasis: "NONE" });
+      expect(app.fetcher).not.toHaveBeenCalled();
+      expect(app.fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("turned off again (no reload): the next explicit request asks the disclosure as before", async () => {
+      const en = getMessages("en-SG");
+      const app = await activatedApp();
+      render(<JagaOnApp {...app.props} />);
+      const toggle = await toMore();
+      fireEvent.click(toggle);
+      await waitFor(() => expect(toggle).toBeChecked());
+      fireEvent.click(toggle);
+      await waitFor(() => expect(toggle).not.toBeChecked());
+      fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navHistory }));
+      fireEvent.click(await screen.findByRole("button", { name: en.history.explanation.action }));
+      expect(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).toBeInTheDocument();
+      expect(app.fetcher).not.toHaveBeenCalled();
+      expect(app.rows).toHaveLength(0);
+    });
   });
 });
 

@@ -36,6 +36,12 @@ export const enSGMessages: AppMessages = {
   aiAccess: {
     passcodeLabel: "Demo passcode",
   },
+  // ai-wording-setting.11c.1 (Packet 11C Addendum C, C2): the label is fixed by the hybrid spec (D11); the line is new wording. Human
+  // acceptance pending.
+  aiWording: {
+    keepOnDeviceLabel: "Keep wording on this device",
+    keepOnDeviceBody: "When on, JagaOn uses its standard wording and never sends an AI request.",
+  },
   shared: {
     appName: "JagaOn",
     demoBoundary:

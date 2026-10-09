@@ -130,6 +130,13 @@ export type AiAssistanceFactory = (ports: {
   history: RecordedHistoryQueryPort;
   carePreparation: JagaOnRuntime["carePreparation"];
   audit: AiInvocationAuditPort;
+  /**
+   * Packet 11C Addendum C (C2): the patient's "Keep wording on this device" setting, read per request (never a captured value). Fix
+   * round 1 (I-1): awaited: this tab's choice, else the stored value (another tab's change counts at once; unreadable: on).
+   */
+  privateMode: () => Promise<boolean>;
+  /** C2 fix round 1 (I-1): this tab's in-memory value, for render-time offers only (kept in step by the change notice). */
+  privateModeHint: () => boolean;
 }) => { history: PatternExplainerPort; careSummary: CareSummaryAiWordingPort | null };
 
 /** Startup gate: onboarding until setup is completed or explicitly skipped. */
@@ -183,6 +190,29 @@ export function JagaOnApp({
   ]);
   const [runtime, setRuntime] = useState<JagaOnRuntime | null>(null);
   const runtimeRef = useRef<JagaOnRuntime | null>(null);
+  /**
+   * Packet 11C Addendum C, Task C2 (hybrid spec D11): the patient's "Keep wording on this device" setting. The state drives the More
+   * screen's checkbox (null until the open runtime's stored value is read); the ref is what the one AI wiring reads per request
+   * (`readKeepWordingOnDevice`), so a change applies from the next explicit request with no reload or rebuild. A stored value that
+   * cannot be read counts as on (fail closed: nothing is sent).
+   */
+  const [keepWordingOnDevice, setKeepWordingOnDevice] = useState<boolean | null>(null);
+  const keepWordingRef = useRef(false);
+  /** Fix round 1 (M-1): a choice made in this session whose save failed; it survives a reopen (stored || choice) until saved. */
+  const unsavedKeepWordingChoice = useRef<boolean | null>(null);
+  const readKeepWordingOnDevice = useCallback(() => keepWordingRef.current, []);
+  /**
+   * Fix round 1 (I-1): the per-request value the AI wiring awaits: this tab's choice, else the STORED value (another tab may have turned
+   * it on without this tab knowing yet); an unreadable stored value counts as on.
+   */
+  const keepWordingAwaitedFor = useCallback(
+    (open: JagaOnRuntime) => async () =>
+      keepWordingRef.current ||
+      (await Promise.resolve()
+        .then(() => open.keepWordingOnDevice.read())
+        .catch(() => true)),
+    [],
+  );
   /** Packet 10A: bumping the epoch re-opens the dataset (retry, delete-all restart). */
   const [runtimeEpoch, setRuntimeEpoch] = useState(0);
   const runtimeOptions = useRef<BrowserJournalRuntimeOptions>({});
@@ -262,6 +292,7 @@ export function JagaOnApp({
     const { enterFreshSetup, resolveStartup, persistedSetupIsComplete } = startup.current;
 
     let unsubscribe: () => void = () => undefined;
+    let unsubscribeKeepWording: () => void = () => undefined;
 
     const firstOpen = startupRuntimeRef.current === undefined;
     const completeSetupAtOpen = firstOpen && persistedSetupIsComplete();
@@ -309,13 +340,37 @@ export function JagaOnApp({
         });
         reconciliationWaiter.current?.("COMPLETED");
         reconciliationWaiter.current = null;
-        const [resolvedLocale, todayView] = await Promise.all([
+        const [resolvedLocale, todayView, keepOnDevice] = await Promise.all([
           nextRuntime.resolveLocale(),
           nextRuntime.query.loadToday(),
+          // Packet 11C Addendum C (C2): read before the AI wiring exists; unreadable counts as on (fail closed).
+          Promise.resolve()
+            .then(() => nextRuntime.keepWordingOnDevice.read())
+            .catch(() => true),
         ]);
         if (!active) {
           nextRuntime.close();
           return;
+        }
+        // Fix round 1 (M-1): a choice whose save failed in this session is not silently reverted by the reopened dataset.
+        const effective = keepOnDevice || unsavedKeepWordingChoice.current === true;
+        keepWordingRef.current = effective;
+        setKeepWordingOnDevice(effective);
+        // Fix round 1 (I-1): another tab's stored change re-reads the value and updates this tab's in-memory value and checkbox.
+        try {
+          unsubscribeKeepWording = nextRuntime.keepWordingOnDevice.subscribe(() => {
+            void Promise.resolve()
+              .then(() => nextRuntime.keepWordingOnDevice.read())
+              .catch(() => true)
+              .then((stored) => {
+                if (!active) return;
+                const value = stored || unsavedKeepWordingChoice.current === true;
+                keepWordingRef.current = value;
+                setKeepWordingOnDevice(value);
+              });
+          });
+        } catch {
+          // Without change notices the awaited stored value still decides every request.
         }
         setRuntime(nextRuntime);
         // The setup's own locale wins once onboarding state exists.
@@ -345,6 +400,7 @@ export function JagaOnApp({
     return () => {
       active = false;
       unsubscribe();
+      unsubscribeKeepWording();
       createdRuntime?.close();
     };
   }, [runtimeFactory, runtimeEpoch]);
@@ -393,9 +449,33 @@ export function JagaOnApp({
    * Packet 11C Addendum C, C3 (replaces the B3 once-per-app-session acceptance): there is no app-level disclosure state. Each explicit
    * request carries its own decision from the dialog its screen showed for it; nothing is accepted for later requests or the other flow.
    */
+  // Packet 11C Addendum C (C2): plus the "Keep wording on this device" setting, as a function read per request.
   const aiAssistance = useMemo(
-    () => (runtime ? aiAssistanceFactory({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit }) : null),
-    [runtime, aiAssistanceFactory],
+    () =>
+      runtime
+        ? aiAssistanceFactory({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit, privateMode: keepWordingAwaitedFor(runtime), privateModeHint: readKeepWordingOnDevice })
+        : null,
+    [runtime, aiAssistanceFactory, keepWordingAwaitedFor, readKeepWordingOnDevice],
+  );
+  /**
+   * Packet 11C Addendum C (C2): the patient's choice applies at once (from the next explicit request; a request already past its mode
+   * check is not altered) and is then persisted; a failed save keeps the choice for this session and the screen says storage failed.
+   */
+  const changeKeepWordingOnDevice = useCallback(
+    async (next: boolean) => {
+      keepWordingRef.current = next;
+      setKeepWordingOnDevice(next);
+      try {
+        if (!runtime) throw new Error("STORAGE_UNAVAILABLE");
+        await runtime.keepWordingOnDevice.persist(next);
+        unsavedKeepWordingChoice.current = null;
+      } catch (error) {
+        // Fix round 1 (M-1): kept for this session, also across a reopen of the dataset.
+        unsavedKeepWordingChoice.current = next;
+        throw error;
+      }
+    },
+    [runtime],
   );
   const historyExplainer: PatternExplainerPort | null = aiAssistance?.history ?? null;
   const careSummaryWording: CareSummaryAiWordingPort | null = aiAssistance?.careSummary ?? null;
@@ -570,6 +650,8 @@ export function JagaOnApp({
     setRuntime(null);
     setStorageLock(null);
     setToday(EMPTY_TODAY);
+    // Fix round 1 (M-1): every setting went with the dataset, including an unsaved "Keep wording on this device" choice (D11: off).
+    unsavedKeepWordingChoice.current = null;
     onboardingLocaleRef.current = false;
     setOnboarding(null);
     // Preferences were deleted with the dataset: the neutral shell returns to en-SG.
@@ -737,6 +819,7 @@ export function JagaOnApp({
             }}
             deleteAll={deleteAllPort}
             onDatasetDeleted={noop}
+            keepWording={{ value: runtime ? keepWordingOnDevice : null, change: changeKeepWordingOnDevice }}
           />
         );
       case "MY_MEDICINES":

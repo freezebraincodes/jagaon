@@ -77,7 +77,8 @@ export const HACKATHON_STORAGE_PROFILE: StorageProfileManifest = deepFreeze({
   notWritableRecordTypes: RECORD_TYPES.filter((type) => !WRITABLE_RECORD_TYPES.includes(type)),
   emptyTables: [...EMPTY_IN_PROFILE_TABLES],
   metadataKeys: [...PROFILE_METADATA_KEYS],
-  appPreferenceKeys: ["language"],
+  // Packet 11C Addendum C (C2): the patient's "Keep wording on this device" setting (a versioned row; see app-preference-row.ts).
+  appPreferenceKeys: ["language", "keepWordingOnDevice"],
   backupTables: JAGAON_TABLE_NAMES.filter((table) => !BACKUP_EXCLUDED_TABLES.includes(table)),
   backupExcludedTables: [...BACKUP_EXCLUDED_TABLES],
   permanentDeletionTargets: ["GLUCOSE_READING", "MEDICATION_EVENT", "INTAKE_EVENT", "ACTIVITY_EVENT"],

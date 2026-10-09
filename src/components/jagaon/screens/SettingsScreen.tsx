@@ -24,7 +24,19 @@ export type SettingsScreenProps = {
   deleteAll: DeleteAllPort;
   onDatasetDeleted: () => void;
   goBack?: () => void;
+  /** Packet 11C Addendum C (C2): the "Keep wording on this device" setting; absent renders no toggle. */
+  keepWording?: KeepWordingSetting;
 };
+
+/**
+ * Packet 11C Addendum C, Task C2 (hybrid spec D11): the patient's "Keep wording on this device" setting as the screen sees it.
+ * `value` is null while the dataset is not open (the checkbox is disabled, never guessed). `change(next)` applies the choice from the
+ * next explicit AI request and persists it; it rejects when it could not be saved.
+ */
+export type KeepWordingSetting = Readonly<{
+  value: boolean | null;
+  change(next: boolean): Promise<void>;
+}>;
 
 /**
  * Settings section of frame 12. It renders inside More rather than as a
@@ -37,6 +49,7 @@ export function SettingsScreen({
   persistLocale,
   deleteAll,
   onDatasetDeleted,
+  keepWording,
 }: SettingsScreenProps) {
   const msg = messages.settings;
   const more = messages.more;
@@ -53,6 +66,18 @@ export function SettingsScreen({
     try {
       await persistLocale(nextLocale);
       setSavedVisible(true);
+    } catch {
+      setStorageError(true);
+    }
+  }
+
+  /** Packet 11C Addendum C (C2): applies and persists the patient's choice; the existing storage message on failure. */
+  async function handleKeepWordingChange(next: boolean) {
+    if (!keepWording) return;
+    setSavedVisible(false);
+    setStorageError(false);
+    try {
+      await keepWording.change(next);
     } catch {
       setStorageError(true);
     }
@@ -101,6 +126,31 @@ export function SettingsScreen({
           onChange={handleLocaleChange}
         />
       </div>
+
+      {/* Packet 11C Addendum C (C2): a native checkbox (keyboard, name, state and description from the platform). Copy and placement:
+          human acceptance pending. */}
+      {keepWording ? (
+        <div className="setting-row">
+          <DeviceIcon size={26} className="icon setting-icon" />
+          <span className="setting-text">
+            <label className="setting-title" htmlFor="keep-wording-setting">
+              {messages.aiWording.keepOnDeviceLabel}
+            </label>
+            <span className="setting-body" id="keep-wording-setting-body">
+              {messages.aiWording.keepOnDeviceBody}
+            </span>
+          </span>
+          <input
+            id="keep-wording-setting"
+            type="checkbox"
+            className="setting-checkbox"
+            checked={keepWording.value === true}
+            disabled={keepWording.value === null}
+            aria-describedby="keep-wording-setting-body"
+            onChange={(event) => void handleKeepWordingChange(event.target.checked)}
+          />
+        </div>
+      ) : null}
 
       <div className="setting-row setting-row--future" role="group" aria-labelledby="contrast-title" aria-disabled="true">
         <ContrastIcon size={26} className="icon setting-icon" />

@@ -14,7 +14,7 @@ import {
   serialiseBackupContainer,
   type EncryptedBackupContainerV1,
 } from "./backup-container-v1";
-import { BACKUP_PAYLOAD_FORMAT, BACKUP_SCHEMA_VERSION, backupPayloadV1Schema, CANONICAL_JSON_PROFILE, type BackupPayloadV1 } from "./backup-payload-v1";
+import { BACKUP_PAYLOAD_FORMAT, BACKUP_SCHEMA_VERSION, backupPayloadV2Schema, CANONICAL_JSON_PROFILE, type BackupPayloadV2 } from "./backup-payload-v1";
 import type { BackupSnapshotRepository } from "./backup-snapshot-repository";
 import { validateConfirmedPassphrase, type PassphraseProblem } from "./passphrase";
 import { BACKUP_CONTAINER_ID_BYTES, BACKUP_IV_BYTES, BACKUP_KDF_EXPORT_ITERATIONS, BACKUP_SALT_BYTES, type BackupCryptoPort } from "./web-crypto-port";
@@ -80,9 +80,11 @@ export function createBackupExportService(dependencies: {
         const salt = crypto.randomBytes(BACKUP_SALT_BYTES);
         const iv = crypto.randomBytes(BACKUP_IV_BYTES);
         const containerId = encodeBase64Url(containerIdBytes);
-        const payload: BackupPayloadV1 = {
+        // Packet 11C Addendum C (C2): payload version 2, with the patient settings read in the same validated snapshot.
+        const payload: BackupPayloadV2 = {
           format: BACKUP_PAYLOAD_FORMAT,
           backupSchemaVersion: BACKUP_SCHEMA_VERSION,
+          patientSettings: { keepWordingOnDevice: snapshot.patientSettings.keepWordingOnDevice },
           containerId,
           datasetIdentity: snapshot.identity.datasetIdentity,
           exportedAt,
@@ -96,7 +98,7 @@ export function createBackupExportService(dependencies: {
           tableManifests: await createBackupManifest(snapshot.tables, crypto.sha256),
           tables: snapshot.tables,
         };
-        if (!backupPayloadV1Schema.safeParse(payload).success) throw new StorageOperationError("BACKUP_VALIDATION_FAILED");
+        if (!backupPayloadV2Schema.safeParse(payload).success) throw new StorageOperationError("BACKUP_VALIDATION_FAILED");
         plaintext = canonicaliseBackupPayload(payload);
         if (plaintext.length > limits.maxPlaintextBytes) throw new StorageOperationError("BACKUP_TOO_LARGE_FOR_FORMAT_V1");
         events.onStepCompleted?.(0);

@@ -59,9 +59,10 @@ export function createBootstrapLocaleRepository(
         if (raw === undefined) return "en-SG";
 
         try {
-          return implementedStorageRowCodecs.appPreferences.validateAfterRead(
-            raw,
-          ).value;
+          const row = implementedStorageRowCodecs.appPreferences.validateAfterRead(raw);
+          // Packet 11C Addendum C (C2): the table holds one more closed key; the row stored under "language" must be a language row.
+          if (row.key !== "language") throw new Error("Not a language row");
+          return row.value;
         } catch {
           // This row is explicitly rebuildable and contains no health truth.
           // Delete corruption rather than leaking an unsupported locale into

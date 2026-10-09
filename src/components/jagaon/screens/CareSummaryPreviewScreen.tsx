@@ -40,7 +40,8 @@ export type CareSummaryAiWordingOutcome =
  */
 export type CareSummaryAiWordingPort = {
   available(current: CareSummarySnapshotPayload): boolean;
-  disclosureRequired(current: CareSummarySnapshotPayload): boolean;
+  /** C2 fix round 1 (I-1): may answer asynchronously (the app's wiring awaits the stored "Keep wording on this device" setting). */
+  disclosureRequired(current: CareSummarySnapshotPayload): boolean | Promise<boolean>;
   compose(input: { snapshotRef: ExpectedHead; locale: SupportedLocale; disclosure?: "ACCEPTED" | "DECLINED" }, signal?: AbortSignal): Promise<CareSummaryAiWordingOutcome>;
   /**
    * Packet 11C Addendum C (C5): the disclosure shown for an explicit request closed without the patient's decision (locale or preview
@@ -210,6 +211,12 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
   const aiOffered = aiWording !== null && aiSnapshot && aiWording.available(ready.payload);
   const aiLoading = aiPhase.kind === "LOADING";
   const disclosureKey = `${ready?.revisionId ?? ""}|${locale}`;
+  // C2 fix round 1 (I-1): an asynchronous disclosure check belongs to the preview and locale it was asked for.
+  const checkingDisclosure = useRef(false);
+  const currentDisclosureKey = useRef(disclosureKey);
+  useEffect(() => {
+    currentDisclosureKey.current = disclosureKey;
+  }, [disclosureKey]);
   // The dialog or the request belongs to the locale (and, for the dialog, the snapshot revision) it was opened in.
   if ((aiPhase.kind === "DISCLOSURE" && aiPhase.key !== disclosureKey) || (aiPhase.kind === "LOADING" && aiPhase.locale !== locale)) setAiPhase(IDLE);
 
@@ -316,10 +323,30 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
   }
 
   // Packet 11C Addendum C (C3): every explicit request (the first action and every Retry) asks again; nothing is remembered.
+  // C2 fix round 1 (I-1): the port may answer asynchronously (it awaits the stored "Keep wording on this device" setting). While it is
+  // answering, a second click starts nothing; an answer that arrives after the preview, locale or screen changed is dropped (nothing
+  // was shown or sent for that click). A failed answer shows no disclosure, so that request can never be sent.
   function startAiWording() {
-    if (!ready || !aiWording || !aiOffered || aiBusy || unsettled.current > 0) return;
-    if (aiWording.disclosureRequired(ready.payload)) setAiPhase({ kind: "DISCLOSURE", key: disclosureKey, locale: ready.payload.locale });
-    else runAiWording(null);
+    if (!ready || !aiWording || !aiOffered || aiBusy || unsettled.current > 0 || checkingDisclosure.current) return;
+    const key = disclosureKey;
+    const requestLocale = ready.payload.locale;
+    const decide = (required: boolean) => {
+      if (required) setAiPhase({ kind: "DISCLOSURE", key, locale: requestLocale });
+      else runAiWording(null);
+    };
+    const required = aiWording.disclosureRequired(ready.payload);
+    if (typeof required === "boolean") {
+      decide(required);
+      return;
+    }
+    checkingDisclosure.current = true;
+    void Promise.resolve(required)
+      .catch(() => false)
+      .then((answer) => {
+        checkingDisclosure.current = false;
+        if (!mounted.current || currentDisclosureKey.current !== key) return;
+        decide(answer);
+      });
   }
 
   // The dialog's primary action: accepts remote use for this one request only (it travels with the request).

@@ -227,6 +227,9 @@ export async function buildRestorePlan(input: {
     tables,
     eventSequenceHighWaterMark: highWater,
     ...(candidate.lastCompletedMigrationId ? { lastCompletedMigrationId: candidate.lastCompletedMigrationId } : {}),
+    // Packet 11C Addendum C (C2): the backup's patient settings, bound into the target digest and plan hash (the commit combines them
+    // with the device's current value: fix round 1, I-2).
+    patientSettings: { keepWordingOnDevice: candidate.patientSettings.keepWordingOnDevice === true },
   };
   const material = {
     operationId: input.operationId,

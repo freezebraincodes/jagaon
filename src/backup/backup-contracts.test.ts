@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { APPLICATION_VERSION } from "@/config/application-version";
 import { canonicaliseBackupTable, canonicalRowsBytes, createBackupManifest, BackupCanonicalisationError, toHex } from "./backup-canonicalisation";
 import { canonicaliseBackupHeaderAad, encryptedBackupContainerV1Schema, serialiseBackupContainer, type EncryptedBackupContainerV1 } from "./backup-container-v1";
-import { BACKUP_TABLE_NAMES_V1, backupPayloadV1Schema, type BackupTableSetV1 } from "./backup-payload-v1";
+import { BACKUP_SCHEMA_VERSION, BACKUP_TABLE_NAMES_V1, backupPayloadV1Schema, backupPayloadV2Schema, type BackupTableSetV1 } from "./backup-payload-v1";
 import { encodeBase64Url } from "./base64url";
 import { createWebCryptoPort } from "./web-crypto-port";
 
@@ -87,6 +87,29 @@ describe("version 1 payload contract and canonical manifest", () => {
     expect(backupPayloadV1Schema.safeParse({ ...payload(), passphrase: "x" }).success).toBe(false);
     expect(backupPayloadV1Schema.safeParse({ ...payload(), requestedRuntimePointers: [{ runtimeKind: "DETERMINISTIC", manifestId: "m", manifestVersion: "1" }] }).success).toBe(false);
     expect(backupPayloadV1Schema.safeParse({ ...payload(), backupSchemaVersion: 2 }).success).toBe(false);
+  });
+
+  /**
+   * Packet 11C Addendum C, Task C2: payload version 2 is version 1 plus the closed `patientSettings` (the "Keep wording on this device"
+   * setting). Version 1 stays exactly as it was (an old backup still validates against it and is migrated in memory, see the restore
+   * validator tests); version 2 requires the field and accepts nothing else.
+   */
+  it("version 2 adds exactly the closed patient settings; version 1 is unchanged", () => {
+    expect(BACKUP_SCHEMA_VERSION).toBe(2);
+    const v2 = (patientSettings: unknown = { keepWordingOnDevice: false }) => ({ ...payload(), backupSchemaVersion: 2, patientSettings });
+    expect(backupPayloadV2Schema.safeParse(v2()).success).toBe(true);
+    expect(backupPayloadV2Schema.safeParse(v2({ keepWordingOnDevice: true })).success).toBe(true);
+    // (A missing field is checked below; `undefined` here would take the helper's default.)
+    for (const bad of [{}, { keepWordingOnDevice: "true" }, { keepWordingOnDevice: 1 }, { keepWordingOnDevice: true, language: "en-SG" }, null, []]) {
+      expect(backupPayloadV2Schema.safeParse(v2(bad)).success, JSON.stringify(bad)).toBe(false);
+    }
+    const { patientSettings: _dropped, ...withoutSettings } = v2();
+    expect(backupPayloadV2Schema.safeParse(withoutSettings).success).toBe(false);
+    expect(backupPayloadV2Schema.safeParse({ ...v2(), backupSchemaVersion: 1 }).success).toBe(false);
+    expect(backupPayloadV2Schema.safeParse({ ...v2(), tables: { ...emptyTables(), appPreferences: [] } }).success).toBe(false);
+    // Version 1: exactly the old envelope; it never carries patient settings.
+    expect(backupPayloadV1Schema.safeParse(payload()).success).toBe(true);
+    expect(backupPayloadV1Schema.safeParse({ ...payload(), patientSettings: { keepWordingOnDevice: false } }).success).toBe(false);
   });
 
   it("orders rows by exact primary key regardless of input order and rejects duplicates", () => {

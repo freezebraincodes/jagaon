@@ -5,7 +5,8 @@ import { createDeletionFixture } from "@/application/deletion/packet10-deletion-
 import { createPopulatedDataset, installFakeIndexedDb, openRaw, PACKET10_NOW, readAllTables } from "@/application/storage/packet10-test-support";
 import { createBackupExportService } from "@/backup/backup-export-service";
 import { createBackupSnapshotRepository } from "@/backup/backup-snapshot-repository";
-import { capturingFilePort } from "@/backup/backup-test-support";
+import { capturingFilePort, decryptForTest, parseContainer, sealForTest } from "@/backup/backup-test-support";
+import { canonicalizeJson } from "@/application/contracts/canonical-json";
 import { createWebCryptoPort } from "@/backup/web-crypto-port";
 import { isJournalSourceEventName } from "@/application/journal/journal-stored-rows";
 import type { JagaOnDatabase } from "@/storage/database";
@@ -369,6 +370,131 @@ describe("Packet 10C restore (RST-001–RST-006, RST-012, RST-015, RST-016, RST-
       const after = await openRaw(target);
       expect(await readAllTables(after)).toEqual(before);
       after.close();
+    },
+    TIMEOUT,
+  );
+});
+
+/**
+ * Packet 11C Addendum C, Task C2 (hybrid spec D11): the patient's "Keep wording on this device" setting travels in the backup (payload
+ * version 2) and the restore replaces the device's value with the backup's, atomically with the dataset. An old (version 1) backup has
+ * no such field and restores it as off. Offline; no provider, no network.
+ */
+describe("Packet 11C C2: the 'Keep wording on this device' setting through backup and restore", () => {
+  const keepWordingRows = (tables: Record<string, unknown[]>) => tables.appPreferences.filter((row) => (row as { key: string }).key === "keepWordingOnDevice");
+
+  it(
+    "round-trips: on in the backup is on after restoring into an empty dataset (and the plan binds it)",
+    async () => {
+      const { name, runtime } = await createPopulatedDataset();
+      names.push(name);
+      await runtime.keepWordingOnDevice.persist(true);
+      expect(await runtime.keepWordingOnDevice.read()).toBe(true);
+      runtime.close();
+      const database = await openRaw(name);
+      const file = await exportFrom(database);
+      database.close();
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const target = await emptyDataset();
+      const before = await createBrowserJournalRuntime(target, { now: () => PACKET10_NOW });
+      // Fix round 1 (I-2): the device holds an explicit off; the backup's on wins (on || off).
+      await before.keepWordingOnDevice.persist(false);
+      expect(await before.keepWordingOnDevice.read()).toBe(false);
+      before.close();
+      const { service } = restoreService(target);
+      const inspected = await service.inspect(file, PASS);
+      if (inspected.kind !== "PLAN_READY") throw new Error(JSON.stringify(inspected));
+      expect(inspected.plan.target.patientSettings).toEqual({ keepWordingOnDevice: true });
+      // The setting is part of the reviewed, hash-bound target: a changed copy is stale and changes nothing.
+      const tampered = structuredClone(inspected.plan) as typeof inspected.plan;
+      (tampered.target as { patientSettings: { keepWordingOnDevice: boolean } }).patientSettings = { keepWordingOnDevice: false };
+      expect(await service.confirm(tampered, { planHash: tampered.planHash, confirmedAt: LATER as never })).toMatchObject({ kind: "STALE" });
+
+      expect(await service.confirm(inspected.plan, { planHash: inspected.plan.planHash, confirmedAt: LATER as never })).toEqual({ kind: "COMMITTED" });
+      const committed = await openRaw(target);
+      const afterCommit = await readAllTables(committed);
+      committed.close();
+      expect(keepWordingRows(afterCommit)).toEqual([{ key: "keepWordingOnDevice", preferenceSchemaVersion: "app-preference.keep-wording.11c.1", value: true, updatedAt: LATER }]);
+      const restored = await createBrowserJournalRuntime(target, { now: () => LATER as never, bootstrapLocaleAfterRestore: "en-SG" });
+      expect(await restored.keepWordingOnDevice.read()).toBe(true);
+      restored.close();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    },
+    TIMEOUT,
+  );
+
+  // Fix round 1 (I-2, coordinator ruling, supersedes the brief's "old backup → off" on a device that is on): a restore never turns
+  // private mode off. The commit writes backup || device (an unreadable device value counts as on); the plan target keeps the backup's.
+  it(
+    "an old version 1 backup (off) restored over a device that is on keeps it on",
+    async () => {
+      const { name, runtime } = await createPopulatedDataset();
+      names.push(name);
+      runtime.close();
+      const database = await openRaw(name);
+      const current = await exportFrom(database);
+      database.close();
+      // The same backup as the Packet 10 code path wrote it: payload version 1, no patient settings.
+      const container = parseContainer(current);
+      const payload = await decryptForTest(container, PASS);
+      expect(payload.patientSettings).toEqual({ keepWordingOnDevice: false });
+      payload.backupSchemaVersion = 1;
+      delete payload.patientSettings;
+      const old = await sealForTest(canonicalizeJson(payload), PASS, container.containerId);
+
+      const reopened = await createBrowserJournalRuntime(name, { now: () => PACKET10_NOW });
+      await reopened.keepWordingOnDevice.persist(true);
+      expect(await reopened.keepWordingOnDevice.read()).toBe(true);
+      reopened.close();
+      const { service } = restoreService(name);
+      const inspected = await service.inspect(old, PASS);
+      if (inspected.kind !== "PLAN_READY") throw new Error(JSON.stringify(inspected));
+      expect(inspected.plan.mode).toBe("REPLACE_SAME_LINEAGE_DATABASE");
+      expect(inspected.plan.sourceBackupSchemaVersion).toBe(1);
+      expect(inspected.plan.target.patientSettings).toEqual({ keepWordingOnDevice: false });
+      expect(await service.confirm(inspected.plan, { planHash: inspected.plan.planHash, confirmedAt: LATER as never })).toEqual({ kind: "COMMITTED" });
+      const committed = await openRaw(name);
+      const afterCommit = await readAllTables(committed);
+      committed.close();
+      expect(keepWordingRows(afterCommit)).toEqual([{ key: "keepWordingOnDevice", preferenceSchemaVersion: "app-preference.keep-wording.11c.1", value: true, updatedAt: LATER }]);
+      const restored = await createBrowserJournalRuntime(name, { now: () => LATER as never });
+      expect(await restored.keepWordingOnDevice.read()).toBe(true);
+      restored.close();
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "an old version 1 backup restored into an empty device gives off (the D11 default)",
+    async () => {
+      const { name, runtime } = await createPopulatedDataset();
+      names.push(name);
+      runtime.close();
+      const database = await openRaw(name);
+      const current = await exportFrom(database);
+      database.close();
+      const container = parseContainer(current);
+      const payload = await decryptForTest(container, PASS);
+      payload.backupSchemaVersion = 1;
+      delete payload.patientSettings;
+      const old = await sealForTest(canonicalizeJson(payload), PASS, container.containerId);
+
+      const target = await emptyDataset();
+      const { service } = restoreService(target);
+      const inspected = await service.inspect(old, PASS);
+      if (inspected.kind !== "PLAN_READY") throw new Error(JSON.stringify(inspected));
+      expect(inspected.plan.mode).toBe("RESTORE_INTO_EMPTY_DATABASE");
+      expect(inspected.plan.target.patientSettings).toEqual({ keepWordingOnDevice: false });
+      expect(await service.confirm(inspected.plan, { planHash: inspected.plan.planHash, confirmedAt: LATER as never })).toEqual({ kind: "COMMITTED" });
+      const committed = await openRaw(target);
+      const afterCommit = await readAllTables(committed);
+      committed.close();
+      expect(afterCommit.appPreferences).toEqual([]);
+      const restored = await createBrowserJournalRuntime(target, { now: () => LATER as never });
+      expect(await restored.keepWordingOnDevice.read()).toBe(false);
+      restored.close();
     },
     TIMEOUT,
   );

@@ -69,6 +69,13 @@ import { SHIPPED_REQUEST_CLASS_GATE, type AiRequestClassGate } from "./request-c
  * C6 fix round 1 (brief item 5, C5 carry): the same holds for every provider FAILED marked `notSentToProvider` without usage (the route's
  * pre-call FAILED answers, any 4xx, the browser client's own refusals before its POST): the call is not counted, and the row keeps the
  * existing closed reason. Anything that may have been transmitted (usage present, a throw) keeps the C5 conservative accounting.
+ * Packet 11C Addendum C, Task C2 (hybrid spec D11; Section 9.2 resolver order PRIVATE / OFFLINE / NOT_ACTIVATED / NO_PROVIDER): the
+ * private-mode check is now the first MODE check, before activation (it ran after activation before C2, when nothing wired it), so the
+ * patient's explicit request is audited PRIVACY_REJECTED (mode PRIVATE, zero attempts, usage basis NONE) under the shipped manifest
+ * too. It still follows the local, network-free planning step (`planSlots` and the deterministic composition): an unplannable request
+ * keeps its planner fallback and reason in every mode (C2 fix round 1, M-3: kept there so every deterministic output stays identical).
+ * It is read (awaited) once per request at that point; a request already past it, including its one structural repair, is not cancelled
+ * or altered by a later change.
  */
 export type AiLanguageMode = "REMOTE_AI" | "PRIVATE" | "OFFLINE" | "NOT_ACTIVATED" | "NO_PROVIDER" | "INELIGIBLE" | "CLASS_NOT_QUALIFIED" | "REMOTE_DISABLED" | "REMOTE_NOT_ACCEPTED";
 export type AiHybridExecutionResult =
@@ -82,8 +89,13 @@ export type AiHybridTaskServiceDependencies = Readonly<{
   monotonicMs: () => number;
   provider?: AiShellProviderPort;
   manifest?: AiActivationManifest;
-  /** The patient's "keep wording on this device" preference; private mode is not wired in 11C, and wiring it is a later owner decision. */
-  privateMode?: () => boolean;
+  /**
+   * The patient's "Keep wording on this device" setting (hybrid spec D11). Packet 11C Addendum C, Task C2 wires it: the browser AI
+   * wiring passes the stored setting, read (and awaited, C2 fix round 1) once per request as the first mode check, after the local
+   * planning step (true: mode PRIVATE, PRIVACY_REJECTED, nothing projected or sent, zero attempts). A check that throws or rejects
+   * counts as on. Absent means off.
+   */
+  privateMode?: () => boolean | Promise<boolean>;
   /** Connectivity probe evaluated before any call; absent means online. */
   online?: () => boolean;
   /**
@@ -239,9 +251,20 @@ export function createAiHybridTaskService(dependencies: AiHybridTaskServiceDepen
           : { kind: "COMPOSED", source: "DETERMINISTIC", mode, composition: deterministic, reason: outcome.reason, auditRef: request.requestId, ...extras };
       };
 
+      // Packet 11C Addendum C (C2): the patient's "Keep wording on this device" setting is the first mode check (spec 9.2 resolver
+      // order; after the local planning above), read once here for this request, so the request is audited as PRIVATE under every
+      // manifest. A throwing check counts as on.
+      // Fix round 1 (I-1): the value may be asynchronous (the stored setting, which another tab may have changed); it is awaited here and
+      // a rejection counts as on.
+      let keepOnDevice: boolean;
+      try {
+        keepOnDevice = (await dependencies.privateMode?.()) === true;
+      } catch {
+        keepOnDevice = true;
+      }
+      if (keepOnDevice) return finish("PRIVATE", { kind: "DETERMINISTIC", reason: "PRIVACY_REJECTED" });
       const activation = resolveAiTaskActivation(request.taskType, dependencies.releaseProfile, manifest);
       if (activation.state !== "SYNTHETIC_REMOTE_ENABLED") return finish("NOT_ACTIVATED", { kind: "DETERMINISTIC", reason: activation.reason });
-      if (dependencies.privateMode?.() === true) return finish("PRIVATE", { kind: "DETERMINISTIC", reason: "PRIVACY_REJECTED" });
       if (dependencies.online !== undefined && !dependencies.online()) return finish("OFFLINE", { kind: "DETERMINISTIC", reason: "TRANSPORT_FAILED" });
       if (!dependencies.provider) return finish("NO_PROVIDER", { kind: "DETERMINISTIC", reason: "MISSING_CONFIGURATION" });
       if (planned.plan.remote.eligible !== true) return finish("INELIGIBLE", { kind: "DETERMINISTIC", reason: planned.plan.remote.reason });

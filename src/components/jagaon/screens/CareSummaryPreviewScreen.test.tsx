@@ -612,6 +612,31 @@ describe("Care-summary preview: AI wording action (Packet 11C B4b)", () => {
     expect(screen.queryByRole("button", { name: en.ai.retry })).toBeNull();
   });
 
+  it("C2 fix round 1 (I-1): an asynchronous disclosure check is awaited: true shows the dialog; false (e.g. kept on this device) sends the request without one; a second click while it answers starts nothing", async () => {
+    const { h, recordId } = await prepared();
+    const { port, calls } = fakeWording();
+    let answer!: (required: boolean) => void;
+    port.disclosureRequired.mockImplementation(() => new Promise<boolean>((resolve) => (answer = resolve)) as never);
+    renderAi(h, recordId, port);
+    const action = await aiAction();
+    fireEvent.click(action);
+    fireEvent.click(action);
+    expect(port.disclosureRequired).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await act(async () => answer(true));
+    const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    fireEvent.click(within(dialog).getByRole("button", { name: en.ai.careSummary.confirm }));
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+    expect(calls[0]!.input.disclosure).toBe("ACCEPTED");
+    act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "PROVIDER_TIMEOUT" }));
+    // The next request: the awaited check says no disclosure (the setting is on): no dialog, and the request carries no decision.
+    port.disclosureRequired.mockImplementation(() => Promise.resolve(false) as never);
+    fireEvent.click(await screen.findByRole("button", { name: en.ai.retry }));
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(calls[1]!.input).not.toHaveProperty("disclosure");
+  });
+
   it("C3: each explicit request asks again; an accepted request's Retry is a new request with a new dialog and a new signal", async () => {
     const { h, recordId } = await prepared();
     const { port, calls } = fakeWording({ required: true });

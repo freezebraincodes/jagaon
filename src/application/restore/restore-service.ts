@@ -106,6 +106,9 @@ export function createRestoreService(dependencies: {
               fingerprint: (tables) => currentDatasetFingerprint(tables),
               validateTarget,
               targetTables: target.tables,
+              // Packet 11C Addendum C (C2): the reviewed backup value (absent in an old backup: off); the commit writes it OR the device's
+              // current value, atomically with the dataset (fix round 1, I-2: a restore never turns the setting off).
+              keepWordingOnDevice: target.patientSettings.keepWordingOnDevice === true,
               eventSequenceHighWaterMark: target.eventSequenceHighWaterMark,
               startedAt: plan.createdAt,
               committedAt: now,

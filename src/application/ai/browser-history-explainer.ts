@@ -65,6 +65,11 @@ import { createPatternExplainer, type PatternExplanation } from "./explain-patte
  *   own REMOTE_AI_DISABLED refusal sets a boolean for this runtime, so no further disclosure is offered and later requests are audited
  *   REMOTE_AI_DISABLED without a send; `remoteSwitchKnownOff` stays an additional pluggable check. The route remains the enforcement
  *   point for the switch, origin, access and spend; every route refusal is audited with its own code and no attempt.
+ *
+ * Packet 11C Addendum C, Task C2 (hybrid spec D11): the patient's "Keep wording on this device" setting (`privateMode`, read per
+ * request) is passed to the one hybrid service and is the first condition of "a remote attempt could happen": while it is on, no
+ * disclosure, passcode field or care AI action is offered, and each explicit request is composed in the browser and audited
+ * PRIVACY_REJECTED (mode PRIVATE) with nothing sent. The C3 decisions and the C6 route checks are unchanged.
  */
 export type BrowserHistoryExplainerDependencies = Readonly<{
   history: RecordedHistoryQueryPort;
@@ -86,6 +91,22 @@ export type BrowserHistoryExplainerDependencies = Readonly<{
    * throws counts as known off. It never accepts anything: the service and the route decide independently.
    */
   remoteSwitchKnownOff?: () => boolean;
+  /**
+   * Packet 11C Addendum C, Task C2 (hybrid spec D11): the patient's "Keep wording on this device" setting. The shipped app passes a
+   * function over the stored setting; it is read per request (a change applies from the next request, no rebuild). True: no AI action or
+   * disclosure is offered (so no passcode field), and every explicit request of either flow composes deterministically in the browser,
+   * audited PRIVACY_REJECTED (mode PRIVATE, zero attempts, usage basis NONE) under every manifest; nothing is sent. Absent: off. A check
+   * that throws counts as on.
+   * C2 fix round 1 (I-1): it may answer asynchronously (the app: this tab's choice, else the STORED value, so a change made in another
+   * tab counts at once); it is awaited by both disclosure checks and the service, and a rejection counts as on.
+   */
+  privateMode?: () => boolean | Promise<boolean>;
+  /**
+   * C2 fix round 1 (I-1): this tab's in-memory value, for render-time offers that must answer synchronously (the care action's
+   * `available`). Never decisive for a send: the disclosure checks and the service await `privateMode`. Absent: a synchronous
+   * `privateMode` answer is used. A hint that throws counts as on.
+   */
+  privateModeHint?: () => boolean;
 }>;
 
 /** Packet 11C B4b: the runtime's care-preparation ports the care-summary wording reads and replaces through. */
@@ -107,7 +128,8 @@ export type BrowserAiAssistanceDependencies = BrowserHistoryExplainerDependencie
  */
 export type BrowserCareSummaryWording = Readonly<{
   available(current: CareSummarySnapshotPayload): boolean;
-  disclosureRequired(current: CareSummarySnapshotPayload): boolean;
+  /** C2 fix round 1 (I-1): asynchronous, so it can await the stored "Keep wording on this device" setting; never rejects. */
+  disclosureRequired(current: CareSummarySnapshotPayload): Promise<boolean>;
   compose(input: { snapshotRef: ExpectedHead; locale: AiLocale; disclosure?: AiRemoteUseRequestDecision }, signal?: AbortSignal): Promise<CareSummaryAiOutcome>;
   /**
    * Packet 11C Addendum C (C5): the disclosure shown for an explicit request closed without the patient's decision (locale or preview
@@ -186,6 +208,31 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
       return true;
     }
   };
+  // Packet 11C Addendum C (C2; fix round 1 I-1): the patient's "Keep wording on this device" setting, awaited per request (the app
+  // passes this tab's choice, else the stored value another tab may have changed); a throwing or rejecting check counts as on.
+  const keepWordingOnDevice = async () => {
+    try {
+      return (await dependencies.privateMode?.()) === true;
+    } catch {
+      return true;
+    }
+  };
+  // Render-time offers (the care action's `available`, which must answer synchronously) use this tab's in-memory value (`privateModeHint`,
+  // kept in step with other tabs by the change notice); without a hint, a synchronous `privateMode` answer. Every decision that can lead
+  // to a send (both disclosure checks and the service) awaits `keepWordingOnDevice` instead.
+  const keepWordingHint = () => {
+    try {
+      if (dependencies.privateModeHint) return dependencies.privateModeHint() === true;
+      const value = dependencies.privateMode?.();
+      if (value instanceof Promise) {
+        void value.catch(() => undefined);
+        return false;
+      }
+      return value === true;
+    } catch {
+      return true;
+    }
+  };
   // ONE hybrid service for every flow of this runtime (Packet 11C B4b).
   const service = createAiHybridTaskService({
     releaseProfile: CURRENT_RELEASE_PROFILE,
@@ -194,11 +241,13 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
     monotonicMs: dependencies.monotonicMs ?? deviceMonotonicMs,
     manifest,
     provider: createBrowserShellClient({ disclosure: decisions.disclosure, fetcher: dependencies.fetcher, accessPasscode: passcode.read, onRefusal }),
+    privateMode: keepWordingOnDevice,
     online,
     requestClassGate,
     remoteSwitchKnownOff: switchKnownOff,
   });
-  const remoteEnabled = (taskType: ShellTask) => online() && !switchKnownOff() && resolveAiTaskActivation(taskType, CURRENT_RELEASE_PROFILE, manifest).state === "SYNTHETIC_REMOTE_ENABLED";
+  const remoteEnabled = (taskType: ShellTask) =>
+    !keepWordingHint() && online() && !switchKnownOff() && resolveAiTaskActivation(taskType, CURRENT_RELEASE_PROFILE, manifest).state === "SYNTHETIC_REMOTE_ENABLED";
   /**
    * Packet 11C Addendum C (C1, C3): whether exactly this request could be sent: the same planner and value-blind projection as the
    * service (reads, writes and sends nothing), then the class gate. A request that is not remote-eligible or of an unqualified class
@@ -231,11 +280,12 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
   /** The history request the patient is about to make for this comparison and locale (one local read; writes and sends nothing). */
   const historyRequestAdmissible = async (input: { factId: string; locale: AiLocale }): Promise<boolean> => {
     try {
-      if (!remoteEnabled("EXPLAIN_PATTERN")) return false;
+      // C2 fix round 1 (I-1): the awaited setting (another tab may have turned it on), not only this tab's in-memory value.
+      if (!remoteEnabled("EXPLAIN_PATTERN") || (await keepWordingOnDevice())) return false;
       const loaded = await dependencies.history.loadExplainablePattern({ factId: input.factId });
       if (loaded.kind !== "EXPLAINABLE") return false;
       const request = buildSourceBackedExplainRequest({ view: loaded.view, locale: input.locale, requestId: requestId(), requestedAt: now() });
-      return requestAdmissible(request) && remoteEnabled("EXPLAIN_PATTERN");
+      return requestAdmissible(request) && remoteEnabled("EXPLAIN_PATTERN") && !(await keepWordingOnDevice());
     } catch {
       return false;
     }
@@ -263,7 +313,8 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
   const careSummary: BrowserCareSummaryWording = Object.freeze({
     available: careAvailable,
     // Every explicit request needs its own decision (C3), so the disclosure is required exactly when the request could be sent.
-    disclosureRequired: careAvailable,
+    // C2 fix round 1 (I-1): with the awaited setting (another tab may have turned it on); never rejects.
+    disclosureRequired: async (current: CareSummarySnapshotPayload) => careAvailable(current) && !(await keepWordingOnDevice()),
     compose: (input: { snapshotRef: ExpectedHead; locale: AiLocale; disclosure?: AiRemoteUseRequestDecision }, signal?: AbortSignal) =>
       decisions.run(input.disclosure, signal, (token) => composer.composeCareSummaryWithAi({ snapshotRef: input.snapshotRef, locale: input.locale }, token)),
     disclosureClosed: moot("DRAFT_CARE_PREPARATION_SUMMARY"),

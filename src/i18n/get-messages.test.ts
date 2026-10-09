@@ -108,6 +108,43 @@ describe("getMessages", () => {
   });
 });
 
+/**
+ * Packet 11C Addendum C, Task C2 (hybrid spec D11): the "Keep wording on this device" setting copy (ai-wording-setting.11c.1). The
+ * English label is fixed by the spec; the explanatory line and the zh label and line (您) are new candidates, human acceptance pending.
+ * The group sits outside every approved group, so approved rows stay byte-identical.
+ */
+describe("Packet 11C C2: Keep wording on this device copy (human acceptance pending)", () => {
+  it("ships exactly the spec's English label, the candidate line and the zh candidates", () => {
+    expect(getMessages("en-SG").aiWording).toEqual({
+      keepOnDeviceLabel: "Keep wording on this device",
+      keepOnDeviceBody: "When on, JagaOn uses its standard wording and never sends an AI request.",
+    });
+    expect(getMessages("zh-SG").aiWording).toEqual({
+      keepOnDeviceLabel: "措辞只在这部装置上生成",
+      keepOnDeviceBody: "开启后，JagaOn 会为您使用标准措辞，不会发送任何 AI 请求。",
+    });
+  });
+
+  // Fix round 1 (M-6): 这部装置 follows the Packet 10 data copy; the main catalogue uses 此设备. The wording is pending human review
+  // (an alternative candidate is listed in the C2 report), so this only pins the current candidate.
+  it("zh uses 您 (never 你) and full-width punctuation; the current candidate label says 这部装置", () => {
+    const zh = getMessages("zh-SG").aiWording;
+    expect(zh.keepOnDeviceBody).toContain("您");
+    expect(Object.values(zh).join("")).not.toMatch(/你|[,.;:!?]/);
+    expect(zh.keepOnDeviceLabel).toContain("这部装置");
+  });
+
+  it("adds no key to an approved group", () => {
+    for (const locale of ["en-SG", "zh-SG"] as const) {
+      const messages = getMessages(locale);
+      for (const group of ["ai", "aiAccess", "more", "settings", "shared"] as const) {
+        expect(Object.keys(messages[group])).not.toContain("keepOnDeviceLabel");
+        expect(Object.keys(messages[group])).not.toContain("keepOnDeviceBody");
+      }
+    }
+  });
+});
+
 describe("Packet 9A food copy (09-bilingual-copy-matrix.md Section 1)", () => {
   const en = getMessages("en-SG").food;
   const zh = getMessages("zh-SG").food;

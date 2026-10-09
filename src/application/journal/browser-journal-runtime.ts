@@ -13,6 +13,8 @@ import {
 } from "@/domain/shared/identifiers";
 import type { Instant } from "@/domain/shared/time";
 import { createBootstrapLocaleRepository } from "@/storage/bootstrap-locale-repository";
+import { createKeepWordingPreferenceRepository } from "@/storage/keep-wording-preference-repository";
+import { createKeepWordingChangeNotice } from "@/application/storage/keep-wording-change-notice";
 import { storageFailure } from "@/storage/storage-failure";
 import { createStorageMetadataRepository, localStateCleanupPendingRow } from "@/storage/storage-metadata";
 import { acquireDatasetPresence } from "@/application/storage/browser-dataset-lifecycle";
@@ -80,6 +82,17 @@ export type JagaOnRuntime = {
   carePreparation: { commands: CarePreparationCommandPort; query: CarePreparationQueryPort };
   resolveLocale(): Promise<SupportedLocale>;
   persistLocale(locale: SupportedLocale): Promise<void>;
+  /**
+   * Packet 11C Addendum C, Task C2 (hybrid spec D11): the patient's "Keep wording on this device" setting (default off: no stored
+   * row). `read` resolves true for a stored row that cannot be read (fail closed). Covered by backup, restore and delete-all.
+   */
+  keepWordingOnDevice: {
+    read(): Promise<boolean>;
+    /** Stores the choice, then (C2 fix round 1, I-1) announces the change to the other open tabs of this dataset. */
+    persist(keepOnDevice: boolean): Promise<void>;
+    /** C2 fix round 1 (I-1): called when another tab stored a change (re-read the value); returns the unsubscribe function. */
+    subscribe(listener: () => void): () => void;
+  };
   resetDemo(): Promise<void>;
   /**
    * Packet 11C B2b: the append-only local AI invocation audit port (the existing Packet 10 `aiInvocationAudits` table), written only by
@@ -205,6 +218,10 @@ export async function createBrowserJournalRuntime(
   const journalCommands = createJournalCommandService(database, { now, ids });
   const query = createJournalQueryService(database);
   const localeRepository = createBootstrapLocaleRepository(database);
+  // Packet 11C Addendum C (C2): the patient's "Keep wording on this device" setting, stored next to the language; fix round 1 (I-1):
+  // a stored change is announced to the other open tabs of this dataset.
+  const keepWordingRepository = createKeepWordingPreferenceRepository(database);
+  const keepWordingNotice = createKeepWordingChangeNotice(database.name);
   const coordinator = createIntelligenceCoordinator(database, {
     now,
     ids: { ...ids, evaluationId: () => crypto.randomUUID(), leaseToken: () => crypto.randomUUID() },
@@ -460,6 +477,13 @@ export async function createBrowserJournalRuntime(
     async persistLocale(locale: SupportedLocale) {
       await localeRepository.resolve(locale, now());
     },
+    keepWordingOnDevice: Object.freeze({
+      read: () => keepWordingRepository.read(),
+      async persist(keepOnDevice: boolean) {
+        await keepWordingRepository.persist(keepOnDevice, now());
+        keepWordingNotice.announce();
+      },
+    }),
     async resetDemo() {
       await intelligence;
       await packet8;
@@ -482,9 +506,12 @@ export async function createBrowserJournalRuntime(
       complete: () => metadata.clearLocalStateCleanupPending(),
     }),
     ...ports,
+    // C2 fix round 1 (I-1): `subscribe` is synchronous (it returns the unsubscribe function), so it is added outside the async gate.
+    keepWordingOnDevice: Object.freeze({ ...ports.keepWordingOnDevice, subscribe: keepWordingNotice.subscribe }),
     integrityLock: gate.current,
     onIntegrityLock: gate.subscribe,
     close() {
+      keepWordingNotice.close();
       database.close();
       releasePresence();
     },

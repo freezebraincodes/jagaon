@@ -13,6 +13,63 @@ function deletePort(result: Awaited<ReturnType<DeleteAllPort["confirm"]>> = { ki
   } satisfies DeleteAllPort;
 }
 
+/**
+ * Packet 11C Addendum C, Task C2 (hybrid spec D11): one native checkbox for the patient's "Keep wording on this device" setting. The
+ * English label is fixed by the spec; the explanatory line and the zh wording (您) are new candidates, human acceptance pending.
+ */
+describe("SettingsScreen: Keep wording on this device (Packet 11C C2)", () => {
+  function renderWith(locale: "en-SG" | "zh-SG", value: boolean | null, change = vi.fn(async (_next: boolean) => undefined)) {
+    const messages = getMessages(locale);
+    const view = render(
+      <SettingsScreen messages={messages} locale={locale} setLocale={vi.fn()} persistLocale={vi.fn()} deleteAll={deletePort()} onDatasetDeleted={vi.fn()} keepWording={{ value, change }} />,
+    );
+    return { messages, change, view };
+  }
+
+  it.each(["en-SG", "zh-SG"] as const)("%s: a keyboard-reachable native checkbox, named by its label and described by its line; default off", (locale) => {
+    const { messages } = renderWith(locale, false);
+    const toggle = screen.getByRole("checkbox", { name: messages.aiWording.keepOnDeviceLabel });
+    expect(toggle.tagName).toBe("INPUT");
+    expect(toggle).toHaveAttribute("type", "checkbox");
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toBeEnabled();
+    expect(toggle).toHaveAccessibleDescription(messages.aiWording.keepOnDeviceBody);
+    // Reachable by keyboard: a native, focusable control in the tab order.
+    toggle.focus();
+    expect(toggle).toHaveFocus();
+    expect(toggle).not.toHaveAttribute("tabindex", "-1");
+  });
+
+  it.each(["en-SG", "zh-SG"] as const)("%s: turning it on and off applies and persists each choice; the state is the checkbox's own", async (locale) => {
+    const { messages, change, view } = renderWith(locale, false);
+    fireEvent.click(screen.getByRole("checkbox", { name: messages.aiWording.keepOnDeviceLabel }));
+    await waitFor(() => expect(change).toHaveBeenLastCalledWith(true));
+    view.rerender(
+      <SettingsScreen messages={messages} locale={locale} setLocale={vi.fn()} persistLocale={vi.fn()} deleteAll={deletePort()} onDatasetDeleted={vi.fn()} keepWording={{ value: true, change }} />,
+    );
+    const toggle = screen.getByRole("checkbox", { name: messages.aiWording.keepOnDeviceLabel });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(change).toHaveBeenLastCalledWith(false));
+    expect(change).toHaveBeenCalledTimes(2);
+  });
+
+  it("is disabled (not guessed) while the dataset is not open, and shows the existing storage message when saving fails", async () => {
+    const { messages } = renderWith("en-SG", null);
+    expect(screen.getByRole("checkbox", { name: messages.aiWording.keepOnDeviceLabel })).toBeDisabled();
+    cleanup();
+    const failing = renderWith("en-SG", false, vi.fn(async () => { throw new Error("storage"); }));
+    fireEvent.click(screen.getByRole("checkbox", { name: failing.messages.aiWording.keepOnDeviceLabel }));
+    expect(await screen.findByText(failing.messages.shared.storageUnavailable)).toBeInTheDocument();
+  });
+
+  it("renders no toggle when no setting is wired", () => {
+    const messages = getMessages("en-SG");
+    render(<SettingsScreen messages={messages} locale="en-SG" setLocale={vi.fn()} persistLocale={vi.fn()} deleteAll={deletePort()} onDatasetDeleted={vi.fn()} />);
+    expect(screen.queryByRole("checkbox", { name: messages.aiWording.keepOnDeviceLabel })).toBeNull();
+  });
+});
+
 describe("SettingsScreen", () => {
   it("persists an explicit locale selection", async () => {
     const persistLocale = vi.fn().mockResolvedValue(undefined);

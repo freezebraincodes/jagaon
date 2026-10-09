@@ -120,6 +120,24 @@ describe("whole-dataset deletion (SDEL-012)", () => {
     INTEGRATION_TIMEOUT_MS,
   );
 
+  it(
+    "Packet 11C C2: deleting all data also removes the 'Keep wording on this device' setting; the new dataset reads it as off",
+    async () => {
+      const h = await setup();
+      await h.runtime.keepWordingOnDevice.persist(true);
+      expect(await h.runtime.keepWordingOnDevice.read()).toBe(true);
+      expect(await h.service.confirm(h.service.prepare(), "DELETE")).toEqual({ kind: "DELETED", localStateCleared: true });
+      expect(await Dexie.exists(h.name)).toBe(false);
+      const restarted = await createBrowserJournalRuntime(h.name, { now: () => PACKET10_NOW, seedSyntheticScenarioOnCreate: false });
+      expect(await restarted.keepWordingOnDevice.read()).toBe(false);
+      restarted.close();
+      const database = await openRaw(h.name);
+      expect(await database.table("appPreferences").toArray()).toEqual([]);
+      database.close();
+    },
+    INTEGRATION_TIMEOUT_MS,
+  );
+
   it("waits for an unknown connection rather than claiming success, and reports it as blocked meanwhile", async () => {
     const name = `packet10-delete-blocked-${crypto.randomUUID()}`;
     names.push(name);

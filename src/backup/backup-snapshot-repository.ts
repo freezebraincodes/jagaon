@@ -6,7 +6,8 @@ import type { JagaOnDatabase } from "@/storage/database";
 import { StorageOperationError } from "@/storage/storage-failure";
 import type { DatabaseIdentityRow } from "@/storage/storage-metadata";
 import { BackupCanonicalisationError, canonicaliseBackupTable } from "./backup-canonicalisation";
-import { BACKUP_TABLE_NAMES_V1, type BackupTableSetV1 } from "./backup-payload-v1";
+import { KEEP_WORDING_PREFERENCE_KEY, type AppPreferenceRow } from "@/storage/app-preference-row";
+import { BACKUP_TABLE_NAMES_V1, type BackupPatientSettings, type BackupTableSetV1 } from "./backup-payload-v1";
 
 /**
  * One consistent, fully validated read-only snapshot for export (storage-
@@ -20,6 +21,11 @@ export type ValidatedBackupSnapshot = {
   identity: DatabaseIdentityRow;
   eventSequenceHighWaterMark: number;
   tables: BackupTableSetV1;
+  /**
+   * Packet 11C Addendum C (C2): the patient's "Keep wording on this device" setting, read from the validated `appPreferences` rows of
+   * the same read transaction (no row: off). Only this value is exported; the table itself stays excluded.
+   */
+  patientSettings: BackupPatientSettings;
 };
 
 export type BackupSnapshotRepository = { readValidatedSnapshot(): Promise<ValidatedBackupSnapshot> };
@@ -51,9 +57,13 @@ export function createBackupSnapshotRepository(database: JagaOnDatabase): Backup
         throw new StorageOperationError("BACKUP_VALIDATION_FAILED", { tableName: "storageMetadata" });
       }
 
+      // Every appPreferences row passed its closed codec above (verifyDataset), so the setting row, when present, is a valid boolean.
+      const keepWording = (all.appPreferences as AppPreferenceRow[]).find((row) => row.key === KEEP_WORDING_PREFERENCE_KEY);
+      const patientSettings: BackupPatientSettings = { keepWordingOnDevice: keepWording?.value === true };
+
       try {
         const tables = Object.fromEntries(BACKUP_TABLE_NAMES_V1.map((name) => [name, canonicaliseBackupTable(name, all[name])])) as BackupTableSetV1;
-        return { identity, eventSequenceHighWaterMark: verification.eventSequenceHighWaterMark, tables };
+        return { identity, eventSequenceHighWaterMark: verification.eventSequenceHighWaterMark, tables, patientSettings };
       } catch (error) {
         if (error instanceof BackupCanonicalisationError) throw new StorageOperationError("BACKUP_VALIDATION_FAILED", error.tableName ? { tableName: error.tableName } : {});
         throw error;

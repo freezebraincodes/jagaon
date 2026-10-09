@@ -239,6 +239,88 @@ describe("hybrid task service", () => {
     expectOneValidRow(rows, reason);
     expect(rows[0]!.attempts.count).toBe(0);
   });
+  /**
+   * Packet 11C Addendum C, Task C2 (hybrid spec D11, Section 9.2 mode resolver: PRIVATE / OFFLINE / NOT_ACTIVATED / NO_PROVIDER): the
+   * patient's "Keep wording on this device" setting is the first mode check (after the local planning step), before activation, so its
+   * explicit request is audited as what it is under every manifest: mode PRIVATE, PRIVACY_REJECTED, no attempt, usage basis NONE, no
+   * provider model, no source, no usage.
+   * Nothing is planned for sending: no projection, class check, switch check or disclosure, and no provider call.
+   */
+  describe("Packet 11C Addendum C, C2: private mode (Keep wording on this device)", () => {
+    const privateRow = (row: AiInvocationAuditRow) => {
+      expect(row).toMatchObject({ auditSchemaVersion: "ai-invocation-audit.11c.2", outcomeCode: "PRIVACY_REJECTED", attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, providerModel: null, sourceRevisions: [], usageBasis: "NONE" });
+      expect(row.measurements).toMatchObject({ inputTokens: null, outputTokens: null, costMicroUsd: null });
+    };
+    it.each([
+      ["the shipped manifest (deterministic-only)", { manifest: AI_ACTIVATION_MANIFEST, requestClassGate: undefined }],
+      ["an activated manifest with a QUALIFIED class", {}],
+    ])("under %s: mode PRIVATE, one exact PRIVACY_REJECTED row, nothing projected, gated, disclosed or sent", async (_label, overrides) => {
+      for (const fixture of [EN, CARE]) {
+        const decide = vi.fn(async () => "ACCEPTED" as const);
+        const invoke = vi.fn();
+        const admit = vi.fn<AiRequestClassGate["admit"]>(() => ({ admitted: true, classId: "test", reason: null }) as never);
+        const switchKnownOff = vi.fn(() => false);
+        const rows: AiInvocationAuditRow[] = [];
+        const run = harness([], {
+          requestClassGate: { admit, anyAdmissible: () => true },
+          ...overrides,
+          privateMode: () => true,
+          remoteSwitchKnownOff: switchKnownOff,
+          provider: { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, remoteUse: { decide }, invoke },
+          audit: { append: async (row: AiInvocationAuditRow) => void rows.push(row) },
+        });
+        projectorSpy.mockClear();
+        const result = await run.service.execute(fixture.request);
+        expect(result).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "PRIVATE", reason: "PRIVACY_REJECTED" });
+        expect((result as any).composition).toEqual(composeDeterministic(fixture.request, fixture.plan, fixture.atoms, AI_HYBRID_RUNTIME_BUNDLES[fixture.plan.taskType]));
+        expect(projectorSpy).not.toHaveBeenCalled();
+        expect(admit).not.toHaveBeenCalled();
+        expect(switchKnownOff).not.toHaveBeenCalled();
+        expect(decide).not.toHaveBeenCalled();
+        expect(invoke).not.toHaveBeenCalled();
+        expectOneValidRow(rows, "PRIVACY_REJECTED", AI_HYBRID_RUNTIME_BUNDLES[fixture.plan.taskType].bundleKey);
+        privateRow(rows[0]!);
+      }
+    });
+    it("the setting is read per request (no rebuild): off sends, on keeps the wording on the device, off sends again", async () => {
+      let keep = false;
+      const run = harness([completed(VALID), completed(VALID)], { privateMode: () => keep });
+      expect(await run.service.execute(EN.request)).toMatchObject({ source: "AI", mode: "REMOTE_AI" });
+      keep = true;
+      expect(await run.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", mode: "PRIVATE" });
+      keep = false;
+      expect(await run.service.execute(EN.request)).toMatchObject({ source: "AI", mode: "REMOTE_AI" });
+      expect(run.calls).toHaveLength(2);
+      expect(run.rows.map((row) => row.outcomeCode)).toEqual(["ACCEPTED", "PRIVACY_REJECTED", "ACCEPTED"]);
+    });
+    it("a check that throws keeps the wording on the device (fail closed)", async () => {
+      const run = harness([completed(VALID)], { privateMode: () => { throw new Error("broken"); } });
+      expect(await run.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", mode: "PRIVATE", reason: "PRIVACY_REJECTED" });
+      expect(run.calls).toHaveLength(0);
+      privateRow(run.rows[0]!);
+      // Fix round 1 (I-1): an asynchronous value is awaited; a rejection also keeps the wording on the device.
+      const rejecting = harness([completed(VALID)], { privateMode: async () => { throw new Error("unreadable"); } });
+      expect(await rejecting.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", mode: "PRIVATE", reason: "PRIVACY_REJECTED" });
+      expect(rejecting.calls).toHaveLength(0);
+      const stored = harness([completed(VALID)], { privateMode: async () => true });
+      expect(await stored.service.execute(EN.request)).toMatchObject({ mode: "PRIVATE" });
+      expect(stored.calls).toHaveLength(0);
+    });
+    it("coordinator ruling: switching it on while a request is in flight does not cancel or alter that request; the next request is private", async () => {
+      let keep = false;
+      let release!: (result: ProviderInvocationResult) => void;
+      const pending = new Promise<ProviderInvocationResult>((resolve) => (release = resolve));
+      const run = harness([pending, completed(VALID)], { privateMode: () => keep });
+      const inFlight = run.service.execute(EN.request);
+      await vi.waitFor(() => expect(run.calls).toHaveLength(1));
+      keep = true;
+      release(completed(VALID));
+      expect(await inFlight).toMatchObject({ source: "AI", mode: "REMOTE_AI" });
+      expect(await run.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", mode: "PRIVATE" });
+      expect(run.calls).toHaveLength(1);
+      expect(run.rows.map((row) => row.outcomeCode)).toEqual(["ACCEPTED", "PRIVACY_REJECTED"]);
+    });
+  });
   it.each([
     ["S1 malformed twice", [completed(`${JSON.stringify(VALID)}}`), completed(`${JSON.stringify(VALID)}}`)], "SCHEMA_INVALID", 2],
     ["S5 digit", [completed({ ...VALID, shells: { ...(VALID as any).shells, evidence: "About 10 of {{S3}}." } })], "FACT_FIDELITY_FAILED", 1],

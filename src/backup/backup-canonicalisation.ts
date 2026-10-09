@@ -1,5 +1,5 @@
 import { canonicalizeJson } from "@/application/contracts/canonical-json";
-import { BACKUP_PRIMARY_KEYS, BACKUP_TABLE_NAMES_V1, TABLE_ENVELOPE_SCHEMA_VERSION, type BackupPayloadV1, type BackupTableManifest, type BackupTableNameV1, type BackupTableSetV1 } from "./backup-payload-v1";
+import { BACKUP_PRIMARY_KEYS, BACKUP_TABLE_NAMES_V1, TABLE_ENVELOPE_SCHEMA_VERSION, type BackupPayloadV1, type BackupPayloadV2, type BackupTableManifest, type BackupTableNameV1, type BackupTableSetV1 } from "./backup-payload-v1";
 
 /**
  * `JAGAON_CANONICAL_JSON_V1` canonicalisation for the backup (spec 7.4).
@@ -80,7 +80,7 @@ export async function createBackupManifest(
   return manifests;
 }
 
-export function canonicaliseBackupPayload(payload: BackupPayloadV1): Uint8Array {
+export function canonicaliseBackupPayload(payload: BackupPayloadV1 | BackupPayloadV2): Uint8Array {
   try {
     return utf8(canonicalizeJson(payload));
   } catch {

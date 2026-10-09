@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   appPreferenceRowSchema,
+  createKeepWordingPreferenceRow,
   createLanguagePreferenceRow,
+  KEEP_WORDING_PREFERENCE_KEY,
+  KEEP_WORDING_PREFERENCE_SCHEMA_VERSION,
   type AppPreferenceRow,
 } from "./app-preference-row";
 import { type Instant, instantSchema } from "@/domain/shared/time";
@@ -145,6 +148,42 @@ describe("appPreferenceRowSchema rejection", () => {
       updatedAt: "2026-09-30T10:00:00Z",
     });
     expect(result.success).toBe(false);
+  });
+});
+
+/**
+ * Packet 11C Addendum C, Task C2 (hybrid spec D11): the patient's "Keep wording on this device" setting is one more closed key of the
+ * same settings row. The new row names its own version (the C5 pattern); the existing language row is unchanged and still valid.
+ */
+describe("keepWordingOnDevice preference row (Packet 11C C2)", () => {
+  const at = "2026-10-08T01:00:00.000Z";
+  it("creates and accepts the versioned row for on and off, exactly", () => {
+    for (const value of [true, false]) {
+      const row = createKeepWordingPreferenceRow(value, makeInstant(at));
+      expect(row).toEqual({ key: "keepWordingOnDevice", preferenceSchemaVersion: "app-preference.keep-wording.11c.1", value, updatedAt: at });
+      expect(appPreferenceRowSchema.parse(row)).toEqual(row);
+    }
+    expect(KEEP_WORDING_PREFERENCE_KEY).toBe("keepWordingOnDevice");
+    expect(KEEP_WORDING_PREFERENCE_SCHEMA_VERSION).toBe("app-preference.keep-wording.11c.1");
+  });
+  it("still accepts the unversioned language row exactly as before", () => {
+    expect(appPreferenceRowSchema.safeParse({ key: "language", value: "zh-SG", updatedAt: at }).success).toBe(true);
+    expect(appPreferenceRowSchema.safeParse({ key: "language", preferenceSchemaVersion: "app-preference.keep-wording.11c.1", value: "zh-SG", updatedAt: at }).success).toBe(false);
+  });
+  it("rejects a missing or unknown version, a non-boolean value, a missing field and an unknown field", () => {
+    const base = { key: "keepWordingOnDevice", preferenceSchemaVersion: "app-preference.keep-wording.11c.1", value: true, updatedAt: at };
+    for (const bad of [
+      { ...base, preferenceSchemaVersion: undefined },
+      { ...base, preferenceSchemaVersion: "app-preference.keep-wording.11c.2" },
+      { ...base, value: "true" },
+      { ...base, value: 1 },
+      { ...base, value: "en-SG" },
+      { key: base.key, preferenceSchemaVersion: base.preferenceSchemaVersion, updatedAt: at },
+      { ...base, updatedAt: "2026-10-08 01:00" },
+      { ...base, extra: true },
+    ]) {
+      expect(appPreferenceRowSchema.safeParse(JSON.parse(JSON.stringify(bad))).success, JSON.stringify(bad)).toBe(false);
+    }
   });
 });
 

@@ -7,7 +7,7 @@ import { createBackupSnapshotRepository } from "./backup-snapshot-repository";
 import { capturingFilePort, decryptForTest, parseContainer, sealForTest } from "./backup-test-support";
 import { parseCanonicalContainerV1 } from "./backup-container-reader";
 import { createBackupRestoreValidator } from "./backup-restore-validator";
-import { migrateBackupPayload, type BackupPayloadMigration } from "./backup-migration-registry";
+import { BACKUP_PAYLOAD_MIGRATIONS, migrateBackupPayload, type BackupPayloadMigration } from "./backup-migration-registry";
 import { createWebCryptoPort } from "./web-crypto-port";
 import { encodeBase64Url } from "./base64url";
 
@@ -79,6 +79,9 @@ describe("authenticate before use and validate completely (BAK-011, RST-007)", (
       expect(candidate.containerId).toBe(parseContainer(file).containerId);
       expect(candidate.payloadFingerprint).toMatch(/^[0-9a-f]{64}$/);
       expect(candidate.tables).toEqual(payload.tables);
+      // Packet 11C C2: the exported setting (never set in this dataset: off), exactly.
+      expect(candidate.patientSettings).toEqual({ keepWordingOnDevice: false });
+      expect(candidate.sourceBackupSchemaVersion).toBe(2);
     },
     TIMEOUT,
   );
@@ -118,13 +121,17 @@ describe("authenticate before use and validate completely (BAK-011, RST-007)", (
         ["safety row", reseal((copy) => (((copy.tables as Record<string, Array<Record<string, unknown>>>).recordHeads![0]!).recordType = "SAFETY_EVENT"))],
         ["runtime pointer", reseal((copy) => (copy.requestedRuntimePointers = [{ runtimeKind: "DETERMINISTIC", manifestId: "m", manifestVersion: "1" }]))],
         ["not canonical", sealForTest(JSON.stringify(payload, null, 2), PASS, payload.containerId as string)],
-        ["duplicate key", sealForTest(canonicalizeJson(payload).replace('{"backupSchemaVersion":1', '{"backupSchemaVersion":1,"backupSchemaVersion":1'), PASS, payload.containerId as string)],
+        // Packet 11C C2: the current payload is version 2 (a duplicated version key is still refused).
+        ["duplicate key", sealForTest(canonicalizeJson(payload).replace('{"backupSchemaVersion":2', '{"backupSchemaVersion":2,"backupSchemaVersion":2'), PASS, payload.containerId as string)],
+        ["patient settings: unknown field", reseal((copy) => (copy.patientSettings = { keepWordingOnDevice: false, language: "en-SG" }))],
+        ["patient settings: not a boolean", reseal((copy) => (copy.patientSettings = { keepWordingOnDevice: "false" }))],
+        ["patient settings: missing", reseal((copy) => delete copy.patientSettings)],
       ];
       for (const [label, sealed] of cases) {
         // The manifest is recomputed for the reordered rows, so only order fails there.
         expect(await codeOf(validator().validate(await sealed, PASS)), label).toBe("BACKUP_PAYLOAD_INVALID");
       }
-      expect(await codeOf(validator().validate(await reseal((copy) => (copy.backupSchemaVersion = 2)), PASS))).toBe("BACKUP_VERSION_UNSUPPORTED");
+      expect(await codeOf(validator().validate(await reseal((copy) => (copy.backupSchemaVersion = 3)), PASS))).toBe("BACKUP_VERSION_UNSUPPORTED");
       expect(await codeOf(validator().validate(await reseal((copy) => (copy.sourceLogicalStorageSchemaVersion = 2)), PASS))).toBe("BACKUP_VERSION_UNSUPPORTED");
     },
     TIMEOUT,
@@ -133,28 +140,72 @@ describe("authenticate before use and validate completely (BAK-011, RST-007)", (
 
 describe("closed in-memory backup migration (RST-008)", () => {
   const v0to1: BackupPayloadMigration = {
-    migrationId: "jagaon.backup.0001-test",
+    migrationId: "jagaon.backup.test-step-0-to-1",
     fromBackupSchemaVersion: 0,
     toBackupSchemaVersion: 1,
     migrate: (old) => ({ ...old, backupSchemaVersion: 1 }),
   };
 
-  it("has no registered migration for the first payload version and fails closed on unknown versions", () => {
-    expect(migrateBackupPayload({ backupSchemaVersion: 1 })).toEqual({ payload: { backupSchemaVersion: 1 }, appliedMigrationIds: [] });
+  // Packet 11C Addendum C, Task C2 (deliberate change): payload version 2 adds the patient settings, so the compiled registry now has
+  // exactly one step, version 1 → 2, which adds the "Keep wording on this device" setting as off. Unknown versions still fail closed.
+  it("registers exactly the version 1 → 2 step (the setting defaults to off) and fails closed on unknown versions", () => {
+    expect(BACKUP_PAYLOAD_MIGRATIONS.map((step) => [step.migrationId, step.fromBackupSchemaVersion, step.toBackupSchemaVersion])).toEqual([["jagaon.backup.0001-patient-settings", 1, 2]]);
+    expect(migrateBackupPayload({ backupSchemaVersion: 1 })).toEqual({ payload: { backupSchemaVersion: 2, patientSettings: { keepWordingOnDevice: false } }, appliedMigrationIds: ["jagaon.backup.0001-patient-settings"] });
+    expect(migrateBackupPayload({ backupSchemaVersion: 2, patientSettings: { keepWordingOnDevice: true } })).toEqual({ payload: { backupSchemaVersion: 2, patientSettings: { keepWordingOnDevice: true } }, appliedMigrationIds: [] });
+    // A version 1 payload never carried the setting; one that claims to is refused, never silently overwritten.
+    expect(() => migrateBackupPayload({ backupSchemaVersion: 1, patientSettings: { keepWordingOnDevice: true } })).toThrow(expect.objectContaining({ code: "BACKUP_PAYLOAD_INVALID" }));
     expect(() => migrateBackupPayload({ backupSchemaVersion: 0 })).toThrow(expect.objectContaining({ code: "BACKUP_VERSION_UNSUPPORTED" }));
-    expect(() => migrateBackupPayload({ backupSchemaVersion: 2 })).toThrow(expect.objectContaining({ code: "BACKUP_VERSION_UNSUPPORTED" }));
+    expect(() => migrateBackupPayload({ backupSchemaVersion: 3 })).toThrow(expect.objectContaining({ code: "BACKUP_VERSION_UNSUPPORTED" }));
     expect(() => migrateBackupPayload({ backupSchemaVersion: "1" })).toThrow(expect.objectContaining({ code: "BACKUP_PAYLOAD_INVALID" }));
   });
 
   it(
+    "Packet 11C C2: an old version 1 backup (no patient settings) still validates, migrated in memory, with the setting off",
+    async () => {
+      const old = await reseal((copy) => {
+        copy.backupSchemaVersion = 1;
+        delete copy.patientSettings;
+      });
+      const candidate = await validator().validate(old, PASS);
+      expect(candidate.sourceBackupSchemaVersion).toBe(1);
+      expect(candidate.appliedBackupMigrationIds).toEqual(["jagaon.backup.0001-patient-settings"]);
+      expect(candidate.patientSettings).toEqual({ keepWordingOnDevice: false });
+      expect(candidate.tables).toEqual(payload.tables);
+      const claiming = await reseal((copy) => {
+        copy.backupSchemaVersion = 1;
+        copy.patientSettings = { keepWordingOnDevice: true };
+      });
+      expect(await codeOf(validator().validate(claiming, PASS))).toBe("BACKUP_PAYLOAD_INVALID");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "Packet 11C C2: a version 2 backup carries its own setting into the candidate exactly",
+    async () => {
+      for (const keepWordingOnDevice of [true, false]) {
+        const candidate = await validator().validate(await reseal((copy) => (copy.patientSettings = { keepWordingOnDevice })), PASS);
+        expect(candidate.sourceBackupSchemaVersion).toBe(2);
+        expect(candidate.appliedBackupMigrationIds).toEqual([]);
+        expect(candidate.patientSettings).toEqual({ keepWordingOnDevice });
+      }
+    },
+    TIMEOUT,
+  );
+
+  it(
     "applies an exact registered step in memory and then validates the result completely",
     async () => {
-      const old = await reseal((copy) => (copy.backupSchemaVersion = 0));
-      const migrating = createBackupRestoreValidator({ crypto: () => createWebCryptoPort(), migrations: [v0to1] });
+      const old = await reseal((copy) => {
+        copy.backupSchemaVersion = 0;
+        delete copy.patientSettings;
+      });
+      // A test-only 0 → 1 step followed by the registered 1 → 2 step.
+      const migrating = createBackupRestoreValidator({ crypto: () => createWebCryptoPort(), migrations: [v0to1, ...BACKUP_PAYLOAD_MIGRATIONS] });
       const candidate = await migrating.validate(old, PASS);
-      expect(candidate.appliedBackupMigrationIds).toEqual(["jagaon.backup.0001-test"]);
+      expect(candidate.appliedBackupMigrationIds).toEqual(["jagaon.backup.test-step-0-to-1", "jagaon.backup.0001-patient-settings"]);
       expect(candidate.sourceBackupSchemaVersion).toBe(0);
-      const inventing = createBackupRestoreValidator({ crypto: () => createWebCryptoPort(), migrations: [{ ...v0to1, migrate: (oldPayload) => ({ ...oldPayload, backupSchemaVersion: 1, invented: "value" }) }] });
+      const inventing = createBackupRestoreValidator({ crypto: () => createWebCryptoPort(), migrations: [{ ...v0to1, migrate: (oldPayload) => ({ ...oldPayload, backupSchemaVersion: 1, invented: "value" }) }, ...BACKUP_PAYLOAD_MIGRATIONS] });
       expect(await codeOf(inventing.validate(old, PASS))).toBe("BACKUP_PAYLOAD_INVALID");
     },
     TIMEOUT,

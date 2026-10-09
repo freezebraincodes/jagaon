@@ -1,4 +1,5 @@
 import type { Instant } from "@/domain/shared/time";
+import { createKeepWordingPreferenceRow, KEEP_WORDING_PREFERENCE_KEY } from "./app-preference-row";
 import type { ClosedRowCodecRegistry } from "./closed-row-codecs";
 import type { JagaOnDatabase } from "./database";
 import { StorageOperationError } from "./storage-failure";
@@ -11,7 +12,10 @@ import { JAGAON_TABLE_NAMES, type JagaOnTableName } from "./table-catalogue";
  * fingerprint, clears the replaced dataset, inserts the validated target
  * rows, adopts the backup identity, continues the event sequence and writes
  * `RESTORE_STATE: RECONCILING` last. Either all of it commits or the previous
- * dataset is untouched. Preferences stay absent until reconciliation.
+ * dataset is untouched. Preferences stay absent until reconciliation, except
+ * (Packet 11C Addendum C, C2) the "Keep wording on this device" setting,
+ * written here as the reviewed backup value OR the device's current value
+ * (fix round 1, I-2: a restore never turns it off).
  *
  * Corrective Pass D: LOCAL_STATE_CLEANUP_PENDING is local operational
  * metadata, never part of a backup target. The exact current marker, bound to
@@ -32,6 +36,12 @@ export type RestoreCommitInput = {
   /** Re-validates the exact private commit target inside the write boundary. */
   validateTarget(): boolean;
   targetTables: Partial<Record<JagaOnTableName, readonly unknown[]>>;
+  /**
+   * Packet 11C Addendum C (C2): the backup's "Keep wording on this device" setting. Fix round 1 (I-2, coordinator ruling): the value
+   * written is backup || the device's current value (read inside the transaction before clearing; unreadable counts as on), so a restore
+   * never turns it off; on writes the one versioned row, off leaves none.
+   */
+  keepWordingOnDevice?: boolean;
   eventSequenceHighWaterMark: number;
   startedAt: Instant;
   committedAt: Instant;
@@ -63,6 +73,9 @@ export async function commitRestore(database: JagaOnDatabase, input: RestoreComm
     ),
     registry.storageMetadata.validateForWrite({ key: "EVENT_SEQUENCE_HIGH_WATER_MARK", lastAllocatedSequence: input.eventSequenceHighWaterMark, updatedAt: input.committedAt }),
   ];
+  // Packet 11C Addendum C (C2): the patient's setting; the language projection stays absent until reconciliation. Validated before the
+  // transaction; whether it is written is decided inside it (fix round 1, I-2: backup || device).
+  const keepWordingRow = registry.appPreferences.validateForWrite(createKeepWordingPreferenceRow(true, input.committedAt));
   const restoreState = restoreStateRowSchema.parse({
     key: "RESTORE_STATE",
     phase: "RECONCILING",
@@ -91,6 +104,18 @@ export async function commitRestore(database: JagaOnDatabase, input: RestoreComm
     } catch {
       throw new StorageOperationError("STORAGE_INTEGRITY_FAILED", { tableName: "storageMetadata" });
     }
+    // C2 fix round 1 (I-2, coordinator ruling): a restore never turns "Keep wording on this device" off. The device's current value is
+    // read before anything is cleared (no row: off; a row that does not validate: on) and combined with the backup's: backup || device.
+    const deviceRow = (current.appPreferences as Array<{ key?: unknown }>).find((row) => row.key === KEEP_WORDING_PREFERENCE_KEY);
+    let deviceKeepsWording = false;
+    if (deviceRow !== undefined) {
+      try {
+        deviceKeepsWording = (registry.appPreferences.validateAfterRead(deviceRow) as { value: unknown }).value === true;
+      } catch {
+        deviceKeepsWording = true;
+      }
+    }
+    const keepWording = input.keepWordingOnDevice === true || deviceKeepsWording;
 
     // 2. Clear every row of the replaced dataset, including projections and preferences.
     for (const name of JAGAON_TABLE_NAMES) await database.table(name).clear();
@@ -99,6 +124,8 @@ export async function commitRestore(database: JagaOnDatabase, input: RestoreComm
       const tableRows = rows[name];
       if (tableRows && tableRows.length > 0) await database.table(name).bulkAdd(tableRows as never[]);
     }
+    // Packet 11C Addendum C (C2): the "Keep wording on this device" row only when on (backup || device); no row is off.
+    if (keepWording) await database.table("appPreferences").put(keepWordingRow as never);
     // 5–6. Adopt the backup identity and continue the sequence.
     for (const row of metadata) await database.table("storageMetadata").put(row as never);
     // The local cleanup marker survives the replacement exactly as it was.

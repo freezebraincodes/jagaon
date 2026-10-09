@@ -11,6 +11,7 @@ import { BACKUP_TABLE_NAMES_V1 } from "./backup-payload-v1";
 import { decodeBase64Url } from "./base64url";
 import { createWebCryptoPort } from "./web-crypto-port";
 import { MAX_BACKUP_ENCODED_BYTES, MAX_BACKUP_PLAINTEXT_BYTES, serialiseBackupContainer } from "./backup-container-v1";
+import { createKeepWordingPreferenceRepository } from "@/storage/keep-wording-preference-repository";
 
 installFakeIndexedDb();
 const INTEGRATION_TIMEOUT_MS = 120_000;
@@ -65,7 +66,9 @@ describe("Packet 10B encrypted backup export", () => {
       const identity = before.storageMetadata.find((row) => (row as { key: string }).key === "DATABASE_IDENTITY") as { datasetIdentity: string };
       expect(payload).toMatchObject({
         format: "jagaon-backup-payload",
-        backupSchemaVersion: 1,
+        // Packet 11C Addendum C (C2, deliberate change): payload version 2 carries the patient settings (default off when never set).
+        backupSchemaVersion: 2,
+        patientSettings: { keepWordingOnDevice: false },
         datasetIdentity: identity.datasetIdentity,
         exportedAt: PACKET10_NOW,
         sourceApplicationVersion: "0.1.0",
@@ -243,6 +246,27 @@ describe("Packet 10B encrypted backup export", () => {
       const inHeads = snapshot.tables.recordHeads.some((row) => (row as { recordId: string }).recordId === committed.recordId);
       const inEvents = snapshot.tables.domainEvents.some((row) => (row as { change: { recordId: string } }).change.recordId === committed.recordId);
       expect(new Set([inRevisions, inHeads, inEvents]).size).toBe(1);
+      h.database.close();
+    },
+    INTEGRATION_TIMEOUT_MS,
+  );
+
+  it(
+    "Packet 11C C2: exports the patient's 'Keep wording on this device' setting from the same read, and no appPreferences row",
+    async () => {
+      const capture = capturingFilePort();
+      const h = await setup(capture.port);
+      await createKeepWordingPreferenceRepository(h.database).persist(true, PACKET10_NOW);
+      const before = await readAllTables(h.database);
+      const snapshot = await createBackupSnapshotRepository(h.database).readValidatedSnapshot();
+      expect(snapshot.patientSettings).toEqual({ keepWordingOnDevice: true });
+      await h.service.export({ passphrase: PASSPHRASE, confirmation: PASSPHRASE });
+      const payload = await decryptForTest(parseContainer(capture.saved[0]!.bytes), PASSPHRASE);
+      expect(payload).toMatchObject({ backupSchemaVersion: 2, patientSettings: { keepWordingOnDevice: true } });
+      expect(Object.keys(payload.patientSettings as object)).toEqual(["keepWordingOnDevice"]);
+      expect(JSON.stringify(payload)).not.toContain("app-preference.keep-wording");
+      expect(Object.keys(payload.tables as object)).not.toContain("appPreferences");
+      expect(await readAllTables(h.database)).toEqual(before);
       h.database.close();
     },
     INTEGRATION_TIMEOUT_MS,

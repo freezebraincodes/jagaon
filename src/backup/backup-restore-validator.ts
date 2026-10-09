@@ -13,7 +13,7 @@ import { canonicalRowsBytes, isCanonicallyOrdered, toHex } from "./backup-canoni
 import { parseCanonicalContainerV1 } from "./backup-container-reader";
 import { canonicaliseBackupHeaderAad, MAX_BACKUP_ENCODED_BYTES, MAX_BACKUP_PLAINTEXT_BYTES } from "./backup-container-v1";
 import { migrateBackupPayload, type BackupPayloadMigration } from "./backup-migration-registry";
-import { BACKUP_TABLE_NAMES_V1, backupPayloadV1Schema, type BackupTableSetV1 } from "./backup-payload-v1";
+import { BACKUP_TABLE_NAMES_V1, backupPayloadV2Schema, type BackupPatientSettings, type BackupTableSetV1 } from "./backup-payload-v1";
 import { normaliseBackupPassphrase } from "./passphrase";
 import { decodeStrictUtf8, parseStrictJson, StrictJsonError, toPlainData } from "./strict-json";
 import type { BackupCryptoPort } from "./web-crypto-port";
@@ -38,6 +38,11 @@ export type ValidatedBackupCandidate = Readonly<{
   highestEventSequence: number;
   lastCompletedMigrationId?: string;
   tables: BackupTableSetV1;
+  /**
+   * Packet 11C Addendum C (C2): the backup's patient settings (payload version 2); a version 1 backup is migrated with the
+   * "Keep wording on this device" setting off.
+   */
+  patientSettings: BackupPatientSettings;
   payloadFingerprint: string;
   appliedBackupMigrationIds: string[];
 }>;
@@ -89,7 +94,8 @@ export function createBackupRestoreValidator(dependencies: {
       const sourceBackupSchemaVersion = raw.backupSchemaVersion as number;
       const migrated = migrateBackupPayload(raw, dependencies.migrations);
 
-      const parsed = backupPayloadV1Schema.safeParse(migrated.payload);
+      // Packet 11C Addendum C (C2): every accepted payload is validated as the current version 2 (after any in-memory migration).
+      const parsed = backupPayloadV2Schema.safeParse(migrated.payload);
       if (!parsed.success) throw new StorageOperationError("BACKUP_PAYLOAD_INVALID");
       const payload = parsed.data;
       if (payload.containerId !== container.containerId) throw new StorageOperationError("BACKUP_PAYLOAD_INVALID");
@@ -136,6 +142,7 @@ export function createBackupRestoreValidator(dependencies: {
         highestEventSequence: verification.highestEventSequence,
         ...(payload.lastCompletedMigrationId ? { lastCompletedMigrationId: payload.lastCompletedMigrationId } : {}),
         tables: payload.tables,
+        patientSettings: { keepWordingOnDevice: payload.patientSettings.keepWordingOnDevice },
         payloadFingerprint,
         appliedBackupMigrationIds: migrated.appliedMigrationIds,
       });

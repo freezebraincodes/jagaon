@@ -38,6 +38,12 @@ export const zhSGMessages: AppMessages = {
   aiAccess: {
     passcodeLabel: "演示通行码",
   },
+  // ai-wording-setting.11c.1 (Packet 11C Addendum C, C2): new candidate wording (您 register, full-width punctuation, the catalogue's
+  // 这部装置 for "this device"). Human acceptance pending.
+  aiWording: {
+    keepOnDeviceLabel: "措辞只在这部装置上生成",
+    keepOnDeviceBody: "开启后，JagaOn 会为您使用标准措辞，不会发送任何 AI 请求。",
+  },
   shared: {
     appName: "JagaOn",
     demoBoundary:

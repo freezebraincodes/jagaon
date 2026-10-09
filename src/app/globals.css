@@ -2783,6 +2783,20 @@ button.summary-tile:hover:not(:disabled) {
   color: var(--ink-2);
 }
 
+/* Packet 11C Addendum C (C2): the native "Keep wording on this device" checkbox (presentation human acceptance pending). */
+.setting-checkbox {
+  flex: 0 0 auto;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.setting-checkbox:focus-visible {
+  outline: 3px solid var(--terracotta);
+  outline-offset: 2px;
+}
+
 .switch {
   display: inline-flex;
   align-items: center;

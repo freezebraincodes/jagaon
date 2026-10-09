@@ -43,7 +43,8 @@ describe("HACKATHON_DEMO storage profile manifest (Packet 10 freeze Section 3)",
     expect(HACKATHON_STORAGE_PROFILE.metadataKeys).toEqual(["DATABASE_IDENTITY", "EVENT_SEQUENCE_HIGH_WATER_MARK", "MIGRATION_STATE", "RESTORE_STATE", "LOCAL_STATE_CLEANUP_PENDING"]);
     expect(HACKATHON_STORAGE_PROFILE.physicalDexieVersion).toBe(2);
     expect(HACKATHON_STORAGE_PROFILE.logicalStorageSchemaVersion).toBe(1);
-    expect(HACKATHON_STORAGE_PROFILE.appPreferenceKeys).toEqual(["language"]);
+    // Packet 11C Addendum C (C2, deliberate change): the patient's "Keep wording on this device" setting joins the language row.
+    expect(HACKATHON_STORAGE_PROFILE.appPreferenceKeys).toEqual(["language", "keepWordingOnDevice"]);
     expect(HACKATHON_STORAGE_PROFILE.backupExcludedTables).toEqual(["appPreferences", "storageMetadata"]);
     expect(HACKATHON_STORAGE_PROFILE.backupTables).toEqual([
       "recordRevisions",

@@ -29,6 +29,7 @@ import { closeCarePreparationHarnesses, createCarePreparationHarness, ENABLED_CA
 import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
 import { projectValidatedAiCareSummary } from "@/application/care-preparation/ai-care-summary-replacement";
 import type { CareSummaryAiWordingPort } from "@/components/jagaon/screens/CareSummaryPreviewScreen";
+import { createBrowserJournalRuntime, type JagaOnRuntime } from "@/application/journal/browser-journal-runtime";
 
 // Packet 11C B4b: a pass-through spy, so a test can count the hybrid services one wiring builds (behaviour unchanged).
 vi.mock("./ai-hybrid-task-service", async (importOriginal) => {
@@ -584,7 +585,7 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
       expect(await assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
       // Packet 11C Addendum C (C3, C1 carry): the care AI action is hidden when this preview's class is not QUALIFIED (shipped: never shown).
       expect(assistance.careSummary!.available(care.payload)).toBe(false);
-      expect(assistance.careSummary!.disclosureRequired(care.payload)).toBe(false);
+      expect(await assistance.careSummary!.disclosureRequired(care.payload)).toBe(false);
       // Even with an explicit per-request acceptance, the class decides first: nothing is sent.
       expect(await assistance.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" })).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
       expect(await assistance.careSummary!.compose({ snapshotRef: care.snapshotRef, locale: "en-SG", disclosure: "ACCEPTED" })).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "TASK_DISABLED" });
@@ -611,17 +612,17 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
       const assistance = createBrowserAiAssistance({ history: ports, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: gateQualifying([explain, careClass]), now: () => LATER });
       expect(await assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
       expect(assistance.careSummary!.available(care.payload)).toBe(false);
-      expect(assistance.careSummary!.disclosureRequired(care.payload)).toBe(false);
+      expect(await assistance.careSummary!.disclosureRequired(care.payload)).toBe(false);
       // The test-only gate qualifies this preview's class: the action and the disclosure are offered.
       const qualified = createBrowserAiAssistance({ history: ports, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), now: () => LATER });
       expect(qualified.careSummary!.available(care.payload)).toBe(true);
-      expect(qualified.careSummary!.disclosureRequired(care.payload)).toBe(true);
+      expect(await qualified.careSummary!.disclosureRequired(care.payload)).toBe(true);
       // A gate that throws offers nothing. The probes read nothing beyond the comparison, and write and send nothing.
       const throwing = { admit: () => { throw new Error("broken"); }, anyAdmissible: () => { throw new Error("broken"); } };
       const broken = createBrowserAiAssistance({ history: ports, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: throwing, now: () => LATER });
       expect(await broken.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
       expect(broken.careSummary!.available(care.payload)).toBe(false);
-      expect(broken.careSummary!.disclosureRequired(care.payload)).toBe(false);
+      expect(await broken.careSummary!.disclosureRequired(care.payload)).toBe(false);
       expect(load).not.toHaveBeenCalled();
       expect(await care.audits.list()).toEqual([]);
     });
@@ -629,7 +630,9 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
     it("the shipped app passes no request-class gate (production uses the shipped records)", () => {
       const app = readFileSync(join(process.cwd(), "src/components/jagaon/JagaOnApp.tsx"), "utf8");
       // Packet 11C Addendum C (C3, deliberate retarget): no session either; the app passes exactly the three runtime ports.
-      expect(app).toMatch(/aiAssistanceFactory\(\{ history: runtime\.history, carePreparation: runtime\.carePreparation, audit: runtime\.aiAudit \}\)/);
+      // Packet 11C Addendum C (C2, deliberate retarget; fix round 1 I-1): plus the "Keep wording on this device" setting: the awaited
+      // per-request value (this tab's choice, else the stored value) and the in-memory value for render-time offers.
+      expect(app).toMatch(/aiAssistanceFactory\(\{ history: runtime\.history, carePreparation: runtime\.carePreparation, audit: runtime\.aiAudit, privateMode: keepWordingAwaitedFor\(runtime\), privateModeHint: readKeepWordingOnDevice \}\)/);
       expect(app).not.toMatch(/remoteUse|RemoteUseSession|acceptDisclosure/);
       expect(app).not.toMatch(/requestClassGate|request-class/);
       const wiringSource = readFileSync(join(process.cwd(), "src/application/ai/browser-history-explainer.ts"), "utf8");
@@ -649,7 +652,7 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
     const care = await careSetup();
     const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, now: () => LATER }).careSummary!;
     expect(wording.available(care.payload)).toBe(false);
-    expect(wording.disclosureRequired(care.payload)).toBe(false);
+    expect(await wording.disclosureRequired(care.payload)).toBe(false);
     expect(await wording.compose({ snapshotRef: care.snapshotRef, locale: "en-SG", disclosure: "ACCEPTED" })).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "TASK_DISABLED" });
     expect(await care.snapshots()).toBe(1);
     expect((await care.audits.list()).map((row) => [row.taskType, row.outcomeCode, row.attempts.count, row.providerModel])).toEqual([["DRAFT_CARE_PREPARATION_SUMMARY", "TASK_DISABLED", 0, null]]);
@@ -663,20 +666,20 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
     const assistance = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), online: () => online, remoteSwitchKnownOff: () => switchOff });
     const wording = assistance.careSummary!;
     expect(wording.available(care.payload)).toBe(true);
-    expect(wording.disclosureRequired(care.payload)).toBe(true);
-    expect(wording.disclosureRequired(care.payload)).toBe(true);
+    expect(await wording.disclosureRequired(care.payload)).toBe(true);
+    expect(await wording.disclosureRequired(care.payload)).toBe(true);
     online = false;
     expect(wording.available(care.payload)).toBe(false);
-    expect(wording.disclosureRequired(care.payload)).toBe(false);
+    expect(await wording.disclosureRequired(care.payload)).toBe(false);
     online = true;
     switchOff = true;
     expect(wording.available(care.payload)).toBe(false);
-    expect(wording.disclosureRequired(care.payload)).toBe(false);
+    expect(await wording.disclosureRequired(care.payload)).toBe(false);
     switchOff = false;
     // Only the care task's own activation counts.
     const historyOnly = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate() });
     expect(historyOnly.careSummary!.available(care.payload)).toBe(false);
-    expect(historyOnly.careSummary!.disclosureRequired(care.payload)).toBe(false);
+    expect(await historyOnly.careSummary!.disclosureRequired(care.payload)).toBe(false);
     expect(await care.audits.list()).toEqual([]);
   });
 
@@ -740,7 +743,7 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
     const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER }).careSummary!;
     // Packet 11C Addendum C (C3): no request of this preview could be sent, so its AI action is not offered either.
     expect(wording.available(care.payload)).toBe(false);
-    expect(wording.disclosureRequired(care.payload)).toBe(false);
+    expect(await wording.disclosureRequired(care.payload)).toBe(false);
     // The eligibility probes are not requests: still no row.
     expect(await care.audits.list()).toEqual([]);
     expect(await wording.compose({ snapshotRef: care.snapshotRef, locale: "en-SG" })).toEqual({ kind: "NOT_ELIGIBLE", reason: "NOTHING_TO_PHRASE" });
@@ -757,6 +760,247 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
     const rows = await care.audits.list();
     expect(rows.map((row) => [row.taskType, row.locale, row.outcomeCode, row.attempts.count, row.providerModel])).toEqual([["DRAFT_CARE_PREPARATION_SUMMARY", "zh-SG", "DISCLOSURE_CLOSED_MOOT", 0, null]]);
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Packet 11C Addendum C, Task C2 (hybrid spec D11): the patient's "Keep wording on this device" setting, passed to the ONE hybrid
+   * service of both flows and read per request. When on: zero network calls, no disclosure (so no passcode field), no care AI action, a
+   * deterministic history explanation and exactly one PRIVACY_REJECTED row (mode PRIVATE) per explicit request; probes write none.
+   * Proven under the shipped manifest AND an injected activated manifest with test-only QUALIFIED classes (fetch spy and fake route).
+   */
+  describe("Packet 11C Addendum C, C2: private mode (Keep wording on this device)", () => {
+    const privateRow = (row: AiInvocationAuditRow, taskType: string, locale: string) => {
+      expect(aiInvocationAuditRowSchema.parse(row)).toMatchObject({
+        auditSchemaVersion: "ai-invocation-audit.11c.2",
+        taskType,
+        locale,
+        outcomeCode: "PRIVACY_REJECTED",
+        attempts: { count: 0, structuralRepairUsed: false, timedOut: false },
+        providerModel: null,
+        sourceRevisions: [],
+        usageBasis: "NONE",
+      });
+      expect(row.measurements).toMatchObject({ inputTokens: null, outputTokens: null, costMicroUsd: null });
+    };
+
+    it.each([
+      ["the shipped manifest (no test seam)", false],
+      ["an injected activated manifest with test-only QUALIFIED classes and a fake route", true],
+    ])("under %s: no POST, no disclosure, no care action, deterministic explanation, one exact PRIVACY_REJECTED row per explicit request", async (_label, activated) => {
+      const fetchSpy = vi.fn();
+      vi.stubGlobal("fetch", fetchSpy);
+      const care = await careSetup();
+      const { history } = await higherFixture();
+      const fetcher = fakeRoute();
+      const seams = activated ? { manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher } : {};
+      const assistance = createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, now: () => LATER, privateMode: () => true, ...seams });
+      // The probes: no disclosure (so no passcode field) and no care AI action; they write and send nothing.
+      expect(await assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+      expect(assistance.careSummary!.available(care.payload)).toBe(false);
+      expect(await assistance.careSummary!.disclosureRequired(care.payload)).toBe(false);
+      expect(await care.audits.list()).toEqual([]);
+      // One explicit history request, even one that carries an acceptance: deterministic, local, one PRIVATE row.
+      for (const locale of ["en-SG", "zh-SG"] as const) {
+        expect(await assistance.history.explain({ factId: FACT, locale, disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
+      }
+      // The care flow offers no action; an explicit call anyway (defence in depth) keeps the deterministic preview.
+      expect(await assistance.careSummary!.compose({ snapshotRef: care.snapshotRef, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "PRIVACY_REJECTED" });
+      expect(await care.snapshots()).toBe(1);
+      const rows = await care.audits.list();
+      expect(rows).toHaveLength(3);
+      privateRow(rows.find((row) => row.taskType === "EXPLAIN_PATTERN" && row.locale === "en-SG")!, "EXPLAIN_PATTERN", "en-SG");
+      privateRow(rows.find((row) => row.taskType === "EXPLAIN_PATTERN" && row.locale === "zh-SG")!, "EXPLAIN_PATTERN", "zh-SG");
+      privateRow(rows.find((row) => row.taskType === "DRAFT_CARE_PREPARATION_SUMMARY")!, "DRAFT_CARE_PREPARATION_SUMMARY", "en-SG");
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("read per request, no rebuild: on hides the disclosure and the care action and keeps the next request local; off restores both", async () => {
+      const care = await careSetup();
+      const { history } = await higherFixture();
+      const fetcher = fakeRoute();
+      let keep = true;
+      const before = vi.mocked(createAiHybridTaskService).mock.calls.length;
+      const assistance = createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER, privateMode: () => keep });
+      expect(vi.mocked(createAiHybridTaskService).mock.calls.length - before).toBe(1);
+      expect(await assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+      expect(assistance.careSummary!.available(care.payload)).toBe(false);
+      keep = false;
+      expect(await assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+      expect(assistance.careSummary!.available(care.payload)).toBe(true);
+      expect(await assistance.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ source: "AI" });
+      keep = true;
+      expect(await assistance.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ source: "DETERMINISTIC" });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect((await care.audits.list()).map((row) => row.outcomeCode).sort()).toEqual(["ACCEPTED", "PRIVACY_REJECTED"]);
+    });
+
+    it("a check that throws keeps the wording on the device: no disclosure, no care action, nothing sent", async () => {
+      const care = await careSetup();
+      const { history } = await higherFixture();
+      const fetcher = fakeRoute();
+      const assistance = createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER, privateMode: () => { throw new Error("unknown"); } });
+      expect(await assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+      expect(assistance.careSummary!.available(care.payload)).toBe(false);
+      expect(await assistance.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ source: "DETERMINISTIC" });
+      expect(fetcher).not.toHaveBeenCalled();
+      expect((await care.audits.list()).map((row) => row.outcomeCode)).toEqual(["PRIVACY_REJECTED"]);
+    });
+
+    it("coordinator ruling: switched on while an accepted request is in flight, that request completes unchanged (one POST, ACCEPTED); the next is private", async () => {
+      const care = await careSetup();
+      const { history } = await higherFixture();
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const route = fakeRoute();
+      const slow = vi.fn<BrowserShellFetcher>(async (url, init) => (await held, route(url, init)));
+      let keep = false;
+      const assistance = createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher: slow, now: () => LATER, privateMode: () => keep });
+      const inFlight = assistance.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+      await vi.waitFor(() => expect(slow).toHaveBeenCalledTimes(1));
+      keep = true;
+      release();
+      expect(await inFlight).toMatchObject({ kind: "EXPLAINED", source: "AI" });
+      expect(await assistance.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ source: "DETERMINISTIC" });
+      expect(slow).toHaveBeenCalledTimes(1);
+      expect((await care.audits.list()).map((row) => row.outcomeCode).sort()).toEqual(["ACCEPTED", "PRIVACY_REJECTED"]);
+    });
+
+    it("fix round 1 (M-2): switched on during the explainer's held local source read, the request resolves as PRIVATE: one PRIVACY_REJECTED row, no POST", async () => {
+      const { history } = await higherFixture();
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const reading = vi.fn();
+      const slowHistory: RecordedHistoryQueryPort = { load: history.load, loadExplainablePattern: async (request) => (reading(), await held, history.loadExplainablePattern(request)) };
+      const fetchSpy = vi.fn();
+      vi.stubGlobal("fetch", fetchSpy);
+      const fetcher = fakeRoute();
+      const log = audit();
+      let keep = false;
+      const assistance = createBrowserAiAssistance({ history: slowHistory, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => NOW as Instant, privateMode: () => keep });
+      const request = assistance.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+      await vi.waitFor(() => expect(reading).toHaveBeenCalled());
+      keep = true;
+      release();
+      expect(await request).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
+      expect(log.rows).toHaveLength(1);
+      expect(aiInvocationAuditRowSchema.parse(log.rows[0])).toMatchObject({ outcomeCode: "PRIVACY_REJECTED", attempts: { count: 0 }, providerModel: null, sourceRevisions: [], usageBasis: "NONE" });
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+  });
+});
+
+/**
+ * Packet 11C Addendum C, C2 fix round 1 (I-1): the setting reaches every open tab. Two runtimes share one (fake) IndexedDB, as two tabs
+ * share one browser dataset. The wiring awaits the stored value per request (the app passes `ref || await read()`), and a change notice
+ * on a BroadcastChannel lets the other tab update its in-memory value and UI. Either alone keeps the other tab's next request local.
+ */
+describe("browser AI assistance: the setting across tabs (Packet 11C C2 fix round 1, I-1)", () => {
+  const LATER = "2026-10-04T02:05:00.000Z" as Instant;
+  const names: string[] = [];
+  afterEach(async () => {
+    for (const name of names.splice(0)) await Dexie.delete(name);
+  });
+  async function twoTabs() {
+    const name = `c2-tabs-${crypto.randomUUID()}`;
+    names.push(name);
+    const tabA = await createBrowserJournalRuntime(name, { now: () => LATER, seedSyntheticScenarioOnCreate: false });
+    const tabB = await createBrowserJournalRuntime(name, { now: () => LATER, seedSyntheticScenarioOnCreate: false });
+    return { tabA, tabB };
+  }
+  async function wiringOf(tab: JagaOnRuntime, ref: { current: boolean }) {
+    const { history } = await higherFixture();
+    const fetcher = fakeRoute();
+    const log = audit();
+    // Exactly what the app passes: the tab's in-memory value, else the stored value (unreadable: on).
+    const assistance = createBrowserAiAssistance({
+      history,
+      audit: log.port,
+      manifest: ENABLED,
+      requestClassGate: qualifiedTestRequestClassGate(),
+      fetcher,
+      now: () => LATER,
+      privateMode: async () => ref.current || (await tab.keepWordingOnDevice.read().catch(() => true)),
+      privateModeHint: () => ref.current,
+    });
+    return { assistance, fetcher, log };
+  }
+
+  it("with the change notice: tab A turns it on; tab B learns it, offers no disclosure and keeps its next request local", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { tabA, tabB } = await twoTabs();
+    const refB = { current: false };
+    const notices = vi.fn();
+    const unsubscribe = tabB.keepWordingOnDevice.subscribe(() => {
+      notices();
+      void tabB.keepWordingOnDevice.read().then((stored) => (refB.current = stored));
+    });
+    const b = await wiringOf(tabB, refB);
+    expect(await b.assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+    await tabA.keepWordingOnDevice.persist(true);
+    await vi.waitFor(() => expect(refB.current).toBe(true));
+    expect(notices).toHaveBeenCalledTimes(1);
+    expect(await b.assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+    expect(await b.assistance.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
+    expect(b.log.rows.map((row) => row.outcomeCode)).toEqual(["PRIVACY_REJECTED"]);
+    expect(b.fetcher).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // A tab never notifies itself.
+    const ownNotices = vi.fn();
+    const ownUnsubscribe = tabA.keepWordingOnDevice.subscribe(ownNotices);
+    await tabA.keepWordingOnDevice.persist(false);
+    await vi.waitFor(() => expect(notices).toHaveBeenCalledTimes(2));
+    expect(ownNotices).not.toHaveBeenCalled();
+    ownUnsubscribe();
+    unsubscribe();
+    tabA.close();
+    tabB.close();
+  });
+
+  it("without any change notice (no BroadcastChannel): the awaited stored value alone keeps tab B's next request local", async () => {
+    vi.stubGlobal("BroadcastChannel", undefined);
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { tabA, tabB } = await twoTabs();
+    const refB = { current: false };
+    const unsubscribe = tabB.keepWordingOnDevice.subscribe(() => (refB.current = true));
+    const b = await wiringOf(tabB, refB);
+    expect(await b.assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+    await tabA.keepWordingOnDevice.persist(true);
+    // Tab B's in-memory value is stale (no notice exists), yet the awaited read decides.
+    expect(refB.current).toBe(false);
+    expect(await b.assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+    expect(await b.assistance.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
+    expect(b.log.rows.map((row) => row.outcomeCode)).toEqual(["PRIVACY_REJECTED"]);
+    expect(b.fetcher).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    unsubscribe();
+    tabA.close();
+    tabB.close();
+  });
+
+  it("the care flow uses the same awaited value: its disclosure check is false once the stored value is on", async () => {
+    vi.stubGlobal("BroadcastChannel", undefined);
+    const { tabA, tabB } = await twoTabs();
+    const h = await createCarePreparationHarness();
+    const commands = createCarePreparationService(h.database, { now: () => LATER, ids: testIds, projectAiCareSummary: projectValidatedAiCareSummary });
+    const reading = await h.journal.recordGlucose({ payload: { measurement: { enteredValue: "6.6" as never, enteredUnit: "MMOL_L", normalization: null }, measurementMethod: "FINGERSTICK_METER", context: { kind: "PATIENT_SELECTED_SLOT", slot: "BEDTIME" } }, temporal: { kind: "POINT", occurrence: exact("2026-10-03T13:00:00.000Z") }, recordedAt: LATER });
+    if (reading.kind !== "COMMITTED") throw new Error("fixture");
+    const prepared = await commands.prepare(await h.selection());
+    if (prepared.kind !== "COMMITTED") throw new Error("prepared");
+    const view = await h.query.loadSummary(prepared.recordId);
+    if (view.status !== "READY") throw new Error("ready");
+    const refB = { current: false };
+    const BOTH: AiActivationManifest = { ...ENABLED_CARE_MANIFEST, tasks: { ...ENABLED_CARE_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED" } };
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands }, audit: createAiInvocationAuditRepository(h.database), manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher: fakeRoute(), now: () => LATER, privateMode: async () => refB.current || (await tabB.keepWordingOnDevice.read()), privateModeHint: () => refB.current }).careSummary!;
+    expect(await wording.disclosureRequired(view.payload)).toBe(true);
+    await tabA.keepWordingOnDevice.persist(true);
+    expect(await wording.disclosureRequired(view.payload)).toBe(false);
+    tabA.close();
+    tabB.close();
+    closeCarePreparationHarnesses();
   });
 });
 

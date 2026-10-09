@@ -1,5 +1,5 @@
 import type { Sha256Digest } from "@/application/contracts/canonical-json";
-import type { BackupTableSetV1 } from "@/backup/backup-payload-v1";
+import type { BackupPatientSettings, BackupTableSetV1 } from "@/backup/backup-payload-v1";
 import type { Instant } from "@/domain/shared/time";
 import type { StorageOperationFailure } from "@/storage/storage-failure";
 import type { RestoreMode } from "@/storage/storage-metadata";
@@ -36,6 +36,11 @@ export type RestoreTarget = {
   tables: BackupTableSetV1;
   eventSequenceHighWaterMark: number;
   lastCompletedMigrationId?: string;
+  /**
+   * Packet 11C Addendum C (C2): the backup's patient settings (bound into `targetDigest`; an old version 1 backup: off). Fix round 1
+   * (I-2): the commit writes backup || the device's current value, so a restore never turns "Keep wording on this device" off.
+   */
+  patientSettings: BackupPatientSettings;
 };
 
 export type RestorePlan = Readonly<{

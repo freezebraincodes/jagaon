@@ -938,6 +938,16 @@ export type AiAccessMessages = {
   passcodeLabel: string;
 };
 
+/**
+ * Packet 11C Addendum C, Task C2 (ai-wording-setting.11c.1): the "Keep wording on this device" setting on the More screen (hybrid spec
+ * D11). `keepOnDeviceLabel` en is fixed by the spec; the explanatory line and both zh strings (您) are new candidates. Human acceptance
+ * pending for every string and for the placement. Kept outside the approved groups so their rows stay byte-identical.
+ */
+export type AiWordingMessages = {
+  keepOnDeviceLabel: string;
+  keepOnDeviceBody: string;
+};
+
 export type AppMessages = {
   /** Packet 10 data, backup, restore, deletion and integrity copy. */
   packet10: Packet10Messages;
@@ -945,6 +955,8 @@ export type AppMessages = {
   ai: AiMessages;
   /** Packet 11C Addendum C (C6): the demo passcode field of the AI disclosure (human acceptance pending). */
   aiAccess: AiAccessMessages;
+  /** Packet 11C Addendum C (C2): the "Keep wording on this device" setting (human acceptance pending). */
+  aiWording: AiWordingMessages;
   shared: SharedMessages;
   today: TodayMessages;
   glucose: GlucoseMessages;
