@@ -328,6 +328,9 @@ describe("Packet 11A scope", () => {
       "src/app/api/ai/task/ai-task-handler.ts",
       "src/app/api/ai/task/route.test.ts",
       "src/app/api/ai/task/route.ts",
+      "src/app/api/ai/transcript/route.test.ts",
+      "src/app/api/ai/transcript/route.ts",
+      "src/app/api/ai/transcript/transcript-extraction-handler.ts",
     ]);
   });
 
@@ -353,7 +356,7 @@ describe("Packet 11A scope", () => {
     expect(strip(readFileSync(join(ROOT, AI_DISCLOSURE_DIALOG), "utf8"))).not.toMatch(/\bfetch\b|XMLHttpRequest|sendBeacon|localStorage|sessionStorage|indexedDB/);
     // Packet 11B: the provider adapters are reachable only from the server AI route. Packet 11C B2a (deliberate retarget): that route is
     // now the value-blind POST /api/ai/shell; the retired POST /api/ai/task reaches no provider adapter, AI service or credential reader.
-    expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/ai/") && !importGraph(["src/app/api/ai/shell/route.ts"]).includes(file))).toEqual([]);
+    expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/ai/") && !importGraph(["src/app/api/ai/shell/route.ts", "src/app/api/ai/transcript/route.ts"]).includes(file))).toEqual([]);
     expect(importGraph(["src/app/api/ai/task/route.ts"]).filter((file) => /^src\/(ai|application\/ai|domain\/ai)\//.test(file))).toEqual([]);
     // The shared-helper extraction keeps the legacy fact-sending service out of the hybrid service's graph and the shell route's graph.
     // Packet 11C Addendum C, C1: the test-only request-class support (test-only QUALIFIED records) and the evaluation-only definitions
@@ -402,15 +405,23 @@ const NETWORK_CALL_SITE = /(?<![.\w$])fetch\b(?!\s*:)|(?:globalThis|window|self)
 const EXISTING_NETWORK_MODULES = [
   "src/ai/kie/kie-model-catalogue.ts",
   "src/ai/kie/kie-responses-provider.ts",
+  // Packet 13 (P13X, owner scope expansion 2026-10-09): the transcript-extraction transport's one bounded POST to the documented DeepSeek endpoint (server-only).
+  "src/ai/transcript-extraction/transcript-extraction-provider.ts",
   "src/app/api/onemap/search/onemap-search-handler.ts",
   // Packet 11C Addendum B, Task B2b (owner-approved design, D1): the browser shell client's single same-origin POST to /api/ai/shell.
   // It is the one deliberate addition; it sends only after the request passed the client-side checks and an accepted disclosure, and
   // the shipped manifest keeps every task NOT_ACTIVATED, so the shipped app never reaches it (B3: nor is the disclosure ever shown).
   "src/application/ai/browser-shell-client.ts",
   "src/application/nearby-food/browser-nearby-food.ts",
+  // Packet 13 (P13X): the transcript-extraction browser client's single same-origin POST to /api/ai/transcript.
+  "src/application/transcript-extraction/transcript-extraction-client.ts",
+  // Packet 13 slice (P13S, S7; owner decisions 3 and 4, 2026-10-09: server-side UserSig and the real TRTC adapter authorized): the
+  // voice credential client's single same-origin POST to /api/voice/usersig. Not in the browser graph until the Tell JagaOn screen
+  // (Q13-5) loads it by dynamic import after the voice-cloud disclosure.
+  "src/voice/trtc/trtc-credential-client.ts",
 ];
 const ENVIRONMENT_READ = /process\.env|import\.meta\.env/;
-const PROVIDER_KEY_NAME = /KIE_API_KEY|DEEPSEEK_API_KEY|ONEMAP_ACCESS_TOKEN/;
+const PROVIDER_KEY_NAME = /KIE_API_KEY|DEEPSEEK_API_KEY|ONEMAP_ACCESS_TOKEN|TRTC_SDK_SECRET_KEY/;
 
 describe("Packet 11C Checkpoint 2 guards", () => {
   it("activates nothing: every task stays DETERMINISTIC_ONLY under HACKATHON_DEMO and none is SYNTHETIC_REMOTE_ENABLED", () => {
@@ -433,14 +444,17 @@ describe("Packet 11C Checkpoint 2 guards", () => {
     // Only the two server routes read the environment, and only server-only modules name a provider key.
     // Packet 11C B2a (deliberate retarget): the environment-reading AI route is now the value-blind shell route; the retired legacy task
     // route reads no environment and names no key. The shell route reads its credential only through readDeepSeekToken (catalogue).
-    expect(SOURCES.filter((file) => ENVIRONMENT_READ.test(strip(readFileSync(join(ROOT, file), "utf8"))))).toEqual(["src/app/api/ai/shell/route.ts", "src/app/api/onemap/search/route.ts"]);
+    // Packet 13 slice (P13S, S7; owner decisions 3 and 4): plus the voice UserSig route, whose only server-only configuration module names
+    // the TRTC signing secret (read last, after every refusal; never returned).
+    expect(SOURCES.filter((file) => ENVIRONMENT_READ.test(strip(readFileSync(join(ROOT, file), "utf8"))))).toEqual(["src/app/api/ai/shell/route.ts", "src/app/api/ai/transcript/route.ts", "src/app/api/onemap/search/route.ts", "src/app/api/voice/usersig/route.ts"]);
     expect(SOURCES.filter((file) => PROVIDER_KEY_NAME.test(readFileSync(join(ROOT, file), "utf8")))).toEqual([
       "src/ai/deepseek/deepseek-catalogue.ts",
       "src/ai/kie/kie-route-config.ts",
       "src/app/api/onemap/search/route.ts",
+      "src/app/api/voice/usersig/voice-usersig-config.ts",
     ]);
     for (const file of CLIENT_GRAPH) {
-      expect(readFileSync(join(ROOT, file), "utf8"), file).not.toMatch(/process\.env|import\.meta\.env|KIE_API_KEY|DEEPSEEK_API_KEY|ONEMAP_ACCESS_TOKEN|NEXT_PUBLIC_|\bBearer\b|api\.kie|deepseek\.com|readKieToken|readDeepSeekToken/);
+      expect(readFileSync(join(ROOT, file), "utf8"), file).not.toMatch(/process\.env|import\.meta\.env|KIE_API_KEY|DEEPSEEK_API_KEY|ONEMAP_ACCESS_TOKEN|NEXT_PUBLIC_|\bBearer\b|api\.kie|deepseek\.com|readKieToken|readDeepSeekToken|TRTC_SDK_SECRET_KEY|tls-sig-api-v2/);
     }
     expect(CLIENT_GRAPH.filter((file) => file.startsWith("src/ai/") || file.startsWith("src/app/api/"))).toEqual([]);
   });
@@ -504,6 +518,10 @@ describe("Packet 11C Checkpoint 2 guards", () => {
         "src/application/ai/language/ai-composition.ts",
         "src/application/care-preparation/care-preparation-service.ts",
         "src/application/care-preparation/ai-care-summary-replacement.ts",
+        // Packet 13 (P13X, deliberate): the transcript-extraction client reads the per-request decision before its one POST, and the
+        // voice adapter binds the voice screen's own disclosure acceptance to exactly that one call (createAiRemoteUseDecisions().run).
+        "src/application/transcript-extraction/transcript-extraction-client.ts",
+        "src/application/transcript-extraction/voice-remote-extraction-adapter.ts",
       ].sort(),
     );
     // Nowhere in the graph is a decision written as an object field, a const assertion or a stored value outside the screens' handlers.
