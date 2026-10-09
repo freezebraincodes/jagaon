@@ -10,6 +10,15 @@
     "build": "next build",
     "test:e2e:packet10": "playwright test --config playwright.config.ts",
     "test:e2e:packet11c": "playwright test --config playwright.packet-11c.config.ts",
+    "test:unit": "node scripts/release/run-suite.mjs unit",
+    "test:contract": "node scripts/release/run-suite.mjs contract",
+    "test:integration": "node scripts/release/run-suite.mjs integration",
+    "test:fixtures": "node scripts/release/run-suite.mjs fixtures",
+    "test:browser": "node scripts/release/run-suite.mjs browser",
+    "test:e2e": "node scripts/release/run-suite.mjs e2e",
+    "test:accessibility": "node scripts/release/run-suite.mjs accessibility",
+    "test:security": "node scripts/release/run-suite.mjs security",
+    "test:release": "node scripts/release/release.mjs",
     "evaluate:packet11": "node --env-file=.env.local ./node_modules/vitest/vitest.mjs run --no-file-parallelism src/ai/evaluation/packet-11-live-kie.test.ts",
     "evaluate:packet11:latency": "node --env-file=.env.local ./node_modules/vitest/vitest.mjs run --no-file-parallelism src/ai/evaluation/packet-11-live-latency.test.ts"
   },
@@ -20,6 +29,8 @@
     "next": "16.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "tls-sig-api-v2": "1.0.2",
+    "trtc-sdk-v5": "5.20.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {
