@@ -51,6 +51,7 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await expect(panel.getByRole("status")).toContainText(DETERMINISTIC_HEADLINE_PREFIX[locale]);
         await expect(page.getByRole("dialog")).toHaveCount(0);
         await expect(panel.getByText(m.ai.demoTag)).toHaveCount(0);
+        await expect(panel.getByText(m.aiHistoryFallback.unavailableAfterRequest)).toHaveCount(0);
         await expect(page.getByText(m.aiAccess.passcodeLabel)).toHaveCount(0);
         await captureState(page, testInfo, context, "private-on-history", ["no disclosure, no passcode field", "standard wording, no AI tag", "0 /api/ai requests"], panel);
 

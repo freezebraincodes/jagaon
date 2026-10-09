@@ -9,6 +9,7 @@ import {
   openCarePreview,
   openHistory,
   openSettings,
+  openTab,
   planStates,
   PRODUCTION_URL,
   recordTestResult,
@@ -28,16 +29,13 @@ import {
 test.afterEach(async ({}, testInfo) => recordTestResult(testInfo));
 
 /**
- * C7 finding (pre-existing, not introduced by Packet 11C; reported, not fixed here): on a first run, the language chosen on Welcome is
- * reverted to English when the newly created dataset finishes opening after the prepared setup completed (JagaOnApp sets the runtime's
- * stored locale unless `onboardingLocaleRef` is set, and finishing setup never sets it). Expected to FAIL until fixed; when it starts
- * passing, Playwright reports it, and `test.fail` must be removed.
+ * C7 finding D1 (pre-existing; fixed in C7 fix round 1, regression tests in JagaOnApp.test.tsx "D1 (a)" and "D1 (b)"): on a first run,
+ * the language chosen on Welcome used to be reverted to English when the newly created dataset finished opening. This is the real-browser
+ * check of the Welcome-language path in the production build.
  */
-test.describe("C7 finding: Welcome language choice on a first run", () => {
+test.describe("C7 finding D1: Welcome language choice on a first run", () => {
   test.use({ viewport: VIEWPORTS.mobile.viewport });
-  test("zh-SG chosen on Welcome stays zh-SG after the new dataset opens", async ({ page, browserName }) => {
-    test.skip(browserName !== "chromium", "documented once, in Chromium");
-    test.fail(true, "pre-existing defect: the Welcome language choice is reverted to English when the dataset finishes opening");
+  test("zh-SG chosen on Welcome stays zh-SG after the new dataset opens @smoke", async ({ page }) => {
     const zh = messagesFor("zh-SG");
     await page.goto(`${PRODUCTION_URL}/`);
     await page.getByRole("radio", { name: "简体中文" }).check();
@@ -47,8 +45,57 @@ test.describe("C7 finding: Welcome language choice on a first run", () => {
     await page.getByRole("navigation").getByRole("button").last().click();
     await expect(page.getByRole("checkbox")).toBeEnabled();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(zh.more.title, { timeout: 5_000 });
+    expect(await page.evaluate(() => document.documentElement.lang)).toBe("zh-SG");
   });
 });
+
+/**
+ * Owner UI review (evidence and scope): one synthetic care preview that contains a patient-authored READY_TO_ASK question ("Add my own
+ * question" saves the patient's own words as READY_TO_ASK), on screen and in the printed presentation. No AI question clarification.
+ */
+const SYNTHETIC_QUESTION = { "en-SG": "Can I keep my demo pen in my bag on hot days?", "zh-SG": "天气热的时候，我可以把演示用的笔放在包里吗？" } as const;
+for (const locale of LOCALES) {
+  test.describe(`production ${locale} 390: patient-authored question`, () => {
+    test.use({ viewport: VIEWPORTS.mobile.viewport });
+    test(`care preview with a patient-authored READY_TO_ASK question, on screen and printed (${locale}) @smoke`, async ({ page, browserName }, testInfo) => {
+      const context: EvidenceContext = { target: "production", locale, viewport: VIEWPORTS.mobile.label, engine: browserName };
+      planStates(testInfo, context, ["care-question-preview", "care-question-print"]);
+      const tripwire = await shellTripwire(page);
+      await stubWindowPrint(page);
+      const m = await startPreparedProfile(page, PRODUCTION_URL, locale);
+      const question = SYNTHETIC_QUESTION[locale];
+      await openTab(page, m.shared.navToday);
+      await page.getByRole("button", { name: m.today.prepareAppointment }).click();
+      await page.getByRole("button", { name: m.carePreparation.addOwnQuestion }).click();
+      const editor = page.getByRole("dialog");
+      await editor.getByLabel(m.carePreparation.questionLabel).fill(question);
+      await editor.getByRole("button", { name: m.shared.save }).click();
+      await expect(editor).toHaveCount(0);
+      const box = page.getByRole("checkbox", { name: question });
+      if (!(await box.isChecked())) await box.check();
+      await page.getByRole("button", { name: m.carePreparation.previewSummary }).click();
+      await expect(page.getByRole("heading", { level: 1, name: m.careSummary.title })).toBeVisible();
+      const article = page.locator("article.printable-care-summary");
+      await expect(article).toContainText(question);
+      await expect(article.getByRole("heading", { level: 2, name: m.careSummary.questionsHeading })).toBeVisible();
+      await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(0);
+      await expectNoHorizontalOverflow(page);
+      await captureState(page, testInfo, context, "care-question-preview", ["patient-authored question saved with 'Add my own question' (READY_TO_ASK) and ticked", "preview shows it under the questions heading, in the patient's own words", "no AI action (shipped build)"], article);
+      await page.getByRole("button", { name: m.careSummary.approveAction }).click();
+      await page.getByRole("button", { name: m.careSummary.printAction }).click();
+      await expect.poll(() => page.evaluate(() => (window as unknown as { __c7PrintCalls?: number }).__c7PrintCalls ?? 0)).toBe(1);
+      await page.emulateMedia({ media: "print" });
+      const printed = await article.innerText();
+      expect(printed).toContain(question);
+      expect(printed).toContain(m.careSummary.questionsHeading);
+      expect(printed).toContain(m.careSummary.draftNotices.label);
+      if (browserName === "chromium") await page.pdf({ path: `${evidencePath(context, "care-question-print")}.pdf`, printBackground: true });
+      await captureState(page, testInfo, context, "care-question-print", ["approved and printed once (window.print observed)", "print media: the question is printed under the questions heading, in the patient's own words (asserted)", "draft-notices heading printed (asserted)"], article);
+      await page.emulateMedia({ media: null });
+      tripwire.assertUntouched();
+    });
+  });
+}
 
 for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
   const viewport = VIEWPORTS[viewportKey];
@@ -77,6 +124,7 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await expect(panel.getByText(m.ai.resultCheck)).toHaveCount(0);
         await expect(panel.getByRole("group")).toHaveCount(0);
         await expect(panel.getByText(m.ai.remoteNotAccepted)).toHaveCount(0);
+        await expect(panel.getByText(m.aiHistoryFallback.unavailableAfterRequest)).toHaveCount(0);
         await expect(action).toHaveAttribute("aria-expanded", "true");
         await expectNoHorizontalOverflow(page);
         await captureState(page, testInfo, context, "history-deterministic", ["no dialog", "no passcode field", "role=status headline present", "no ai.demoTag / ai.resultCheck / AI group", "no horizontal overflow", "tripwire: no /api/ai/* request"], panel);
@@ -113,8 +161,11 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await expect(article).not.toContainText(m.ai.demoTag);
         await expect(article).not.toContainText(m.ai.resultCheck);
         const printedText = await article.innerText();
+        expect(printedText).not.toContain(m.ai.demoTag);
+        expect(printedText).not.toContain(m.ai.resultCheck);
+        expect(printedText).toContain(m.careSummary.draftNotices.label);
         if (browserName === "chromium") await page.pdf({ path: `${evidencePath(context, "care-print-no-marking")}.pdf`, printBackground: true });
-        await captureState(page, testInfo, context, "care-print-no-marking", [`approved deterministic preview printed once (window.print observed)`, "print media: no ai.demoTag / ai.resultCheck in the printed artifact", `printed draft-notice heading present: ${printedText.includes(m.careSummary.draftNotices.label)}`, browserName === "chromium" ? "printed PDF saved" : "PDF not available in this engine"], article);
+        await captureState(page, testInfo, context, "care-print-no-marking", [`approved deterministic preview printed once (window.print observed)`, "print media: no ai.demoTag / ai.resultCheck in the printed artifact (asserted)", "draft-notices heading printed (asserted)", browserName === "chromium" ? "printed PDF saved" : "PDF not available in this engine"], article);
         await page.emulateMedia({ media: null });
 
         tripwire.assertUntouched();

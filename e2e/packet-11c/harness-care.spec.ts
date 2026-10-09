@@ -79,11 +79,16 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await page.emulateMedia({ media: "print" });
         await expect(article).not.toContainText(m.ai.demoTag);
         const deterministicPrint = await article.innerText();
+        expect(deterministicPrint).not.toContain(m.ai.demoTag);
+        expect(deterministicPrint).not.toContain(m.ai.resultCheck);
+        expect(deterministicPrint).toContain(m.careSummary.draftNotices.label);
         if (browserName === "chromium") await page.pdf({ path: `${evidencePath(context, "care-deterministic-print")}.pdf`, printBackground: true });
-        await captureState(page, testInfo, context, "care-deterministic-print", ["print media: no ai.demoTag / ai.resultCheck", `draft-notice heading printed: ${deterministicPrint.includes(m.careSummary.draftNotices.label)}`, browserName === "chromium" ? "printed PDF saved" : "PDF not available in this engine"], article);
+        await captureState(page, testInfo, context, "care-deterministic-print", ["print media: no ai.demoTag / ai.resultCheck (asserted)", "draft-notices heading printed (asserted)", browserName === "chromium" ? "printed PDF saved" : "PDF not available in this engine"], article);
         await page.emulateMedia({ media: null });
 
         // The disclosure for the care request: modal, safe initial focus, focus trapped; Escape declines and focus returns to the action.
+        // The action is enabled once the preview is recorded as previewed (fix round 1: wait for it; WebKit pressed Enter too early once).
+        await expect(action).toBeEnabled();
         await action.focus();
         await page.keyboard.press("Enter");
         const dialog = page.getByRole("dialog", { name: m.ai.remoteTitle });
@@ -164,6 +169,8 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await expect(article).toContainText(m.ai.demoTag);
         await expect(article).toContainText(m.ai.resultCheck);
         await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(0);
+        // Fix round 1 (U14): the fake bullets are fragments, so no sentence stop appears before an in-line separator.
+        expect(await article.innerText()).not.toMatch(/[.。] ·/);
         expect(shell.calls.at(-1)!.answered).toBe("CANDIDATE");
         expect(shell.calls.at(-1)!.taskType).toBe("DRAFT_CARE_PREPARATION_SUMMARY");
         await expectNoHorizontalOverflow(page);
@@ -196,6 +203,7 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await expect(panel.getByRole("status")).not.toBeEmpty();
         await expect(page.getByRole("dialog")).toHaveCount(0);
         await expect(panel.getByText(m.ai.demoTag)).toHaveCount(0);
+        await expect(panel.getByText(m.aiHistoryFallback.unavailableAfterRequest)).toHaveCount(0);
         await captureState(page, testInfo, context, "not-qualified-history", ["test manifest, shipped PENDING records: no disclosure", "standard wording, no AI tag", "0 POSTs"], panel);
         const article = await openCarePreview(page, m, "insulinRecords");
         await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(0);

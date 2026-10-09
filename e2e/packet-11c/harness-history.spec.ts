@@ -43,13 +43,15 @@ function panelOf(page: Page, m: AppMessages): Locator {
   return page.getByRole("region", { name: m.history.explanation.title });
 }
 
-async function expectDeterministic(page: Page, m: AppMessages, locale: Locale, options: { declinedLine: boolean }) {
+/** `attemptedLine` (owner UI decision U12): the fallback line shown only after an attempted (POSTed) request failed or was refused. */
+async function expectDeterministic(page: Page, m: AppMessages, locale: Locale, options: { declinedLine: boolean; attemptedLine?: boolean }) {
   const panel = panelOf(page, m);
   await expect(panel.getByRole("status")).toContainText(DETERMINISTIC_HEADLINE_PREFIX[locale]);
   await expect(panel.getByText(m.ai.demoTag)).toHaveCount(0);
   await expect(panel.getByText(m.ai.resultCheck)).toHaveCount(0);
   await expect(panel.getByRole("group")).toHaveCount(0);
   await expect(panel.getByText(m.ai.remoteNotAccepted)).toHaveCount(options.declinedLine ? 1 : 0);
+  await expect(panel.getByText(m.aiHistoryFallback.unavailableAfterRequest)).toHaveCount(options.attemptedLine ? 1 : 0);
   const text = await page.locator("main").innerText();
   for (const code of TECHNICAL_CODES) expect(text, code).not.toContain(code);
 }
@@ -119,6 +121,17 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         expect(await activeName(page)).toBe(`button|${m.ai.cancel}`);
         const field = dialog.getByLabel(m.aiAccess.passcodeLabel);
         await expect(field).toHaveAttribute("type", "password");
+        // Owner UI decision U03: the primary action waits for non-whitespace passcode input; Cancel stays available.
+        const confirmButton = dialog.getByRole("button", { name: m.ai.pattern.confirm });
+        await expect(confirmButton).toBeDisabled();
+        await expect(dialog.getByRole("button", { name: m.ai.cancel })).toBeEnabled();
+        await field.fill("   ");
+        await expect(confirmButton).toBeDisabled();
+        await field.fill("");
+        const emptyCycle = await expectFocusTrapped(page, DIALOG, 4, keys.next);
+        expect(new Set(emptyCycle)).toEqual(new Set([`input:password|${m.aiAccess.passcodeLabel}`, `button|${m.ai.cancel}`]));
+        await field.fill(SYNTHETIC_PASSCODE);
+        await expect(confirmButton).toBeEnabled();
         const forward = await expectFocusTrapped(page, DIALOG, 6, keys.next);
         const backward = await expectFocusTrapped(page, DIALOG, 6, keys.previous);
         expect(new Set(forward)).toEqual(new Set([`input:password|${m.aiAccess.passcodeLabel}`, `button|${m.ai.pattern.confirm}`, `button|${m.ai.cancel}`]));
@@ -132,7 +145,7 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
           await expect(part).toBeInViewport();
         }
         await dialog.getByRole("button", { name: m.ai.cancel }).scrollIntoViewIfNeeded();
-        await captureState(page, testInfo, context, "history-dialog", [`sheet ${sheet.scrollHeight}px content in ${sheet.clientHeight}px (overflow-y ${sheet.overflowY}); title, limit and Cancel each scroll into the viewport`, "dialog before any request (0 POSTs)", "aria-modal, named by the title, described by body and limit", "initial focus on Cancel", `Tab cycle stays inside: ${forward.join(" > ")}`, `Shift+Tab cycle stays inside: ${backward.join(" > ")}`, "passcode field type=password", "visible focus indicator", "no horizontal overflow"], dialog);
+        await captureState(page, testInfo, context, "history-dialog", [`sheet ${sheet.scrollHeight}px content in ${sheet.clientHeight}px (overflow-y ${sheet.overflowY}); title, limit and Cancel each scroll into the viewport`, "dialog before any request (0 POSTs)", "aria-modal, named by the title, described by body and limit", "initial focus on Cancel", "U03: primary action disabled while the passcode field is empty or whitespace, enabled with input; Cancel always enabled", `Tab cycle with the field empty: ${emptyCycle.join(" > ")}`, `Tab cycle with a passcode entered stays inside: ${forward.join(" > ")}`, `Shift+Tab cycle stays inside: ${backward.join(" > ")}`, "passcode field type=password", "visible focus indicator", "no horizontal overflow"], dialog);
 
         // Escape takes the safe action: declined, focus returns to the action, standard wording with the non-technical line; nothing sent.
         const movesBefore = (await focusMoves(page)).length;
@@ -218,19 +231,19 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
           shell.answer(answer);
           await requestExplanation(page, m, action);
           await acceptDisclosure(page, m, { passcode: false });
-          await expectDeterministic(page, m, locale, { declinedLine: false });
+          await expectDeterministic(page, m, locale, { declinedLine: false, attemptedLine: true });
           expect(shell.calls.slice(before).map((call) => call.answered)).toEqual([answered]);
           await expectNoHorizontalOverflow(page);
-          await captureState(page, testInfo, context, state, [`fake answer ${answered}`, "one POST, no repair", "standard wording, no AI tag, no closed code shown", "no extra line (history shows ai.remoteNotAccepted only for a declined disclosure)"], panelOf(page, m));
+          await captureState(page, testInfo, context, state, [`fake answer ${answered}`, "one POST, no repair", "standard wording, no AI tag, no closed code shown", "U12: the owner's fallback line (aiHistoryFallback) shown after the attempted POST; no ai.remoteNotAccepted"], panelOf(page, m));
         }
 
         // ACCESS_DENIED: standard wording, and the passcode is forgotten, so the next disclosure asks for it again.
         shell.answer({ kind: "REFUSED", reason: "ACCESS_DENIED" });
         await requestExplanation(page, m, action);
         await acceptDisclosure(page, m, { passcode: false });
-        await expectDeterministic(page, m, locale, { declinedLine: false });
+        await expectDeterministic(page, m, locale, { declinedLine: false, attemptedLine: true });
         expect(shell.calls.at(-1)!.answered).toBe("REFUSED:ACCESS_DENIED");
-        await captureState(page, testInfo, context, "history-refused-access-denied", ["fake 403 REFUSED ACCESS_DENIED", "standard wording, no AI tag, no closed code shown"], panelOf(page, m));
+        await captureState(page, testInfo, context, "history-refused-access-denied", ["fake 403 REFUSED ACCESS_DENIED", "standard wording + U12 fallback line, no AI tag, no closed code shown"], panelOf(page, m));
         await requestExplanation(page, m, action);
         await expect(dialog.getByLabel(m.aiAccess.passcodeLabel)).toBeVisible();
         await captureState(page, testInfo, context, "history-passcode-asked-again", ["after ACCESS_DENIED the next disclosure shows the passcode field again"], dialog);
@@ -261,15 +274,15 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         shell.answer({ kind: "REFUSED", reason: "REMOTE_AI_DISABLED" });
         await requestExplanation(page, m, second);
         await acceptDisclosure(page, m, { passcode: false });
-        await expectDeterministic(page, m, locale, { declinedLine: false });
+        await expectDeterministic(page, m, locale, { declinedLine: false, attemptedLine: true });
         expect(shell.calls.at(-1)!.answered).toBe("REFUSED:REMOTE_AI_DISABLED");
-        await captureState(page, testInfo, context, "history-refused-switch-off", ["fake 403 REFUSED REMOTE_AI_DISABLED", "standard wording, no AI tag, no closed code shown"], panelOf(page, m));
+        await captureState(page, testInfo, context, "history-refused-switch-off", ["fake 403 REFUSED REMOTE_AI_DISABLED", "standard wording + U12 fallback line, no AI tag, no closed code shown"], panelOf(page, m));
         const callsBefore = shell.calls.length;
         await requestExplanation(page, m, second);
-        await expectDeterministic(page, m, locale, { declinedLine: false });
+        await expectDeterministic(page, m, locale, { declinedLine: false, attemptedLine: false });
         await expect(dialog).toHaveCount(0);
         expect(shell.calls.length).toBe(callsBefore);
-        await captureState(page, testInfo, context, "history-switch-off-no-dialog", ["after REMOTE_AI_DISABLED: no disclosure, standard wording, 0 further POSTs"], panelOf(page, m));
+        await captureState(page, testInfo, context, "history-switch-off-no-dialog", ["after REMOTE_AI_DISABLED: no disclosure, standard wording, 0 further POSTs", "U12: no fallback line (nothing attempted for this request)"], panelOf(page, m));
 
         notCaptured(
           testInfo,

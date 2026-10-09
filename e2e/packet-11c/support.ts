@@ -46,9 +46,8 @@ export const messagesFor = (locale: Locale): AppMessages => getMessages(locale);
 
 /**
  * Welcome → "Use the prepared demo profile", then the language is set on the More screen once the dataset is open (the Settings
- * checkbox is enabled only then), as Packet 10 does. The Welcome language choice alone is not used: on a first run it is reverted to
- * English when the newly created dataset finishes opening after setup completes (pre-existing defect, reported in the C7 report and
- * pinned by the expected-to-fail test in production.spec.ts).
+ * checkbox is enabled only then), as Packet 10 does, so every test starts from the same opened dataset in both locales. The Welcome
+ * language path (C7 finding D1, fixed in fix round 1) is checked on its own in production.spec.ts.
  */
 export async function startPreparedProfile(page: Page, baseUrl: string, locale: Locale, query = ""): Promise<AppMessages> {
   const m = messagesFor(locale);
@@ -151,9 +150,14 @@ const EXPLAIN_WORDING = {
   "en-SG": { headline: (t: string) => `A look at ${t}.`, evidence: (t: string) => `This is based on ${t}.`, evidenceNone: "This is based on your recorded information." },
   "zh-SG": { headline: (t: string) => `本说明关注的是${t}。`, evidence: (t: string) => `本说明依据${t}。`, evidenceNone: "本说明依据您的记录信息。" },
 } as const;
+/**
+ * Care bullets are fragments without sentence-final punctuation, like the approved default shells (the tokens alone): the app places a
+ * bullet inside a line (e.g. the appointment line is `bullet · time`, ai-care-summary-request.ts:115), so a fake full stop would show
+ * as "… 2026. · 9:40 am" (fix round 1, U14: that stray "." came from this fake text).
+ */
 const CARE_WORDING = {
-  "en-SG": { intro: "Here are the details you chose to include:", bullet: (t: readonly string[]) => `You recorded ${t.join(", ")}.` },
-  "zh-SG": { intro: "以下是您选择加入的信息：", bullet: (t: readonly string[]) => `您记录了${t.join("，")}。` },
+  "en-SG": { intro: "Here are the details you chose to include:", bullet: (t: readonly string[]) => `You recorded ${t.join(", ")}` },
+  "zh-SG": { intro: "以下是您选择加入的信息：", bullet: (t: readonly string[]) => `您记录了${t.join("，")}` },
 } as const;
 
 /** How an accepted fake AI headline starts, per locale (the deterministic one starts with the language copy's default instead). */
@@ -306,8 +310,8 @@ export async function shellTripwire(page: Page): Promise<{ hits: string[]; asser
 
 /** The accessible names of the elements focused by `count` presses of Tab (or Shift+Tab). */
 /**
- * The keys that move focus through every control. WebKit follows Safari's default ("Press Tab to highlight each item" off): Tab
- * reaches text fields only and Option+Tab reaches every control, so WebKit uses Alt+Tab (the app sees key "Tab" either way).
+ * The keys that move focus through buttons as well as fields. WebKit follows Safari's default ("Press Tab to highlight each item" off):
+ * Tab skips buttons and Option+Tab includes them, so WebKit uses Alt+Tab (the app sees key "Tab" either way).
  */
 export function tabKeys(browserName: string): { next: string; previous: string } {
   return browserName === "webkit" ? { next: "Alt+Tab", previous: "Alt+Shift+Tab" } : { next: "Tab", previous: "Shift+Tab" };
@@ -439,13 +443,15 @@ export async function captureState(page: Page, testInfo: TestInfo, context: Evid
   const screenshot = join(dir, `${base}.png`);
   // A full-page capture misplaces a fixed modal sheet, so a state with an open dialog is captured as the viewport the person sees.
   const modalOpen = (await page.locator("[role=dialog]").count()) > 0;
-  await page.screenshot({ path: screenshot, fullPage: !modalOpen });
+  // Fix round 1: in a full-page capture the fixed bottom navigation would be drawn mid-page over the content, so it is hidden there
+  // (screenshot-only CSS; the page itself is unchanged). The viewport capture of an open modal keeps it, as the person sees it.
+  await page.screenshot({ path: screenshot, fullPage: !modalOpen, ...(modalOpen ? {} : { style: ".app-nav { visibility: hidden !important; }" }) });
   let aria: string | null = null;
   if (scope) {
     aria = join(dir, `${base}.aria.yml`);
     writeFileSync(aria, await scope.ariaSnapshot());
   }
-  writeRecord({ kind: "STATE", testId: testInfo.testId, title: testInfo.title, ...context, state, checks: modalOpen ? [...checks, "screenshot: viewport (modal open)"] : checks, screenshot: relative(EVIDENCE_DIR, screenshot), aria: aria ? relative(EVIDENCE_DIR, aria) : null });
+  writeRecord({ kind: "STATE", testId: testInfo.testId, title: testInfo.title, ...context, state, checks: [...checks, modalOpen ? "screenshot: viewport (modal open)" : "screenshot: full page, fixed bottom navigation hidden in the capture only"], screenshot: relative(EVIDENCE_DIR, screenshot), aria: aria ? relative(EVIDENCE_DIR, aria) : null });
 }
 
 /** A state that could not be captured, with the reason. Never a pass. */
