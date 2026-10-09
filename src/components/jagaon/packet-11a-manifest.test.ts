@@ -265,7 +265,9 @@ describe("Packet 11A scope", () => {
     // Packet 11C B2b: no production module exports a disclosure that accepts remote use by itself. Packet 11C Addendum C, C3 (deliberate
     // retarget of the B3 session): the per-request decisions accept only the one request the screen passes "ACCEPTED" with, which only
     // the disclosure dialog's primary action does (pinned below).
-    expect(exportsOf(browserShellClient)).toEqual(["BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createAiRemoteUseDecisions", "createBrowserShellClient"]);
+    // CL3 contract re-freeze (Task RF, deliberate): plus the label of that per-request disclosure policy (a string only; pinned by the
+    // contract freeze with the behaviour).
+    expect(exportsOf(browserShellClient)).toEqual(["AI_DISCLOSURE_POLICY_VERSION", "BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createAiRemoteUseDecisions", "createBrowserShellClient"]);
     // Packet 11C B4b (deliberate): the one AI wiring of both flows (history explanation and care-summary wording) over one hybrid service.
     expect(exportsOf(browserHistoryExplainer)).toEqual(["createBrowserAiAssistance", "createBrowserHistoryExplainer"]);
     expect(exportsOf(persistence)).toEqual(["createAiInvocationAuditRepository"]);

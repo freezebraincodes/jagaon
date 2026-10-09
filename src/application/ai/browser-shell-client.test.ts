@@ -50,8 +50,10 @@ afterEach(() => {
 
 describe("browser shell client: identity and module surface", () => {
   // Packet 11C Addendum C, C3 (deliberate retarget): the per-request decisions replace the B3 session disclosure.
+  // CL3 contract re-freeze (Task RF, deliberate): plus the label of the per-request disclosure policy (a string; pinned by the freeze).
   it("exports exactly the client factory, the frozen route identity, the interim fail-closed disclosure and the per-request decisions (C3)", () => {
-    expect(Object.keys(client).sort()).toEqual(["BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createAiRemoteUseDecisions", "createBrowserShellClient"]);
+    expect(Object.keys(client).sort()).toEqual(["AI_DISCLOSURE_POLICY_VERSION", "BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createAiRemoteUseDecisions", "createBrowserShellClient"]);
+    expect(client.AI_DISCLOSURE_POLICY_VERSION).toBe("ai-disclosure-policy.11c.2-per-request");
   });
 
   it("B3: exposes its disclosure as the port's remoteUse, so the hybrid service decides it before the first attempt", () => {

@@ -134,21 +134,23 @@ export function createRequestClassGate(registry: AiRequestClassRegistry): AiRequ
 /**
  * The SHIPPED qualification records: exactly one per generated definition, every one PENDING with no evidence and no sign-off. Moving a
  * class to QUALIFIED is an owner sign-off (C1-c) after accepted live evidence under this contract; it is never automatic.
+ * CL3 re-freeze: the literal below is generated (renderQualificationRecordsBlock in packet-11c-request-class-generator.ts, all PENDING)
+ * and packet-11c-request-classes.test.ts requires byte equality; the contract freeze pins the sha256 of this module OUTSIDE the literal.
  */
 export const AI_REQUEST_CLASS_QUALIFICATION_RECORDS: readonly AiRequestClassQualificationRecord[] = Object.freeze(
   ([
-    { classId: "bac882e227c2d60c1fc3d5e8254e2156d1799292d75e61ac3de049ac71a6700f", contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "485a2775305fc15df24f8b4875480d25c68f22404bd7b3770ffc7568dd4805c9", contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "a6df9a141604ab110a711da6fc6633039e5e996f11a446ad6786c56730cce046", contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "21095e8b492b28f3e42e5d4c8a41e798850f31af57b5adb32fb1e145de6b44d6", contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "d730024d1739e62b4b41dbf4359ba777eb298f8c77f9f3c9df02aff0833f554d", contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "fdbcd2b97549ef30f4cacb3949fd62f6305c7239e7c04dde5490dbb539b90b24", contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "aeabdaa95f6a7dc055f7fe737f41553459d9e25402665f99bea1251da7bd0b73", contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "dd7bbe0996b20441c9f6265fd1d26fbd6307ed7df3f315fa3bd090d6f5fd3316", contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "dd2a66a29ac985b7339106db3b5d6a1ef4ca17cd2bf92ca37750ef08262a3483", contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "46fdc1a51c13432b4fa7392a88fec88814b0ecc82c1e71bb79be421b5c7e0965", contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "430e29a5637992267da2c3e839aaa1abeee5a5f5c7d58680af8eff56119952f7", contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "7634c87ff2d343f23d4f59a56d0f1a693d32cab329167ce7bc614f1c50994edd", contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "cb1925c0c9bc85c8dfa75648500df15c8cdc0f1f0774e4f7e7003dd30d8bfc87", contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "87f33caaff876eaf6800f6bf52f00948f125a9a982e5e1f14e5b5f73f9011e21", contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "81287a246ac1062109fece55825b9fb5f0c3d977db2940d9a8addd6d03143fab", contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "818cfcf4b39e18ca069d0aad3ec286e83a6f9c7772704406e3755a8aa989ab9a", contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "9cf93f92a646807e4ad1a214bb4c83d1e8d9c35fb43f15f773ee4fdf36409fee", contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "82b4712365e0e0cbe2ac120e901e8b6f0d9db1ee3c732424935818b6416ec12e", contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "2efcdd020da58dc5e92c8380273da5166a3cde584d3a5145f8e5f3ad56d3e859", contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "14edfc1de07da9373750ad84ec0d423297a0d92a6e4fc1fb368b7496a723a934", contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "5d577574638c5a7c08b6b943a9bff6baf52db2519998ebad9dc49e7565e60bfb", contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "3acd8b2cd182434f92cdc29fc7accef2b2c3c54baf29241749de10b25a624a42", contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "753e307f4e4175388d6978d310cf335c55a10902383671802ab41f7df90d1d39", contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "a8c8095d082eeababc84fbc97fcd4fd438155aeeaaca453064a0982952b2ee44", contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
   ] as const satisfies readonly AiRequestClassQualificationRecord[]).map((record): AiRequestClassQualificationRecord => Object.freeze({ ...record })),
 );
 

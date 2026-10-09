@@ -19,6 +19,13 @@ import { AI_SHELL_ACCESS_HEADER } from "@/application/ai/ai-shell-route-contract
  * - `JAGAON_AI_DAILY_SPEND_LIMIT_USD`: the daily spend limit in USD (a positive decimal with at most 6 decimals, below 1,000,000), held as
  *   whole micro-USD for the per-instance spend ledger (ai-spend-ledger.ts). The owner's target is entered here at deployment.
  */
+/**
+ * CL3 contract re-freeze (Task RF): the label of the C6 server access and spend policy (the switch, origin protection, the demo passcode,
+ * the per-instance daily spend guard, the route's check order and the not-sent marker; ai-shell-handler.ts). The contract freeze pins
+ * the variable names and the order, never a value. Never model-facing.
+ */
+export const AI_SHELL_ACCESS_SPEND_POLICY_VERSION = "ai-shell-access-spend.11c.1";
+
 export const AI_SHELL_DEPLOYMENT_ENV = Object.freeze({
   remoteAi: "JAGAON_REMOTE_AI",
   allowedOrigins: "JAGAON_AI_ALLOWED_ORIGINS",

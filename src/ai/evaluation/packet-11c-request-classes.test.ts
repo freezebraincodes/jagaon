@@ -1,11 +1,13 @@
 // @vitest-environment node
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import Dexie from "dexie";
 import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { DEEPSEEK_RESPONSES_URL } from "@/ai/deepseek/deepseek-catalogue";
 import { AI_REQUEST_CLASS_CONTRACT, AI_REQUEST_CLASS_DEFINITIONS, AI_REQUEST_CLASS_SCHEME } from "@/application/ai/request-class-definitions";
-import { requestClassId, requestClassIdentity, shellRequestDigest } from "@/application/ai/request-class-qualification";
+import { AI_REQUEST_CLASS_QUALIFICATION_RECORDS, requestClassId, requestClassIdentity, shellRequestDigest } from "@/application/ai/request-class-qualification";
 import { projectShellTaskRequest } from "@/application/ai/language/shell-projector";
 import { planSlots } from "@/application/ai/language/slot-planner";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "@/application/ai/ai-hybrid-runtime-bundles";
@@ -15,16 +17,30 @@ import { renderDeterministicCareSummary } from "@/application/care-preparation/d
 import { AI_LOCALES, type AiTaskRequest, type ShellTask } from "@/domain/ai";
 import { hybridFixturesForPhase } from "./packet-11-hybrid-fixtures";
 import { capture } from "./packet-11-presentation-guard.test";
-import { generateRequestClassDefinitions, projectedFixtureRequest, renderRequestClassDefinitionsModule, requestClassContractDigest, requestClassContractInputsFromCode } from "./packet-11c-request-class-generator";
+import {
+  generateRequestClassDefinitions,
+  projectedFixtureRequest,
+  renderQualificationRecordsBlock,
+  renderRequestClassDefinitionsModule,
+  requestClassContractDigest,
+  requestClassContractInputsFromCode,
+  splitQualificationModule,
+} from "./packet-11c-request-class-generator";
 import { SOURCE_BACKED_SCENARIOS, sourceBackedFixture } from "./packet-11-source-backed-fixtures";
 
 /**
  * Packet 11C Addendum C, Task C1: the immutable request-class definitions are generated from the frozen request builders over the 70 FULL
  * fixtures and bound to the frozen model-facing contract. Offline: the real DeepSeek shell adapter with a recording fetcher that throws.
  * "Samples" are FULL fixtures sharing one identical model-facing body; nothing here claims the model saw any fixture's patient text.
+ *
+ * CL3 contract re-freeze (Task RF, C1-review carry): the contract inputs also carry each class's captured model-facing body sha256 and the
+ * endpoint sha256 (cross-checked below against the presentation guard's own capture), the shipped qualification records literal is
+ * regenerated (all PENDING) and must be byte-identical, and the source-backed and care class assertions name the exact class.
  */
 
 const DEFINITIONS_FILE = join(process.cwd(), "src/application/ai/request-class-definitions.ts");
+const QUALIFICATION_FILE = join(process.cwd(), "src/application/ai/request-class-qualification.ts");
+const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 
 beforeAll(() => {
   Dexie.dependencies.indexedDB = fakeIndexedDB;
@@ -42,18 +58,40 @@ const projected = (request: AiTaskRequest, task: ShellTask) => {
 };
 
 describe("Packet 11C C1 request-class definitions (generated, immutable, contract-bound)", () => {
-  it("the committed module is byte-identical to the module regenerated from the frozen sources", () => {
-    expect(readFileSync(DEFINITIONS_FILE, "utf8")).toBe(renderRequestClassDefinitionsModule());
+  it("the committed module is byte-identical to the module regenerated from the frozen sources", async () => {
+    expect(readFileSync(DEFINITIONS_FILE, "utf8")).toBe(await renderRequestClassDefinitionsModule());
+  }, 30_000);
+
+  it("the shipped qualification records literal is byte-identical to the regenerated one: one per definition, ALL PENDING, no evidence", () => {
+    const { records } = splitQualificationModule(readFileSync(QUALIFICATION_FILE, "utf8"));
+    expect(records).toBe(renderQualificationRecordsBlock(AI_REQUEST_CLASS_DEFINITIONS));
+    expect(AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => [record.classId, record.contractDigest, record.status, record.evidenceRef, record.signedOffBy, record.signedOffAt])).toEqual(
+      AI_REQUEST_CLASS_DEFINITIONS.map((definition) => [definition.classId, AI_REQUEST_CLASS_CONTRACT.digest, "PENDING", null, null, null]),
+    );
   });
 
-  it("the contract is the frozen contract read from the code, and its digest is sha256 of the canonical { scheme, inputs }", () => {
+  it("the contract binds each class's exact model-facing body and the endpoint (cross-checked with the presentation guard's capture)", async () => {
+    const { modelFacingBodySha256, endpointSha256 } = AI_REQUEST_CLASS_CONTRACT.inputs;
+    expect(Object.keys(modelFacingBodySha256)).toEqual(AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.shellRequestDigest));
+    expect(endpointSha256).toBe(sha256(DEEPSEEK_RESPONSES_URL));
+    const fixtures = hybridFixturesForPhase("FULL");
+    for (const definition of AI_REQUEST_CLASS_DEFINITIONS) {
+      for (const id of definition.sampleFixtureIds) {
+        const { body } = await capture(fixtures.find((fixture) => fixture.id === id)!);
+        expect(sha256(body!), `${definition.classId} ${id}`).toBe(modelFacingBodySha256[definition.shellRequestDigest]);
+      }
+    }
+  }, 60_000);
+
+  it("the contract is the frozen contract read from the code, and its digest is sha256 of the canonical { scheme, inputs }", async () => {
     expect(AI_REQUEST_CLASS_CONTRACT.scheme).toBe("ai-request-class.11c.1");
     expect(AI_REQUEST_CLASS_SCHEME).toBe("ai-request-class.11c.1");
-    expect(AI_REQUEST_CLASS_CONTRACT.inputs).toEqual(requestClassContractInputsFromCode());
+    expect(AI_REQUEST_CLASS_CONTRACT.inputs).toEqual(await requestClassContractInputsFromCode());
     expect(AI_REQUEST_CLASS_CONTRACT.digest).toBe(requestClassContractDigest(AI_REQUEST_CLASS_CONTRACT.inputs));
     expect(Object.isFrozen(AI_REQUEST_CLASS_CONTRACT) && Object.isFrozen(AI_REQUEST_CLASS_CONTRACT.inputs) && Object.isFrozen(AI_REQUEST_CLASS_DEFINITIONS)).toBe(true);
     expect(AI_REQUEST_CLASS_DEFINITIONS.every((definition) => Object.isFrozen(definition) && Object.isFrozen(definition.sampleFixtureIds))).toBe(true);
-  });
+    expect(Object.isFrozen(AI_REQUEST_CLASS_CONTRACT.inputs.modelFacingBodySha256)).toBe(true);
+  }, 30_000);
 
   it("every definition is bound to the contract: classId = sha256(contractDigest || shellRequestDigest); classes are distinct", () => {
     for (const definition of AI_REQUEST_CLASS_DEFINITIONS) {
@@ -111,9 +149,15 @@ describe("Packet 11C C1 request-class definitions (generated, immutable, contrac
         expect(definition, `${locale} ${scenario}`).toBeDefined();
         expect(definition!.taskType).toBe("EXPLAIN_PATTERN");
         expect(definition!.locale).toBe(locale);
+        // CL3 re-freeze (C1-review carry): exactly the evaluated 9-sample class whose samples include the ordinary fixture.
+        expect(definition!.sampleFixtureIds, `${locale} ${scenario}`).toHaveLength(9);
+        expect(definition!.sampleFixtureIds).toContain(`p11.explain-pattern.${locale.toLowerCase()}.ordinary`);
         ids.add(definition!.classId);
       }
       expect(ids.size, locale).toBe(1);
+      // CL3 re-freeze: the care class of each synthetic draft shape, in the draft's own locale (ORDINARY: the 15-sample class with the
+      // ordinary fixture; HIDDEN_LIMITATION: the 1-sample hidden-limitation class).
+      const careClass = { ORDINARY: { samples: 15, fixture: "ordinary" }, HIDDEN_LIMITATION: { samples: 1, fixture: "hidden-limitation" } } as const;
       for (const shape of ["ORDINARY", "HIDDEN_LIMITATION"] as SyntheticCareDraftShape[]) {
         const current = (await renderDeterministicCareSummary(syntheticCareDraft(shape, locale))).payload;
         const built = buildCareSummaryAiRequest({ current, requestId: "33333333-3333-4333-8333-333333333333", requestedAt: NOW });
@@ -121,6 +165,9 @@ describe("Packet 11C C1 request-class definitions (generated, immutable, contrac
         const definition = classOf(projected(built.request, "DRAFT_CARE_PREPARATION_SUMMARY"));
         expect(definition, `${locale} ${shape}`).toBeDefined();
         expect(definition!.taskType).toBe("DRAFT_CARE_PREPARATION_SUMMARY");
+        expect(definition!.locale, `${locale} ${shape}`).toBe(locale);
+        expect(definition!.sampleFixtureIds, `${locale} ${shape}`).toHaveLength(careClass[shape as keyof typeof careClass].samples);
+        expect(definition!.sampleFixtureIds).toContain(`p11.draft-care-preparation-summary.${locale.toLowerCase()}.${careClass[shape as keyof typeof careClass].fixture}`);
       }
     }
     // Packet 11C Addendum C, C3 fix round 1: an offline test-execution allowance only (12 fake-IndexedDB source-backed harnesses and 4

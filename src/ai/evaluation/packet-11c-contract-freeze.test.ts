@@ -21,8 +21,15 @@ import {
 import { DEEPSEEK_RESPONSES_PROFILE } from "@/ai/deepseek/deepseek-responses-provider";
 import { SHELL_PROVIDER_SCHEMA_VERSION, shellOutputJsonSchema, shellOutputSchemaName } from "@/ai/kie/kie-shell-contracts";
 import { PACKET_11_SHELL_PROMPT_VERSION, PACKET_11_SHELL_PROMPTS } from "@/ai/prompts/packet-11-shell-prompts";
+import { AI_SHELL_ACCESS_SPEND_POLICY_VERSION, AI_SHELL_DEPLOYMENT_ENV } from "@/app/api/ai/shell/ai-shell-deployment-config";
 import { createAiShellHandler } from "@/app/api/ai/shell/ai-shell-handler";
 import { TEST_DEPLOYMENT_ENVIRONMENT, testBrowserHeaders } from "@/app/api/ai/shell/ai-shell-route-test-support";
+import { AI_DISCLOSURE_POLICY_VERSION, createAiRemoteUseDecisions, INTERIM_FAIL_CLOSED_DISCLOSURE } from "@/application/ai/browser-shell-client";
+import { AI_SHELL_ACCESS_HEADER, AI_SHELL_ROUTE_REFUSAL_REASONS } from "@/application/ai/ai-shell-route-contract";
+import { BACKUP_PAYLOAD_MIGRATIONS } from "@/backup/backup-migration-registry";
+import { BACKUP_PAYLOAD_FORMAT, BACKUP_SCHEMA_VERSION, BACKUP_SCHEMA_VERSION_V1 } from "@/backup/backup-payload-v1";
+import { KEEP_WORDING_PREFERENCE_KEY, KEEP_WORDING_PREFERENCE_SCHEMA_VERSION } from "@/storage/app-preference-row";
+import type { AppMessages } from "@/i18n/types";
 import { AI_ACTIVATION_MANIFEST, type AiActivationManifest } from "@/application/ai/ai-activation-manifest";
 import { AI_HYBRID_BUNDLE_VERSION, AI_HYBRID_RUNTIME_BUNDLES, AI_HYBRID_VERSIONS } from "@/application/ai/ai-hybrid-runtime-bundles";
 import { AI_MEANING_REGISTRY_REVISION } from "@/application/ai/ai-meaning-registry";
@@ -49,12 +56,12 @@ import { CARE_SUMMARY_AI_MARKING_VERSIONS, CARE_SUMMARY_TEMPLATES_WITH_AI_MARKIN
 import { AI_LOCALES, AI_TASK_TYPES, SHELL_INPUT_VERSIONS, SHELL_MAX_OUTPUT_TOKENS, SHELL_OUTPUT_VERSIONS, SHELL_PROVIDER_REQUEST_VERSION, SHELL_TASKS, SHELL_TEMPERATURE, SLOT_PLAN_VERSION, type AiLocale } from "@/domain/ai";
 import { getMessages } from "@/i18n/get-messages";
 import { AI_REQUEST_CLASS_CONTRACT, AI_REQUEST_CLASS_DEFINITIONS } from "@/application/ai/request-class-definitions";
-import { AI_REMOTE_ELIGIBILITY_POLICY_VERSION, AI_REQUEST_CLASS_QUALIFICATION_RECORDS } from "@/application/ai/request-class-qualification";
+import { AI_REMOTE_ELIGIBILITY_POLICY_VERSION, AI_REQUEST_CLASS_QUALIFICATION_RECORDS, SHIPPED_REQUEST_CLASS_GATE } from "@/application/ai/request-class-qualification";
 import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 import { canonicalizeJson } from "@/application/contracts/canonical-json";
-import { requestClassContractDigest, requestClassContractInputsFromCode } from "./packet-11c-request-class-generator";
+import { requestClassContractDigest, requestClassContractInputsFromCode, splitQualificationModule } from "./packet-11c-request-class-generator";
 import { VALIDATOR_RULES_REVISION } from "./packet-11-evaluation";
-import { AI_HYBRID_EVALUATION_REPORT_VERSION, APPROVED_HYBRID_CONTRACT, HYBRID_FULL_EVALUATION_POLICY } from "./packet-11-hybrid-evaluation";
+import { AI_HYBRID_EVALUATION_REPORT_VERSION, APPROVED_HYBRID_CONTRACT, HYBRID_FULL_EVALUATION_POLICY, HYBRID_FULL_UTILITY_THRESHOLDS } from "./packet-11-hybrid-evaluation";
 import { hybridFixturesForPhase, PACKET_11_HYBRID_FIXTURE_SET_REVISION } from "./packet-11-hybrid-fixtures";
 import { plannedFixture } from "./packet-11-hybrid-test-support";
 import { capture, existingFixtureDigest, versionNormalisedFixtureDigest } from "./packet-11-presentation-guard.test";
@@ -96,6 +103,22 @@ import { SOURCE_BACKED_SCENARIOS, sourceBackedFixture } from "./packet-11-source
  * Packet 11C Addendum C, Task C4 (deliberate, for the CL3 re-freeze): `careSummary` adds the AI-assisted care-summary template and
  * renderer 11c.2 (hashed AI marking built from the approved rows ai.demoTag and ai.resultCheck), the AI-marking template list and the
  * sha256 of the marking text per locale; 11c.2 joins the notice templates. Deterministic previews keep 11c.1. Not model-facing.
+ *
+ * Packet 11C Addendum C, CL3 contract re-freeze (Task RF; every CL1–CL3 version or policy, each read from the code by a reader):
+ * - `harness` also pins the unchanged FULL utility thresholds of hybrid-full-policy.2;
+ * - `requestClasses`: the contract inputs now also bind each class's captured model-facing body sha256 and the endpoint sha256 (C1-review
+ *   carry; every classId changed, records regenerated, all still PENDING), plus the sha256 of the qualification module OUTSIDE its
+ *   generated records literal (the rule, schema and gate) and the shipped gate admitting no task;
+ * - `remoteUseDisclosure` (C3): the per-request disclosure policy ai-disclosure-policy.11c.2-per-request, read from its behaviour, and
+ *   the passcode-field row bytes (no label; human acceptance pending). The dialog copy stays ai-disclosure.11c.1 (`disclosureCopy`):
+ *   owner decision U03 changed behaviour only (the primary action waits for non-whitespace passcode input), no dialog row;
+ * - `shellAccessSpend` (C6): the policy ai-shell-access-spend.11c.1, the deployment variable NAMES (never a value), the access header
+ *   name, the closed refusal reasons, the not-sent marker and the route's check order, read by probing the handler (all faults set,
+ *   then each reported fault removed in turn, until the provider call);
+ * - `privateWording` (C2): the preference row app-preference.keep-wording.11c.1, backup payload v2 and its one migration, and the
+ *   setting's copy group ai-wording-setting.11c.2 (owner decisions U04/U05 moved it from 11c.1);
+ * - `historyFallback` (owner decision U12): the copy group ai-history-fallback.11c.1.
+ * None of it is model-facing (checked on every captured body): every body digest is unchanged.
  *
  * Changing anything pinned here fails with FROZEN_CONTRACT_CHANGED and the item's name. Update this manifest only deliberately, with the
  * owner's re-approval of the contract and the evidence policy (a changed model-facing byte needs fresh evaluation evidence).
@@ -139,7 +162,17 @@ const FROZEN = Object.freeze({
   },
   fixtureSet: { revision: "packet11-fixtures.11b.16", fullFixtureCount: 70 },
   // Packet 11C Addendum C (C5): eval.20, the conservative usage accounting (owner decision C5-b); the policy is unchanged.
-  harness: { label: "packet11-eval.20", fullEvaluationPolicy: "hybrid-full-policy.2" },
+  // CL3 re-freeze: the unchanged FULL utility thresholds of that policy are pinned too.
+  harness: {
+    label: "packet11-eval.20",
+    fullEvaluationPolicy: "hybrid-full-policy.2",
+    fullUtilityThresholds: {
+      firstCallValid: { numerator: 69, denominator: 70, comparison: "AT_LEAST" },
+      repairs: { numerator: 1, denominator: 70, comparison: "AT_MOST" },
+      usefulAcceptedOutput: { numerator: 67, denominator: 70, comparison: "AT_LEAST" },
+      withinProductionTimeout: { numerator: 67, denominator: 70, comparison: "AT_LEAST" },
+    },
+  },
   // Packet 11C Addendum C (C5, owner decision C5-a): the versioned local audit row and its audit-only outcome codes (never model-facing).
   audit: {
     schemaVersion: "ai-invocation-audit.11c.2",
@@ -190,15 +223,57 @@ const FROZEN = Object.freeze({
   // Packet 11C Addendum C (C1, owner decision C1): remote eligibility is restricted to QUALIFIED request classes. The immutable,
   // generated class definitions are bound to the contract digest (computed from the frozen sources above); the separate owner
   // qualification records ship ALL PENDING (no evidence, no sign-off). Never model-facing.
+  // CL3 re-freeze (C1-review carry, deliberate): the contract inputs also bind each class's captured model-facing body sha256 and the
+  // endpoint sha256, so the contract digest and every classId changed (was f2814202…, definitions 30836f5d…); the records were
+  // regenerated, ALL PENDING. The qualification module is pinned outside its generated records literal.
   requestClasses: {
     scheme: "ai-request-class.11c.1",
     remoteEligibilityPolicy: "ai-remote-eligibility.11c.1",
-    contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b",
-    definitionsSha256: "30836f5da23fce91fc3947a80fcfe185eeb4976e02f323784a915ae4ae2dcf18",
+    contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8",
+    definitionsSha256: "d17c62cdaaf0cdef4cef8fc60732fa6a57bfd442b85e01952e0ac3f453167853",
+    contractBindings: { classBodies: 12, endpointSha256: "6a440b422e727dd307ca07f0f1df977bd3ac1d0d62917187225a12b9f5f306de", sourceBackedAndCareClassBodiesBound: true },
     classesPerTaskLocale: { "EXPLAIN_PATTERN en-SG": 3, "EXPLAIN_PATTERN zh-SG": 3, "DRAFT_CARE_PREPARATION_SUMMARY en-SG": 3, "DRAFT_CARE_PREPARATION_SUMMARY zh-SG": 3 },
     samples: 70,
     qualificationRecords: { count: 12, statuses: ["PENDING"], withEvidence: 0, signedOff: 0 },
+    qualificationModuleSha256OutsideRecords: "d5531a2afe31f970766616429c51031586331addc7961866245746af3a43d17b",
+    shippedGateAdmissibleTasks: [],
   },
+  // CL3 re-freeze (C3, owner decision C3; label introduced in RF): disclosure acceptance belongs to ONE explicit request (its decision
+  // token) and ends when that request settles or its token aborts; a later request never inherits it; the interim default never accepts.
+  remoteUseDisclosure: {
+    policy: "ai-disclosure-policy.11c.2-per-request",
+    behaviour: { duringAcceptedRequest: "ACCEPTED", afterThatRequestSettles: "NOT_ACCEPTED", laterRequestOnSameTokenWithoutDecision: "NOT_ACCEPTED", otherToken: "NOT_ACCEPTED", afterTokenAborts: "NOT_ACCEPTED", declined: "DECLINED", interimDefault: "NOT_ACCEPTED" },
+    dialogCopyLabel: "ai-disclosure.11c.1",
+    passcodeFieldRowsSha256: "3464497896470f9c7db7c8e0850c1ef8ec5591631f4006a26f56328d71996014",
+  },
+  // CL3 re-freeze (C6; label introduced in RF): names and order only, never a value.
+  shellAccessSpend: {
+    policy: "ai-shell-access-spend.11c.1",
+    environmentVariableNames: ["JAGAON_REMOTE_AI", "JAGAON_AI_ALLOWED_ORIGINS", "JAGAON_AI_DEMO_PASSCODE", "JAGAON_AI_DAILY_SPEND_LIMIT_USD"],
+    accessHeader: "x-jagaon-demo-passcode",
+    refusalReasons: ["REQUEST_CLASS_NOT_QUALIFIED", "REMOTE_AI_DISABLED", "ORIGIN_REJECTED", "ACCESS_DENIED", "SPEND_NOT_CONFIGURED", "SPEND_CEILING_REACHED", "SPEND_LEDGER_UNAVAILABLE"],
+    checkOrder: [
+      "requestChecks: 400 FAILED PAYLOAD_INVALID",
+      "remoteAiSwitch: 403 REFUSED REMOTE_AI_DISABLED",
+      "originProtection: 403 REFUSED ORIGIN_REJECTED",
+      "accessAuthorization: 403 REFUSED ACCESS_DENIED",
+      "activation: 200 FAILED TASK_DISABLED",
+      "requestClassQualification: 403 REFUSED REQUEST_CLASS_NOT_QUALIFIED",
+      "spendReservation: 403 REFUSED SPEND_NOT_CONFIGURED",
+      "credentialRead: 200 FAILED MISSING_CONFIGURATION",
+      "providerCall",
+    ],
+    notSentMarker: { field: "notSentToProvider", value: true, preCallAnswersCarryingIt: 8, afterCallAnswerKeys: ["kind", "reason", "usage"] },
+  },
+  // CL3 re-freeze (C2): the private wording setting. The copy group moved 11c.1 -> 11c.2 by owner decisions U04/U05 (2026-10-09).
+  privateWording: {
+    preferenceRow: { key: "keepWordingOnDevice", schemaVersion: "app-preference.keep-wording.11c.1" },
+    backupPayload: { format: "jagaon-backup-payload", schemaVersion: 2, previousSchemaVersion: 1 },
+    migrations: [{ migrationId: "jagaon.backup.0001-patient-settings", from: 1, to: 2 }],
+    copy: { label: "ai-wording-setting.11c.2", rowsSha256: "5b29366cbd41d54229a03e58554b6b8e37bfb79fb2964eddaa99ff7ca099f5d1" },
+  },
+  // CL3 re-freeze (owner decision U12): the history fallback line after an attempted remote request.
+  historyFallback: { copy: { label: "ai-history-fallback.11c.1", rowsSha256: "87a23aac11ad7e0560ce034542ea72559d2d0bcb8cb25c32678eab421a60cf17" } },
   runtimeBundles: { modelSnapshot: null, routeProfile: "deterministic-only.11a.1" },
   modelFacingBodies: {
     fixtures70: {
@@ -279,6 +354,99 @@ async function routeTransmission() {
   return { status: response.status, sent, evaluated };
 }
 
+/**
+ * A copy group without a runtime version constant: its label is the one beside its rows in both catalogues (exactly one), and its rows
+ * are pinned as bytes (the sha256 of both locales' rows).
+ */
+function catalogueCopy(labelPrefix: string, rows: (messages: AppMessages) => unknown) {
+  const pattern = new RegExp(`${labelPrefix.replace(/[.-]/g, "\\$&")}\\.11c\\.\\d+`, "g");
+  const labels = [...new Set(LOCALES.flatMap((locale) => readFileSync(join(process.cwd(), `src/i18n/messages/${locale}.ts`), "utf8").match(pattern) ?? []))];
+  return { label: labels.length === 1 ? labels[0] : { LABELS: labels }, rowsSha256: sha256(JSON.stringify(Object.fromEntries(LOCALES.map((locale) => [locale, rows(getMessages(locale))])))) };
+}
+
+/** C3: the per-request disclosure policy, read from its behaviour (createAiRemoteUseDecisions) and the interim default. */
+async function disclosureBehaviour() {
+  const decisions = createAiRemoteUseDecisions();
+  const decide = (token: AbortSignal | undefined) => decisions.disclosure.decide(token ?? new AbortController().signal);
+  const first = new AbortController();
+  const duringAcceptedRequest = await decisions.run("ACCEPTED", first.signal, decide);
+  const afterThatRequestSettles = await decide(first.signal);
+  const laterRequestOnSameTokenWithoutDecision = await decisions.run(undefined, first.signal, decide);
+  const second = new AbortController();
+  const otherToken = await decisions.run("ACCEPTED", second.signal, () => decide(new AbortController().signal));
+  const third = new AbortController();
+  const afterTokenAborts = await decisions.run("ACCEPTED", third.signal, (token) => {
+    third.abort();
+    return decide(token);
+  });
+  const declined = await decisions.run("DECLINED", new AbortController().signal, decide);
+  const interimDefault = await INTERIM_FAIL_CLOSED_DISCLOSURE.decide(new AbortController().signal);
+  return { duringAcceptedRequest, afterThatRequestSettles, laterRequestOnSameTokenWithoutDecision, otherToken, afterTokenAborts, declined, interimDefault };
+}
+
+/**
+ * C6: the route's check order, read by probing `/api/ai/shell` (fake fetcher; TEST deployment values only, never a deployment value):
+ * every fault is set, the step that answers is recorded and its fault removed, until the provider call is reached. A swapped check
+ * changes the recorded order. Also returns each answer, to read the not-sent marker.
+ */
+const ROUTE_FAULTS = ["requestChecks", "remoteAiSwitch", "originProtection", "accessAuthorization", "activation", "requestClassQualification", "spendReservation", "credentialRead"] as const;
+type RouteFault = (typeof ROUTE_FAULTS)[number];
+const ROUTE_STEP_OF: Readonly<Record<string, RouteFault>> = {
+  "FAILED PAYLOAD_INVALID": "requestChecks",
+  "REFUSED REMOTE_AI_DISABLED": "remoteAiSwitch",
+  "REFUSED ORIGIN_REJECTED": "originProtection",
+  "REFUSED ACCESS_DENIED": "accessAuthorization",
+  "FAILED TASK_DISABLED": "activation",
+  "FAILED PROFILE_NOT_PERMITTED": "activation",
+  "REFUSED REQUEST_CLASS_NOT_QUALIFIED": "requestClassQualification",
+  "REFUSED SPEND_NOT_CONFIGURED": "spendReservation",
+  "FAILED MISSING_CONFIGURATION": "credentialRead",
+};
+let routeProbe: Promise<{ order: string[]; preCall: Array<Record<string, unknown>>; afterCall: Record<string, unknown> | null }> | null = null;
+function probeRouteCheckOrder() {
+  routeProbe ??= (async () => {
+    const approved = projectShellTaskRequest(plannedFixture("p11.explain-pattern.en-sg.ordinary").plan);
+    const remaining = new Set<RouteFault>(ROUTE_FAULTS);
+    const order: string[] = [];
+    const preCall: Array<Record<string, unknown>> = [];
+    for (let probe = 0; probe <= ROUTE_FAULTS.length; probe += 1) {
+      const has = (fault: RouteFault) => remaining.has(fault);
+      const environment: Record<string, string> = { ...TEST_DEPLOYMENT_ENVIRONMENT };
+      if (has("remoteAiSwitch")) delete environment[AI_SHELL_DEPLOYMENT_ENV.remoteAi];
+      if (has("spendReservation")) delete environment[AI_SHELL_DEPLOYMENT_ENV.dailySpendLimitUsd];
+      if (!has("credentialRead")) environment.DEEPSEEK_API_KEY = SENTINEL;
+      const sent: string[] = [];
+      const handler = createAiShellHandler({
+        environment,
+        activationManifest: has("activation") ? AI_ACTIVATION_MANIFEST : ENABLED,
+        requestClassGate: has("requestClassQualification") ? SHIPPED_REQUEST_CLASS_GATE : qualifiedTestRequestClassGate(),
+        fetcher: async (url) => {
+          sent.push(url);
+          throw new Error("OFFLINE_CAPTURE_ONLY");
+        },
+      });
+      const headers = { "content-type": "application/json", ...testBrowserHeaders(has("accessAuthorization") ? null : undefined), ...(has("originProtection") ? { Origin: "https://origin-not-allowed.invalid" } : {}) };
+      const body = has("requestChecks") ? { ...approved, unexpectedField: true } : approved;
+      const response = await handler(new Request(`http://localhost${AI_SHELL_ROUTE_PATH}`, { method: "POST", headers, body: JSON.stringify(body) }));
+      const answer = (await response.json()) as Record<string, unknown>;
+      if (sent.length > 0) {
+        order.push("providerCall");
+        return { order, preCall, afterCall: answer };
+      }
+      const step = ROUTE_STEP_OF[`${String(answer.kind)} ${String(answer.reason)}`];
+      if (step === undefined || !remaining.has(step)) {
+        order.push(`UNEXPECTED: ${response.status} ${String(answer.kind)} ${String(answer.reason)}`);
+        break;
+      }
+      order.push(`${step}: ${response.status} ${String(answer.kind)} ${String(answer.reason)}`);
+      preCall.push(answer);
+      remaining.delete(step);
+    }
+    return { order, preCall, afterCall: null };
+  })();
+  return routeProbe;
+}
+
 /** How each frozen item is read from the code (every source that carries it). */
 const ACTUAL: { readonly [K in FrozenItem]: () => unknown } = {
   slotPlan: () => agree({ SLOT_PLAN_VERSION, "AI_HYBRID_VERSIONS.slotPlan": AI_HYBRID_VERSIONS.slotPlan, "APPROVED_HYBRID_CONTRACT.slotPlanVersion": APPROVED_HYBRID_CONTRACT.slotPlanVersion }),
@@ -325,6 +493,7 @@ const ACTUAL: { readonly [K in FrozenItem]: () => unknown } = {
   harness: () => ({
     label: agree({ AI_HYBRID_EVALUATION_REPORT_VERSION, "AI_HYBRID_VERSIONS.evaluationReport": AI_HYBRID_VERSIONS.evaluationReport, "APPROVED_HYBRID_CONTRACT.evaluationReportVersion": APPROVED_HYBRID_CONTRACT.evaluationReportVersion }),
     fullEvaluationPolicy: agree({ HYBRID_FULL_EVALUATION_POLICY, "APPROVED_HYBRID_CONTRACT.fullEvaluationPolicy": APPROVED_HYBRID_CONTRACT.fullEvaluationPolicy }),
+    fullUtilityThresholds: JSON.parse(JSON.stringify(HYBRID_FULL_UTILITY_THRESHOLDS)) as unknown,
   }),
   audit: () => ({
     schemaVersion: AI_INVOCATION_AUDIT_SCHEMA_VERSION,
@@ -396,17 +565,27 @@ const ACTUAL: { readonly [K in FrozenItem]: () => unknown } = {
     profile: AI_ACTIVATION_MANIFEST.profile,
     everyTask: agree({ ...AI_ACTIVATION_MANIFEST.tasks, taskCount: Object.keys(AI_ACTIVATION_MANIFEST.tasks).length === AI_TASK_TYPES.length ? "DETERMINISTIC_ONLY" : Object.keys(AI_ACTIVATION_MANIFEST.tasks) }),
   }),
-  requestClasses: () => ({
+  requestClasses: async () => ({
     scheme: AI_REQUEST_CLASS_CONTRACT.scheme,
     remoteEligibilityPolicy: AI_REMOTE_ELIGIBILITY_POLICY_VERSION,
     contractDigest: agree({
       "AI_REQUEST_CLASS_CONTRACT.digest": AI_REQUEST_CLASS_CONTRACT.digest,
       "computed from AI_REQUEST_CLASS_CONTRACT.inputs": requestClassContractDigest(AI_REQUEST_CLASS_CONTRACT.inputs),
-      "computed from the frozen sources": requestClassContractDigest(requestClassContractInputsFromCode()),
+      "computed from the frozen sources": requestClassContractDigest(await requestClassContractInputsFromCode()),
       "every definition": [...new Set(AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.contractDigest))].join(","),
       "every record": [...new Set(AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => record.contractDigest))].join(","),
     }),
     definitionsSha256: sha256(canonicalizeJson(AI_REQUEST_CLASS_DEFINITIONS.map((definition) => ({ ...definition, sampleFixtureIds: [...definition.sampleFixtureIds] })))),
+    contractBindings: await (async () => {
+      const { sourceBacked, care } = await capturedBodies();
+      const bound = new Set(Object.values(AI_REQUEST_CLASS_CONTRACT.inputs.modelFacingBodySha256));
+      return {
+        classBodies: agree({ "inputs.modelFacingBodySha256": Object.keys(AI_REQUEST_CLASS_CONTRACT.inputs.modelFacingBodySha256).length, definitions: AI_REQUEST_CLASS_DEFINITIONS.length }),
+        endpointSha256: agree({ "inputs.endpointSha256": AI_REQUEST_CLASS_CONTRACT.inputs.endpointSha256, "sha256(DEEPSEEK_RESPONSES_URL)": sha256(DEEPSEEK_RESPONSES_URL) }),
+        // The source-backed EXPLAIN and care class bodies the guards pin are among the bodies the contract binds.
+        sourceBackedAndCareClassBodiesBound: [...sourceBacked.map((entry) => entry.body), ...care.map((entry) => entry.body)].every((body) => bound.has(sha256(body))),
+      };
+    })(),
     classesPerTaskLocale: Object.fromEntries(
       SHELL_TASKS.flatMap((task) => LOCALES.map((locale) => [`${task} ${locale}`, AI_REQUEST_CLASS_DEFINITIONS.filter((definition) => definition.taskType === task && definition.locale === locale).length])),
     ),
@@ -417,7 +596,41 @@ const ACTUAL: { readonly [K in FrozenItem]: () => unknown } = {
       withEvidence: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.filter((record) => record.evidenceRef !== null).length,
       signedOff: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.filter((record) => record.signedOffBy !== null || record.signedOffAt !== null).length,
     },
+    // C1-review carry: the rule, schema and gate, frozen independently of the regenerated records literal.
+    qualificationModuleSha256OutsideRecords: sha256(splitQualificationModule(readFileSync(join(process.cwd(), "src/application/ai/request-class-qualification.ts"), "utf8")).outside),
+    shippedGateAdmissibleTasks: SHELL_TASKS.filter((task) => SHIPPED_REQUEST_CLASS_GATE.anyAdmissible(task)),
   }),
+  remoteUseDisclosure: async () => ({
+    policy: AI_DISCLOSURE_POLICY_VERSION,
+    behaviour: await disclosureBehaviour(),
+    dialogCopyLabel: (ACTUAL.disclosureCopy() as { label: unknown }).label,
+    passcodeFieldRowsSha256: sha256(JSON.stringify(Object.fromEntries(LOCALES.map((locale) => [locale, getMessages(locale).aiAccess])))),
+  }),
+  shellAccessSpend: async () => {
+    const { order, preCall, afterCall } = await probeRouteCheckOrder();
+    const markers = preCall.map((answer) => Object.keys(answer).filter((key) => key !== "kind" && key !== "reason"));
+    const field = agree(Object.fromEntries(markers.map((keys, index) => [order[index]!, keys.join(",")])));
+    return {
+      policy: AI_SHELL_ACCESS_SPEND_POLICY_VERSION,
+      environmentVariableNames: Object.values(AI_SHELL_DEPLOYMENT_ENV),
+      accessHeader: AI_SHELL_ACCESS_HEADER,
+      refusalReasons: [...AI_SHELL_ROUTE_REFUSAL_REASONS],
+      checkOrder: order,
+      notSentMarker: {
+        field,
+        value: agree(Object.fromEntries(preCall.map((answer, index) => [order[index]!, typeof field === "string" ? answer[field] : null]))),
+        preCallAnswersCarryingIt: preCall.filter((answer) => typeof field === "string" && answer[field] === true).length,
+        afterCallAnswerKeys: afterCall === null ? null : Object.keys(afterCall).sort(),
+      },
+    };
+  },
+  privateWording: () => ({
+    preferenceRow: { key: KEEP_WORDING_PREFERENCE_KEY, schemaVersion: KEEP_WORDING_PREFERENCE_SCHEMA_VERSION },
+    backupPayload: { format: BACKUP_PAYLOAD_FORMAT, schemaVersion: BACKUP_SCHEMA_VERSION, previousSchemaVersion: BACKUP_SCHEMA_VERSION_V1 },
+    migrations: BACKUP_PAYLOAD_MIGRATIONS.map((migration) => ({ migrationId: migration.migrationId, from: migration.fromBackupSchemaVersion, to: migration.toBackupSchemaVersion })),
+    copy: catalogueCopy("ai-wording-setting", (messages) => messages.aiWording),
+  }),
+  historyFallback: () => ({ copy: catalogueCopy("ai-history-fallback", (messages) => messages.aiHistoryFallback) }),
   runtimeBundles: () => ({
     modelSnapshot: agree(Object.fromEntries([...AI_TASK_TYPES.map((task) => [`legacy ${task}`, AI_TASK_RUNTIME_BUNDLES[task].modelSnapshot]), ...SHELL_TASKS.map((task) => [`hybrid ${task}`, AI_HYBRID_RUNTIME_BUNDLES[task].modelSnapshot])])),
     routeProfile: agree(Object.fromEntries([...AI_TASK_TYPES.map((task) => [`legacy ${task}`, AI_TASK_RUNTIME_BUNDLES[task].routeProfile]), ...SHELL_TASKS.map((task) => [`hybrid ${task}`, AI_HYBRID_RUNTIME_BUNDLES[task].routeProfile])])),
@@ -467,7 +680,8 @@ describe("Packet 11C frozen contract manifest (Addendum B, Task B5; offline)", (
     // Packet 11C Addendum C (C5): nor the audit schema label, an audit-only outcome code or a usage basis.
     // Packet 11C Addendum C (C1): nor the request-class scheme, the eligibility policy, the contract digest or any class id.
     // Packet 11C Addendum C (C6): nor the passcode header, a deployment variable name or the route's not-sent marker.
-    const labels = [SHELL_PROVIDER_SCHEMA_VERSION, AI_HYBRID_EVALUATION_REPORT_VERSION, "kie-schema", "packet11-eval", "packet11-fixtures", "hybrid-full-policy", "ai-activation", "care-summary-template", "ai-disclosure", "ai-invocation-audit", "usageBasis", "UPPER_BOUND", ...AI_AUDIT_ONLY_OUTCOME_CODES, "ai-request-class", "ai-remote-eligibility", AI_REQUEST_CLASS_CONTRACT.digest, ...AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.classId), "x-jagaon-demo-passcode", "JAGAON_", "notSentToProvider"];
+    // CL3 re-freeze: nor the disclosure policy, the access/spend policy, the preference row, backup or migration ids, or the new copy groups.
+    const labels = [SHELL_PROVIDER_SCHEMA_VERSION, AI_HYBRID_EVALUATION_REPORT_VERSION, "kie-schema", "packet11-eval", "packet11-fixtures", "hybrid-full-policy", "ai-activation", "care-summary-template", "ai-disclosure", "ai-invocation-audit", "usageBasis", "UPPER_BOUND", ...AI_AUDIT_ONLY_OUTCOME_CODES, "ai-request-class", "ai-remote-eligibility", AI_REQUEST_CLASS_CONTRACT.digest, ...AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.classId), "x-jagaon-demo-passcode", "JAGAON_", "notSentToProvider", AI_DISCLOSURE_POLICY_VERSION, AI_SHELL_ACCESS_SPEND_POLICY_VERSION, KEEP_WORDING_PREFERENCE_SCHEMA_VERSION, "keepWordingOnDevice", "jagaon.backup", "jagaon-backup-payload", "ai-wording-setting", "ai-history-fallback"];
     expect(all.flatMap((body, index) => labels.filter((label) => body.includes(label)).map((label) => `${index}: ${label}`))).toEqual([]);
     // The slot-plan version is the only version echo each body carries twice (the documented version-only difference).
     expect(all.filter((body) => normaliseSlotPlanVersion(body).occurrences !== SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY)).toEqual([]);

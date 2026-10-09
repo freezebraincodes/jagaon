@@ -1,4 +1,6 @@
-import { DEEPSEEK_RESPONSES_PROFILE } from "@/ai/deepseek/deepseek-responses-provider";
+import { DEEPSEEK_DOCUMENTED_MODELS, DEEPSEEK_RESPONSES_URL } from "@/ai/deepseek/deepseek-catalogue";
+import { createDeepSeekShellResponsesProvider, DEEPSEEK_RESPONSES_PROFILE } from "@/ai/deepseek/deepseek-responses-provider";
+import { selectEvaluationCandidates } from "@/ai/kie/kie-route-config";
 import { SHELL_PROVIDER_SCHEMA_VERSION, shellOutputJsonSchema, shellOutputSchemaName } from "@/ai/kie/kie-shell-contracts";
 import { PACKET_11_SHELL_PROMPT_VERSION, PACKET_11_SHELL_PROMPTS } from "@/ai/prompts/packet-11-shell-prompts";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "@/application/ai/ai-hybrid-runtime-bundles";
@@ -25,12 +27,65 @@ import { hybridFixturesForPhase } from "./packet-11-hybrid-fixtures";
  *   projected request (and so model-facing body) is identical. "Samples" means only that: fixtures sharing one identical body. It never
  *   means the model saw a fixture's patient text (none crosses the boundary).
  * `packet-11c-request-classes.test.ts` regenerates the module text and requires byte equality with the committed file.
+ *
+ * Packet 11C Addendum C, CL3 contract re-freeze (Task RF, C1-review carry): the contract inputs also bind the exact model-facing bytes and
+ * the provider endpoint: `modelFacingBodySha256` is the sha256 of each class's captured model-facing body (the real DeepSeek shell adapter
+ * with a fetcher that records the body and throws, exactly as the presentation guard captures it; every sample of a class must yield the
+ * same body), keyed by the class's shellRequestDigest, and `endpointSha256` is the sha256 of the URL that adapter sends to (the URL itself
+ * stays server-only). This changed every classId (intended). The SHIPPED qualification records are generated here too
+ * (`renderQualificationRecordsBlock`): one per definition, ALL PENDING, no evidence, no sign-off (this generator never writes another
+ * status); the test requires the records literal in `request-class-qualification.ts` to be byte-identical to it.
  */
 
 const sha256 = (text: string) => sha256Hex(text);
 
+/** A fixed selection clock (the presentation guard's): the documented deepseek-flash entry does not depend on it. */
+const CAPTURE_NOW = () => "2026-10-08T00:00:00.000Z";
+const CAPTURE_SENTINEL = "ds-SENTINEL-CREDENTIAL-request-class-generator";
+
+/**
+ * The exact model-facing request of one projected value-blind request: the real DeepSeek shell adapter (the route's provider, D2) with a
+ * fetcher that records the URL and body and throws. No provider call is made.
+ */
+export async function captureModelFacingRequest(request: ShellTaskRequest): Promise<{ url: string; body: string }> {
+  const selection = selectEvaluationCandidates({ requested: APPROVED_HYBRID_CONTRACT.requestModelId, listing: [], documented: DEEPSEEK_DOCUMENTED_MODELS, now: CAPTURE_NOW });
+  if (selection.kind !== "SELECTED" || selection.candidates.length !== 1) throw new Error("REQUEST_CLASS_CAPTURE_MODEL_NOT_SELECTABLE");
+  const sent: Array<{ url: string; body: string }> = [];
+  const provider = createDeepSeekShellResponsesProvider({
+    token: CAPTURE_SENTINEL,
+    model: selection.candidates[0]!,
+    fetcher: async (url, init) => {
+      sent.push({ url: String(url), body: String(init.body) });
+      throw new Error("OFFLINE_CAPTURE_ONLY");
+    },
+  });
+  await provider.invoke(request, new AbortController().signal);
+  if (sent.length !== 1) throw new Error("REQUEST_CLASS_CAPTURE_NOT_ONE_BODY");
+  return sent[0]!;
+}
+
+/**
+ * The captured model-facing body sha256 of every class (keyed by shellRequestDigest, in first-fixture order) and the sha256 of the one
+ * endpoint every capture went to. Fails when two samples of one class yield different bodies or a capture goes elsewhere.
+ */
+export async function capturedClassBodies(): Promise<{ modelFacingBodySha256: Record<string, string>; endpointSha256: string }> {
+  const bodies: Record<string, string> = {};
+  for (const fixture of hybridFixturesForPhase("FULL")) {
+    const request = projectedFixtureRequest(fixture);
+    if (request === null) continue;
+    const { url, body } = await captureModelFacingRequest(request);
+    if (url !== DEEPSEEK_RESPONSES_URL) throw new Error(`REQUEST_CLASS_CAPTURE_ENDPOINT_UNEXPECTED: ${fixture.id}`);
+    const key = shellRequestDigest(request);
+    const bodySha = sha256(body);
+    if (bodies[key] !== undefined && bodies[key] !== bodySha) throw new Error(`REQUEST_CLASS_BODY_NOT_UNIQUE: ${fixture.id}`);
+    bodies[key] = bodySha;
+  }
+  return { modelFacingBodySha256: bodies, endpointSha256: sha256(DEEPSEEK_RESPONSES_URL) };
+}
+
 /** The frozen model-facing contract identity, read from the code (the B5 freeze test pins each value and that its sources agree). */
-export function requestClassContractInputsFromCode(): AiRequestClassContractInputs {
+export async function requestClassContractInputsFromCode(): Promise<AiRequestClassContractInputs> {
+  const { modelFacingBodySha256, endpointSha256 } = await capturedClassBodies();
   return {
     slotPlan: SLOT_PLAN_VERSION,
     shellRequestProfile: SHELL_PROVIDER_REQUEST_VERSION,
@@ -47,8 +102,11 @@ export function requestClassContractInputsFromCode(): AiRequestClassContractInpu
     temperature: SHELL_TEMPERATURE,
     maxOutputTokens: { ...SHELL_MAX_OUTPUT_TOKENS },
     // The route's provider and request model id (D2). The endpoint URL is server-only and pinned by the freeze test's shellRoute item;
-    // it is not carried here, so the browser graph names no provider endpoint.
+    // only its sha256 is carried here (below), so the browser graph names no provider endpoint.
     routeModel: { providerKey: DEEPSEEK_RESPONSES_PROFILE.providerKey, requestModelId: APPROVED_HYBRID_CONTRACT.requestModelId },
+    // CL3 re-freeze (C1-review carry): the exact model-facing bytes of every class and the endpoint they go to.
+    modelFacingBodySha256,
+    endpointSha256,
   };
 }
 
@@ -80,8 +138,8 @@ export function generateRequestClassDefinitions(contractDigest: string): AiReque
 }
 
 /** The exact text of `src/application/ai/request-class-definitions.ts`. */
-export function renderRequestClassDefinitionsModule(): string {
-  const inputs = requestClassContractInputsFromCode();
+export async function renderRequestClassDefinitionsModule(): Promise<string> {
+  const inputs = await requestClassContractInputsFromCode();
   const contractDigest = requestClassContractDigest(inputs);
   const definitions = generateRequestClassDefinitions(contractDigest);
   const json = (value: unknown) => JSON.stringify(value);
@@ -96,6 +154,8 @@ export function renderRequestClassDefinitionsModule(): string {
     ` * The IMMUTABLE request-class definitions of the value-blind shell route, bound to the frozen model-facing contract:`,
     ` * - \`AI_REQUEST_CLASS_CONTRACT\`: the contract identity (\`inputs\`) and its digest, sha256 of the canonical JSON of`,
     ` *   { scheme, inputs }. Any change to a contract input changes the digest and so every classId (no unversioned structural hash).`,
+    ` *   CL3 re-freeze (C1-review carry): the inputs also carry the sha256 of each class's captured model-facing body (keyed by its`,
+    ` *   shellRequestDigest) and the sha256 of the provider endpoint URL (the URL itself stays server-only).`,
     ` * - \`AI_REQUEST_CLASS_DEFINITIONS\`: one entry per distinct projected value-blind ShellTaskRequest of the 70 FULL fixtures.`,
     ` *   shellRequestDigest = sha256 of the request's canonical JSON; classId = sha256(contractDigest || shellRequestDigest) (the two`,
     ` *   64-hex digests concatenated). \`sampleFixtureIds\` are the FULL fixtures sharing that identical request and model-facing body:`,
@@ -118,6 +178,8 @@ export function renderRequestClassDefinitionsModule(): string {
     `  temperature: number;`,
     `  maxOutputTokens: Readonly<Record<ShellTask, number>>;`,
     `  routeModel: Readonly<{ providerKey: string; requestModelId: string }>;`,
+    `  modelFacingBodySha256: Readonly<Record<string, string>>;`,
+    `  endpointSha256: string;`,
     `}>;`,
     `export type AiRequestClassDefinition = Readonly<{ classId: string; contractDigest: string; taskType: ShellTask; locale: AiLocale; shellRequestDigest: string; sampleFixtureIds: readonly string[] }>;`,
     ``,
@@ -138,6 +200,10 @@ export function renderRequestClassDefinitionsModule(): string {
     `    temperature: ${json(inputs.temperature)},`,
     `    maxOutputTokens: Object.freeze({ EXPLAIN_PATTERN: ${json(inputs.maxOutputTokens.EXPLAIN_PATTERN)}, DRAFT_CARE_PREPARATION_SUMMARY: ${json(inputs.maxOutputTokens.DRAFT_CARE_PREPARATION_SUMMARY)} }),`,
     `    routeModel: Object.freeze({ providerKey: ${json(inputs.routeModel.providerKey)}, requestModelId: ${json(inputs.routeModel.requestModelId)} }),`,
+    `    modelFacingBodySha256: Object.freeze({`,
+    ...Object.entries(inputs.modelFacingBodySha256).map(([requestDigest, bodySha]) => `      ${json(requestDigest)}: ${json(bodySha)},`),
+    `    }),`,
+    `    endpointSha256: ${json(inputs.endpointSha256)},`,
     `  }),`,
     `  digest: CONTRACT_DIGEST,`,
     `});`,
@@ -154,4 +220,38 @@ export function renderRequestClassDefinitionsModule(): string {
     ``,
   ];
   return lines.join("\n");
+}
+
+/** The first line of the shipped records literal in `request-class-qualification.ts`, and the first line after it. */
+export const QUALIFICATION_RECORDS_START = "export const AI_REQUEST_CLASS_QUALIFICATION_RECORDS";
+export const QUALIFICATION_RECORDS_END = "\n\nexport const SHIPPED_REQUEST_CLASS_REGISTRY";
+
+/**
+ * CL3 re-freeze: the exact text of the shipped records literal (from `export const AI_REQUEST_CLASS_QUALIFICATION_RECORDS` to its closing
+ * `);`): one record per definition, in definition order, ALL PENDING with no evidence and no sign-off. Moving a class to QUALIFIED is an
+ * owner sign-off, never this generator.
+ */
+export function renderQualificationRecordsBlock(definitions: readonly Pick<AiRequestClassDefinition, "classId" | "contractDigest">[]): string {
+  const json = (value: unknown) => JSON.stringify(value);
+  return [
+    `${QUALIFICATION_RECORDS_START}: readonly AiRequestClassQualificationRecord[] = Object.freeze(`,
+    `  ([`,
+    ...definitions.map((definition) => `    { classId: ${json(definition.classId)}, contractDigest: ${json(definition.contractDigest)}, status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },`),
+    `  ] as const satisfies readonly AiRequestClassQualificationRecord[]).map((record): AiRequestClassQualificationRecord => Object.freeze({ ...record })),`,
+    `);`,
+  ].join("\n");
+}
+
+/**
+ * Splits the qualification module source at its shipped records literal (exactly one, ending before SHIPPED_REQUEST_CLASS_REGISTRY):
+ * `records` is the literal, `outside` the rest of the module with the literal replaced by a fixed marker. The freeze pins sha256(outside),
+ * so the qualification rule, schema and gate are frozen independently of the regenerated records.
+ */
+export function splitQualificationModule(source: string): { records: string; outside: string } {
+  const start = source.indexOf(QUALIFICATION_RECORDS_START);
+  const end = source.indexOf(QUALIFICATION_RECORDS_END);
+  if (start < 0 || end < start || source.indexOf(QUALIFICATION_RECORDS_START, start + 1) >= 0 || source.indexOf(QUALIFICATION_RECORDS_END, end + 1) >= 0) {
+    throw new Error("QUALIFICATION_RECORDS_LITERAL_NOT_FOUND");
+  }
+  return { records: source.slice(start, end), outside: `${source.slice(0, start)}<SHIPPED_RECORDS_LITERAL>${source.slice(end)}` };
 }

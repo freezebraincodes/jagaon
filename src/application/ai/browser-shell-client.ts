@@ -67,6 +67,13 @@ export type AiRemoteUseRequestDecision = "ACCEPTED" | "DECLINED";
  *   reused token ends for both requests); a decline stays DECLINED for that token (B5: fails safe). Only the two exact decisions count.
  * - In memory only: nothing is persisted or shared between instances.
  */
+/**
+ * CL3 contract re-freeze (Task RF): the label of this per-request disclosure policy (C3; it replaced the B3 once-per-app-session
+ * acceptance). Pinned by the contract freeze with the behaviour above; the dialog copy keeps its own label (ai-disclosure.11c.1). Never
+ * model-facing.
+ */
+export const AI_DISCLOSURE_POLICY_VERSION = "ai-disclosure-policy.11c.2-per-request";
+
 export type AiRemoteUseDecisions = Readonly<{
   disclosure: AiRemoteUseDisclosure;
   run<T>(decision: AiRemoteUseRequestDecision | undefined, signal: AbortSignal | undefined, request: (token: AbortSignal | undefined) => Promise<T>): Promise<T>;
