@@ -37,7 +37,9 @@ describe("Packet 6A storage and screen manifest", () => {
 
   it("touches browser storage only through the onboarding storage adapter", () => {
     const users = files.filter((file) => /localStorage|sessionStorage/.test(file.text)).map((file) => file.path);
-    expect(users).toEqual(["src/application/onboarding/demo-onboarding-repository.ts"]);
+    // Packet 13 slice (P13S S5, deliberate): the TRTC adapter only REMOVES the transcriber plugin's own `TRTC_RT_<userId>` key after
+    // a session (privacy cleanup); it never reads or writes JagaOn data.
+    expect(users).toEqual(["src/application/onboarding/demo-onboarding-repository.ts", "src/voice/trtc/trtc-transcriber-adapter.ts"]);
   });
 
   it("writes no authoritative revision or domain event from onboarding modules", () => {
