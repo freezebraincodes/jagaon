@@ -503,5 +503,30 @@ describe("PatternExplanationPanel: foreign-offset readings and Singapore time (P
     expect(text.indexOf(messages.ai.remoteNotAccepted)).toBeLessThan(text.indexOf(observation.text));
     // Non-technical: no reason code or provider detail.
     expect(text).not.toMatch(/MISSING_CONFIGURATION|REQUEST_CANCELLED|REMOTE_NOT_ACCEPTED|NOT_ACCEPTED|DeepSeek/);
+    // Owner UI decision U12: the attempted-request fallback line is not shown for a declined disclosure.
+    expect(within(region).queryByText(messages.aiHistoryFallback.unavailableAfterRequest)).not.toBeInTheDocument();
+  });
+
+  it.each([["en-SG"], ["zh-SG"]] as const)("U12 %s: after an attempted remote request failed or was refused, the owner's fallback line beside the standard wording; never otherwise", async (locale) => {
+    const { history } = await higherFixture();
+    const explanation = await explain(history, locale);
+    const messages = getMessages(locale);
+    const line = messages.aiHistoryFallback.unavailableAfterRequest;
+    // Ordinary deterministic use (no marker): no line.
+    renderPanel(locale, explanation);
+    expect(screen.queryByText(line)).not.toBeInTheDocument();
+    cleanup();
+
+    renderPanel(locale, { ...explanation, remoteUse: "UNAVAILABLE_AFTER_REQUEST" });
+    const region = screen.getByRole("region", { name: messages.history.explanation.title });
+    expect(within(region).getByText(line)).toBeInTheDocument();
+    expect(within(region).queryByText(messages.ai.remoteNotAccepted)).not.toBeInTheDocument();
+    expect(within(region).queryByText(messages.ai.demoTag)).not.toBeInTheDocument();
+    expect(within(region).queryByRole("group")).not.toBeInTheDocument();
+    const text = region.textContent ?? "";
+    const { headline, observation } = payloadOf(explanation);
+    expect(text.indexOf(headline.text)).toBeLessThan(text.indexOf(line));
+    expect(text.indexOf(line)).toBeLessThan(text.indexOf(observation.text));
+    expect(text).not.toMatch(/UNAVAILABLE_AFTER_REQUEST|ACCESS_DENIED|PROVIDER_|REFUSED|FAILED/);
   });
 });

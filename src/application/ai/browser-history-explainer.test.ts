@@ -92,7 +92,8 @@ describe("browser history explainer wiring (Packet 11C B2b)", () => {
     expect(source).toMatch(/manifest \?\? AI_ACTIVATION_MANIFEST/);
     expect(source).toMatch(/const decisions = createAiRemoteUseDecisions\(\);/);
     // Packet 11C Addendum C (C6, deliberate): plus the in-memory passcode reader and the route-refusal listener (no acceptance seam).
-    expect(source).toMatch(/createBrowserShellClient\(\{ disclosure: decisions\.disclosure, fetcher: dependencies\.fetcher, accessPasscode: passcode\.read, onRefusal \}\)/);
+    // Owner UI decision U12 (deliberate): plus the POST observer (it only records that this request's POST left the browser).
+    expect(source).toMatch(/createBrowserShellClient\(\{ disclosure: decisions\.disclosure, fetcher: dependencies\.fetcher, accessPasscode: passcode\.read, onRefusal, onPost: notePost \}\)/);
     expect(source).not.toMatch(/AiRemoteUseSession|createAiRemoteUseSession|dependencies\.disclosure|dependencies\.remoteUse|acceptDisclosure/);
   });
 
@@ -1039,5 +1040,90 @@ describe("browser history explainer: one audit row per explicit request (Packet 
     expect(log.rows).toHaveLength(0);
     await explainer.explain({ factId: FACT, locale: "en-SG" });
     expect(log.rows.map((row) => row.outcomeCode)).toEqual(["TASK_DISABLED"]);
+  });
+});
+
+/**
+ * Owner UI decision U12 (owner-ui-decisions-2026-10-09): after an ATTEMPTED remote request fails or is refused, the history explanation
+ * carries `remoteUse: "UNAVAILABLE_AFTER_REQUEST"` (the panel then shows the owner's fallback line). "Attempted" means: the browser
+ * shell client actually POSTed to the route for THIS request (its decision token). A route answer with `notSentToProvider` (a 403 refusal
+ * or a pre-call FAILED) still counts, because the POST happened; a request refused before any POST (not activated, private, not
+ * qualified, offline, the switch known off, declined, no decision, a client-side refusal) never does.
+ */
+describe("browser history explainer: fallback after an attempted remote request (owner UI decision U12)", () => {
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const failedAfterCall = () => vi.fn<BrowserShellFetcher>(async () => json({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { ...USAGE, basis: "UPPER_BOUND" } }));
+  const failedBeforeCall = () => vi.fn<BrowserShellFetcher>(async () => json({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true }));
+  const refused = (reason: string) => vi.fn<BrowserShellFetcher>(async () => json({ kind: "REFUSED", reason, notSentToProvider: true }, 403));
+  const serverError = () => vi.fn<BrowserShellFetcher>(async () => new Response("x", { status: 500 }));
+
+  async function explainWith(options: { fetcher: BrowserShellFetcher; manifest?: AiActivationManifest; qualified?: boolean; privateMode?: boolean; switchOff?: boolean; online?: boolean }, disclosure?: "ACCEPTED" | "DECLINED") {
+    const { history } = await higherFixture();
+    const explainer = createBrowserHistoryExplainer({
+      history,
+      audit: audit().port,
+      manifest: options.manifest ?? ENABLED,
+      fetcher: options.fetcher,
+      ...(options.qualified === false ? {} : { requestClassGate: qualifiedTestRequestClassGate() }),
+      ...(options.privateMode ? { privateMode: () => true } : {}),
+      ...(options.switchOff ? { remoteSwitchKnownOff: () => true } : {}),
+      ...(options.online === false ? { online: () => false } : {}),
+    });
+    explainer.accessPasscode.provide("TEST-ONLY-passcode-value");
+    return explainer.explain({ factId: FACT, locale: "en-SG", ...(disclosure ? { disclosure } : {}) }, new AbortController().signal);
+  }
+
+  it.each([
+    ["FAILED after a provider call", failedAfterCall],
+    ["FAILED before a provider call (notSentToProvider, but POSTed)", failedBeforeCall],
+    ["REFUSED SPEND_CEILING_REACHED (403)", () => refused("SPEND_CEILING_REACHED")],
+    ["REFUSED ACCESS_DENIED (403)", () => refused("ACCESS_DENIED")],
+    ["REFUSED REMOTE_AI_DISABLED (403)", () => refused("REMOTE_AI_DISABLED")],
+    ["an HTTP 500", serverError],
+  ] as const)("shown: an accepted request that was POSTed and answered %s explains with the standard wording and the marker", async (_label, make) => {
+    const fetcher = make();
+    const result = await explainWith({ fetcher }, "ACCEPTED");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC", remoteUse: "UNAVAILABLE_AFTER_REQUEST" });
+  });
+
+  it("not shown: an accepted AI explanation (POSTed and accepted)", async () => {
+    const result = await explainWith({ fetcher: fakeRoute() }, "ACCEPTED");
+    expect(result).toMatchObject({ kind: "EXPLAINED", source: "AI" });
+    expect(result).not.toHaveProperty("remoteUse");
+  });
+
+  it.each([
+    ["ordinary deterministic use (shipped manifest)", { manifest: AI_ACTIVATION_MANIFEST }, "ACCEPTED"],
+    ["private mode", { privateMode: true }, "ACCEPTED"],
+    ["not qualified (shipped all-PENDING records)", { qualified: false }, "ACCEPTED"],
+    ["the server switch known off before any send", { switchOff: true }, "ACCEPTED"],
+    ["offline", { online: false }, "ACCEPTED"],
+    ["no decision for the request (e.g. its disclosure closed moot)", {}, undefined],
+  ] as const)("not shown, nothing POSTed: %s", async (_label, options, disclosure) => {
+    const fetcher = failedAfterCall();
+    const result = await explainWith({ fetcher, ...options }, disclosure);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
+    expect(result).not.toMatchObject({ remoteUse: "UNAVAILABLE_AFTER_REQUEST" });
+  });
+
+  it("not shown: a declined disclosure keeps its own NOT_ACCEPTED line; nothing POSTed", async () => {
+    const fetcher = failedAfterCall();
+    const result = await explainWith({ fetcher }, "DECLINED");
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
+  });
+
+  it("per request: after a refused POST, the next request with no POST (switch now known off) carries no marker", async () => {
+    const { history } = await higherFixture();
+    const fetcher = refused("REMOTE_AI_DISABLED");
+    const explainer = createBrowserHistoryExplainer({ history, audit: audit().port, manifest: ENABLED, fetcher, requestClassGate: qualifiedTestRequestClassGate() });
+    explainer.accessPasscode.provide("TEST-ONLY-passcode-value");
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ remoteUse: "UNAVAILABLE_AFTER_REQUEST" });
+    const second = await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(second).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
+    expect(second).not.toHaveProperty("remoteUse");
   });
 });

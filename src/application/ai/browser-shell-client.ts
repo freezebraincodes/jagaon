@@ -163,7 +163,12 @@ function passcodeHeader(read: (() => string | null) | undefined): Record<string,
  * persisted); read once per POST and sent only as the `x-jagaon-demo-passcode` request header, never in the body. `onRefusal` (C6): told
  * the closed code of each route REFUSED (so the wiring can learn that the server switch is off, or forget a passcode the route denied).
  */
-export function createBrowserShellClient(options: { disclosure: AiRemoteUseDisclosure; fetcher?: BrowserShellFetcher; accessPasscode?: () => string | null; onRefusal?: (reason: AiShellRouteRefusalReason) => void }): AiShellProviderPort {
+/**
+ * `onPost` (owner UI decision U12, 2026-10-09): told, right before each POST leaves the browser, the decision token of the explicit
+ * request it belongs to (the same token for its single repair), so the wiring knows a remote request was actually attempted. It never
+ * sees or changes the request; a throwing listener changes nothing.
+ */
+export function createBrowserShellClient(options: { disclosure: AiRemoteUseDisclosure; fetcher?: BrowserShellFetcher; accessPasscode?: () => string | null; onRefusal?: (reason: AiShellRouteRefusalReason) => void; onPost?: (decisionToken: AbortSignal) => void }): AiShellProviderPort {
   // The global network primitive is bound lazily, per call; nothing is sent at construction.
   const fetcher: BrowserShellFetcher = options.fetcher ?? ((input, init) => fetch(input, init));
   return Object.freeze({
@@ -186,6 +191,11 @@ export function createBrowserShellClient(options: { disclosure: AiRemoteUseDiscl
       // bound, never zero. A readable FAILED answer carries the route's own usage (reported or its bound), or none when nothing was called.
       const unreadable = (reason: ProviderFailureReason) => failed(reason, shellRouteCallUpperBound(parsed.data));
       let response: Response;
+      try {
+        options.onPost?.(token);
+      } catch {
+        // ignored: the listener only observes
+      }
       try {
         response = await fetcher(AI_SHELL_ROUTE_PATH, { method: "POST", headers: { "content-type": "application/json", ...passcodeHeader(options.accessPasscode) }, body, cache: "no-store", redirect: "error", signal });
       } catch {

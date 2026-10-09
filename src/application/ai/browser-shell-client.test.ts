@@ -776,3 +776,29 @@ describe("the default fetcher", () => {
     expect((fetchSpy.mock.calls[0] as unknown[])[0]).toBe(AI_SHELL_ROUTE_PATH);
   });
 });
+
+/** Owner UI decision U12: `onPost` observes each POST that actually leaves the browser, with the request's decision token. */
+describe("U12: the POST observer", () => {
+  it("is told the decision token right before each POST (a 403 refusal included), and never when nothing is POSTed", async () => {
+    const onPost = vi.fn();
+    const token = signal();
+    const refused = answering(() => json({ kind: "REFUSED", reason: "ACCESS_DENIED", notSentToProvider: true }, 403));
+    await createBrowserShellClient({ disclosure: ACCEPTED, fetcher: refused, onPost }).invoke(REQUEST(), signal(), token);
+    expect(refused).toHaveBeenCalledTimes(1);
+    expect(onPost.mock.calls).toEqual([[token]]);
+    // Nothing POSTed: not accepted, or a request the client refuses itself.
+    const silent = answering(() => json({ kind: "CANDIDATE", candidate: VALID, retention: "CONFIRMED_NOT_STORED", usage: USAGE }));
+    const quiet = vi.fn();
+    await createBrowserShellClient({ disclosure: INTERIM_FAIL_CLOSED_DISCLOSURE, fetcher: silent, onPost: quiet }).invoke(REQUEST(), signal(), signal());
+    await createBrowserShellClient({ disclosure: ACCEPTED, fetcher: silent, onPost: quiet }).invoke({ ...REQUEST(), taskType: "UNKNOWN" } as unknown as ShellTaskRequest, signal(), signal());
+    expect(silent).not.toHaveBeenCalled();
+    expect(quiet).not.toHaveBeenCalled();
+  });
+
+  it("a throwing observer changes nothing: the POST and its answer proceed", async () => {
+    const fetcher = answering(() => json({ kind: "CANDIDATE", candidate: VALID, retention: "CONFIRMED_NOT_STORED", usage: USAGE }));
+    const result = await createBrowserShellClient({ disclosure: ACCEPTED, fetcher, onPost: () => { throw new Error("x"); } }).invoke(REQUEST(), signal());
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(result.kind).toBe("COMPLETED");
+  });
+});

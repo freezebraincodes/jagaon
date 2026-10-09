@@ -233,6 +233,9 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
       return true;
     }
   };
+  // Owner UI decision U12 (2026-10-09): the explicit requests (by decision token) for which the browser actually POSTed to the route.
+  const postedRequests = new WeakSet<AbortSignal>();
+  const notePost = (token: AbortSignal) => void postedRequests.add(token);
   // ONE hybrid service for every flow of this runtime (Packet 11C B4b).
   const service = createAiHybridTaskService({
     releaseProfile: CURRENT_RELEASE_PROFILE,
@@ -240,7 +243,7 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
     now,
     monotonicMs: dependencies.monotonicMs ?? deviceMonotonicMs,
     manifest,
-    provider: createBrowserShellClient({ disclosure: decisions.disclosure, fetcher: dependencies.fetcher, accessPasscode: passcode.read, onRefusal }),
+    provider: createBrowserShellClient({ disclosure: decisions.disclosure, fetcher: dependencies.fetcher, accessPasscode: passcode.read, onRefusal, onPost: notePost }),
     privateMode: keepWordingOnDevice,
     online,
     requestClassGate,
@@ -299,7 +302,14 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
   const explainer = createPatternExplainer({ history: dependencies.history, execute: service.execute, recordUnsent: service.recordUnsent, now, requestId });
   const history: BrowserHistoryExplainer = Object.freeze({
     explain: (input: { factId: string; locale: AiLocale; disclosure?: AiRemoteUseRequestDecision }, signal?: AbortSignal) =>
-      decisions.run(input.disclosure, signal, (token) => explainer.explain({ factId: input.factId, locale: input.locale }, token)),
+      decisions.run(input.disclosure, signal, async (token) => {
+        const result = await explainer.explain({ factId: input.factId, locale: input.locale }, token);
+        // U12: the standard wording after a remote request that was actually POSTed (and then failed or was refused) is marked, so the
+        // panel shows the owner's fallback line. Never for a request that was not POSTed (deterministic use, private mode, not
+        // qualified, switch known off, offline, declined or no decision) and never for an AI result.
+        const attempted = token !== undefined && postedRequests.has(token);
+        return attempted && result.kind === "EXPLAINED" && result.source === "DETERMINISTIC" && result.remoteUse === undefined ? { ...result, remoteUse: "UNAVAILABLE_AFTER_REQUEST" as const } : result;
+      }),
     disclosureRequired: historyRequestAdmissible,
     disclosureClosed: moot("EXPLAIN_PATTERN"),
     accessPasscode: passcode.entry,

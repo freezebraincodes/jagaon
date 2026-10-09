@@ -34,8 +34,12 @@ export type PatternExplanationResult =
       composition: { taskType: string; output: { taskType: string; payload: unknown } };
       limitations: readonly { limitationRef: string; code: string; text: string }[];
       summaryRoleNotice: string;
-      /** Packet 11C B3: present only when the remote-use disclosure was not accepted (the deterministic explanation; nothing sent). */
-      remoteUse?: "NOT_ACCEPTED";
+      /**
+       * Packet 11C B3: "NOT_ACCEPTED" only when the remote-use disclosure was not accepted (the deterministic explanation; nothing sent).
+       * Owner UI decision U12: "UNAVAILABLE_AFTER_REQUEST" only when a remote request was actually POSTed and then failed or was refused
+       * (the deterministic explanation with the owner's fallback line).
+       */
+      remoteUse?: "NOT_ACCEPTED" | "UNAVAILABLE_AFTER_REQUEST";
     }
   | { kind: "UNAVAILABLE"; reason: string };
 
@@ -225,6 +229,8 @@ export function PatternExplanationPanel({ messages, locale, explanation, panelId
         {shown ? (
           <>
             {shown.remoteUse === "NOT_ACCEPTED" ? <p className="history-explanation-notice history-explanation-remote-use">{messages.ai.remoteNotAccepted}</p> : null}
+            {/* Owner UI decision U12: only after a remote request was actually attempted and then failed or was refused. */}
+            {shown.remoteUse === "UNAVAILABLE_AFTER_REQUEST" ? <p className="history-explanation-notice history-explanation-remote-use">{messages.aiHistoryFallback.unavailableAfterRequest}</p> : null}
             <p className="history-explanation-text">{shown.text.observation}</p>
             <p className="history-explanation-text">{shown.text.evidence}</p>
             {aiSourced ? <p className="history-explanation-notice history-explanation-ai-check">{messages.ai.resultCheck}</p> : null}

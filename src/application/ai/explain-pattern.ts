@@ -45,9 +45,11 @@ export type PatternExplanationUnavailableReason = ViewReason | "STALE_RESULT" | 
 /**
  * `remoteUse: "NOT_ACCEPTED"` (Packet 11C B3) is the dedicated, non-technical UI-level outcome for a request whose remote-use disclosure
  * was not accepted: the explanation is the ordinary deterministic one and nothing was sent. It is present only in that case.
+ * `remoteUse: "UNAVAILABLE_AFTER_REQUEST"` (owner UI decision U12, 2026-10-09) is set by the browser wiring (never by this use case):
+ * the remote request was actually POSTed and then failed or was refused, so the standard wording is shown with the owner's fallback line.
  */
 export type PatternExplanation =
-  | { kind: "EXPLAINED"; source: "AI" | "DETERMINISTIC"; view: ExplainablePatternView; composition: AiComposition; limitations: readonly PatternLimitation[]; summaryRoleNotice: string; remoteUse?: "NOT_ACCEPTED" }
+  | { kind: "EXPLAINED"; source: "AI" | "DETERMINISTIC"; view: ExplainablePatternView; composition: AiComposition; limitations: readonly PatternLimitation[]; summaryRoleNotice: string; remoteUse?: "NOT_ACCEPTED" | "UNAVAILABLE_AFTER_REQUEST" }
   | { kind: "UNAVAILABLE"; reason: PatternExplanationUnavailableReason };
 
 /**
