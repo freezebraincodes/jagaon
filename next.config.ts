@@ -23,7 +23,8 @@ const contentSecurityPolicy = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isDevelopment ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' https://www.onemap.gov.sg",
+  // Owner decision 2026-10-09: `data:` for images only, for Leaflet's built-in tile-cancellation placeholder (no other directive).
+  "img-src 'self' data: https://www.onemap.gov.sg",
   `connect-src 'self' ${TRTC_CONNECT_SOURCES.join(" ")}`,
   "object-src 'none'",
   "base-uri 'self'",

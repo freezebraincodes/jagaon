@@ -29,6 +29,10 @@ export const CLIENT_JAGAON_LITERALS = Object.freeze([
   "JAGAON_LEGACY_DEXIE_VERSION",
   "JAGAON_DATABASE_NAME",
   "JAGAON_LOCAL_STATE_KEYS",
+  // H1 rehearsal: the canonical-JSON hash profile tags of the deletion and restore planners (domain separation, not env names).
+  "JAGAON_DELETION_PLAN_V2",
+  "JAGAON_DELETED_COMMAND_HASH_V1",
+  "JAGAON_RESTORE_PLAN_V2",
 ]);
 const JAGAON_TOKEN = /JAGAON_[A-Z0-9_]+/g;
 const SECRET_SHAPES = [/\bsk-[A-Za-z0-9]{20,}/, /eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/, /-----BEGIN [A-Z ]*PRIVATE KEY-----/];
@@ -137,7 +141,8 @@ export const EXPECTED_CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' https://www.onemap.gov.sg",
+  // Owner decision 2026-10-09: `data:` for images only (Leaflet's tile-cancellation placeholder); no other directive.
+  "img-src 'self' data: https://www.onemap.gov.sg",
   `connect-src 'self' ${TRTC_CONNECT_SOURCES.join(" ")}`,
   "object-src 'none'",
   "base-uri 'self'",
@@ -201,7 +206,9 @@ export function securityHeaderFindings(headers, { api = false } = {}) {
   else {
     const sources = Object.values(directives).flat();
     if (sources.includes("'unsafe-eval'")) findings.push("CSP_UNSAFE_EVAL");
-    if (sources.some(isBroadSource)) findings.push("CSP_WILDCARD");
+    // Owner decision 2026-10-09: the one exception is `data:` inside img-src; every other directive, scheme or wildcard is broad.
+    const broad = Object.entries(directives).some(([name, list]) => list.some((source) => isBroadSource(source) && !(name === "img-src" && source.toLowerCase() === "data:")));
+    if (broad) findings.push("CSP_WILDCARD");
     if (!directives["default-src"]) findings.push("CSP_DEFAULT_SRC_MISSING");
   }
   const xfo = (headers["x-frame-options"] ?? "").toUpperCase();
