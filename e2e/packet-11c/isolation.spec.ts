@@ -54,8 +54,9 @@ test.describe("Packet 11C C7 isolation", () => {
 
   test("the production routes are exactly the src/app routes; the harness has no API route", () => {
     const production = JSON.parse(readFileSync(join(PRODUCTION_NEXT, "app-path-routes-manifest.json"), "utf8")) as Record<string, string>;
-    // `/_global-error` and `/_not-found` are the framework's own pages.
-    expect(Object.values(production).sort()).toEqual(["/", "/_global-error", "/_not-found", "/api/ai/shell", "/api/ai/task", "/api/onemap/search"]);
+    // `/_global-error` and `/_not-found` are the framework's own pages. H1 rehearsal: Packet 13 added `/api/ai/transcript` and
+    // `/api/voice/usersig` to src/app (release/capability-manifest.json lists both); the list stays exact.
+    expect(Object.values(production).sort()).toEqual(["/", "/_global-error", "/_not-found", "/api/ai/shell", "/api/ai/task", "/api/ai/transcript", "/api/onemap/search", "/api/voice/usersig"]);
     const harness = JSON.parse(readFileSync(join(HARNESS_NEXT, "app-path-routes-manifest.json"), "utf8")) as Record<string, string>;
     expect(Object.values(harness).sort()).toEqual(["/", "/_global-error", "/_not-found"]);
   });

@@ -39,11 +39,24 @@ export async function datasetFingerprint(page: Page): Promise<{ identity: string
   const summary = await page.evaluate(
     () =>
       new Promise<{ identity: string; heads: string[]; counts: Record<string, number> }>((resolve, reject) => {
+        // H1 rehearsal (WebKit, intermittent): right after delete-all the app may not have created its new database yet. Opening
+        // it then CREATED an empty v1 database and `transaction([])` threw inside onsuccess, so the promise never settled (180 s
+        // timeout). An absent database is now reported as empty, without creating one (the upgrade is aborted).
+        let absent = false;
         const request = indexedDB.open("jagaon");
-        request.onerror = () => reject(request.error);
+        request.onupgradeneeded = () => {
+          absent = true;
+          request.transaction?.abort();
+        };
+        request.onerror = () => (absent ? resolve({ identity: "", heads: [], counts: {} }) : reject(request.error));
         request.onsuccess = () => {
           const database = request.result;
           const names = [...database.objectStoreNames];
+          if (names.length === 0) {
+            database.close();
+            resolve({ identity: "", heads: [], counts: {} });
+            return;
+          }
           const transaction = database.transaction(names, "readonly");
           const counts: Record<string, number> = {};
           let heads: string[] = [];

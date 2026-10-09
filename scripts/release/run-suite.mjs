@@ -97,9 +97,19 @@ export function planSuite(manifest, suite, { root, serveRoot = root, buildDir, e
 }
 
 /** The exact command for one group. Never includes --env-file. */
+/**
+ * H1 rehearsal: the Vitest worker bound. With the default pool (one worker per core but one) the integration group ran the
+ * CPU-bound backup and deletion files (PBKDF2, AES-GCM) beside the jsdom screen files, and passing screen tests timed out at random
+ * (2, 4 and 5 different failures on three runs). Four workers ran the same 61 files green in about the same wall time.
+ */
+export const VITEST_RELEASE_MAX_WORKERS = 4;
+
 export function commandFor(group, { root, serveRoot = root, reportPath }) {
   if (group.runner === "vitest") {
-    return { cwd: root, args: [join(root, "node_modules/vitest/vitest.mjs"), "run", "--reporter=json", `--outputFile=${reportPath}`, ...group.files] };
+    return {
+      cwd: root,
+      args: [join(root, "node_modules/vitest/vitest.mjs"), "run", "--reporter=json", `--outputFile=${reportPath}`, "--minWorkers=1", `--maxWorkers=${VITEST_RELEASE_MAX_WORKERS}`, ...group.files],
+    };
   }
   return { cwd: serveRoot, args: [join(serveRoot, "node_modules/@playwright/test/cli.js"), "test", "--config", group.config, "--reporter=json", ...group.files] };
 }
@@ -158,8 +168,12 @@ export function readPlaywrightReport(report, { suite, serveRoot }) {
     }
     for (const child of node.suites ?? []) visit(child, file, [...titles, child.title]);
   };
+  // H1 rehearsal: Playwright reports its rootDir as the REAL path (macOS tmpdir /var/… is /private/var/…), so a file is mapped
+  // against the serve root as given or, failing that, its real path. A file under neither stays "../…" and is refused as unexpected.
+  const roots = [serveRoot, canonicalPath(serveRoot)];
   for (const top of report.suites ?? []) {
-    const file = toRelative(serveRoot, join(rootDir, top.file));
+    const absolute = join(rootDir, top.file);
+    const file = roots.map((r) => toRelative(r, absolute)).find((p) => p !== ".." && !p.startsWith("../")) ?? toRelative(serveRoot, absolute);
     collected.add(file);
     visit(top, file, []);
   }
