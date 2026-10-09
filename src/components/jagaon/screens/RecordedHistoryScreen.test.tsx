@@ -24,6 +24,7 @@ import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
 import { shellTaskRequestSchema, slotToken, type AiInvocationAuditRow, type ShellFieldPath } from "@/domain/ai";
 import type { PatternExplainerPort, PatternExplanationResult } from "../history/PatternExplanationPanel";
 import { RecordedHistoryScreen } from "./RecordedHistoryScreen";
+import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;
 const originalIDBKeyRange = Dexie.dependencies.IDBKeyRange;
@@ -734,7 +735,8 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     const rows: AiInvocationAuditRow[] = [];
     const fetcher = fakeRoute();
     const remoteUse = createAiRemoteUseSession();
-    const real = createBrowserHistoryExplainer({ history, audit: { append: async (row) => void rows.push(row) }, manifest, remoteUse, fetcher, online });
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+    const real = createBrowserHistoryExplainer({ history, audit: { append: async (row) => void rows.push(row) }, manifest, remoteUse, fetcher, online, requestClassGate: qualifiedTestRequestClassGate() });
     const explain = vi.fn(real.explain);
     const explainer = { ...real, explain };
     return { history, rows, fetcher, remoteUse, explainer, explain };

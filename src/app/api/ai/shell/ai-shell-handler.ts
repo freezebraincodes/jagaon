@@ -5,6 +5,7 @@ import { AI_SHELL_MAX_BODY_BYTES, aiShellRouteResponseSchema, shellRouteCallUppe
 import { isApprovedShellTaskRequest, shellPlanView } from "@/application/ai/language/shell-projector";
 import { validateShellCandidate, type ShellValidationReason } from "@/application/ai/language/shell-validator";
 import { FIXED_FIELD_BUDGETS, type FieldKind } from "@/application/ai/language/slot-planner";
+import { SHIPPED_REQUEST_CLASS_GATE, type AiRequestClassGate } from "@/application/ai/request-class-qualification";
 import { parseStrictJson, toPlainData } from "@/backup/strict-json";
 import { shellOutputSchema, shellTaskRequestSchema, type AiReasonCode, type ShellTaskRequest } from "@/domain/ai";
 import { DEEPSEEK_DOCUMENTED_MODELS, readDeepSeekToken } from "@/ai/deepseek/deepseek-catalogue";
@@ -32,6 +33,9 @@ import { HACKATHON_STORAGE_PROFILE } from "@/storage/storage-profile-manifest";
  * the reported usage (also for a candidate that fails the re-parse), else the adapter's exact-body upper bound, else (no result: the
  * timeout, a cancellation) the route's pre-send upper bound for the request, with its basis. A FAILED decided before the call carries
  * none. Result handling only: the model-facing body is unchanged.
+ * Packet 11C Addendum C, Task C1: after the activation check and BEFORE the credential read, the received request's class (its canonical
+ * digest bound to the current contract) must be QUALIFIED by the injected request-class gate (production: the shipped records, all
+ * PENDING). Otherwise the answer is the closed `REFUSED` REQUEST_CLASS_NOT_QUALIFIED (HTTP 403, no usage): nothing is read or sent.
  */
 
 const DEFAULT_RATE_LIMIT = Object.freeze({ maxRequests: 10, windowMs: 60_000 });
@@ -49,6 +53,11 @@ export type AiShellHandlerOptions = {
   /** The compiled release profile; defaults to the storage profile identity. */
   releaseProfile?: unknown;
   rateLimit?: { maxRequests: number; windowMs: number };
+  /**
+   * Packet 11C Addendum C (C1): which request classes may be sent. Absent means the shipped gate (the generated definitions and the
+   * shipped qualification records, all PENDING); route.ts passes none. Test seam only: tests inject test-only QUALIFIED records.
+   */
+  requestClassGate?: AiRequestClassGate;
 };
 
 function reply(body: AiShellRouteResponse, status = 200): Response {
@@ -105,6 +114,7 @@ export function createAiShellHandler(options: AiShellHandlerOptions): (request: 
   const profile = "releaseProfile" in options ? options.releaseProfile : HACKATHON_STORAGE_PROFILE.profileId;
   const now = options.now ?? (() => new Date());
   const limit = options.rateLimit ?? DEFAULT_RATE_LIMIT;
+  const requestClassGate = options.requestClassGate ?? SHIPPED_REQUEST_CLASS_GATE;
   const admitted: number[] = [];
 
   return async function handle(request: Request): Promise<Response> {
@@ -138,6 +148,16 @@ export function createAiShellHandler(options: AiShellHandlerOptions): (request: 
     // Activation is checked on the server too; the shipped manifest is deterministic-only, so the shipped route stops here.
     const activation = resolveAiTaskActivation(shellRequest.taskType, profile, manifest);
     if (activation.state !== "SYNTHETIC_REMOTE_ENABLED") return failed(activation.reason);
+
+    // Packet 11C Addendum C (C1): the received request's own class, under the current contract, must be QUALIFIED; otherwise the closed
+    // refusal (HTTP 403, no usage), still before the credential read. A gate that throws refuses.
+    let classQualified = false;
+    try {
+      classQualified = requestClassGate.admit(shellRequest).admitted === true;
+    } catch {
+      classQualified = false;
+    }
+    if (!classQualified) return reply({ kind: "REFUSED", reason: "REQUEST_CLASS_NOT_QUALIFIED" }, 403);
 
     // The credential is read only now, after every request check.
     const token = readDeepSeekToken(options.environment);

@@ -19,6 +19,12 @@ import { projectShellTaskRequest } from "@/application/ai/language/shell-project
 import { planSlots } from "@/application/ai/language/slot-planner";
 import type { AiInvocationAuditRow, AiTaskRequest, ShellFieldPath, ShellTaskRequest } from "@/domain/ai";
 import { requestFixture, sourceBackedRequest } from "@/domain/ai/ai-test-fixtures";
+import { AI_REQUEST_CLASS_DEFINITIONS } from "@/application/ai/request-class-definitions";
+import { AI_REQUEST_CLASS_QUALIFICATION_RECORDS, createRequestClassGate, requestClassIdentity, type AiRequestClassGate } from "@/application/ai/request-class-qualification";
+import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
+import { buildCareSummaryAiRequest } from "@/application/care-preparation/ai-care-summary-request";
+import { NOW, syntheticCareDraft } from "@/application/care-preparation/care-preparation-test-support";
+import { renderDeterministicCareSummary } from "@/application/care-preparation/deterministic-care-summary-renderer";
 import { createAiShellHandler } from "./ai-shell-handler";
 import * as route from "./route";
 
@@ -66,7 +72,9 @@ function recordingEnvironment(values: Record<string, string> = ENV) {
   return { environment, reads };
 }
 type Options = Partial<Parameters<typeof createAiShellHandler>[0]>;
-const handler = (options: Options = {}) => createAiShellHandler({ environment: ENV, activationManifest: ENABLED, ...options });
+// Packet 11C Addendum C (C1): a remote path needs a QUALIFIED class; these tests inject test-only QUALIFIED records (the shipped records
+// are all PENDING). An option `requestClassGate: undefined` restores the production default.
+const handler = (options: Options = {}) => createAiShellHandler({ environment: ENV, activationManifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), ...options });
 async function call(request: Request, options: Options = {}) {
   const response = await handler(options)(request);
   return { status: response.status, headers: response.headers, body: await response.json() };
@@ -84,6 +92,12 @@ describe("route module", () => {
     const source = readFileSync(join(process.cwd(), "src/app/api/ai/shell/route.ts"), "utf8");
     expect(source).toContain("process.env");
     expect(source).not.toMatch(/NEXT_PUBLIC_/);
+  });
+
+  it("C1: the production wiring passes only the server environment (so the shipped request-class gate, all PENDING, applies)", () => {
+    const source = readFileSync(join(process.cwd(), "src/app/api/ai/shell/route.ts"), "utf8");
+    expect(source).toMatch(/const handle = createAiShellHandler\(\{ environment: process\.env \}\);/);
+    expect(source).not.toMatch(/requestClassGate|request-class|activationManifest/);
   });
 
   it("the shipped route is NOT_ACTIVATED: a valid approved request is refused server-side with no credential read and no fetch", async () => {
@@ -140,6 +154,72 @@ describe("route module", () => {
       expect((await call(post(shellRequest()), { fetcher, releaseProfile })).body).toEqual({ kind: "FAILED", reason: "PROFILE_NOT_PERMITTED" });
     }
     expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe("Packet 11C Addendum C, C1: an unqualified request class is refused before any credential read", () => {
+  const REFUSED = { kind: "REFUSED", reason: "REQUEST_CLASS_NOT_QUALIFIED" };
+  it.each([
+    ["the production default (no gate: the shipped, all-PENDING records)", undefined],
+    ["a gate over the shipped definitions and records", createRequestClassGate({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS })],
+  ])("under %s, every evaluated class (activated test manifest) answers 403 REFUSED, with no credential read, no fetch and no usage", async (_label, requestClassGate) => {
+    for (const fixture of [EN, ZH, CARE, CARE_ZH]) {
+      const fetcher = deepseek();
+      const { environment, reads } = recordingEnvironment();
+      const response = await createAiShellHandler({ environment, fetcher, activationManifest: ENABLED, ...(requestClassGate ? { requestClassGate } : {}) })(post(shellRequest(fixture)));
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body).toEqual(REFUSED);
+      expect(aiShellRouteResponseSchema.safeParse(body).success).toBe(true);
+      expect(reads).toEqual([]);
+      expect(fetcher).not.toHaveBeenCalled();
+    }
+  });
+  it("the class is the received request's own: a gate qualifying one class admits only that class, after the request and activation checks", async () => {
+    const id = requestClassIdentity(shellRequest(EN)).classId;
+    const gate = createRequestClassGate({
+      definitions: AI_REQUEST_CLASS_DEFINITIONS,
+      records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => (record.classId === id ? { ...record, status: "QUALIFIED", evidenceRef: "test/evidence", signedOffBy: "test", signedOffAt: "2026-10-08T00:00:00.000Z" } : record)),
+    });
+    const admitted = await call(post(shellRequest(EN)), { requestClassGate: gate, fetcher: deepseek() });
+    expect(admitted).toMatchObject({ status: 200, body: { kind: "CANDIDATE" } });
+    expect(await call(post(shellRequest(ZH)), { requestClassGate: gate, fetcher: deepseek() })).toMatchObject({ status: 403, body: REFUSED });
+    // A request refused earlier is refused for that reason (the gate is never asked); the shipped manifest still answers TASK_DISABLED.
+    const admit = vi.fn<AiRequestClassGate["admit"]>(() => ({ admitted: true, classId: id }));
+    const spy: AiRequestClassGate = { admit, anyAdmissible: () => true };
+    expect(await call(post({ ...shellRequest(EN), facts: [] }), { requestClassGate: spy })).toMatchObject({ status: 400, body: { kind: "FAILED", reason: "PAYLOAD_INVALID" } });
+    expect(await call(post(shellRequest(EN)), { requestClassGate: spy, activationManifest: AI_ACTIVATION_MANIFEST })).toMatchObject({ status: 200, body: { kind: "FAILED", reason: "TASK_DISABLED" } });
+    expect(admit).not.toHaveBeenCalled();
+  });
+  it("an approved class outside the definitions (other care section counts) is refused; a gate that throws refuses", async () => {
+    const defined = new Set(AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.classId));
+    const unseen: ShellTaskRequest[] = [];
+    for (const shape of ["MISSING_DATA", "RICH"] as const) {
+      const current = (await renderDeterministicCareSummary(syntheticCareDraft(shape, "en-SG"))).payload;
+      const built = buildCareSummaryAiRequest({ current, requestId: "33333333-3333-4333-8333-333333333333", requestedAt: NOW });
+      if (built.kind !== "READY") continue;
+      const planned = planSlots(built.request, AI_HYBRID_RUNTIME_BUNDLES.DRAFT_CARE_PREPARATION_SUMMARY);
+      if (planned.kind !== "PLANNED" || planned.plan.remote.eligible !== true) continue;
+      const request = projectShellTaskRequest(planned.plan);
+      if (!defined.has(requestClassIdentity(request).classId)) unseen.push(request);
+    }
+    expect(unseen.length).toBeGreaterThan(0);
+    for (const request of unseen) {
+      const { environment, reads } = recordingEnvironment();
+      const fetcher = deepseek();
+      const response = await createAiShellHandler({ environment, fetcher, activationManifest: ENABLED })(post(request));
+      expect([response.status, await response.json()]).toEqual([403, REFUSED]);
+      expect(reads).toEqual([]);
+      expect(fetcher).not.toHaveBeenCalled();
+    }
+    const throwing: AiRequestClassGate = { admit: () => { throw new Error("broken"); }, anyAdmissible: () => true };
+    expect(await call(post(shellRequest(EN)), { requestClassGate: throwing })).toMatchObject({ status: 403, body: REFUSED });
+  });
+  it("the route contract: REFUSED carries exactly one closed reason and never usage; an audit-only code is never a FAILED reason", () => {
+    expect(aiShellRouteResponseSchema.safeParse(REFUSED).success).toBe(true);
+    expect(aiShellRouteResponseSchema.safeParse({ ...REFUSED, usage: { inputTokens: 1, outputTokens: 1, costMicroUsd: 1, basis: "REPORTED" } }).success).toBe(false);
+    expect(aiShellRouteResponseSchema.safeParse({ kind: "REFUSED", reason: "TASK_DISABLED" }).success).toBe(false);
+    expect(aiShellRouteResponseSchema.safeParse({ kind: "FAILED", reason: "REQUEST_CLASS_NOT_QUALIFIED" }).success).toBe(false);
   });
 });
 
@@ -526,6 +606,7 @@ describe("the structural repair happens once, in the hybrid service (D6)", () =>
       invoke: async (input, signal): Promise<ProviderInvocationResult> => {
         const body = aiShellRouteResponseSchema.parse(await (await handle(post(input, { signal }))).json());
         if (body.kind === "FAILED") return { kind: "FAILED", reason: body.reason as "PROVIDER_FAILED" };
+        if (body.kind === "REFUSED") return { kind: "FAILED", reason: "PROVIDER_REJECTED", refusal: body.reason };
         if (body.kind === "STRUCTURALLY_REJECTED") return body;
         return { kind: "COMPLETED", candidate: body.candidate, usage: body.usage, retention: body.retention };
       },
@@ -535,7 +616,7 @@ describe("the structural repair happens once, in the hybrid service (D6)", () =>
     const queue = [...candidates];
     const fetcher = vi.fn(async (_url: string, _init: RequestInit) => new Response(JSON.stringify(envelope(typeof queue[0] === "string" ? (queue.shift() as string) : JSON.stringify(queue.shift())))));
     const rows: AiInvocationAuditRow[] = [];
-    const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", manifest: ENABLED, provider: viaRoute(handler({ fetcher })), audit: { append: async (row) => void rows.push(row) }, now: () => "2026-10-08T01:00:00.000Z", monotonicMs: () => 0 });
+    const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", manifest: ENABLED, provider: viaRoute(handler({ fetcher })), audit: { append: async (row) => void rows.push(row) }, now: () => "2026-10-08T01:00:00.000Z", monotonicMs: () => 0, requestClassGate: qualifiedTestRequestClassGate() });
     return { result: await service.execute(EN.request), rows, fetcher };
   }
 

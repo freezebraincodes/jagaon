@@ -13,6 +13,7 @@ import { AI_TASK_RUNTIME_BUNDLES } from "./ai-runtime-bundles";
 import { createAiTaskService } from "./ai-task-service";
 import { projectProviderTaskPayload } from "./detached-payload-projector";
 import { buildSourceBackedExplainRequest } from "./explain-pattern-request";
+import { qualifiedTestRequestClassGate } from "./request-class-test-support";
 
 /**
  * Packet 11C Task 6A (owner instruction 2026-10-08): a source-backed EXPLAIN request (one carrying the local
@@ -153,7 +154,8 @@ describe("hybrid service still handles a source-backed request (Packet 11C Task 
     const rows: AiInvocationAuditRow[] = [];
     const calls: ShellTaskRequest[] = [];
     const provider: AiShellProviderPort = { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, invoke: async (input) => { calls.push(input); return { kind: "FAILED", reason: "TRANSPORT_FAILED" }; } };
-    const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async (row) => void rows.push(row) }, now: () => FIXTURE_NOW, monotonicMs: () => 0, manifest, provider });
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+    const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async (row) => void rows.push(row) }, now: () => FIXTURE_NOW, monotonicMs: () => 0, manifest, provider, requestClassGate: qualifiedTestRequestClassGate() });
     return { service, rows, calls };
   }
 

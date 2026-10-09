@@ -65,6 +65,8 @@ import {
   type DemoOnboardingStoragePort,
 } from "@/application/onboarding/demo-onboarding-repository";
 import { createPreparedOnboardingState } from "@/application/onboarding/prepared-onboarding-fixture";
+// Packet 11C Addendum C (C1): the activated paths inject test-only QUALIFIED records (the shipped records are all PENDING).
+import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 import type { DemoOnboardingStateV1 } from "@/application/onboarding/demo-onboarding-contracts";
 
 afterEach(() => cleanup());
@@ -1311,7 +1313,7 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
     const rows: AiInvocationAuditRow[] = [];
     runtime.aiAudit = { append: vi.fn(async (row: AiInvocationAuditRow) => void rows.push(row)) };
     const fetcher = fakeRoute();
-    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: ENABLED, fetcher });
+    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
     const props = { runtimeFactory: async () => runtime, onboardingRepositoryFactory: completed(), aiAssistanceFactory: factory };
     return { props, rows, fetcher, fetchSpy };
   }
@@ -1520,7 +1522,7 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     vi.stubGlobal("fetch", fetchSpy);
     const care = await careRuntime();
     const fetcher = fakeRoute();
-    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, fetcher, now: () => LATER as never });
+    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER as never });
     render(<JagaOnApp runtimeFactory={async () => care.runtime} onboardingRepositoryFactory={completed()} printPortFactory={() => ({ print: vi.fn() })} aiAssistanceFactory={factory} />);
     const before = (await toCarePreview()).textContent;
     const action = (await screen.findByRole("button", { name: en.ai.careSummary.action })) as HTMLButtonElement;
@@ -1546,7 +1548,7 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     vi.stubGlobal("fetch", fetchSpy);
     const care = await careRuntime();
     const fetcher = fakeRoute();
-    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, fetcher, now: () => LATER as never });
+    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER as never });
     render(<JagaOnApp runtimeFactory={async () => care.runtime} onboardingRepositoryFactory={completed()} printPortFactory={() => ({ print: vi.fn() })} aiAssistanceFactory={factory} />);
     await toCarePreview();
     const action = (await screen.findByRole("button", { name: en.ai.careSummary.action })) as HTMLButtonElement;
@@ -1570,7 +1572,7 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     const { history } = await higherFixture();
     care.runtime.history = history;
     const fetcher = fakeRoute();
-    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, fetcher, now: () => LATER as never });
+    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER as never });
     render(<JagaOnApp runtimeFactory={async () => care.runtime} onboardingRepositoryFactory={completed()} printPortFactory={() => ({ print: vi.fn() })} aiAssistanceFactory={factory} />);
 
     // The disclosure is accepted once, in the history flow.

@@ -18,6 +18,8 @@ import { BROWSER_SHELL_CLIENT_PROVIDER_MODEL, createAiRemoteUseSession, createBr
 import { projectProviderTaskPayload } from "./detached-payload-projector";
 import { projectShellTaskRequest } from "./language/shell-projector";
 import { planSlots } from "./language/slot-planner";
+import type { AiRequestClassGate } from "./request-class-qualification";
+import { qualifiedTestRequestClassGate } from "./request-class-test-support";
 
 /**
  * Packet 11C Addendum B, Task B2b: the browser shell client for POST /api/ai/shell (B-boundary, D1, D2, D6, interim disclosure rule).
@@ -257,6 +259,17 @@ describe("the response: strictly parsed with the shared route contract, closed r
     expect(await invoke(() => json({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED" }))).toEqual({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED" });
   });
 
+  it("C1: the route's 403 REFUSED REQUEST_CLASS_NOT_QUALIFIED is a closed PROVIDER_REJECTED carrying that refusal and no usage", async () => {
+    const refused = { kind: "REFUSED", reason: "REQUEST_CLASS_NOT_QUALIFIED" };
+    expect(await invoke(() => json(refused, 403))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", refusal: "REQUEST_CLASS_NOT_QUALIFIED" });
+    // Any other 403 body (or an unknown refusal reason) is the plain closed refusal, still without usage.
+    expect(await invoke(() => json({ kind: "REFUSED", reason: SENTINEL }, 403))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED" });
+    expect(await invoke(() => json(SENTINEL, 403, "text/plain"))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED" });
+    expect(await invoke(() => json({ kind: "FAILED", reason: "PAYLOAD_INVALID" }, 400))).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED" });
+    // REFUSED is a 403 answer only: with 200 it is a non-conforming answer after a POST (the pre-send upper bound counts).
+    expect(await invoke(() => json(refused))).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: shellRouteCallUpperBound(REQUEST()) });
+  });
+
   it.each([["TASK_DISABLED"], ["PROFILE_NOT_PERMITTED"], ["PAYLOAD_INVALID"], ["REQUEST_CANCELLED"], ["BUDGET_EXCEEDED"]])("maps the route reason %s, which is not a provider failure reason, to PROVIDER_FAILED", async (reason) => {
     expect(await invoke(() => json({ kind: "FAILED", reason }))).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED" });
   });
@@ -313,7 +326,8 @@ describe("the response: strictly parsed with the shared route contract, closed r
 
 /** The client inside the real hybrid service (the service owns the per-call timeout, cancellation and the single repair). */
 describe("the client under the hybrid service", () => {
-  function service(options: { manifest?: AiActivationManifest; disclosure?: AiRemoteUseDisclosure; fetcher: BrowserShellFetcher }) {
+  // Packet 11C Addendum C (C1): a remote path needs a QUALIFIED class; test-only QUALIFIED records unless `requestClassGate` says otherwise.
+  function service(options: { manifest?: AiActivationManifest; disclosure?: AiRemoteUseDisclosure; fetcher: BrowserShellFetcher; requestClassGate?: AiRequestClassGate | "SHIPPED" }) {
     const rows: AiInvocationAuditRow[] = [];
     const hybrid = createAiHybridTaskService({
       releaseProfile: "HACKATHON_DEMO",
@@ -322,9 +336,22 @@ describe("the client under the hybrid service", () => {
       monotonicMs: () => 0,
       manifest: options.manifest ?? ENABLED,
       provider: createBrowserShellClient({ disclosure: options.disclosure ?? ACCEPTED, fetcher: options.fetcher }),
+      ...(options.requestClassGate === "SHIPPED" ? {} : { requestClassGate: options.requestClassGate ?? qualifiedTestRequestClassGate() }),
     });
     return { hybrid, rows };
   }
+
+  it("C1: the shipped request-class gate (all PENDING) with an activated test manifest: deterministic, no disclosure, no POST, one REQUEST_CLASS_NOT_QUALIFIED row", async () => {
+    const decide = vi.fn<AiRemoteUseDisclosure["decide"]>(async () => "ACCEPTED");
+    const fetcher = answering(() => json({ kind: "CANDIDATE", candidate: VALID, retention: "CONFIRMED_NOT_STORED", usage: USAGE }));
+    const run = service({ disclosure: { decide }, fetcher, requestClassGate: "SHIPPED" });
+    expect(await run.hybrid.execute(EN.request)).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "CLASS_NOT_QUALIFIED", reason: "TASK_DISABLED" });
+    expect(decide).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(run.rows).toHaveLength(1);
+    expect(run.rows[0]).toMatchObject({ outcomeCode: "REQUEST_CLASS_NOT_QUALIFIED", providerModel: null, attempts: { count: 0 }, usageBasis: "NONE" });
+    expect(aiInvocationAuditRowSchema.safeParse(run.rows[0]).success).toBe(true);
+  });
 
   it("the shipped manifest: deterministic, no disclosure asked, no POST, one audit row without a provider", async () => {
     const decide = vi.fn<AiRemoteUseDisclosure["decide"]>(async () => "ACCEPTED");
@@ -425,12 +452,13 @@ describe("the client under the hybrid service", () => {
       usage: { input_tokens: 600, output_tokens: 80, output_tokens_details: { reasoning_tokens: 0 } },
       store: false, error: null, incomplete_details: null, ...extra,
     });
-    function viaRoute(candidates: Array<{ text: string; extra?: Record<string, unknown> }>, manifest: AiActivationManifest = ENABLED) {
+    // Packet 11C Addendum C (C1): the route side gets test-only QUALIFIED records too, unless `routeGate` is "SHIPPED" (the default).
+    function viaRoute(candidates: Array<{ text: string; extra?: Record<string, unknown> }>, manifest: AiActivationManifest = ENABLED, routeGate: "TEST" | "SHIPPED" = "TEST") {
       const deepseek = vi.fn(async (_url: string, _init: RequestInit) => {
         const next = candidates.shift()!;
         return new Response(JSON.stringify(envelope(next.text, next.extra)), { status: 200, headers: { "content-type": "application/json" } });
       });
-      const handle = createAiShellHandler({ environment: { DEEPSEEK_API_KEY: "deepseek-SENTINEL-test" }, activationManifest: manifest, fetcher: deepseek });
+      const handle = createAiShellHandler({ environment: { DEEPSEEK_API_KEY: "deepseek-SENTINEL-test" }, activationManifest: manifest, fetcher: deepseek, ...(routeGate === "TEST" ? { requestClassGate: qualifiedTestRequestClassGate() } : {}) });
       const posts = vi.fn<BrowserShellFetcher>((url, init) => handle(new Request(`http://localhost${url}`, init)));
       return { deepseek, posts };
     }
@@ -459,6 +487,17 @@ describe("the client under the hybrid service", () => {
       expect(await run.hybrid.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", reason: "PROVIDER_FAILED" });
       expect(route.posts).toHaveBeenCalledTimes(1);
       expect(run.rows[0]!.measurements).toMatchObject(ROUTE_USAGE);
+    });
+
+    it("C1: the route's own class check refuses (403, before any credential read) when only the browser has the class qualified; audited REQUEST_CLASS_NOT_QUALIFIED", async () => {
+      const route = viaRoute([{ text: JSON.stringify(VALID) }], ENABLED, "SHIPPED");
+      const run = service({ fetcher: route.posts });
+      expect(await run.hybrid.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", mode: "REMOTE_AI", reason: "PROVIDER_REJECTED" });
+      expect(route.posts).toHaveBeenCalledTimes(1);
+      expect(route.deepseek).not.toHaveBeenCalled();
+      expect(run.rows).toHaveLength(1);
+      expect(run.rows[0]).toMatchObject({ outcomeCode: "REQUEST_CLASS_NOT_QUALIFIED", attempts: { count: 1, structuralRepairUsed: false }, measurements: { inputTokens: null, outputTokens: null, costMicroUsd: null } });
+      expect(aiInvocationAuditRowSchema.safeParse(run.rows[0]).success).toBe(true);
     });
 
     it("the route's own activation check still refuses when only the browser is activated", async () => {

@@ -1,4 +1,5 @@
 import type { AiInvocationAuditRow, ProviderTaskRequest, ShellTaskRequest } from "@/domain/ai";
+import type { AiShellRouteRefusalReason } from "./ai-shell-route-contract";
 
 /**
  * Packet 11A provider-neutral ports (ai-system-spec Sections 7, 12). A provider
@@ -73,8 +74,10 @@ export type ProviderInvocationResult =
    * `usage` (Packet 11C B2b; widened in Addendum C, C5): present on every failure that follows a potentially billed transmission, so the
    * hybrid service counts that spend: the provider-reported usage when the provider reported it, else the call's pre-send upper bound
    * (basis UPPER_BOUND). Absent exactly when nothing was transmitted (a refused, unconfigured or not-accepted call), i.e. nothing billed.
+   * `refusal` (Packet 11C Addendum C, C1): the server shell route's closed REFUSED reason (decided before any provider call; the browser
+   * client sets it, with reason PROVIDER_REJECTED and no usage). The hybrid service audits it as that audit-only outcome code.
    */
-  | Readonly<{ kind: "FAILED"; reason: ProviderFailureReason; usage?: ProviderUsage }>;
+  | Readonly<{ kind: "FAILED"; reason: ProviderFailureReason; usage?: ProviderUsage; refusal?: AiShellRouteRefusalReason }>;
 
 export type AiProviderPort = Readonly<{
   /** The exact provider and model snapshot this port is pinned to, recorded in the local audit. */

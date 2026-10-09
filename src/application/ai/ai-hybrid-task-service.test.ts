@@ -10,6 +10,8 @@ import { verifyComposition } from "./language/assembler";
 import { atomMultiset, composeDeterministic } from "./language/deterministic-composition";
 import { planSlots } from "./language/slot-planner";
 import { projectShellTaskRequest } from "./language/shell-projector";
+import { requestClassIdentity, SHIPPED_REQUEST_CLASS_GATE, type AiRequestClassGate } from "./request-class-qualification";
+import { qualifiedTestRequestClassGate } from "./request-class-test-support";
 
 // Module spies pin the production wiring: S10 (verifyComposition) and the value-blind projector are the real
 // implementations by default; individual tests override a single call.
@@ -38,7 +40,9 @@ function harness(results: Array<ProviderInvocationResult | Promise<ProviderInvoc
   const calls: ShellTaskRequest[] = [];
   const rows: AiInvocationAuditRow[] = [];
   const provider: AiShellProviderPort = { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, invoke: async (input) => { calls.push(input); return results.shift()!; } };
-  const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async (row) => void rows.push(row) }, now: () => "2026-10-06T01:00:00.000Z", monotonicMs: () => 0, manifest: ENABLED, provider, ...overrides });
+  // Packet 11C Addendum C (C1): a remote path needs a QUALIFIED class; these tests inject test-only QUALIFIED records (the shipped
+  // records are all PENDING). An override `requestClassGate: undefined` restores the production default.
+  const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async (row) => void rows.push(row) }, now: () => "2026-10-06T01:00:00.000Z", monotonicMs: () => 0, manifest: ENABLED, provider, requestClassGate: qualifiedTestRequestClassGate(), ...overrides });
   return { calls, rows, service };
 }
 const expectOneValidRow = (rows: AiInvocationAuditRow[], outcomeCode: string, runtimeBundleKey = "ai.explain-pattern@11b.18") => {
@@ -72,6 +76,74 @@ describe("hybrid task service", () => {
     expect(calls).toEqual([projectShellTaskRequest(EN.plan)]);
     expect(result).toMatchObject({ kind: "COMPOSED", source: "AI", mode: "REMOTE_AI", reason: null, limitationCopyComplete: true });
     expectOneValidRow(rows, "ACCEPTED");
+  });
+  describe("Packet 11C Addendum C, C1: only a QUALIFIED request class may be sent", () => {
+    const unqualifiedRow = (row: AiInvocationAuditRow) => {
+      expect(row).toMatchObject({ outcomeCode: "REQUEST_CLASS_NOT_QUALIFIED", attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, providerModel: null, sourceRevisions: [], usageBasis: "NONE" });
+      expect(row.measurements).toMatchObject({ inputTokens: null, outputTokens: null, costMicroUsd: null });
+    };
+    it.each([
+      ["the production default (no gate injected: the shipped, all-PENDING records)", { requestClassGate: undefined }],
+      ["the shipped gate", { requestClassGate: SHIPPED_REQUEST_CLASS_GATE }],
+    ])("an unqualified class under %s composes deterministically, sends nothing, asks no disclosure and writes one REQUEST_CLASS_NOT_QUALIFIED row", async (_label, overrides) => {
+      for (const fixture of [EN, CARE]) {
+        const decide = vi.fn(async () => "ACCEPTED" as const);
+        const invoke = vi.fn();
+        const rows: AiInvocationAuditRow[] = [];
+        const run = harness([], { ...overrides, provider: { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, remoteUse: { decide }, invoke }, audit: { append: async (row: AiInvocationAuditRow) => void rows.push(row) } });
+        const result = await run.service.execute(fixture.request);
+        expect(result).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "CLASS_NOT_QUALIFIED", reason: "TASK_DISABLED" });
+        // The same deterministic composition as any other fallback (the same atoms).
+        expect((result as any).composition).toEqual(composeDeterministic(fixture.request, fixture.plan, fixture.atoms, AI_HYBRID_RUNTIME_BUNDLES[fixture.plan.taskType]));
+        expect(projectorSpy).toHaveBeenCalled();
+        expect(decide).not.toHaveBeenCalled();
+        expect(invoke).not.toHaveBeenCalled();
+        expectOneValidRow(rows, "REQUEST_CLASS_NOT_QUALIFIED", AI_HYBRID_RUNTIME_BUNDLES[fixture.plan.taskType].bundleKey);
+        unqualifiedRow(rows[0]!);
+      }
+    });
+    it("the class is decided on the projected value-blind request, after every earlier check and before the disclosure", async () => {
+      const admit = vi.fn<AiRequestClassGate["admit"]>(() => ({ admitted: false, classId: null, reason: "NO_DEFINITION" }));
+      const gate: AiRequestClassGate = { admit, anyAdmissible: () => false };
+      for (const overrides of [{ manifest: AI_ACTIVATION_MANIFEST }, { privateMode: () => true }, { online: () => false }, { provider: undefined }]) {
+        await harness([], { ...overrides, requestClassGate: gate }).service.execute(EN.request);
+        await harness([], { requestClassGate: gate }).service.execute(ineligibleRequest(INELIGIBLE_CASES[1][1]));
+      }
+      expect(admit).not.toHaveBeenCalled();
+      const run = harness([completed(VALID)], { requestClassGate: gate });
+      await run.service.execute(EN.request);
+      expect(admit).toHaveBeenCalledTimes(1);
+      expect(admit.mock.calls[0]![0]).toEqual(projectShellTaskRequest(EN.plan));
+      expect(run.calls).toHaveLength(0);
+      expectOneValidRow(run.rows, "REQUEST_CLASS_NOT_QUALIFIED");
+    });
+    it("a QUALIFIED class proceeds unchanged (the class id of exactly the request sent); a gate that throws fails closed", async () => {
+      const gate = qualifiedTestRequestClassGate();
+      const run = harness([completed(VALID)], { requestClassGate: gate });
+      expect(await run.service.execute(EN.request)).toMatchObject({ source: "AI", mode: "REMOTE_AI" });
+      expect(gate.admitted).toEqual([requestClassIdentity(run.calls[0]!).classId]);
+      const throwing: AiRequestClassGate = { admit: () => { throw new Error("broken"); }, anyAdmissible: () => true };
+      const broken = harness([completed(VALID)], { requestClassGate: throwing });
+      expect(await broken.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", mode: "CLASS_NOT_QUALIFIED", reason: "TASK_DISABLED" });
+      expect(broken.calls).toHaveLength(0);
+      expectOneValidRow(broken.rows, "REQUEST_CLASS_NOT_QUALIFIED");
+    });
+    it("a cancellation while deciding is REQUEST_CANCELLED with nothing sent", async () => {
+      const controller = new AbortController();
+      const gate: AiRequestClassGate = { admit: (request) => { controller.abort(); return qualifiedTestRequestClassGate().admit(request); }, anyAdmissible: () => true };
+      const run = harness([completed(VALID)], { requestClassGate: gate });
+      expect(await run.service.execute(EN.request, controller.signal)).toMatchObject({ source: "DETERMINISTIC", reason: "REQUEST_CANCELLED" });
+      expect(run.calls).toHaveLength(0);
+      expectOneValidRow(run.rows, "REQUEST_CANCELLED");
+    });
+    it("the route's closed class refusal (a provider FAILED with refusal REQUEST_CLASS_NOT_QUALIFIED) is audited truthfully, never repaired", async () => {
+      const run = harness([{ kind: "FAILED", reason: "PROVIDER_REJECTED", refusal: "REQUEST_CLASS_NOT_QUALIFIED" }, completed(VALID)]);
+      expect(await run.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", mode: "REMOTE_AI", reason: "PROVIDER_REJECTED" });
+      expect(run.calls).toHaveLength(1);
+      expectOneValidRow(run.rows, "REQUEST_CLASS_NOT_QUALIFIED");
+      // The POST reached the app's own route, which refused it before any provider call: one attempt, nothing billed.
+      expect(run.rows[0]).toMatchObject({ attempts: { count: 1 }, measurements: { inputTokens: null, outputTokens: null, costMicroUsd: null } });
+    });
   });
   it.each([
     ["NOT_ACTIVATED (production manifest)", { manifest: AI_ACTIVATION_MANIFEST }, "NOT_ACTIVATED", "TASK_DISABLED"],

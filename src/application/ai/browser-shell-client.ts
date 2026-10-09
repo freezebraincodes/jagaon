@@ -28,6 +28,8 @@ export type { AiRemoteUseDecision, AiRemoteUseDisclosure };
  *    again by the service's full local gates before any use), STRUCTURALLY_REJECTED -> the typed rejection (D6), FAILED -> a closed
  *    provider failure reason, with the billed usage when the route reported it. A non-2xx status, a non-JSON or non-conforming body
  *    and a network error are closed failures; no technical text is ever surfaced.
+ *    Packet 11C Addendum C (C1): a 403 `REFUSED` answer (the route's class check, before any credential read) is the closed
+ *    PROVIDER_REJECTED with its `refusal` (REQUEST_CLASS_NOT_QUALIFIED) and no usage, so the service audits it truthfully.
  *
  * The client never retries (the hybrid service owns the single structural repair) and carries no credential, endpoint, provider
  * setting or caller-chosen model. `providerModel` names the D2 route identity for the local audit only; it is not a runtime-bundle
@@ -74,6 +76,23 @@ function statusReason(status: number): ProviderFailureReason {
   return status >= 400 && status < 500 ? REFUSED_REASON : "PROVIDER_FAILED";
 }
 
+/**
+ * Packet 11C Addendum C (C1): a 403 is the route's refusal before any credential read or provider call (nothing billed, no usage). A
+ * readable `REFUSED` body names its closed refusal (REQUEST_CLASS_NOT_QUALIFIED), which the hybrid service audits; anything else is the
+ * plain closed refusal.
+ */
+async function refusedByRoute(response: Response): Promise<ProviderInvocationResult> {
+  try {
+    if (!/^application\/json(\s*;|$)/i.test(response.headers.get("content-type") ?? "")) return failed(REFUSED_REASON);
+    const text = await response.text();
+    if (text.length > MAX_RESPONSE_CHARS) return failed(REFUSED_REASON);
+    const answer = aiShellRouteResponseSchema.safeParse(toPlainData(parseStrictJson(text, { maxDepth: 16, maxLength: MAX_RESPONSE_CHARS })));
+    return answer.success && answer.data.kind === "REFUSED" ? { kind: "FAILED", reason: REFUSED_REASON, refusal: answer.data.reason } : failed(REFUSED_REASON);
+  } catch {
+    return failed(REFUSED_REASON);
+  }
+}
+
 export function createBrowserShellClient(options: { disclosure: AiRemoteUseDisclosure; fetcher?: BrowserShellFetcher }): AiShellProviderPort {
   // The global network primitive is bound lazily, per call; nothing is sent at construction.
   const fetcher: BrowserShellFetcher = options.fetcher ?? ((input, init) => fetch(input, init));
@@ -99,6 +118,7 @@ export function createBrowserShellClient(options: { disclosure: AiRemoteUseDiscl
       } catch {
         return unreadable("TRANSPORT_FAILED");
       }
+      if (response.status === 403) return refusedByRoute(response);
       if (!response.ok) return response.status >= 400 && response.status < 500 ? failed(statusReason(response.status)) : unreadable(statusReason(response.status));
       if (!/^application\/json(\s*;|$)/i.test(response.headers.get("content-type") ?? "")) return unreadable("PROVIDER_FAILED");
       let text: string;
@@ -119,6 +139,8 @@ export function createBrowserShellClient(options: { disclosure: AiRemoteUseDiscl
       const route = answer.data;
       if (route.kind === "CANDIDATE") return { kind: "COMPLETED", candidate: route.candidate, usage: route.usage, retention: route.retention };
       if (route.kind === "STRUCTURALLY_REJECTED") return { kind: "STRUCTURALLY_REJECTED", reason: route.reason, repairable: route.repairable, usage: route.usage, retention: route.retention };
+      // Packet 11C Addendum C (C1): REFUSED is a 403 answer only; with any other status it is a non-conforming answer after the POST.
+      if (route.kind === "REFUSED") return unreadable("PROVIDER_FAILED");
       const reason = (PROVIDER_FAILURE_REASONS as readonly string[]).includes(route.reason) ? (route.reason as ProviderFailureReason) : "PROVIDER_FAILED";
       return failed(reason, route.usage);
     },

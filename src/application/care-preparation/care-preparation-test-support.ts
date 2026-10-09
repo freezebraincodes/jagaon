@@ -20,6 +20,7 @@ import { AI_HYBRID_RUNTIME_BUNDLES } from "@/application/ai/ai-hybrid-runtime-bu
 import { createAiHybridTaskService } from "@/application/ai/ai-hybrid-task-service";
 import type { AiInvocationAuditPort, AiShellProviderPort, ProviderInvocationResult } from "@/application/ai/ai-provider-port";
 import { planSlots } from "@/application/ai/language/slot-planner";
+import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 import { buildCareSummaryAiRequest } from "./ai-care-summary-request";
 
 /** Shared fake-IndexedDB harness for Packet 9C application tests (test-only module). */
@@ -206,6 +207,8 @@ export async function acceptedAiCareComposition(current: CareSummarySnapshotPayl
     monotonicMs: () => 0,
     manifest: ENABLED_CARE_MANIFEST,
     provider: fakeCareShellProvider(() => completedShells(options.candidate(planned.plan, (options.shells ?? fakeModelCareShells)(planned.plan) as ShellTexts))),
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+    requestClassGate: qualifiedTestRequestClassGate(),
   });
   const result = await service.execute(built.request);
   if (result.kind !== "COMPOSED" || result.source !== "AI") throw new Error(`expected an AI composition, got ${JSON.stringify(result.kind === "COMPOSED" ? result.reason : result.kind)}`);

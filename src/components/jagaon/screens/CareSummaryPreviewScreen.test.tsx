@@ -21,6 +21,8 @@ import { createAiRemoteUseSession, type BrowserShellFetcher } from "@/applicatio
 import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
 import type { PrintPort } from "../care-preparation/PrintPort";
 import { CareSummaryPreviewScreen, type CareSummaryAiWordingOutcome, type CareSummaryAiWordingPort } from "./CareSummaryPreviewScreen";
+// Packet 11C Addendum C (C1): the activated paths inject test-only QUALIFIED records (the shipped records are all PENDING).
+import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;
 const originalKeyRange = Dexie.dependencies.IDBKeyRange;
@@ -731,7 +733,7 @@ describe("Care-summary preview: accepted AI wording (Packet 11C B4b; injected te
       const plan = shellPlanView(shellTaskRequestSchema.parse(JSON.parse(init.body as string)));
       return new Response(JSON.stringify({ kind: "CANDIDATE", candidate: shellCandidate(plan, fakeModelCareShells(plan)), retention: "CONFIRMED_NOT_STORED", usage: { inputTokens: 1, outputTokens: 1, costMicroUsd: 1 } }), { headers: { "content-type": "application/json" } });
     });
-    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands }, audit: audits, remoteUse: createAiRemoteUseSession(), manifest: ENABLED_CARE_MANIFEST, fetcher, now: () => LATER }).careSummary!;
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands }, audit: audits, remoteUse: createAiRemoteUseSession(), manifest: ENABLED_CARE_MANIFEST, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER }).careSummary!;
     return { h, recordId, commands, audits, fetcher, wording };
   }
 
@@ -787,7 +789,7 @@ describe("Care-summary preview: accepted AI wording (Packet 11C B4b; injected te
         return ai.commands.replaceWithAiAssistedPreview(input);
       },
     };
-    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: ai.h.query, commands }, audit: ai.audits, remoteUse: createAiRemoteUseSession(), manifest: ENABLED_CARE_MANIFEST, fetcher: ai.fetcher, now: () => LATER }).careSummary!;
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: ai.h.query, commands }, audit: ai.audits, remoteUse: createAiRemoteUseSession(), manifest: ENABLED_CARE_MANIFEST, requestClassGate: qualifiedTestRequestClassGate(), fetcher: ai.fetcher, now: () => LATER }).careSummary!;
     wording.acceptDisclosure();
     const onReplaced = vi.fn();
     renderAi(ai.h, ai.recordId, wording, { commands, onReplaced });

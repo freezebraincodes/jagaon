@@ -6,9 +6,13 @@ import type { CarePreparationCommandPort, CarePreparationQueryPort, ExpectedHead
 import { buildCareSummaryAiRequest } from "@/application/care-preparation/ai-care-summary-request";
 import { createCareSummaryAiComposer, type CareSummaryAiOutcome } from "@/application/care-preparation/compose-care-summary-with-ai";
 import { AI_ACTIVATION_MANIFEST, resolveAiTaskActivation, type AiActivationManifest } from "./ai-activation-manifest";
+import { resolveAiHybridBundle } from "./ai-hybrid-runtime-bundles";
 import { createAiHybridTaskService } from "./ai-hybrid-task-service";
 import type { AiInvocationAuditPort } from "./ai-provider-port";
-import type { AiLocale, AiTaskType } from "@/domain/ai";
+import { projectShellTaskRequest } from "./language/shell-projector";
+import { planSlots } from "./language/slot-planner";
+import { SHIPPED_REQUEST_CLASS_GATE, type AiRequestClassGate } from "./request-class-qualification";
+import type { AiLocale, ShellTask } from "@/domain/ai";
 import { createBrowserShellClient, INTERIM_FAIL_CLOSED_DISCLOSURE, type AiRemoteUseDecision, type AiRemoteUseDisclosure, type AiRemoteUseSession, type BrowserShellFetcher } from "./browser-shell-client";
 import { createPatternExplainer, type PatternExplanation } from "./explain-pattern";
 
@@ -38,6 +42,11 @@ import { createPatternExplainer, type PatternExplanation } from "./explain-patte
  * history half. With the shipped manifest the care wording is never `available()`, never asks the disclosure and never sends; the
  * preview screen does not show its action. A DETERMINISTIC hybrid result never creates a replacement snapshot (the use case replaces
  * only from a validated AI composition, and the runtime's care service re-validates it with `projectValidatedAiCareSummary`).
+ *
+ * Packet 11C Addendum C, Task C1: the one hybrid service gets the request-class gate (shipped: all PENDING, so every request composes
+ * deterministically before any disclosure or send, audited REQUEST_CLASS_NOT_QUALIFIED). The disclosure is offered only when a send
+ * could happen: for history, while some EXPLAIN_PATTERN class is QUALIFIED (`anyAdmissible`, task-level; the per-request check stays in
+ * the service and becomes per-request in C3); for the care preview, when that preview's own projected request class is QUALIFIED.
  */
 export type BrowserHistoryExplainerDependencies = Readonly<{
   history: RecordedHistoryQueryPort;
@@ -50,6 +59,11 @@ export type BrowserHistoryExplainerDependencies = Readonly<{
   monotonicMs?: () => number;
   requestId?: () => string;
   online?: () => boolean;
+  /**
+   * Packet 11C Addendum C (C1): which request classes may be sent. Absent (the shipped app) means the shipped gate: the generated
+   * definitions and the shipped qualification records, all PENDING, so nothing is sent and no disclosure is shown. Test seam only.
+   */
+  requestClassGate?: AiRequestClassGate;
 }>;
 
 /** Packet 11C B4b: the runtime's care-preparation ports the care-summary wording reads and replaces through. */
@@ -133,6 +147,7 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
     declined.add(own);
     return own;
   };
+  const requestClassGate = dependencies.requestClassGate ?? SHIPPED_REQUEST_CLASS_GATE;
   // ONE hybrid service for every flow of this runtime (Packet 11C B4b).
   const service = createAiHybridTaskService({
     releaseProfile: CURRENT_RELEASE_PROFILE,
@@ -142,10 +157,36 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
     manifest,
     provider: createBrowserShellClient({ disclosure: perRequest, fetcher: dependencies.fetcher }),
     online,
+    requestClassGate,
   });
   // Packet 11C B4a: never while offline either (the service would not send, so there is nothing to disclose).
-  const remoteEnabled = (taskType: AiTaskType) => online() && resolveAiTaskActivation(taskType, CURRENT_RELEASE_PROFILE, manifest).state === "SYNTHETIC_REMOTE_ENABLED";
-  const disclosurePending = (taskType: AiTaskType) => session !== null && !session.accepted() && remoteEnabled(taskType);
+  const remoteEnabled = (taskType: ShellTask) => online() && resolveAiTaskActivation(taskType, CURRENT_RELEASE_PROFILE, manifest).state === "SYNTHETIC_REMOTE_ENABLED";
+  // Packet 11C Addendum C (C1): nor while no class of the task is QUALIFIED (shipped: none), so no disclosure is shown for a request that
+  // the service would compose deterministically before any send. Never throws.
+  const anyClassAdmissible = (taskType: ShellTask) => {
+    try {
+      return requestClassGate.anyAdmissible(taskType) === true;
+    } catch {
+      return false;
+    }
+  };
+  const disclosurePending = (taskType: ShellTask) => session !== null && !session.accepted() && remoteEnabled(taskType) && anyClassAdmissible(taskType);
+  /**
+   * Packet 11C Addendum C (C1): whether this care preview's own request could be sent: the same pure request builder, planner and
+   * value-blind projection as the service (reads, writes and sends nothing), then the class gate. A preview that is not eligible, not
+   * remote-eligible or of an unqualified class needs no disclosure.
+   */
+  const careRequestAdmissible = (current: CareSummarySnapshotPayload) => {
+    try {
+      const built = buildCareSummaryAiRequest({ current, requestId: requestId(), requestedAt: now() });
+      if (built.kind !== "READY") return false;
+      const planned = planSlots(built.request, resolveAiHybridBundle("DRAFT_CARE_PREPARATION_SUMMARY", built.request.locale));
+      if (planned.kind !== "PLANNED" || planned.plan.remote.eligible !== true) return false;
+      return requestClassGate.admit(projectShellTaskRequest(planned.plan)).admitted === true;
+    } catch {
+      return false;
+    }
+  };
   const acceptDisclosure = () => session?.accept();
 
   // Packet 11C Addendum C (C5): a moot disclosure is its explicit request's one audit row (zero attempts, nothing sent).
@@ -168,8 +209,8 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
   const careSummary: BrowserCareSummaryWording = Object.freeze({
     available: () => remoteEnabled("DRAFT_CARE_PREPARATION_SUMMARY"),
     // The eligibility check is the use case's own pure request builder over the snapshot alone; it reads, writes and sends nothing.
-    disclosureRequired: (current: CareSummarySnapshotPayload) =>
-      disclosurePending("DRAFT_CARE_PREPARATION_SUMMARY") && buildCareSummaryAiRequest({ current, requestId: requestId(), requestedAt: now() }).kind === "READY",
+    // Packet 11C Addendum C (C1): and the preview's own request class must be QUALIFIED.
+    disclosureRequired: (current: CareSummarySnapshotPayload) => disclosurePending("DRAFT_CARE_PREPARATION_SUMMARY") && careRequestAdmissible(current),
     acceptDisclosure,
     compose: (input: { snapshotRef: ExpectedHead; locale: AiLocale; disclosure?: "DECLINED" }, signal?: AbortSignal) =>
       composer.composeCareSummaryWithAi({ snapshotRef: input.snapshotRef, locale: input.locale }, requestSignal(input.disclosure, signal)),

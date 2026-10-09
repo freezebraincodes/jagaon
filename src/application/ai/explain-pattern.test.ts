@@ -20,6 +20,7 @@ import { createPatternExplainer, type PatternExplanation } from "./explain-patte
 import { renderAtom, renderSummaryRoleNotice } from "./language/atom-renderer";
 import { OBSERVATION_PATH } from "./language/observation-composer";
 import { planSlots } from "./language/slot-planner";
+import { qualifiedTestRequestClassGate } from "./request-class-test-support";
 
 /**
  * Packet 11C Task 6: the pattern-explanation use case. Every view comes from the real journal -> coordinator ->
@@ -50,7 +51,8 @@ const ENABLED: AiActivationManifest = { ...AI_ACTIVATION_MANIFEST, tasks: { ...A
 /** The real hybrid service; `invoke` is the provider spy (never reached while NOT_ACTIVATED). */
 function hybrid(manifest: AiActivationManifest, invoke: AiShellProviderPort["invoke"]) {
   const provider: AiShellProviderPort = { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, invoke };
-  return createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async () => undefined }, now: () => NOW, monotonicMs: () => 0, manifest, provider });
+  // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+  return createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async () => undefined }, now: () => NOW, monotonicMs: () => 0, manifest, provider, requestClassGate: qualifiedTestRequestClassGate() });
 }
 
 /** A fake `execute` that records each call and resolves only when released (then delegates to `inner`). */
@@ -405,7 +407,7 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
     const { history } = await higherFixture();
     const invoke = vi.fn<AiShellProviderPort["invoke"]>();
     const provider: AiShellProviderPort = { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, remoteUse: { decide: async () => "NOT_ACCEPTED" }, invoke };
-    const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async () => undefined }, now: () => NOW, monotonicMs: () => 0, manifest: ENABLED, provider });
+    const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async () => undefined }, now: () => NOW, monotonicMs: () => 0, manifest: ENABLED, provider, requestClassGate: qualifiedTestRequestClassGate() });
     const declined = explained(await explainer(history, service.execute).explain({ factId: FACT, locale: "en-SG" }));
     expect(declined).toMatchObject({ source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
     expect(invoke).not.toHaveBeenCalled();

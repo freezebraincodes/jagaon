@@ -262,6 +262,9 @@ describe("Packet 9 permanent-deletion boundary (Corrective Pass B)", () => {
       "src/application/ai/language/shell-projector.ts",
       "src/application/ai/language/shell-validator.ts",
       "src/application/ai/language/slot-planner.ts",
+      // Packet 11C Addendum C, Task C1 (deliberate, mirrored): the request-class definitions and qualification records.
+      "src/application/ai/request-class-definitions.ts",
+      "src/application/ai/request-class-qualification.ts",
       "src/domain/ai/ai-invocation-audit.ts",
       "src/domain/ai/ai-language-shell-contracts.ts",
       "src/domain/ai/ai-task-contracts.ts",

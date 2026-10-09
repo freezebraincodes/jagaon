@@ -107,6 +107,11 @@ const CLIENT_AI_FILES = [
   "src/application/ai/language/shell-projector.ts",
   "src/application/ai/language/shell-validator.ts",
   "src/application/ai/language/slot-planner.ts",
+  // Packet 11C Addendum C, Task C1 (deliberate, exactly these two): the generated request-class definitions (plain data) and the
+  // qualification records with the class rule and gate (all PENDING), used by the hybrid service and the wiring before any disclosure or
+  // send. Neither imports evaluation, prompt, provider or credential code; the test-only support module stays out (pinned below).
+  "src/application/ai/request-class-definitions.ts",
+  "src/application/ai/request-class-qualification.ts",
   "src/domain/ai/ai-invocation-audit.ts",
   "src/domain/ai/ai-language-shell-contracts.ts",
   "src/domain/ai/ai-task-contracts.ts",
@@ -210,6 +215,13 @@ describe("Packet 11A scope", () => {
         "src/application/ai/browser-shell-client.ts",
         "src/application/ai/browser-history-explainer.test.ts",
         "src/application/ai/browser-history-explainer.ts",
+        // Packet 11C Addendum C, Task C1 (owner decision C1): the generated, immutable request-class definitions (plain data, bound to the
+        // frozen contract digest), the separate qualification records (all PENDING) with the class rule and gate, its test, and the
+        // test-only support that injects test-only QUALIFIED records (never in a production graph; pinned below).
+        "src/application/ai/request-class-definitions.ts",
+        "src/application/ai/request-class-qualification.test.ts",
+        "src/application/ai/request-class-qualification.ts",
+        "src/application/ai/request-class-test-support.ts",
         "src/domain/ai/ai-language-shell-contracts.test.ts",
         "src/domain/ai/ai-language-shell-contracts.ts",
       ].sort(),
@@ -242,6 +254,8 @@ describe("Packet 11A scope", () => {
       "AI_SHELL_ROUTE_PATH",
       "AI_SHELL_ROUTE_PEAK_USD_PER_MILLION",
       "AI_SHELL_ROUTE_POST_CALL_FAILURE_REASONS",
+      // Packet 11C Addendum C, C1 (deliberate): the route's closed REFUSED reasons (REQUEST_CLASS_NOT_QUALIFIED).
+      "AI_SHELL_ROUTE_REFUSAL_REASONS",
       "aiShellRouteResponseSchema",
       "shellCallUpperBound",
       "shellRouteCallUpperBound",
@@ -330,6 +344,12 @@ describe("Packet 11A scope", () => {
     expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/ai/") && !importGraph(["src/app/api/ai/shell/route.ts"]).includes(file))).toEqual([]);
     expect(importGraph(["src/app/api/ai/task/route.ts"]).filter((file) => /^src\/(ai|application\/ai|domain\/ai)\//.test(file))).toEqual([]);
     // The shared-helper extraction keeps the legacy fact-sending service out of the hybrid service's graph and the shell route's graph.
+    // Packet 11C Addendum C, C1: the test-only request-class support (test-only QUALIFIED records) and the evaluation-only definitions
+    // generator are in no production graph (the browser page and every API route); the route reaches the shipped records only.
+    for (const file of ["src/application/ai/request-class-test-support.ts", "src/ai/evaluation/packet-11c-request-class-generator.ts"]) expect(RUNTIME_GRAPH, file).not.toContain(file);
+    expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/ai/evaluation/"))).toEqual([]);
+    expect(importGraph(["src/app/api/ai/shell/route.ts"])).toEqual(expect.arrayContaining(["src/application/ai/request-class-definitions.ts", "src/application/ai/request-class-qualification.ts"]));
+    expect(importGraph(["src/application/ai/request-class-definitions.ts"]).filter((file) => file !== "src/application/ai/request-class-definitions.ts" && !file.startsWith("src/domain/"))).toEqual([]);
     expect(importGraph(["src/application/ai/ai-hybrid-task-service.ts"])).not.toContain("src/application/ai/ai-task-service.ts");
     expect(importGraph(["src/app/api/ai/shell/route.ts"])).not.toContain("src/application/ai/ai-task-service.ts");
   });

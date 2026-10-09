@@ -11,7 +11,8 @@ import { atomMultiset, composeDeterministic } from "@/application/ai/language/de
 import type { ShellLexicalViolation } from "@/application/ai/language/shell-lexicon";
 import { meaningfulWording, SHELL_GATE_ORDER, validateShellCandidate, type ShellClinicalLabelCategory, type ShellGate, type ShellIntegrityCode, type ShellQualityDetail, type ShellRegisterCode } from "@/application/ai/language/shell-validator";
 import { planSlots, type SlotPlanResult } from "@/application/ai/language/slot-planner";
-import { AI_LOCALES, SHELL_MAX_OUTPUT_TOKENS, SHELL_TEMPERATURE, type AiInvocationAuditRow, type AiLocale, type AiReasonCode, type RemoteIneligibleReason, type ShellFieldPath, type ShellTask, type ShellTexts, type SlotPlan } from "@/domain/ai";
+import { requestClassIdentity, type AiRequestClassGate } from "@/application/ai/request-class-qualification";
+import { AI_LOCALES, SHELL_MAX_OUTPUT_TOKENS, SHELL_TEMPERATURE, type AiInvocationAuditRow, type AiLocale, type AiReasonCode, type RemoteIneligibleReason, type ShellFieldPath, type ShellTask, type ShellTaskRequest, type ShellTexts, type SlotPlan } from "@/domain/ai";
 import { AI_EVALUATION_HARD_GATE_REASONS, rate, type EvaluationLimits, type EvaluationStop, type FixtureEvidence, type LiveRunVerdict, type UtilityRate } from "./packet-11-evaluation";
 import type { AiEvaluationFixture, AiEvaluationPhase } from "./packet-11-fixtures";
 import { PACKET_11_HYBRID_FIXTURE_SET_REVISION } from "./packet-11-hybrid-fixtures";
@@ -350,6 +351,24 @@ function spendOf(usage: ProviderUsage): number {
   return typeof usage.costMicroUsd === "number" ? usage.costMicroUsd / 1_000_000 : 0;
 }
 const round6 = (value: number) => Math.round(value * 1_000_000) / 1_000_000;
+/**
+ * Packet 11C Addendum C (C1): the evaluation-only request-class admission. An owner-authorized evaluation run is how a class obtains the
+ * accepted live evidence that a later owner sign-off may cite, so the harness must be able to send classes that are still PENDING. It
+ * admits every request it is given; it creates, reads and claims no qualification record. Evaluation-only: src/ai/evaluation is outside
+ * the browser and route graphs (pinned in packet-11a-manifest.test.ts), and product code always uses the shipped records.
+ */
+const EVALUATION_RUN_REQUEST_CLASS_ADMISSION: AiRequestClassGate = Object.freeze({
+  admit: (request: ShellTaskRequest) => {
+    let classId = "";
+    try {
+      classId = requestClassIdentity(request).classId;
+    } catch {
+      classId = "";
+    }
+    return { admitted: true as const, classId };
+  },
+  anyAdmissible: () => true,
+});
 const HARD_GATE_REASONS: ReadonlySet<string> = new Set(AI_EVALUATION_HARD_GATE_REASONS);
 /** The same seven provider-failure reasons as eval.4's PROVIDER_REASONS. */
 const PROVIDER_REASONS: ReadonlySet<string> = new Set(PROVIDER_FAILURE_REASONS);
@@ -570,7 +589,9 @@ export async function evaluateHybridModelSnapshot(options: {
   };
 
   const audits: AiInvocationAuditRow[] = [];
-  const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", manifest, provider: wrapper, audit: { append: async (row) => void audits.push(row) }, now, monotonicMs: options.monotonicMs ?? (() => performance.now()) });
+  // Packet 11C Addendum C (C1): the harness is how a request class gets the evidence it needs, so its fixtures pass the evaluation-only
+  // admission (no qualification record is created or claimed). Harness logic, report and request bytes are unchanged.
+  const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", manifest, provider: wrapper, audit: { append: async (row) => void audits.push(row) }, now, monotonicMs: options.monotonicMs ?? (() => performance.now()), requestClassGate: EVALUATION_RUN_REQUEST_CLASS_ADMISSION });
 
   const evidence: HybridFixtureEvidence[] = [];
   for (const fixture of options.fixtures) {

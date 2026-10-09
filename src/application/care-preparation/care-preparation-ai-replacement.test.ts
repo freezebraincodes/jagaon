@@ -12,6 +12,7 @@ import { seedSyntheticCareOrganisation } from "@/application/care-organisation/s
 import { createAiInvocationAuditRepository } from "@/application/ai/ai-audit-persistence";
 import { AI_ACTIVATION_MANIFEST } from "@/application/ai/ai-activation-manifest";
 import { createAiHybridTaskService } from "@/application/ai/ai-hybrid-task-service";
+import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 import { CARE_PREPARATION_STORED_ROW_CODECS, carePreparationRevisionRowCodec } from "./care-preparation-persistence";
 import { createCarePreparationService, type CarePreparationDependencies } from "./care-preparation-service";
 import { createCarePreparationQuery } from "./care-preparation-query";
@@ -371,7 +372,8 @@ describe("composeCareSummaryWithAi (Packet 11C B1b)", () => {
   type H = Awaited<ReturnType<typeof setup>>;
   function composer(h: H, options: { manifest?: typeof AI_ACTIVATION_MANIFEST; provider?: ReturnType<typeof fakeCareShellProvider> } = {}) {
     const provider = options.provider ?? fakeCareShellProvider(() => ({ kind: "FAILED", reason: "PROVIDER_FAILED" }));
-    const hybrid = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: h.audits, now: () => LATER, monotonicMs: () => 0, manifest: options.manifest ?? ENABLED_CARE_MANIFEST, provider });
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+    const hybrid = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: h.audits, now: () => LATER, monotonicMs: () => 0, manifest: options.manifest ?? ENABLED_CARE_MANIFEST, provider, requestClassGate: qualifiedTestRequestClassGate() });
     const execute = vi.fn(hybrid.execute);
     // Packet 11C Addendum C (C5): the service's zero-attempt row for a request that never reaches execute.
     const recordUnsent = vi.fn(hybrid.recordUnsent);

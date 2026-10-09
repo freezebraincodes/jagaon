@@ -40,6 +40,11 @@ import { renderDeterministicCareSummary } from "@/application/care-preparation/d
 import { CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES } from "@/domain/care-preparation/care-summary-snapshot";
 import { AI_LOCALES, AI_TASK_TYPES, SHELL_INPUT_VERSIONS, SHELL_MAX_OUTPUT_TOKENS, SHELL_OUTPUT_VERSIONS, SHELL_PROVIDER_REQUEST_VERSION, SHELL_TASKS, SHELL_TEMPERATURE, SLOT_PLAN_VERSION, type AiLocale } from "@/domain/ai";
 import { getMessages } from "@/i18n/get-messages";
+import { AI_REQUEST_CLASS_CONTRACT, AI_REQUEST_CLASS_DEFINITIONS } from "@/application/ai/request-class-definitions";
+import { AI_REMOTE_ELIGIBILITY_POLICY_VERSION, AI_REQUEST_CLASS_QUALIFICATION_RECORDS } from "@/application/ai/request-class-qualification";
+import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
+import { canonicalizeJson } from "@/application/contracts/canonical-json";
+import { requestClassContractDigest, requestClassContractInputsFromCode } from "./packet-11c-request-class-generator";
 import { VALIDATOR_RULES_REVISION } from "./packet-11-evaluation";
 import { AI_HYBRID_EVALUATION_REPORT_VERSION, APPROVED_HYBRID_CONTRACT, HYBRID_FULL_EVALUATION_POLICY } from "./packet-11-hybrid-evaluation";
 import { hybridFixturesForPhase, PACKET_11_HYBRID_FIXTURE_SET_REVISION } from "./packet-11-hybrid-fixtures";
@@ -73,6 +78,12 @@ import { SOURCE_BACKED_SCENARIOS, sourceBackedFixture } from "./packet-11-source
  * audit row ai-invocation-audit.11c.2 beside the still-valid legacy 11a.1 rows, its audit-only outcome codes and usage bases, and the
  * unchanged provider failure reasons) and `callUpperBound` (the shared pre-send upper bound of one shell call). None of them is
  * model-facing: every body digest below is unchanged.
+ *
+ * Packet 11C Addendum C, Task C1 (owner decision C1): `requestClasses` joins the manifest: the request-class scheme
+ * ai-request-class.11c.1, the remote-eligibility policy ai-remote-eligibility.11c.1, the contract digest (sha256 of the canonical frozen
+ * contract inputs, computed here from the same sources the items above pin), the digest of the 12 generated class definitions, their
+ * count per task and locale and samples, and the shipped qualification records: one per class, ALL PENDING, no evidence, no sign-off.
+ * None of it is model-facing (checked on every captured body): every body digest is unchanged.
  *
  * Changing anything pinned here fails with FROZEN_CONTRACT_CHANGED and the item's name. Update this manifest only deliberately, with the
  * owner's re-approval of the contract and the evidence policy (a changed model-facing byte needs fresh evaluation evidence).
@@ -154,6 +165,18 @@ const FROZEN = Object.freeze({
     },
   },
   activationManifest: { manifestVersion: "ai-activation.11a.1", profile: "HACKATHON_DEMO", everyTask: "DETERMINISTIC_ONLY" },
+  // Packet 11C Addendum C (C1, owner decision C1): remote eligibility is restricted to QUALIFIED request classes. The immutable,
+  // generated class definitions are bound to the contract digest (computed from the frozen sources above); the separate owner
+  // qualification records ship ALL PENDING (no evidence, no sign-off). Never model-facing.
+  requestClasses: {
+    scheme: "ai-request-class.11c.1",
+    remoteEligibilityPolicy: "ai-remote-eligibility.11c.1",
+    contractDigest: "f28142029e09578a84b5bf14ca69b5b49e9d92b874866bc9794471ee57b5d39b",
+    definitionsSha256: "30836f5da23fce91fc3947a80fcfe185eeb4976e02f323784a915ae4ae2dcf18",
+    classesPerTaskLocale: { "EXPLAIN_PATTERN en-SG": 3, "EXPLAIN_PATTERN zh-SG": 3, "DRAFT_CARE_PREPARATION_SUMMARY en-SG": 3, "DRAFT_CARE_PREPARATION_SUMMARY zh-SG": 3 },
+    samples: 70,
+    qualificationRecords: { count: 12, statuses: ["PENDING"], withEvidence: 0, signedOff: 0 },
+  },
   runtimeBundles: { modelSnapshot: null, routeProfile: "deterministic-only.11a.1" },
   modelFacingBodies: {
     fixtures70: {
@@ -220,6 +243,8 @@ async function routeTransmission() {
   const handler = createAiShellHandler({
     environment: { DEEPSEEK_API_KEY: SENTINEL },
     activationManifest: ENABLED,
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING; pinned in `requestClasses`).
+    requestClassGate: qualifiedTestRequestClassGate(),
     fetcher: async (url, init) => {
       sent.push({ url, body: String(init.body) });
       throw new Error("OFFLINE_CAPTURE_ONLY");
@@ -343,6 +368,28 @@ const ACTUAL: { readonly [K in FrozenItem]: () => unknown } = {
     profile: AI_ACTIVATION_MANIFEST.profile,
     everyTask: agree({ ...AI_ACTIVATION_MANIFEST.tasks, taskCount: Object.keys(AI_ACTIVATION_MANIFEST.tasks).length === AI_TASK_TYPES.length ? "DETERMINISTIC_ONLY" : Object.keys(AI_ACTIVATION_MANIFEST.tasks) }),
   }),
+  requestClasses: () => ({
+    scheme: AI_REQUEST_CLASS_CONTRACT.scheme,
+    remoteEligibilityPolicy: AI_REMOTE_ELIGIBILITY_POLICY_VERSION,
+    contractDigest: agree({
+      "AI_REQUEST_CLASS_CONTRACT.digest": AI_REQUEST_CLASS_CONTRACT.digest,
+      "computed from AI_REQUEST_CLASS_CONTRACT.inputs": requestClassContractDigest(AI_REQUEST_CLASS_CONTRACT.inputs),
+      "computed from the frozen sources": requestClassContractDigest(requestClassContractInputsFromCode()),
+      "every definition": [...new Set(AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.contractDigest))].join(","),
+      "every record": [...new Set(AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => record.contractDigest))].join(","),
+    }),
+    definitionsSha256: sha256(canonicalizeJson(AI_REQUEST_CLASS_DEFINITIONS.map((definition) => ({ ...definition, sampleFixtureIds: [...definition.sampleFixtureIds] })))),
+    classesPerTaskLocale: Object.fromEntries(
+      SHELL_TASKS.flatMap((task) => LOCALES.map((locale) => [`${task} ${locale}`, AI_REQUEST_CLASS_DEFINITIONS.filter((definition) => definition.taskType === task && definition.locale === locale).length])),
+    ),
+    samples: AI_REQUEST_CLASS_DEFINITIONS.reduce((total, definition) => total + definition.sampleFixtureIds.length, 0),
+    qualificationRecords: {
+      count: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.length,
+      statuses: [...new Set(AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => record.status))],
+      withEvidence: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.filter((record) => record.evidenceRef !== null).length,
+      signedOff: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.filter((record) => record.signedOffBy !== null || record.signedOffAt !== null).length,
+    },
+  }),
   runtimeBundles: () => ({
     modelSnapshot: agree(Object.fromEntries([...AI_TASK_TYPES.map((task) => [`legacy ${task}`, AI_TASK_RUNTIME_BUNDLES[task].modelSnapshot]), ...SHELL_TASKS.map((task) => [`hybrid ${task}`, AI_HYBRID_RUNTIME_BUNDLES[task].modelSnapshot])])),
     routeProfile: agree(Object.fromEntries([...AI_TASK_TYPES.map((task) => [`legacy ${task}`, AI_TASK_RUNTIME_BUNDLES[task].routeProfile]), ...SHELL_TASKS.map((task) => [`hybrid ${task}`, AI_HYBRID_RUNTIME_BUNDLES[task].routeProfile])])),
@@ -390,7 +437,8 @@ describe("Packet 11C frozen contract manifest (Addendum B, Task B5; offline)", (
     expect(all).toHaveLength(70 + SOURCE_BACKED_SCENARIOS.length * LOCALES.length + CARE_CLASSES.length * LOCALES.length);
     // The schema and harness labels (current and the superseded 11b.6 / eval.18), the fixture set and policy never reach a provider.
     // Packet 11C Addendum C (C5): nor the audit schema label, an audit-only outcome code or a usage basis.
-    const labels = [SHELL_PROVIDER_SCHEMA_VERSION, AI_HYBRID_EVALUATION_REPORT_VERSION, "kie-schema", "packet11-eval", "packet11-fixtures", "hybrid-full-policy", "ai-activation", "care-summary-template", "ai-disclosure", "ai-invocation-audit", "usageBasis", "UPPER_BOUND", ...AI_AUDIT_ONLY_OUTCOME_CODES];
+    // Packet 11C Addendum C (C1): nor the request-class scheme, the eligibility policy, the contract digest or any class id.
+    const labels = [SHELL_PROVIDER_SCHEMA_VERSION, AI_HYBRID_EVALUATION_REPORT_VERSION, "kie-schema", "packet11-eval", "packet11-fixtures", "hybrid-full-policy", "ai-activation", "care-summary-template", "ai-disclosure", "ai-invocation-audit", "usageBasis", "UPPER_BOUND", ...AI_AUDIT_ONLY_OUTCOME_CODES, "ai-request-class", "ai-remote-eligibility", AI_REQUEST_CLASS_CONTRACT.digest, ...AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.classId)];
     expect(all.flatMap((body, index) => labels.filter((label) => body.includes(label)).map((label) => `${index}: ${label}`))).toEqual([]);
     // The slot-plan version is the only version echo each body carries twice (the documented version-only difference).
     expect(all.filter((body) => normaliseSlotPlanVersion(body).occurrences !== SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY)).toEqual([]);

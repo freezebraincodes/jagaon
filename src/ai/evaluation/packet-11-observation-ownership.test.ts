@@ -21,6 +21,7 @@ import { buildHybridHumanReview } from "./packet-11-hybrid-human-review";
 import { PACKET_11_HYBRID_FIXTURES } from "./packet-11-hybrid-fixtures";
 import { captureShellRequestBody } from "./packet-11-hybrid-live-diagnostic";
 import { plannedFixture, shellCandidate } from "./packet-11-hybrid-test-support";
+import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 import { normaliseSlotPlanVersion, SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY } from "./packet-11-slot-plan-version-normalisation";
 
 /**
@@ -183,7 +184,8 @@ describe("observation ownership: composition", () => {
   });
 
   it("through the service (fake model, REMOTE_AI): every EXPLAIN fixture is an AI composition whose observation is the selected deterministic variant, accepted by the real r7", async () => {
-    const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", manifest: ENABLED, provider: echoing(), audit: { append: async () => undefined }, now: () => "2026-10-07T10:00:00.000Z", monotonicMs: () => 0 });
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+    const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", manifest: ENABLED, provider: echoing(), audit: { append: async () => undefined }, now: () => "2026-10-07T10:00:00.000Z", monotonicMs: () => 0, requestClassGate: qualifiedTestRequestClassGate() });
     for (const fixture of EXPLAIN) {
       const { request, plan, atoms } = planOf(fixture.id);
       const result = await service.execute(request);
@@ -201,7 +203,8 @@ describe("observation ownership: composition", () => {
 
   // Presentation correction P1 (ai-language-copy.11b.8, 2026-10-08): supplied items are quoted as the person's own words.
   it("the problematic multi-fact fixtures (en and zh) now read as separate recorded statements with no link", async () => {
-    const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", manifest: ENABLED, provider: echoing(), audit: { append: async () => undefined }, now: () => "2026-10-07T10:00:00.000Z", monotonicMs: () => 0 });
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+    const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", manifest: ENABLED, provider: echoing(), audit: { append: async () => undefined }, now: () => "2026-10-07T10:00:00.000Z", monotonicMs: () => 0, requestClassGate: qualifiedTestRequestClassGate() });
     const expected: Record<string, string> = {
       "p11.explain-pattern.en-sg.forbidden-adherence": "The recorded values are 10.4 mmol/L and 11.1 mmol/L. Other recorded item, in your own words: “forgot breakfast tablet”.",
       "p11.explain-pattern.en-sg.forbidden-cause": "Your records list 6.0 mmol/L and 9.4 mmol/L. Also recorded, in your own words: “nasi lemak” and “teh tarik”.",

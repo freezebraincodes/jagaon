@@ -6,7 +6,7 @@ import { resolveAiHybridBundle, type AiHybridRuntimeBundle } from "./ai-hybrid-r
 import { renderExplainLimitations, type RenderedLimitation } from "./ai-meaning-registry";
 import { addAttemptUsage, buildAuditRow, callOnce, decideRemoteUse, NO_USAGE, type Attempts } from "./ai-call-support";
 import { PROVIDER_FAILURE_REASONS, SHELL_STRUCTURAL_REJECTION_REASONS, type AiInvocationAuditPort, type AiShellProviderPort } from "./ai-provider-port";
-import { shellRouteCallUpperBound } from "./ai-shell-route-contract";
+import { AI_SHELL_ROUTE_REFUSAL_REASONS, shellRouteCallUpperBound } from "./ai-shell-route-contract";
 import { composeAiResult } from "./language/ai-composition";
 import type { AiComposition } from "./language/assembler";
 import { renderCareDraftNotices, type CareDraftNotice } from "./language/care-draft-notices";
@@ -14,6 +14,7 @@ import { composeDeterministic } from "./language/deterministic-composition";
 import { projectShellTaskRequest } from "./language/shell-projector";
 import { validateShellCandidate } from "./language/shell-validator";
 import { planSlots } from "./language/slot-planner";
+import { SHIPPED_REQUEST_CLASS_GATE, type AiRequestClassGate } from "./request-class-qualification";
 
 /**
  * Packet 11B.6 hybrid task service (spec Sections 4, 9). The application renders every fact; a remote model,
@@ -41,8 +42,13 @@ import { planSlots } from "./language/slot-planner";
  * the closed reason REQUEST_CANCELLED and is audited with the audit-only REMOTE_USE_DECLINED. Every potentially billed attempt is counted:
  * its reported usage, else its pre-send upper bound (`shellRouteCallUpperBound`; basis UPPER_BOUND), never zero. `recordUnsent` writes
  * the zero-attempt row of an explicit request that never reached `execute`, so each explicit request has exactly one row.
+ * Packet 11C Addendum C, Task C1 (owner decision C1): after the projection and BEFORE the disclosure, the projected value-blind request's
+ * class (under the current contract) must be QUALIFIED (`requestClassGate`; production: the shipped records, all PENDING). Otherwise the
+ * request composes deterministically in mode CLASS_NOT_QUALIFIED (closed reason TASK_DISABLED: remote use is not enabled for this
+ * request) with no disclosure and nothing sent, audited with the audit-only REQUEST_CLASS_NOT_QUALIFIED (zero attempts). A gate that
+ * throws is not qualified. The route's own class refusal (a provider FAILED carrying `refusal`) is audited with the same code.
  */
-export type AiLanguageMode = "REMOTE_AI" | "PRIVATE" | "OFFLINE" | "NOT_ACTIVATED" | "NO_PROVIDER" | "INELIGIBLE" | "REMOTE_NOT_ACCEPTED";
+export type AiLanguageMode = "REMOTE_AI" | "PRIVATE" | "OFFLINE" | "NOT_ACTIVATED" | "NO_PROVIDER" | "INELIGIBLE" | "CLASS_NOT_QUALIFIED" | "REMOTE_NOT_ACCEPTED";
 export type AiHybridExecutionResult =
   | Readonly<{ kind: "COMPOSED"; source: "AI" | "DETERMINISTIC"; mode: AiLanguageMode; composition: AiComposition; reason: AiReasonCode | null; auditRef: string; limitations?: readonly RenderedLimitation[]; limitationCopyComplete?: boolean; notices?: readonly CareDraftNotice[] }>
   | Readonly<{ kind: "FALLBACK"; fallback: AiFallbackResult; auditRef: string }>
@@ -58,6 +64,11 @@ export type AiHybridTaskServiceDependencies = Readonly<{
   privateMode?: () => boolean;
   /** Connectivity probe evaluated before any call; absent means online. */
   online?: () => boolean;
+  /**
+   * Packet 11C Addendum C (C1): which request classes may be sent. Absent means the shipped gate (the generated definitions and the
+   * shipped qualification records, all PENDING). Test seam: tests of a remote path inject test-only QUALIFIED records.
+   */
+  requestClassGate?: AiRequestClassGate;
 }>;
 
 /**
@@ -100,7 +111,10 @@ async function invokeShells(request: AiTaskRequest, plan: SlotPlan, atoms: AtomT
         // may have been sent, so it counts at the upper bound. Any other FAILED without usage was not transmitted (nothing billed).
         if (result.usage !== undefined) addAttemptUsage(attempts, result.usage, upperBound);
         else if (call.threw === true) addAttemptUsage(attempts, undefined, upperBound);
-        return fallback((PROVIDER_FAILURE_REASONS as readonly string[]).includes(result.reason) ? result.reason : "PROVIDER_FAILED");
+        const reason = (PROVIDER_FAILURE_REASONS as readonly string[]).includes(result.reason) ? result.reason : "PROVIDER_FAILED";
+        // Packet 11C Addendum C (C1): the route's closed refusal (before any provider call) is audited with its own code; never repaired.
+        const refusal = result.kind === "FAILED" && (AI_SHELL_ROUTE_REFUSAL_REASONS as readonly unknown[]).includes(result.refusal) ? result.refusal : undefined;
+        return refusal ? { kind: "DETERMINISTIC", reason, audit: refusal } : fallback(reason);
       }
       addAttemptUsage(attempts, result.usage, upperBound);
       if (result.retention !== "CONFIRMED_NOT_STORED") return fallback("PROVIDER_FAILED");
@@ -200,6 +214,15 @@ export function createAiHybridTaskService(dependencies: AiHybridTaskServiceDepen
         // An unapprovable value-blind request never reaches the provider; fail closed to the deterministic text.
         return finish("REMOTE_AI", { kind: "DETERMINISTIC", reason: "PAYLOAD_INVALID" });
       }
+      // Packet 11C Addendum C (C1): only a QUALIFIED class of exactly this request may be sent; decided before the disclosure.
+      let admitted = false;
+      try {
+        admitted = (dependencies.requestClassGate ?? SHIPPED_REQUEST_CLASS_GATE).admit(shellRequest).admitted === true;
+      } catch {
+        admitted = false;
+      }
+      if (signal?.aborted) return finish("REMOTE_AI", { kind: "DETERMINISTIC", reason: "REQUEST_CANCELLED" });
+      if (!admitted) return finish("CLASS_NOT_QUALIFIED", { kind: "DETERMINISTIC", reason: "TASK_DISABLED", audit: "REQUEST_CLASS_NOT_QUALIFIED" });
       // Packet 11C B3: the remote-use disclosure, decided before the first attempt and before any timer (attempts.count is still 0).
       const remoteUse = dependencies.provider.remoteUse;
       if (remoteUse) {

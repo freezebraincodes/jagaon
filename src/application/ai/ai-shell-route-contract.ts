@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { aiReasonCodeSchema, shellMaxOutputTokens, shellOutputSchema, type AiReasonCode, type ShellTask, type ShellTaskRequest } from "@/domain/ai";
+import { aiReasonCodeSchema, shellMaxOutputTokens, shellOutputSchema, type AiAuditOnlyOutcomeCode, type AiReasonCode, type ShellTask, type ShellTaskRequest } from "@/domain/ai";
 import { PROVIDER_FAILURE_REASONS, SHELL_STRUCTURAL_REJECTION_REASONS } from "./ai-provider-port";
 
 /**
@@ -27,6 +27,10 @@ import { PROVIDER_FAILURE_REASONS, SHELL_STRUCTURAL_REJECTION_REASONS } from "./
  * provider call (a refused request, not activated, missing configuration, the rate limit) carries no usage, and the schema refuses usage
  * on any FAILED whose reason cannot follow a provider call. CANDIDATE and STRUCTURALLY_REJECTED carry the reported usage (basis REPORTED,
  * which may be left implicit). The usage basis never reaches the provider: request bodies are unchanged.
+ *
+ * Packet 11C Addendum C, Task C1: a fourth answer, `REFUSED` (HTTP 403), carries one closed refusal reason decided before any credential
+ * read or provider call (REQUEST_CLASS_NOT_QUALIFIED: the request's class has no QUALIFIED record under the current contract). It never
+ * carries usage. The browser client maps it to a provider refusal that the hybrid service audits with that code.
  */
 export const AI_SHELL_ROUTE_PATH = "/api/ai/shell";
 /** The request body cap in UTF-8 bytes. The largest approved shell request (32 slots, 8 sections) stays well below it. */
@@ -76,6 +80,14 @@ export function shellRouteCallUpperBound(request: ShellTaskRequest): Readonly<{ 
 /** The FAILED reasons that can follow a provider call the route made (and so may carry usage): the provider failures and cancellation. */
 export const AI_SHELL_ROUTE_POST_CALL_FAILURE_REASONS = Object.freeze([...PROVIDER_FAILURE_REASONS, "REQUEST_CANCELLED"] as const satisfies readonly AiReasonCode[]);
 
+/**
+ * Packet 11C Addendum C, Task C1: the route's closed REFUSED reasons, decided before any credential read or provider call (so a REFUSED
+ * answer never carries usage). They are audit-only outcome codes (C5), so they never travel as a FAILED reason; a REFUSED answer is
+ * HTTP 403. REQUEST_CLASS_NOT_QUALIFIED: the request's class (under the current contract) has no QUALIFIED record.
+ */
+export const AI_SHELL_ROUTE_REFUSAL_REASONS = Object.freeze(["REQUEST_CLASS_NOT_QUALIFIED"] as const satisfies readonly AiAuditOnlyOutcomeCode[]);
+export type AiShellRouteRefusalReason = (typeof AI_SHELL_ROUTE_REFUSAL_REASONS)[number];
+
 const counts = {
   inputTokens: z.number().int().min(0).max(100_000).nullable(),
   outputTokens: z.number().int().min(0).max(100_000).nullable(),
@@ -92,6 +104,8 @@ export const aiShellRouteResponseSchema = z
     z.strictObject({ kind: z.literal("CANDIDATE"), candidate: z.union([shellOutputSchema("EXPLAIN_PATTERN"), shellOutputSchema("DRAFT_CARE_PREPARATION_SUMMARY")]), retention: retentionSchema, usage: reportedUsageSchema }),
     z.strictObject({ kind: z.literal("STRUCTURALLY_REJECTED"), reason: z.enum(SHELL_STRUCTURAL_REJECTION_REASONS), repairable: z.boolean(), retention: retentionSchema, usage: reportedUsageSchema }),
     z.strictObject({ kind: z.literal("FAILED"), reason: aiReasonCodeSchema, usage: failedUsageSchema.optional() }),
+    // Packet 11C Addendum C (C1): a closed refusal before any credential read or provider call; never usage.
+    z.strictObject({ kind: z.literal("REFUSED"), reason: z.enum(AI_SHELL_ROUTE_REFUSAL_REASONS) }),
   ])
   .superRefine((body, ctx) => {
     if (body.kind === "FAILED" && body.usage !== undefined && !(AI_SHELL_ROUTE_POST_CALL_FAILURE_REASONS as readonly string[]).includes(body.reason)) {
