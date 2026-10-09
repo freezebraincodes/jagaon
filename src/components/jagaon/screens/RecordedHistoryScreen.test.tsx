@@ -757,6 +757,13 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     return { history, rows, fetcher, explainer, explain, disclosureRequired };
   }
   const dialogOf = (locale: AiLocale = "en-SG") => screen.getByRole("dialog", { name: getMessages(locale).ai.remoteTitle });
+  /** Owner UI decision U03: while the passcode field is shown, the primary action needs it filled (a test-only value), then accepts. */
+  const acceptIn = (dialog: HTMLElement, locale: AiLocale = "en-SG") => {
+    const m = getMessages(locale);
+    const field = within(dialog).queryByLabelText(m.aiAccess.passcodeLabel);
+    if (field && (field as HTMLInputElement).value.trim() === "") fireEvent.change(field, { target: { value: "TEST-ONLY-passcode-value" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: m.ai.pattern.confirm }));
+  };
   const panelStatus = (locale: AiLocale = "en-SG") => within(screen.getByRole("region", { name: getMessages(locale).history.explanation.title })).getByRole("status");
   /**
    * Packet 11C Addendum C (C3): the action, then its per-request disclosure check (one local read), until the dialog or the panel shows.
@@ -824,7 +831,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     const run = await wired();
     render(screenElement("en-SG", run.history, run.explainer));
     const action = await askAction();
-    act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.pattern.confirm })));
+    act(() => acceptIn(dialogOf()));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     const panel = screen.getByRole("region", { name: en.history.explanation.title });
     expect(within(panel).getByRole("heading", { level: 3 })).toHaveFocus();
@@ -843,7 +850,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     expect(dialogOf()).toBeInTheDocument();
     expect(run.explain).toHaveBeenCalledTimes(1);
     expect(run.fetcher).toHaveBeenCalledTimes(1);
-    act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.pattern.confirm })));
+    act(() => acceptIn(dialogOf()));
     await waitFor(() => expect(run.fetcher).toHaveBeenCalledTimes(2));
     expect(run.explain).toHaveBeenCalledTimes(2);
     // Each request has its own signal (its own decision token).
@@ -857,7 +864,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     const action = await askAction();
     const field = within(dialogOf()).getByLabelText(en.aiAccess.passcodeLabel);
     fireEvent.change(field, { target: { value: "TEST-ONLY-passcode-value" } });
-    act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.pattern.confirm })));
+    act(() => acceptIn(dialogOf()));
     await waitFor(() => expect(run.fetcher).toHaveBeenCalledTimes(1));
     const init = run.fetcher.mock.calls[0]![1];
     expect((init.headers as Record<string, string>)["x-jagaon-demo-passcode"]).toBe("TEST-ONLY-passcode-value");
@@ -889,7 +896,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     const run = await wired(ENABLED, () => true, route);
     render(screenElement("en-SG", run.history, run.explainer));
     await askAction();
-    act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.pattern.confirm })));
+    act(() => acceptIn(dialogOf()));
     const panel = screen.getByRole("region", { name: en.history.explanation.title });
     await waitFor(() => expect(within(panel).getByText(en.history.explanation.aiLabel)).toBeInTheDocument());
     expect(run.fetcher).toHaveBeenCalledTimes(2);
@@ -985,7 +992,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     fireEvent.click(actions[0]!);
     const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
     holdA = new Promise((resolve) => (releaseA = resolve));
-    act(() => fireEvent.click(within(dialog).getByRole("button", { name: en.ai.pattern.confirm })));
+    act(() => acceptIn(dialog));
     await waitFor(() => expect(explain).toHaveBeenCalledTimes(1));
     const signalA = explain.mock.calls[0]![1]!;
     expect(explain.mock.calls[0]![0]).toEqual({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" });
@@ -1103,7 +1110,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     const run = await wired();
     const { rerender } = render(screenElement("en-SG", run.history, run.explainer));
     await askAction();
-    act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.pattern.confirm })));
+    act(() => acceptIn(dialogOf()));
     const panel = screen.getByRole("region", { name: en.history.explanation.title });
     await waitFor(() => expect(within(panel).getByText(en.history.explanation.aiLabel)).toBeInTheDocument());
     expect(run.fetcher).toHaveBeenCalledTimes(1);
@@ -1125,7 +1132,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     await askAction("zh-SG");
     expect(dialogOf("zh-SG")).toBeInTheDocument();
     expect(run.fetcher).toHaveBeenCalledTimes(1);
-    act(() => fireEvent.click(within(dialogOf("zh-SG")).getByRole("button", { name: zh.ai.pattern.confirm })));
+    act(() => acceptIn(dialogOf("zh-SG"), "zh-SG"));
     await waitFor(() => expect(run.fetcher).toHaveBeenCalledTimes(2));
     expect(run.explain.mock.calls[1]![0]).toEqual({ factId: FACT, locale: "zh-SG", disclosure: "ACCEPTED" });
   });

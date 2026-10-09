@@ -25,8 +25,9 @@ type Props = {
   onCancel: () => void;
   /**
    * Packet 11C Addendum C, Task C6: the demo passcode entry. While it is `needed()` (asked once, when the dialog opens), the dialog shows
-   * a password field, and the primary action hands a non-empty value to `provide` before `onConfirm` (an empty field provides nothing:
-   * the route then refuses the request, ACCESS_DENIED). Absent, null, not needed or unreadable: no field (the route still checks).
+   * a password field, and the primary action hands the entered value to `provide` before `onConfirm`. Owner UI decision U03
+   * (2026-10-09): the primary action stays disabled until the field holds non-whitespace input; Cancel stays available. Absent, null,
+   * not needed or unreadable: no field (the route still checks).
    */
   passcode?: AiDisclosurePasscodeEntry | null;
 };
@@ -60,8 +61,11 @@ export function AiDisclosureDialog({ messages, flow, onConfirm, onCancel, passco
   const fieldId = useId();
   const [askPasscode] = useState(() => passcodeNeeded(passcode));
   const [entered, setEntered] = useState("");
+  // Owner UI decision U03 (2026-10-09): while the field is required, the primary action waits for non-whitespace input. Cancel stays
+  // available and the route still checks every passcode (a value it cannot accept is refused ACCESS_DENIED; fail closed).
+  const awaitingPasscode = askPasscode && entered.trim().length === 0;
   const accept = () => {
-    // An empty field holds nothing: the request then goes without a passcode and the route refuses it (ACCESS_DENIED; fail closed).
+    if (awaitingPasscode) return;
     if (askPasscode && entered.length > 0) {
       try {
         passcode?.provide(entered);
@@ -85,7 +89,7 @@ export function AiDisclosureDialog({ messages, flow, onConfirm, onCancel, passco
       initialFocusSelector="[data-ai-disclosure-safe]"
       actions={
         <>
-          <button type="button" className="btn btn-primary btn-wide" onClick={accept}>
+          <button type="button" className="btn btn-primary btn-wide" disabled={awaitingPasscode} onClick={accept}>
             {confirm}
           </button>
           <button type="button" className="btn btn-outline btn-wide" data-ai-disclosure-safe="" onClick={onCancel}>

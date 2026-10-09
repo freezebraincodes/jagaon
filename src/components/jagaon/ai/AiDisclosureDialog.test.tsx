@@ -144,12 +144,40 @@ describe("AiDisclosureDialog (Packet 11C B3)", () => {
       expect(screen.getByRole("button", { name: getMessages(locale).ai.cancel })).toHaveFocus();
     });
 
-    it("an empty field provides nothing; the primary action still answers (the route then refuses without a passcode: fail closed)", () => {
+    /**
+     * Owner UI decision U03 (owner-ui-decisions-2026-10-09; replaces the C6 "empty field still answers" behaviour): while the passcode
+     * field is required, the primary action is disabled until the field holds non-whitespace input. Cancel stays available; the route's
+     * own checks are unchanged.
+     */
+    it.each<[SupportedLocale]>([["en-SG"], ["zh-SG"]])("U03 %s: the primary action is disabled while the required field is empty or whitespace; Cancel stays available", (locale) => {
+      const m = getMessages(locale);
       const provide = vi.fn(() => true);
-      const { onConfirm } = openWith({ needed: () => true, provide });
-      fireEvent.click(screen.getByRole("button", { name: "Generate explanation" }));
+      const { onConfirm, onCancel } = openWith({ needed: () => true, provide }, locale);
+      const confirm = screen.getByRole("button", { name: m.ai.pattern.confirm });
+      expect(confirm).toBeDisabled();
+      fireEvent.change(screen.getByLabelText(m.aiAccess.passcodeLabel), { target: { value: "   " } });
+      expect(confirm).toBeDisabled();
+      fireEvent.click(confirm);
+      expect(onConfirm).not.toHaveBeenCalled();
       expect(provide).not.toHaveBeenCalled();
+      const cancel = screen.getByRole("button", { name: m.ai.cancel });
+      expect(cancel).toBeEnabled();
+      fireEvent.click(cancel);
+      expect(onCancel).toHaveBeenCalledTimes(1);
+    });
+
+    it.each<[SupportedLocale]>([["en-SG"], ["zh-SG"]])("U03 %s: non-whitespace input enables the primary action, which provides it and accepts", (locale) => {
+      const m = getMessages(locale);
+      const provide = vi.fn(() => true);
+      const { onConfirm } = openWith({ needed: () => true, provide }, locale);
+      fireEvent.change(screen.getByLabelText(m.aiAccess.passcodeLabel), { target: { value: PASSCODE } });
+      const confirm = screen.getByRole("button", { name: m.ai.pattern.confirm });
+      expect(confirm).toBeEnabled();
+      fireEvent.click(confirm);
+      expect(provide.mock.calls).toEqual([[PASSCODE]]);
       expect(onConfirm).toHaveBeenCalledTimes(1);
+      fireEvent.change(screen.getByLabelText(m.aiAccess.passcodeLabel), { target: { value: "" } });
+      expect(confirm).toBeDisabled();
     });
 
     it("confirming provides the entered passcode once, then accepts; the field keeps no copy elsewhere in the dialog", () => {

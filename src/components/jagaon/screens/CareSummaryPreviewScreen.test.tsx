@@ -798,6 +798,13 @@ describe("Care-summary preview: AI wording action (Packet 11C B4b)", () => {
   });
 });
 
+/** Owner UI decision U03 (2026-10-09): while the passcode field is shown, the primary action needs it filled (a test-only value). */
+function acceptCareDisclosure(dialog: HTMLElement, messages: ReturnType<typeof getMessages>) {
+  const field = within(dialog).queryByLabelText(messages.aiAccess.passcodeLabel);
+  if (field) fireEvent.change(field, { target: { value: "TEST-ONLY-passcode-value" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: messages.ai.careSummary.confirm }));
+}
+
 describe("Care-summary preview: accepted AI wording (Packet 11C B4b; injected test manifest and fake route)", () => {
   const LATER = "2026-10-04T02:05:00.000Z" as Instant;
 
@@ -822,7 +829,7 @@ describe("Care-summary preview: accepted AI wording (Packet 11C B4b; injected te
     renderAi(ai.h, ai.recordId, ai.wording, { locale, commands: ai.commands, print, onReplaced });
     const before = (await screen.findByRole("article")).textContent;
     fireEvent.click(await aiAction(locale));
-    fireEvent.click(within(await screen.findByRole("dialog", { name: messages.ai.remoteTitle })).getByRole("button", { name: messages.ai.careSummary.confirm }));
+    acceptCareDisclosure(await screen.findByRole("dialog", { name: messages.ai.remoteTitle }), messages);
     const region = await screen.findByRole("region", { name: messages.ai.careSummary.resultTitle });
     expect(within(region).getByText(messages.ai.careSummary.resultBody)).toBeTruthy();
     // Focus moves to the labelled AI region of the new preview (it is announced by its label).
@@ -914,7 +921,7 @@ describe("Care-summary preview: accepted AI wording (Packet 11C B4b; injected te
     renderAi(ai.h, ai.recordId, wording, { commands, onReplaced });
     fireEvent.click(await aiAction());
     // Packet 11C Addendum C (C3): this request's own acceptance (no session).
-    fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.careSummary.confirm }));
+    acceptCareDisclosure(await screen.findByRole("dialog", { name: en.ai.remoteTitle }), en);
     await waitFor(() => expect(gate.started).toBe(true));
     expect(ai.fetcher).toHaveBeenCalledTimes(1);
     expect((await ai.audits.list()).map((row) => row.outcomeCode)).toEqual(["ACCEPTED"]);
