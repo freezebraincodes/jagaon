@@ -326,7 +326,8 @@ export async function renderAiAssistedCareSummary(input: {
   validatedAt: Instant;
 }): Promise<CareSummarySnapshotPayload> {
   const { current } = input;
-  const sections = [...input.sections, careSummaryAiMarkingSection(current.locale, input.sections.length)] as CareSummarySnapshotPayload["sections"];
+  // The rows frozen for this template version (care-summary-ai-marking.ts), never read from the live catalogue.
+  const sections = [...input.sections, careSummaryAiMarkingSection(current.locale, input.sections.length, CARE_SUMMARY_AI_ASSISTED_TEMPLATE_VERSION)] as CareSummarySnapshotPayload["sections"];
   const contentHash = await hashCanonicalJson(
     careSummaryExportProjection({ ...current, sections, rendererVersion: CARE_SUMMARY_AI_ASSISTED_RENDERER_VERSION, localePackVersion: current.rendering.localePackVersion }),
   );

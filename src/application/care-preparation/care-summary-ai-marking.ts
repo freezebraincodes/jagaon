@@ -2,11 +2,11 @@ import type { SupportedLocale } from "@/domain/patient-settings/locale";
 import {
   CARE_SUMMARY_AI_MARKING_BLOCK_ID,
   CARE_SUMMARY_AI_MARKING_SECTION,
+  CARE_SUMMARY_AI_MARKING_VERSIONS,
   CARE_SUMMARY_TEMPLATES_WITH_AI_MARKING,
   type CareSummarySection,
   type CareSummarySnapshotPayload,
 } from "@/domain/care-preparation/care-summary-snapshot";
-import { getMessages } from "@/i18n/get-messages";
 import { sectionAssetId } from "./care-summary-locale-pack";
 
 /**
@@ -14,12 +14,13 @@ import { sectionAssetId } from "./care-summary-locale-pack";
  *
  * One AI_MARKING block in its own last section (after the care-draft notices), built ONLY from the two approved catalogue rows
  * (11-bilingual-copy-state-matrix.md Section 2, APPROVED_PACKET_11) in the snapshot's locale: `ai.demoTag`, a line feed, then
- * `ai.resultCheck`. It is block content, so the content hash covers it and approval binds the exact artifact that prints it. No other
+ * `ai.resultCheck`, as frozen for the template version (`CARE_SUMMARY_AI_MARKING_ROWS`). It is block content, so the content hash covers it and approval binds the exact artifact that prints it. No other
  * wording is added. Deterministic snapshots never carry it. Placement (after the notices) and appearance (the tag printed as the
  * section heading, the check line beneath it): human acceptance pending.
  *
- * `careSummaryAiMarkingIssues` is the exact validator the domain cannot be (the catalogue is the application's): every snapshot under an
- * AI-marking template must end with exactly this section for its locale; the domain schema already refuses a marking anywhere else.
+ * `careSummaryAiMarkingIssues` is the exact validator the domain does not hold (the frozen rows are application copy): every snapshot
+ * under an AI-marking template must end with exactly this section for its template version and locale; the domain schema already
+ * refuses a marking anywhere else.
  */
 
 export { CARE_SUMMARY_AI_MARKING_BLOCK_ID };
@@ -27,32 +28,56 @@ export { CARE_SUMMARY_AI_MARKING_BLOCK_ID };
 /** The section's title asset id. The marking prints its own stored rows (the tag as the heading), never a locale-pack asset. */
 export const CARE_SUMMARY_AI_MARKING_TITLE_ASSET_ID = sectionAssetId(CARE_SUMMARY_AI_MARKING_SECTION);
 
-/** The marking text: the approved tag, a line feed, the approved check line, in the locale. */
-export function careSummaryAiMarkingText(locale: SupportedLocale): string {
-  const ai = getMessages(locale).ai;
-  return `${ai.demoTag}\n${ai.resultCheck}`;
+type MarkingRows = Readonly<{ demoTag: string; resultCheck: string }>;
+
+/**
+ * C4 fix round 1 (review Minor 1): the marking rows each AI-marking template version stores, FROZEN with that version (the bytes of the
+ * approved rows ai.demoTag and ai.resultCheck, 11-bilingual-copy-state-matrix.md Section 2, as of care-summary-template.11c.2). The
+ * renderer and the validator read these, never the live catalogue, so a later catalogue edit can neither change what a new 11c.2
+ * snapshot stores nor invalidate a stored one; different marking wording needs a new template version. A test pins this equal to the
+ * catalogue today.
+ */
+export const CARE_SUMMARY_AI_MARKING_ROWS: Readonly<Record<string, Readonly<Record<SupportedLocale, MarkingRows>>>> = Object.freeze({
+  "care-summary-template.11c.2": Object.freeze({
+    "en-SG": Object.freeze({ demoTag: "AI-assisted demo", resultCheck: "Check the wording against your recorded information. AI can make mistakes." }),
+    "zh-SG": Object.freeze({ demoTag: "AI 辅助演示", resultCheck: "请对照您已记录的资料检查内容。AI 可能会出错。" }),
+  }),
+});
+
+/** The rows frozen for `templateVersion`, or null when that version has no marking. */
+function markingRowsFor(templateVersion: string, locale: SupportedLocale): MarkingRows | null {
+  return Object.prototype.hasOwnProperty.call(CARE_SUMMARY_AI_MARKING_ROWS, templateVersion) ? (CARE_SUMMARY_AI_MARKING_ROWS[templateVersion]![locale] ?? null) : null;
 }
 
-/** The AI marking section at `displayOrder` (always the snapshot's last section). */
-export function careSummaryAiMarkingSection(locale: SupportedLocale, displayOrder: number): CareSummarySection {
+/** The marking text of an AI-marking template version: the approved tag, a line feed, the approved check line, in the locale. */
+export function careSummaryAiMarkingText(locale: SupportedLocale, templateVersion: string = CARE_SUMMARY_AI_MARKING_VERSIONS.templateVersion): string {
+  const rows = markingRowsFor(templateVersion, locale);
+  if (!rows) throw new Error("SUMMARY_AI_MARKING_INVALID");
+  return `${rows.demoTag}\n${rows.resultCheck}`;
+}
+
+/** The AI marking section at `displayOrder` (always the snapshot's last section) for an AI-marking template version. */
+export function careSummaryAiMarkingSection(locale: SupportedLocale, displayOrder: number, templateVersion: string = CARE_SUMMARY_AI_MARKING_VERSIONS.templateVersion): CareSummarySection {
   return {
     sectionId: CARE_SUMMARY_AI_MARKING_SECTION,
     titleLocaleAssetId: CARE_SUMMARY_AI_MARKING_TITLE_ASSET_ID,
     displayOrder,
-    blocks: [{ kind: "AI_MARKING", blockId: CARE_SUMMARY_AI_MARKING_BLOCK_ID, temporalRole: "NOT_APPLICABLE", renderedText: careSummaryAiMarkingText(locale) }],
+    blocks: [{ kind: "AI_MARKING", blockId: CARE_SUMMARY_AI_MARKING_BLOCK_ID, temporalRole: "NOT_APPLICABLE", renderedText: careSummaryAiMarkingText(locale, templateVersion) }],
   };
 }
 
 /**
- * The exact-marking rule. Under an AI-marking template the last section must be exactly the marking section for the snapshot's locale
- * and no other section may be one; under any other template no section may be one. Stable closed code.
+ * The exact-marking rule. Under an AI-marking template the last section must be exactly the marking section frozen for that template
+ * version and the snapshot's locale, and no other section may be one; under any other template no section may be one. Stable closed code.
  */
 export function careSummaryAiMarkingIssues(payload: Pick<CareSummarySnapshotPayload, "locale" | "sections" | "composition">): ["SUMMARY_AI_MARKING_INVALID"] | [] {
   const sections = payload.sections;
   const marking = sections.filter((section) => section.sectionId === CARE_SUMMARY_AI_MARKING_SECTION);
-  if (!CARE_SUMMARY_TEMPLATES_WITH_AI_MARKING.includes(payload.composition.templateVersion)) return marking.length === 0 ? [] : ["SUMMARY_AI_MARKING_INVALID"];
+  const templateVersion = payload.composition.templateVersion;
+  if (!CARE_SUMMARY_TEMPLATES_WITH_AI_MARKING.includes(templateVersion)) return marking.length === 0 ? [] : ["SUMMARY_AI_MARKING_INVALID"];
+  if (!markingRowsFor(templateVersion, payload.locale)) return ["SUMMARY_AI_MARKING_INVALID"];
   const last = sections[sections.length - 1];
-  const expected = careSummaryAiMarkingSection(payload.locale, sections.length - 1);
+  const expected = careSummaryAiMarkingSection(payload.locale, sections.length - 1, templateVersion);
   return marking.length === 1 && last !== undefined && sameSection(last, expected) ? [] : ["SUMMARY_AI_MARKING_INVALID"];
 }
 

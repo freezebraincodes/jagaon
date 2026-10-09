@@ -63,7 +63,7 @@ export const CARE_SUMMARY_SOURCE_EVALUATOR = Object.freeze({ key: "care-preparat
  * which the application owns): an 11c.2 AI-assisted snapshot without exactly its marking, or any other snapshot with one, is never
  * written, read, backed up or restored. Older (9c.1, 11c.1) snapshots carry none and pass unchanged.
  */
-const storedCareSummarySnapshotRevisionSchema = careSummarySnapshotRevisionSchema.superRefine((revision, ctx) => {
+export const storedCareSummarySnapshotRevisionSchema = careSummarySnapshotRevisionSchema.superRefine((revision, ctx) => {
   for (const message of careSummaryAiMarkingIssues(revision.payload)) ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: ["payload", "sections"] });
 }) as unknown as z.ZodType<CareSummarySnapshotRevision, z.ZodTypeDef, unknown>;
 

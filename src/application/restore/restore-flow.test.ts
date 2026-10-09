@@ -18,6 +18,10 @@ import { printableCareSummary } from "@/application/care-preparation/care-summar
 import { createCarePreparationQuery } from "@/application/care-preparation/care-preparation-query";
 import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
 import { acceptedAiCareComposition, rewriteAsLegacy11c1AiAssistedSnapshot, rewriteAsLegacy9c1Snapshot } from "@/application/care-preparation/care-preparation-test-support";
+import { canonicaliseBackupTable, createBackupManifest } from "@/backup/backup-canonicalisation";
+import { hashCanonicalJson } from "@/application/contracts/canonical-json";
+import { careSummaryExportProjection, type CareSummarySnapshotPayload } from "@/domain/care-preparation/care-summary-snapshot";
+import { getMessages } from "@/i18n/get-messages";
 import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
 
 installFakeIndexedDb();
@@ -178,6 +182,39 @@ describe("Packet 11C B1b: backup and restore of 9c.1 and AI-assisted care summar
       if (legacyAiView.status !== "READY") throw new Error("legacy ai view");
       expect(JSON.stringify(legacyAiView.payload)).toBe(JSON.stringify(legacyAi));
       expect(legacyAiView.payload.sections.some((section) => section.sectionId === "AI_MARKING")).toBe(false);
+
+      // C4 fix round 1 (review Minor 3), end to end: the same backup with the 11c.2 snapshot's marking text altered is refused at
+      // inspection, before anything is written. Only the marking differs: the snapshot's content hash is recomputed, the table is
+      // re-canonicalised, the manifest digests are recomputed and the payload is resealed. The control reseals it unaltered and passes.
+      const resealed = async (alterMarking: boolean) => {
+        const container = parseContainer(file);
+        const payload = (await decryptForTest(container, PASS)) as { tables: Record<string, unknown[]>; tableManifests: unknown };
+        type StoredSnapshotRow = { recordType: string; recordId: string; revision: { payload: CareSummarySnapshotPayload } };
+        let altered = 0;
+        for (const row of payload.tables.recordRevisions as StoredSnapshotRow[]) {
+          if (!alterMarking || row.recordType !== "CARE_SUMMARY_SNAPSHOT" || row.recordId !== replaced.recordId) continue;
+          const snapshot = row.revision.payload;
+          const sections = snapshot.sections.map((section) =>
+            section.sectionId === "AI_MARKING" ? { ...section, blocks: section.blocks.map((block) => ({ ...block, renderedText: `${getMessages("en-SG").ai.demoTag}\nThis wording was checked by AI.` })) } : section,
+          ) as CareSummarySnapshotPayload["sections"];
+          const contentHash = await hashCanonicalJson(careSummaryExportProjection({ ...snapshot, sections, rendererVersion: snapshot.rendering.rendererVersion, localePackVersion: snapshot.rendering.localePackVersion }));
+          row.revision.payload = { ...snapshot, sections, rendering: { ...snapshot.rendering, contentHash } };
+          altered += 1;
+        }
+        expect(altered).toBe(alterMarking ? 1 : 0);
+        payload.tables.recordRevisions = canonicaliseBackupTable("recordRevisions", payload.tables.recordRevisions);
+        payload.tableManifests = await createBackupManifest(payload.tables as never, (data) => createWebCryptoPort().sha256(data));
+        return sealForTest(canonicalizeJson(payload), PASS, container.containerId);
+      };
+      const controlTarget = await emptyDataset();
+      expect((await restoreService(controlTarget).service.inspect(await resealed(false), PASS)).kind).toBe("PLAN_READY");
+      const tamperedTarget = await emptyDataset();
+      const refused = await restoreService(tamperedTarget).service.inspect(await resealed(true), PASS);
+      expect(refused).toMatchObject({ kind: "FAILED", failure: { errorCode: "BACKUP_PAYLOAD_INVALID", tableName: "recordRevisions" } });
+      const untouched = await openRaw(tamperedTarget);
+      expect(await untouched.table("recordHeads").count()).toBe(0);
+      expect(await untouched.table("recordRevisions").count()).toBe(0);
+      untouched.close();
       // A backup whose AI-assisted snapshot names no stored audit is refused by the same Packet 10 rule.
       expect(validateAiAuditReferences({ recordRevisions: restored.recordRevisions, aiInvocationAudits: [] })).toEqual({ kind: "INVALID", reason: "DANGLING" });
     },

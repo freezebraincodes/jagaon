@@ -1,13 +1,20 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { AiLocale } from "@/domain/ai";
-import { careSummaryExportProjection, careSummarySnapshotPayloadSchema, type CareSummarySnapshotPayload } from "@/domain/care-preparation/care-summary-snapshot";
+import {
+  CARE_SUMMARY_TEMPLATES_WITH_AI_MARKING,
+  careSummaryExportProjection,
+  careSummarySnapshotPayloadSchema,
+  careSummarySnapshotRevisionSchema,
+  type CareSummarySnapshotPayload,
+} from "@/domain/care-preparation/care-summary-snapshot";
+import { StorageRowValidationError } from "@/storage/storage-row-codec";
 import { hashCanonicalJson } from "@/application/contracts/canonical-json";
 import { getMessages } from "@/i18n/get-messages";
 import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
-import { CARE_SUMMARY_AI_MARKING_BLOCK_ID, careSummaryAiMarkingIssues, careSummaryAiMarkingSection, careSummaryAiMarkingText } from "./care-summary-ai-marking";
+import { CARE_SUMMARY_AI_MARKING_BLOCK_ID, CARE_SUMMARY_AI_MARKING_ROWS, careSummaryAiMarkingIssues, careSummaryAiMarkingSection, careSummaryAiMarkingText } from "./care-summary-ai-marking";
 import { printableCareSummary } from "./care-summary-artifact";
-import { careSummarySnapshotRevisionCodec } from "./care-preparation-persistence";
+import { careSummarySnapshotRevisionCodec, storedCareSummarySnapshotRevisionSchema } from "./care-preparation-persistence";
 import { projectValidatedAiCareSummary } from "./ai-care-summary-replacement";
 import { CARE_SUMMARY_AI_ASSISTED_RENDERER_VERSION, CARE_SUMMARY_AI_ASSISTED_TEMPLATE_VERSION, CARE_SUMMARY_RENDERER_VERSION, CARE_SUMMARY_TEMPLATE_VERSION, isCurrentCareSummaryTemplate } from "./care-summary-locale-pack";
 import { renderDeterministicCareSummary } from "./deterministic-care-summary-renderer";
@@ -43,6 +50,21 @@ const revision = (payload: CareSummarySnapshotPayload) => ({
   transactionId: "00000000-0000-4000-8000-000000000054",
   payload,
 });
+/** The stored-revision schema's issue messages (the codec's reasons, which its error does not carry). */
+const storedIssues = (value: unknown) => {
+  const result = storedCareSummarySnapshotRevisionSchema.safeParse(value);
+  return result.success ? [] : [...new Set(result.error.issues.map((issue) => issue.message))].sort();
+};
+/** The storage error a codec call throws, as plain fields (or "NO_ERROR"). */
+function refusal(call: () => unknown) {
+  try {
+    call();
+  } catch (error) {
+    if (error instanceof StorageRowValidationError) return { name: error.name, code: error.code, table: error.table, boundary: error.boundary };
+    throw error;
+  }
+  return "NO_ERROR";
+}
 /** The payload with its marking block's text replaced (and its hash recomputed, so only the marking differs). */
 async function withMarkingText(payload: CareSummarySnapshotPayload, renderedText: string): Promise<CareSummarySnapshotPayload> {
   const sections = payload.sections.map((section) => (section.sectionId === "AI_MARKING" ? { ...section, blocks: section.blocks.map((block) => ({ ...block, renderedText })) } : section)) as CareSummarySnapshotPayload["sections"];
@@ -141,14 +163,31 @@ describe("Packet 11C C4: the AI marking block", () => {
     const next = await aiAssistedOf("zh-SG");
     const row = careSummarySnapshotRevisionCodec.create(revision(next) as never);
     expect(JSON.stringify(careSummarySnapshotRevisionCodec.validateAfterRead(JSON.parse(JSON.stringify(row))).revision.payload)).toBe(JSON.stringify(next));
+    // C4 fix round 1 (review Minor 2): each refusal is the storage boundary's own error, caused by exactly the marking issue.
     const tampered = await withMarkingText(next, careSummaryAiMarkingText("en-SG"));
-    expect(() => careSummarySnapshotRevisionCodec.create(revision(tampered) as never)).toThrow();
+    // The domain accepts it (two rows, right place); only the exact-marking rule refuses it.
+    expect(careSummarySnapshotRevisionSchema.safeParse(revision(tampered)).success).toBe(true);
+    expect(storedIssues(revision(tampered))).toEqual(["SUMMARY_AI_MARKING_INVALID"]);
+    expect(refusal(() => careSummarySnapshotRevisionCodec.create(revision(tampered) as never))).toEqual({ name: "StorageRowValidationError", code: "STORAGE_VALIDATION_FAILED", table: "recordRevisions", boundary: "WRITE" });
     const raw = JSON.parse(JSON.stringify(row)) as { revision: { payload: CareSummarySnapshotPayload } };
     raw.revision.payload = tampered;
-    expect(() => careSummarySnapshotRevisionCodec.validateAfterRead(raw)).toThrow();
-    // A deterministic snapshot with the marking is refused as well.
+    expect(refusal(() => careSummarySnapshotRevisionCodec.validateAfterRead(raw))).toEqual({ name: "StorageRowValidationError", code: "STORAGE_INTEGRITY_FAILED", table: "recordRevisions", boundary: "READ" });
+    // A deterministic snapshot with the marking is refused as well (by the domain structure rule and the exact rule).
     const deterministic = await deterministicOf("zh-SG");
     const marked = { ...deterministic, sections: [...deterministic.sections, careSummaryAiMarkingSection("zh-SG", deterministic.sections.length)] } as CareSummarySnapshotPayload;
-    expect(() => careSummarySnapshotRevisionCodec.create(revision(marked) as never)).toThrow();
+    expect(storedIssues(revision(marked))).toEqual(["SUMMARY_AI_MARKING_INVALID"]);
+    expect(refusal(() => careSummarySnapshotRevisionCodec.create(revision(marked) as never))).toEqual({ name: "StorageRowValidationError", code: "STORAGE_VALIDATION_FAILED", table: "recordRevisions", boundary: "WRITE" });
+  });
+
+  it("C4 fix round 1 (review Minor 1): validates against the rows frozen with template 11c.2, which equal the approved catalogue rows today", () => {
+    for (const locale of ["en-SG", "zh-SG"] as const) {
+      const ai = getMessages(locale).ai;
+      expect(CARE_SUMMARY_AI_MARKING_ROWS["care-summary-template.11c.2"]![locale]).toEqual({ demoTag: ai.demoTag, resultCheck: ai.resultCheck });
+      expect(careSummaryAiMarkingText(locale, "care-summary-template.11c.2")).toBe(`${MARKING[locale].rows[0]}\n${MARKING[locale].rows[1]}`);
+    }
+    // Every AI-marking template version has frozen rows for both locales; any other version has none.
+    expect(Object.keys(CARE_SUMMARY_AI_MARKING_ROWS)).toEqual([...CARE_SUMMARY_TEMPLATES_WITH_AI_MARKING]);
+    expect(Object.isFrozen(CARE_SUMMARY_AI_MARKING_ROWS) && Object.isFrozen(CARE_SUMMARY_AI_MARKING_ROWS["care-summary-template.11c.2"])).toBe(true);
+    expect(() => careSummaryAiMarkingText("en-SG", "care-summary-template.11c.1")).toThrow("SUMMARY_AI_MARKING_INVALID");
   });
 });
