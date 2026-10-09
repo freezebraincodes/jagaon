@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   GlucoseRecordViewModel,
@@ -8,7 +8,7 @@ import type {
 } from "@/application/journal/journal-contracts";
 import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-fixture";
 import { getMessages } from "@/i18n/get-messages";
-import { dragWheel, stubWheelGeometry } from "../primitives/time-wheel-test-support";
+import { dragWheel as keenDrag, KEEN_VELOCITY_WINDOW_MS, stubWheelGeometry } from "../primitives/time-wheel-test-support";
 import { GlucoseEntryScreen } from "./GlucoseEntryScreen";
 import { InsulinEntryScreen } from "./InsulinEntryScreen";
 import { MealEntryScreen } from "./MealEntryScreen";
@@ -29,8 +29,11 @@ const committed: JournalCommitResult = { kind: "COMMITTED", recordId, revisionId
 /**
  * Corrective Pass C: the wheel rightly refuses future occurrence times, so the
  * expected dates come from one fixed instant (10:00 Singapore, 4 Oct 2026)
- * rather than the host clock. Only `Date` is faked; animation frames, timers,
- * `waitFor` and Keen Slider stay real.
+ * rather than the host clock. `Date`, animation frames and `performance` are
+ * faked, so Keen Slider's 500 ms snap animations and the finger's rest before
+ * release run on the test's clock (`settleWheels`, `dragWheel`) instead of
+ * racing wall-clock `waitFor` windows; timers, `waitFor` and Keen Slider itself
+ * stay real.
  */
 const FIXED_NOW = new Date("2026-10-04T02:00:00.000Z");
 let today: ReturnType<typeof singaporeNowParts>["date"];
@@ -51,6 +54,25 @@ const selected = (name: string) => within(wheel(name)).getByRole("option", { sel
 
 const columns = [en.readingTime.hourLabel, en.readingTime.minuteLabel, en.readingTime.periodLabel];
 
+/**
+ * Runs Keen Slider's pending animation frames on the faked clock until every wheel has stopped (Keen stops requesting frames when its
+ * snap, or rubber-band, animation ends), so no step waits on wall-clock animation time.
+ */
+function settleWheels() {
+  act(() => {
+    vi.runAllTimers();
+  });
+}
+
+/** A resting drag whose rest past Keen's velocity window is a step of the faked clock (Keen reads `Date.now()`). */
+const dragWheel = (target: HTMLElement, rows: number) =>
+  keenDrag(target, rows, {
+    rest: () =>
+      act(() => {
+        vi.advanceTimersByTime(KEEN_VELOCITY_WINDOW_MS + 50);
+      }),
+  });
+
 /** Waits until Keen has moved every wheel's selected option into the centre band. */
 async function wheelsAtRest() {
   await waitFor(() => {
@@ -69,16 +91,20 @@ async function startAt0748() {
   set(en.readingTime.hourLabel, 6);
   set(en.readingTime.minuteLabel, 48);
   set(en.readingTime.periodLabel, 0);
+  settleWheels();
   await wheelsAtRest();
 }
 
 /** Drags 07:48 am to 9:45 pm through Keen Slider, one column at a time. */
 async function dragTo2145() {
   await dragWheel(wheel(en.readingTime.hourLabel), 2);
+  settleWheels();
   await waitFor(() => expect(selected(en.readingTime.hourLabel)).toHaveTextContent("9"));
   await dragWheel(wheel(en.readingTime.minuteLabel), -3);
+  settleWheels();
   await waitFor(() => expect(selected(en.readingTime.minuteLabel)).toHaveTextContent("45"));
   await dragWheel(wheel(en.readingTime.periodLabel), 1);
+  settleWheels();
   await waitFor(() => expect(selected(en.readingTime.periodLabel)).toHaveTextContent(en.readingTime.pm));
 }
 
@@ -98,7 +124,7 @@ const occurrence = (input: unknown) =>
   (input as { temporal: { occurrence: { instantUtc: string } } }).temporal.occurrence.instantUtc;
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.useFakeTimers({ toFake: ["Date", "requestAnimationFrame", "cancelAnimationFrame", "performance"] });
   vi.setSystemTime(FIXED_NOW);
   today = singaporeNowParts().date;
   yesterday = shiftSingaporeDate(today, -1);
@@ -190,6 +216,7 @@ describe("time wheel on journal screens", () => {
     await screen.findByDisplayValue("07:48");
     fireEvent.click(screen.getByRole("radio", { name: en.readingTime.dayYesterday }));
     expectWheelIsPrimary(container);
+    settleWheels();
     await wheelsAtRest();
     expect(screen.getByText(en.readingTime.typeInstead)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: en.readingTime.useNow })).toBeInTheDocument();

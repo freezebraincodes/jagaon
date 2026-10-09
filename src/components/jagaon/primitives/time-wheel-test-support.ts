@@ -38,15 +38,21 @@ export function pause(ms: number) {
 }
 
 /** Keen measures release velocity from moves in its last 200 ms. */
-const KEEN_VELOCITY_WINDOW_MS = 200;
+export const KEEN_VELOCITY_WINDOW_MS = 200;
 
 /**
  * A vertical drag through Keen Slider. Positive `rows` pull later values into
  * the centre. By default the finger rests before release, so Keen sees no
  * velocity and snaps to the nearest row; `fling` releases while moving, so
- * Keen's inertia carries the wheel further before it snaps.
+ * Keen's inertia carries the wheel further before it snaps. `rest` is how the
+ * finger rests past Keen's velocity window: real time by default; a test on a
+ * faked clock passes a step of that clock instead.
  */
-export async function dragWheel(target: HTMLElement, rows: number, { fling = false } = {}) {
+export async function dragWheel(
+  target: HTMLElement,
+  rows: number,
+  { fling = false, rest = () => pause(KEEN_VELOCITY_WINDOW_MS + 50) }: { fling?: boolean; rest?: () => Promise<void> | void } = {},
+) {
   const start = 300;
   keenDragEvent(target, "ksDragStart", start);
   // Keen's first move only checks the drag direction.
@@ -55,6 +61,6 @@ export async function dragWheel(target: HTMLElement, rows: number, { fling = fal
     if (fling) await pause(8);
     keenDragEvent(target, "ksDrag", start - (rows * WHEEL_ROW * step) / 6);
   }
-  if (!fling) await pause(KEEN_VELOCITY_WINDOW_MS + 50);
+  if (!fling) await rest();
   keenDragEvent(target, "ksDragEnd", start - rows * WHEEL_ROW);
 }
