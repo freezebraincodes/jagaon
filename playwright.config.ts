@@ -7,7 +7,8 @@ import { defineConfig, devices } from "@playwright/test";
  * not evidence for physical iPhone Safari.
  */
 export default defineConfig({
-  testDir: "e2e",
+  // Packet 10 specs only (Packet 11C C7 has its own config: playwright.packet-11c.config.ts).
+  testDir: "e2e/packet-10",
   outputDir: "test-results/playwright",
   timeout: 180_000,
   expect: { timeout: 20_000 },
