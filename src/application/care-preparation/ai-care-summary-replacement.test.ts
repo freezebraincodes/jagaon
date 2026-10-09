@@ -5,6 +5,7 @@ import { hashCanonicalJson } from "@/application/contracts/canonical-json";
 import type { AiComposition } from "@/application/ai/language/assembler";
 import { CareSummaryAiProjectionError, projectValidatedAiCareSummary } from "./ai-care-summary-replacement";
 import { printableCareSummary } from "./care-summary-artifact";
+import { careSummaryAiMarkingSection } from "./care-summary-ai-marking";
 import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
 import { acceptedAiCareComposition, AI_AUDIT_REF as AUDIT_REF, AI_VALIDATED_AT as VALIDATED_AT, asLegacy9c1Payload, NOW, syntheticCareDraft, type SyntheticCareDraftShape } from "./care-preparation-test-support";
 import { renderDeterministicCareSummary } from "./deterministic-care-summary-renderer";
@@ -46,15 +47,18 @@ describe("projectValidatedAiCareSummary (Packet 11C B1b)", () => {
     const { composition } = await acceptedAiComposition(current);
     const next = await project(current, composition);
 
-    expect(next.composition).toEqual({ method: "AI_ASSISTED", templateVersion: current.composition.templateVersion, aiInvocationAuditRef: AUDIT_REF, validatedAt: VALIDATED_AT });
+    // Packet 11C Addendum C, C4 (deliberate): the replacement is made under template and renderer 11c.2 and carries the AI marking.
+    expect(next.composition).toEqual({ method: "AI_ASSISTED", templateVersion: "care-summary-template.11c.2", aiInvocationAuditRef: AUDIT_REF, validatedAt: VALIDATED_AT });
     expect(next.status).toBe("PREPARED");
     expect(next.patientApproval).toEqual({ state: "NOT_APPROVED" });
     expect(next.replacesSnapshot).toBeUndefined();
     expect(careSummaryAiReplacementIssues(current, next)).toEqual([]);
     // New content hash, exactly the hash of the new export projection.
     const hash = await hashCanonicalJson(careSummaryExportProjection({ ...next, rendererVersion: next.rendering.rendererVersion, localePackVersion: next.rendering.localePackVersion }));
-    expect(next.rendering).toEqual({ ...current.rendering, contentHash: hash });
+    expect(next.rendering).toEqual({ ...current.rendering, rendererVersion: "care-summary-renderer.11c.2", contentHash: hash });
     expect(hash).not.toBe(current.rendering.contentHash);
+    expect(next.sections.slice(0, -1).map((section) => section.sectionId)).toEqual(current.sections.map((section) => section.sectionId));
+    expect(next.sections.at(-1)).toEqual(careSummaryAiMarkingSection(locale, current.sections.length));
 
     // Insulin, scope, questions, limitations and notices: byte-identical blocks.
     for (const sectionId of ["SUMMARY_SCOPE", "MEDICATION_RECORDS", "QUESTIONS_FOR_CARE_TEAM", "DATA_LIMITATIONS", "CARE_DRAFT_NOTICES"]) {

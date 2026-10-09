@@ -27,6 +27,7 @@ import {
 } from "@/domain/shared";
 import { careSummarySnapshotRevisionSchema, type CareSummarySnapshotRevision } from "@/domain/care-preparation/care-summary-snapshot";
 import { careSummaryExportRevisionSchema, type CareSummaryExportRevision } from "@/domain/care-preparation/care-summary-export";
+import { careSummaryAiMarkingIssues } from "./care-summary-ai-marking";
 import {
   createAuthoritativeCommandStore,
   type AuthoritativeCommandPlan,
@@ -57,9 +58,18 @@ export type StoredCarePreparationRevision = StoredRecordRevision<CarePreparation
 
 export const CARE_SUMMARY_SOURCE_EVALUATOR = Object.freeze({ key: "care-preparation.summary-source", version: "9c.1", role: "CARE_SUMMARY_SOURCE" } as const);
 
+/**
+ * Packet 11C Addendum C, Task C4: the stored snapshot revision is the domain revision plus the exact AI-marking rule (the approved rows,
+ * which the application owns): an 11c.2 AI-assisted snapshot without exactly its marking, or any other snapshot with one, is never
+ * written, read, backed up or restored. Older (9c.1, 11c.1) snapshots carry none and pass unchanged.
+ */
+const storedCareSummarySnapshotRevisionSchema = careSummarySnapshotRevisionSchema.superRefine((revision, ctx) => {
+  for (const message of careSummaryAiMarkingIssues(revision.payload)) ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: ["payload", "sections"] });
+}) as unknown as z.ZodType<CareSummarySnapshotRevision, z.ZodTypeDef, unknown>;
+
 export const careSummarySnapshotRevisionCodec = createStoredRecordRevisionCodec<"CARE_SUMMARY_SNAPSHOT", CareSummarySnapshotRevision>({
   recordTypeSchema: z.literal("CARE_SUMMARY_SNAPSHOT"),
-  revisionSchema: careSummarySnapshotRevisionSchema,
+  revisionSchema: storedCareSummarySnapshotRevisionSchema,
   deriveTemporalIndexFields: () => ({ temporalKind: "ATEMPORAL" }),
 });
 

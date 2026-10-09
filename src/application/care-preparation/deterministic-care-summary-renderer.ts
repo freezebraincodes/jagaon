@@ -15,7 +15,10 @@ import {
 } from "@/domain/care-preparation/care-summary-snapshot";
 import { hashCanonicalJson, type Sha256Digest } from "@/application/contracts/canonical-json";
 import { careDraftNoticesFor } from "@/application/ai/language/care-draft-notices";
+import { careSummaryAiMarkingSection } from "./care-summary-ai-marking";
 import {
+  CARE_SUMMARY_AI_ASSISTED_RENDERER_VERSION,
+  CARE_SUMMARY_AI_ASSISTED_TEMPLATE_VERSION,
   CARE_SUMMARY_RENDERER_VERSION,
   CARE_SUMMARY_TEMPLATE_VERSION,
   careSummaryLocalePack,
@@ -305,4 +308,35 @@ export async function renderDeterministicCareSummary(draft: CareSummaryDraft): P
   // The renderer fails closed: an invalid structure is never stored or shown.
   const payload = careSummarySnapshotPayloadSchema.parse(candidate) as CareSummarySnapshotPayload;
   return { payload, contentHash, sourceRevisions: included };
+}
+
+/**
+ * care-summary-renderer.11c.2 / care-summary-template.11c.2 (Packet 11C Addendum C, Task C4): the AI-assisted replacement of the current
+ * deterministic (11c.1) snapshot. `sections` are its content and notice sections exactly as the validated AI wording left them (only
+ * recorded-fact wording differs; `projectValidatedAiCareSummary` checks that). This renderer appends the AI marking section (the
+ * approved rows ai.demoTag then ai.resultCheck, in the snapshot locale; `careSummaryAiMarkingSection`) as the last section and hashes the
+ * export projection with it and the 11c.2 renderer version, so approval binds the exact artifact that prints the marking. Everything
+ * else (purpose, period, locale, selection, limitations, locale pack) is the current snapshot's. The result is unvalidated: the caller
+ * parses it and checks the replacement invariant. Deterministic previews never pass through here and carry no marking.
+ */
+export async function renderAiAssistedCareSummary(input: {
+  current: CareSummarySnapshotPayload;
+  sections: CareSummarySnapshotPayload["sections"];
+  aiInvocationAuditRef: string;
+  validatedAt: Instant;
+}): Promise<CareSummarySnapshotPayload> {
+  const { current } = input;
+  const sections = [...input.sections, careSummaryAiMarkingSection(current.locale, input.sections.length)] as CareSummarySnapshotPayload["sections"];
+  const contentHash = await hashCanonicalJson(
+    careSummaryExportProjection({ ...current, sections, rendererVersion: CARE_SUMMARY_AI_ASSISTED_RENDERER_VERSION, localePackVersion: current.rendering.localePackVersion }),
+  );
+  const { replacesSnapshot: _replaces, invalidation: _invalidation, ...rest } = current;
+  return {
+    ...rest,
+    status: "PREPARED",
+    sections,
+    composition: { method: "AI_ASSISTED", templateVersion: CARE_SUMMARY_AI_ASSISTED_TEMPLATE_VERSION, aiInvocationAuditRef: input.aiInvocationAuditRef, validatedAt: input.validatedAt },
+    rendering: { rendererVersion: CARE_SUMMARY_AI_ASSISTED_RENDERER_VERSION, localePackVersion: current.rendering.localePackVersion, contentHash },
+    patientApproval: { state: "NOT_APPROVED" },
+  };
 }

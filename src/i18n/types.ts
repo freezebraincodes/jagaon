@@ -928,6 +928,14 @@ export type AiMessages = {
   unavailable: string;
   cancelled: string;
   retry: string;
+  /**
+   * Packet 11C Addendum C, Task C4: the approved rows `ai.demoTag` and `ai.resultCheck` (matrix Section 2, APPROVED_PACKET_11), verbatim.
+   * They mark AI-sourced output only: the hashed AI_MARKING block of an AI-assisted care summary (renderer/template 11c.2) and the
+   * on-screen tags of an AI-sourced history explanation. Never shown on deterministic output. Placement and appearance: human
+   * acceptance pending.
+   */
+  demoTag: string;
+  resultCheck: string;
 };
 
 /**

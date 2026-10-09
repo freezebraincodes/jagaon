@@ -11,7 +11,9 @@ import { getMessages } from "@/i18n/get-messages";
 import { renderDeterministicCareSummary, type CareSummaryDraft } from "./deterministic-care-summary-renderer";
 import { printableCareSummary } from "./care-summary-artifact";
 import { careSummarySnapshotRevisionCodec } from "./care-preparation-persistence";
-import { LEGACY_9C1, asLegacy9c1Payload } from "./care-preparation-test-support";
+import { LEGACY_9C1, acceptedAiCareComposition, AI_AUDIT_REF, AI_VALIDATED_AT, asLegacy11c1AiAssistedPayload, asLegacy9c1Payload, syntheticCareDraft } from "./care-preparation-test-support";
+import { projectValidatedAiCareSummary } from "./ai-care-summary-replacement";
+import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
 
 /**
  * Packet 11C Addendum B, Task B1a (D3, D4): snapshots made by the Packet 9C code path stay byte-identical — their stored payload,
@@ -126,6 +128,141 @@ describe("Packet 11C B1a: 9c.1 snapshots and their printable artifacts stay byte
     const row = careSummarySnapshotRevisionCodec.create(revision as never);
     const read = careSummarySnapshotRevisionCodec.validateAfterRead(JSON.parse(JSON.stringify(row)));
     expect(JSON.stringify(read.revision.payload)).toBe(JSON.stringify(payload));
+  });
+});
+
+/**
+ * Packet 11C Addendum C, Task C4 (D3, D4; owner: "old snapshots byte-identical"): approved 11c.1 artifacts stay byte-identical after the
+ * AI marking (renderer and template 11c.2) is introduced, and new deterministic previews stay byte-identical to the 11c.1 output.
+ *
+ * The fixture `fixtures/care-summary-11c1-approved.json` was captured by running the UNCHANGED 11c.1 code (renderer, AI replacement
+ * projection and `printableCareSummary`, before any C4 edit) and approving the result:
+ * - `deterministic`: `renderDeterministicCareSummary(draft(locale))` (the same draft as the 9c.1 fixture);
+ * - `aiAssisted`: `projectValidatedAiCareSummary` of `syntheticCareDraft("ORDINARY", locale)` from an accepted fake-provider composition
+ *   (`acceptedAiCareComposition` with the evaluation `shellCandidate`), i.e. an 11c.1 AI-assisted snapshot made before C4.
+ * Its file SHA-256 is pinned here; the 9c.1 fixture above is unchanged.
+ */
+const FIXTURE_11C1_PATH = join(process.cwd(), "src/application/care-preparation/fixtures/care-summary-11c1-approved.json");
+const FIXTURE_11C1_SHA256 = "be2ce2a2658badd9b9d7467ab6295a19fd5f42894b45c2215b3a3a6a6feb75a3";
+const PINNED_11C1 = {
+  deterministic: {
+    "en-SG": { contentHash: "c5ef21ed928144e9d83c277d612dc369fd881676b0cf5bdd6f145ccd25102cb3", artifactHash: "11eabb30b5f4b3a9ed9415019956566cabcd8b44e057c8437c9a073ba8bea2ce", byteLength: 901 },
+    "zh-SG": { contentHash: "e3e8e6271192ec576123d3c474803ac40fcd63ba7245a345d9f7dbfdeabd7f81", artifactHash: "3bad1a3ce35e40a4c7687563dd13fe1d79dc8ec4a14930eb590481d3185bdf2d", byteLength: 868 },
+  },
+  aiAssisted: {
+    "en-SG": { contentHash: "c809ac558a882d6ac25f4a6102c518e7c82fecb1850dd6d5324261ae6421ed77", artifactHash: "a7890d3d1d6ff4115bbfdca34b28b8b4ab1f206954489374018c5eceeffa5c9b", byteLength: 669 },
+    "zh-SG": { contentHash: "0847d011a8a0d88a4d34c237071e741c01e75e7b9b2c52fcee4171587469379d", artifactHash: "9b2e463cd4a5ab9d57c28ef44f3b80332e0b53eb73d302544239e40e8d9f5d87", byteLength: 643 },
+  },
+} as const;
+const fixture11c1Bytes = readFileSync(FIXTURE_11C1_PATH);
+const fixture11c1 = JSON.parse(fixture11c1Bytes.toString("utf8")) as Record<"deterministic" | "aiAssisted", Record<"en-SG" | "zh-SG", FixtureEntry>>;
+
+/**
+ * Deterministic previews before C4 (captured from the unchanged 11c.1 renderer): sha256 of the stored payload JSON, the content hash and
+ * the printable artifact hash of every synthetic draft shape and locale.
+ */
+const DETERMINISTIC_BEFORE_C4 = {
+  "ORDINARY en-SG": ["7167372df5338ca453f22acded7801028f580b9c5f0874c7fe4cf5e3cf8e24dc", "b1240ec9b7545f98cd64a0846a6610b992af7411038068429a905c18ffc83b48", "a1f14797d7248493eb487ab8e1fa20570dceb7f00aea7ddf18ebb01018a8e519"],
+  "ORDINARY zh-SG": ["8c9045fab43b46a740b7d28939d515ef171ed193732eeb2a7d4564b5fdcb0160", "8fca4946eee67086e4e2112c568948ca9d6f73f927b01ce4c3fa7de8a638cbb0", "54dc548e6859dc085c692ca2bbac0b846396d7b0a3bd558668c13e5d92318ef3"],
+  "MISSING_DATA en-SG": ["4bf6d23f927cda382a5a97c70afac99972bef8c17302752604679f3d5ad9057d", "2be7cf4d214aea16e8954863cf958cfa0a80c4ac93bcd54b2e9adffad8f41f78", "97c355e44efd0e534aa3db6077129b306f3cf60d20f17ccb22f0adba9d719631"],
+  "MISSING_DATA zh-SG": ["a02814d9e13a2f46aa17a4f46252a93d3ad878ab9e6740a9565e01f739e55a2d", "81d6c4b1fd3d56b6204b6ae53ec1c6dc77dcd0a2c56d5621910700b6db8f4fbf", "cee1bc2ac0cbe8ad823e4a93997d8f91389bcd90569ada80fb72e3cc6ff968ac"],
+  "HIDDEN_LIMITATION en-SG": ["8d07e5a0c8251711b213eef3036d15774df173ca05390885f781d15b608f50e5", "0b58e8ecada1168a45bf42b00b8db3b6ec705036dbef32486122fbb17dc61c9b", "e9fd0153f89673501fd2bc797faadd657b22009758d53ac5a499eafc67af1078"],
+  "HIDDEN_LIMITATION zh-SG": ["df9215ae68c973685ac8af1d7589b1846b00f140a706d1a119ff53d27175b39c", "095afba723ae1769e9a7c606b0ecff77a6e7c912afe3c787e8d1444c0643a7f8", "498121ee46a14993dfbd85c97fdb4c7a4a1648a127aa5726714d1aef4e6aaba5"],
+  "RICH en-SG": ["b38dd52dcde9eea8b4e06de48dbde97eb50ba9a6297d9b1c1ac565fbf6b90d0d", "5271d07e9a88a6c2c3765d956ca5226b8c3452d2f727768cd8a84379b8b6802a", "44f6961cefca7e2e51a1911953aae64ee4bc7162261ee696f98a958bff5f8977"],
+  "RICH zh-SG": ["60f884d7c77433f46117681a8761de6652a3e10d711dbe8382f26e800fde252c", "b268b7ec468539da44ba2d554273645c274f17df51cdb8b7c16e7cb77d1313a4", "0b0bd54a33f2adf91d084e2a24c00a16a51e4f2d7c30e7865e2e8978579ffb2e"],
+} as const;
+
+describe("Packet 11C C4: 11c.1 approved artifacts and deterministic previews stay byte-identical", () => {
+  it("uses the 11c.1 fixture exactly as captured from the unchanged 11c.1 code path", () => {
+    expect(createHash("sha256").update(fixture11c1Bytes).digest("hex")).toBe(FIXTURE_11C1_SHA256);
+    for (const kind of ["deterministic", "aiAssisted"] as const) {
+      for (const locale of ["en-SG", "zh-SG"] as const) {
+        const { approvedPayload } = fixture11c1[kind][locale];
+        expect([approvedPayload.composition.method, approvedPayload.composition.templateVersion, approvedPayload.rendering.rendererVersion, approvedPayload.rendering.localePackVersion]).toEqual([
+          kind === "deterministic" ? "DETERMINISTIC" : "AI_ASSISTED",
+          "care-summary-template.11c.1",
+          "care-summary-renderer.11c.1",
+          "care-summary-locale.11c.1",
+        ]);
+        expect([approvedPayload.status, approvedPayload.rendering.contentHash]).toEqual(["APPROVED", PINNED_11C1[kind][locale].contentHash]);
+        // Made before C4: no marking section.
+        expect(approvedPayload.sections.map((section) => section.sectionId)).not.toContain("AI_MARKING");
+      }
+    }
+  });
+
+  for (const kind of ["deterministic", "aiAssisted"] as const) {
+    for (const locale of ["en-SG", "zh-SG"] as const) {
+      it(`${kind} ${locale}: still validates unchanged, keeps its stored hash, prints the same bytes and round-trips the stored-revision codec`, async () => {
+        const { approvedPayload, printable } = fixture11c1[kind][locale];
+        const before = JSON.stringify(approvedPayload);
+        const parsed = careSummarySnapshotPayloadSchema.safeParse(approvedPayload);
+        expect(parsed.success && JSON.stringify(parsed.data)).toBe(before);
+        const recomputed = await hashCanonicalJson(careSummaryExportProjection({ ...approvedPayload, rendererVersion: approvedPayload.rendering.rendererVersion, localePackVersion: approvedPayload.rendering.localePackVersion }));
+        expect(recomputed).toBe(PINNED_11C1[kind][locale].contentHash);
+        const now = printableCareSummary(approvedPayload);
+        expect(Buffer.from(now.text, "utf8").equals(Buffer.from(printable.text, "utf8"))).toBe(true);
+        expect([now.hash, now.byteLength]).toEqual([PINNED_11C1[kind][locale].artifactHash, PINNED_11C1[kind][locale].byteLength]);
+        expect([printable.hash, printable.byteLength]).toEqual([PINNED_11C1[kind][locale].artifactHash, PINNED_11C1[kind][locale].byteLength]);
+        // No marking is added to an old artifact.
+        expect(now.text).not.toContain(getMessages(locale).ai.demoTag);
+        expect(now.text).not.toContain(getMessages(locale).ai.resultCheck);
+        // Packet 10 backup and restore row validation (the stored-revision codec) keeps it unchanged.
+        const revision = {
+          schemaVersion: 1,
+          recordType: "CARE_SUMMARY_SNAPSHOT" as const,
+          recordId: id(60),
+          revisionId: id(61),
+          revisionNumber: 3,
+          previousRevisionId: id(62),
+          action: "UPDATE" as const,
+          recordedAt: "2026-10-04T02:00:00.000Z",
+          revisionCreatedAt: "2026-10-04T02:10:00.000Z",
+          temporal: { kind: "ATEMPORAL" as const },
+          provenance: { sourceKind: "SYSTEM_DERIVATION", captureMethod: "RULE_ENGINE", initiator: "JAGAON_SYSTEM", assistance: "NONE" },
+          auditEventId: id(63),
+          transactionId: id(64),
+          payload: approvedPayload,
+        };
+        const row = careSummarySnapshotRevisionCodec.create(revision as never);
+        expect(JSON.stringify(careSummarySnapshotRevisionCodec.validateAfterRead(JSON.parse(JSON.stringify(row))).revision.payload)).toBe(before);
+        expect(JSON.stringify(approvedPayload)).toBe(before);
+      });
+    }
+  }
+
+  it.each(["en-SG", "zh-SG"] as const)("%s: a new deterministic preview of the same draft is byte-identical to the approved 11c.1 content (no marking)", async (locale) => {
+    const fresh = await renderDeterministicCareSummary(draft(locale));
+    const { approvedPayload } = fixture11c1.deterministic[locale];
+    expect(JSON.stringify({ ...fresh.payload, status: "APPROVED", patientApproval: approvedPayload.patientApproval })).toBe(JSON.stringify(approvedPayload));
+    expect(fresh.contentHash).toBe(PINNED_11C1.deterministic[locale].contentHash);
+    expect(printableCareSummary(fresh.payload).hash).toBe(PINNED_11C1.deterministic[locale].artifactHash);
+  });
+
+  it.each(["en-SG", "zh-SG"] as const)("%s: proves the test-only 11c.1 AI-assisted stand-in: an 11c.2 replacement minus its marking, at 11c.1 versions, equals the pre-C4 output", async (locale) => {
+    const current = (await renderDeterministicCareSummary(syntheticCareDraft("ORDINARY", locale))).payload;
+    const { composition } = await acceptedAiCareComposition(current, { candidate: shellCandidate });
+    const next = await projectValidatedAiCareSummary({ current, composition, auditRef: AI_AUDIT_REF, validatedAt: AI_VALIDATED_AT });
+    const legacy = await asLegacy11c1AiAssistedPayload(next);
+    const { approvedPayload } = fixture11c1.aiAssisted[locale];
+    expect({ ...legacy, status: "APPROVED", patientApproval: approvedPayload.patientApproval }).toEqual(approvedPayload);
+    // Only the marking section (and the 11c.2 versions, so the content hash) separates the new AI-assisted content from the old.
+    const extra = next.sections.filter((section) => !approvedPayload.sections.some((old) => old.sectionId === section.sectionId));
+    expect(extra.map((section) => section.sectionId)).toEqual(["AI_MARKING"]);
+    expect(next.rendering.contentHash).not.toBe(approvedPayload.rendering.contentHash);
+  });
+
+  it("every synthetic deterministic preview shape stays byte-identical to its pre-C4 output (payload, content hash, artifact)", async () => {
+    const now: Record<string, readonly string[]> = {};
+    for (const shape of ["ORDINARY", "MISSING_DATA", "HIDDEN_LIMITATION", "RICH"] as const) {
+      for (const locale of ["en-SG", "zh-SG"] as const) {
+        const rendered = await renderDeterministicCareSummary(syntheticCareDraft(shape, locale));
+        now[`${shape} ${locale}`] = [createHash("sha256").update(JSON.stringify(rendered.payload), "utf8").digest("hex"), rendered.contentHash, printableCareSummary(rendered.payload).hash];
+        expect(rendered.payload.sections.map((section) => section.sectionId)).not.toContain("AI_MARKING");
+        expect([rendered.payload.composition.templateVersion, rendered.payload.rendering.rendererVersion]).toEqual(["care-summary-template.11c.1", "care-summary-renderer.11c.1"]);
+      }
+    }
+    expect(now).toEqual(DETERMINISTIC_BEFORE_C4);
   });
 });
 

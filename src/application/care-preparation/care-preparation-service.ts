@@ -22,6 +22,7 @@ import {
 } from "./care-preparation-persistence";
 import { renderDeterministicCareSummary } from "./deterministic-care-summary-renderer";
 import { isCurrentCareSummaryTemplate } from "./care-summary-locale-pack";
+import { careSummaryAiMarkingIssues } from "./care-summary-ai-marking";
 import { loadCareSummaryDraft, sourcesAreCurrent } from "./care-summary-candidates";
 import type { CarePreparationCommandPort, CarePreparationCommitResult, ExpectedHead, PrintObservation } from "./care-preparation-contracts";
 
@@ -427,7 +428,15 @@ export function createCarePreparationService(database: JagaOnDatabase, dependenc
         return refused;
       }
       // Defence in depth: the replacement invariant and the command's own audit and time are checked here as well.
-      if (careSummaryAiReplacementIssues(current, next).length > 0 || next.composition.method !== "AI_ASSISTED" || next.composition.aiInvocationAuditRef !== input.aiInvocationAuditRef || next.composition.validatedAt !== input.validatedAt) {
+      // Packet 11C Addendum C, C4: and it is a current (11c.2) AI-assisted snapshot carrying exactly the approved AI marking.
+      if (
+        careSummaryAiReplacementIssues(current, next).length > 0 ||
+        next.composition.method !== "AI_ASSISTED" ||
+        next.composition.aiInvocationAuditRef !== input.aiInvocationAuditRef ||
+        next.composition.validatedAt !== input.validatedAt ||
+        !isCurrentCareSummaryTemplate(next) ||
+        careSummaryAiMarkingIssues(next).length > 0
+      ) {
         return refused;
       }
       const now = dependencies.now();

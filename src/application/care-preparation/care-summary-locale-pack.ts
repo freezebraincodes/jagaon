@@ -1,5 +1,5 @@
 import type { SupportedLocale } from "@/domain/patient-settings/locale";
-import type { CareSummaryPayloadSectionId, CareSummaryLimitationCode, CareSummarySnapshotPayload } from "@/domain/care-preparation/care-summary-snapshot";
+import { CARE_SUMMARY_AI_MARKING_VERSIONS, type CareSummaryPayloadSectionId, type CareSummaryLimitationCode, type CareSummarySnapshotPayload } from "@/domain/care-preparation/care-summary-snapshot";
 import type { TimePoint } from "@/domain/shared/temporal";
 import { getMessages } from "@/i18n/get-messages";
 
@@ -19,15 +19,28 @@ import { getMessages } from "@/i18n/get-messages";
  */
 
 export const CARE_SUMMARY_LOCALE_PACK_VERSION = "care-summary-locale.11c.1";
+/** The current template and renderer of a DETERMINISTIC preview (unchanged by C4, so deterministic output stays byte-identical). */
 export const CARE_SUMMARY_RENDERER_VERSION = "care-summary-renderer.11c.1";
 export const CARE_SUMMARY_TEMPLATE_VERSION = "care-summary-template.11c.1";
+/**
+ * Packet 11C Addendum C, Task C4 (offline; human acceptance pending for placement and appearance): the template and renderer of an
+ * AI-ASSISTED replacement. care-summary-template.11c.2 / care-summary-renderer.11c.2 = the 11c.1 content and notices plus the hashed
+ * AI_MARKING section (care-summary-ai-marking.ts) built from the approved rows ai.demoTag and ai.resultCheck. The locale pack is
+ * unchanged (the marking stores and prints its own rows). Chosen so that deterministic previews keep 11c.1 and stay byte-identical;
+ * only AI-assisted snapshots move to 11c.2 (they alone carry the marking).
+ */
+export const CARE_SUMMARY_AI_ASSISTED_TEMPLATE_VERSION: string = CARE_SUMMARY_AI_MARKING_VERSIONS.templateVersion;
+export const CARE_SUMMARY_AI_ASSISTED_RENDERER_VERSION: string = CARE_SUMMARY_AI_MARKING_VERSIONS.rendererVersion;
 
 /**
- * D3: an unapproved snapshot can be approved only when it was made with the current template and renderer. An older one is shown
- * as stored but must be prepared again; an approved one is never touched and stays printable.
+ * D3: an unapproved snapshot can be approved only when it was made with the current template and renderer for its composition: a
+ * deterministic preview with 11c.1, an AI-assisted one with 11c.2 (C4). An older one (9c.1, or an AI-assisted 11c.1 preview without the
+ * AI marking) is shown as stored but must be prepared again; an approved one is never touched and stays printable.
  */
 export function isCurrentCareSummaryTemplate(payload: Pick<CareSummarySnapshotPayload, "composition" | "rendering">): boolean {
-  return payload.composition.templateVersion === CARE_SUMMARY_TEMPLATE_VERSION && payload.rendering.rendererVersion === CARE_SUMMARY_RENDERER_VERSION;
+  const [template, renderer] =
+    payload.composition.method === "AI_ASSISTED" ? [CARE_SUMMARY_AI_ASSISTED_TEMPLATE_VERSION, CARE_SUMMARY_AI_ASSISTED_RENDERER_VERSION] : [CARE_SUMMARY_TEMPLATE_VERSION, CARE_SUMMARY_RENDERER_VERSION];
+  return payload.composition.templateVersion === template && payload.rendering.rendererVersion === renderer;
 }
 
 const SECTION_ASSET: Readonly<Record<CareSummaryPayloadSectionId, string>> = Object.freeze({
@@ -43,6 +56,8 @@ const SECTION_ASSET: Readonly<Record<CareSummaryPayloadSectionId, string>> = Obj
   QUESTIONS_FOR_CARE_TEAM: "care-summary.section.questions",
   DATA_LIMITATIONS: "care-summary.section.limitations",
   CARE_DRAFT_NOTICES: "care-summary.section.draft-notices",
+  // C4: names the marking section only; no pack asset (the marking prints its own stored, hashed rows).
+  AI_MARKING: "care-summary.section.ai-marking",
 });
 
 const LIMITATION_ASSET: Partial<Readonly<Record<CareSummaryLimitationCode, string>>> = Object.freeze({

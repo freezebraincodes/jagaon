@@ -31,6 +31,9 @@ export const enSGMessages: AppMessages = {
     unavailable: "AI is not available right now. Your recorded information has not changed.",
     cancelled: "AI request cancelled. Your recorded information has not changed.",
     retry: "Try AI again",
+    // Packet 11C Addendum C, C4: approved shared rows (matrix Section 2, APPROVED_PACKET_11), exact. AI-sourced output only.
+    demoTag: "AI-assisted demo",
+    resultCheck: "Check the wording against your recorded information. AI can make mistakes.",
   },
   // Packet 11C Addendum C (C6): the demo passcode field of the AI disclosure. New wording; human acceptance pending.
   aiAccess: {

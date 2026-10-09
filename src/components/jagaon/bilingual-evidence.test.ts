@@ -313,7 +313,9 @@ describe("catalogue wording boundaries", () => {
     const en = getMessages("en-SG").ai;
     const zh = getMessages("zh-SG").ai;
     // Packet 11C B4b (deliberate): plus the shared fallback rows and the care-summary flow rows (pinned in the next test).
-    expect(Object.keys(en).sort()).toEqual(["cancel", "cancelled", "careSummary", "pattern", "remoteBody", "remoteLimit", "remoteNotAccepted", "remoteTitle", "retry", "unavailable"]);
+    // Packet 11C Addendum C, C4 (deliberate): plus the approved marking rows demoTag and resultCheck (pinned against the matrix in
+    // src/i18n/packet-11c-ai-marking-rows.test.ts).
+    expect(Object.keys(en).sort()).toEqual(["cancel", "cancelled", "careSummary", "demoTag", "pattern", "remoteBody", "remoteLimit", "remoteNotAccepted", "remoteTitle", "resultCheck", "retry", "unavailable"]);
     expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort());
     expect(Object.keys(en.pattern)).toEqual(["confirm"]);
     expect(Object.keys(en.careSummary)).toEqual(["confirm", "action", "loading", "resultTitle", "resultBody", "fallback", "changed", "notEligible"]);

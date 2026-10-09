@@ -22,6 +22,9 @@ import { InfoIcon } from "../primitives/Icons";
  * and the cutoff are named in Singapore time; every reading recorded at an offset other than +08:00 also shows its actual offset label
  * and its exact Singapore-time equivalent (from its source instant); the list is headed "Readings included in this comparison (n)";
  * an explanation whose remote use was not accepted shows a short non-technical line beside the standard wording.
+ *
+ * Packet 11C Addendum C, Task C4: an AI-sourced explanation shows the approved rows ai.demoTag (labelling the region that wraps the
+ * generated text) and ai.resultCheck; a deterministic one shows neither. Human acceptance pending for placement and appearance.
  */
 export type PatternExplanationResult =
   | {
@@ -189,6 +192,10 @@ export function PatternExplanationPanel({ messages, locale, explanation, panelId
     explanation === null ? "" : shown ? shown.text.headline : explanation.kind === "UNAVAILABLE" && explanation.reason === "STALE_RESULT" ? t.stale : t.unavailable;
 
   const headingId = `${panelId}-heading`;
+  const aiTagId = `${panelId}-ai-tag`;
+  // Packet 11C Addendum C, C4: AI-sourced output only. Deterministic output never shows an AI tag (owner: "no misleading labels on
+  // deterministic output").
+  const aiSourced = shown?.source === "AI";
   return (
     <section id={panelId} className="history-explanation" aria-labelledby={headingId} aria-busy={explanation === null}>
       <h3 id={headingId} ref={headingRef} tabIndex={-1} className="history-explanation-title">
@@ -197,15 +204,35 @@ export function PatternExplanationPanel({ messages, locale, explanation, panelId
       {explanation === null ? (
         <p className="history-explanation-loading">{messages.shared.loading}</p>
       ) : null}
-      {shown?.source === "AI" ? <span className="history-tag">{t.aiLabel}</span> : null}
-      <p role="status" className="history-explanation-status">
-        {statusText}
-      </p>
+      {/*
+       * Packet 11C Addendum C, C4 (B4b review note; screen only, the panel is never printed): the generated text sits inside one region,
+       * which an AI-sourced result labels with the approved tag (ai.demoTag) and closes with the approved check line (ai.resultCheck); the
+       * existing aiLabel row is kept beside the tag. The wrapper is always present (a plain container without a role for deterministic
+       * output) so the live status region is never remounted. Placement and appearance: human acceptance pending.
+       */}
+      <div className={aiSourced ? "history-explanation-generated history-explanation-ai" : "history-explanation-generated"} {...(aiSourced ? { role: "group", "aria-labelledby": aiTagId } : {})}>
+        {aiSourced ? (
+          <p className="history-explanation-ai-tags">
+            <span id={aiTagId} className="history-tag">
+              {messages.ai.demoTag}
+            </span>{" "}
+            <span className="history-tag">{t.aiLabel}</span>
+          </p>
+        ) : null}
+        <p role="status" className="history-explanation-status">
+          {statusText}
+        </p>
+        {shown ? (
+          <>
+            {shown.remoteUse === "NOT_ACCEPTED" ? <p className="history-explanation-notice history-explanation-remote-use">{messages.ai.remoteNotAccepted}</p> : null}
+            <p className="history-explanation-text">{shown.text.observation}</p>
+            <p className="history-explanation-text">{shown.text.evidence}</p>
+            {aiSourced ? <p className="history-explanation-notice history-explanation-ai-check">{messages.ai.resultCheck}</p> : null}
+          </>
+        ) : null}
+      </div>
       {shown ? (
         <>
-          {shown.remoteUse === "NOT_ACCEPTED" ? <p className="history-explanation-notice history-explanation-remote-use">{messages.ai.remoteNotAccepted}</p> : null}
-          <p className="history-explanation-text">{shown.text.observation}</p>
-          <p className="history-explanation-text">{shown.text.evidence}</p>
           <p className="history-explanation-notice">{shown.summaryRoleNotice}</p>
           {shown.limitations.map((limitation) => (
             <p key={`${limitation.limitationRef}:${limitation.code}`} className="history-note history-explanation-limitation">

@@ -311,6 +311,50 @@ describe("PatternExplanationPanel (Packet 11C Task 7)", () => {
     expect(text.indexOf(t.aiLabel)).toBeLessThan(text.indexOf(payloadOf(explanation).headline.text));
   });
 
+  /**
+   * Packet 11C Addendum C, Task C4 (owner: "no misleading labels on deterministic output"; B4b review note): on screen only (the history
+   * panel is never printed), an AI-sourced explanation shows the approved rows `ai.demoTag` and `ai.resultCheck`, and its generated text
+   * sits inside a region labelled by the tag. A deterministic explanation shows neither and has no AI region. Placement and appearance:
+   * human acceptance pending.
+   */
+  it.each([["en-SG"], ["zh-SG"]] as const)("%s: an AI-sourced explanation's generated text is inside a region labelled by ai.demoTag, with ai.resultCheck (C4)", async (locale) => {
+    const { history } = await higherFixture();
+    const explanation = await explain(history, locale);
+    const messages = getMessages(locale);
+    renderPanel(locale, { ...explanation, source: "AI" });
+    const group = screen.getByRole("group", { name: messages.ai.demoTag });
+    const { headline, observation, evidence } = payloadOf(explanation);
+    const text = group.textContent ?? "";
+    const order = [messages.ai.demoTag, headline.text, observation.text, evidence.text, messages.ai.resultCheck];
+    const positions = order.map((part) => text.indexOf(part));
+    expect(positions.every((position) => position >= 0), JSON.stringify({ order, text })).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    // The existing label row is kept beside the tag (unchanged).
+    expect(within(group).getByText(messages.history.explanation.aiLabel)).toBeInTheDocument();
+    // The application's own lines (summary role, limitation, supporting readings) are not inside the AI region.
+    expect(within(group).queryByText(explanation.summaryRoleNotice)).not.toBeInTheDocument();
+    expect(within(group).queryByText(explanation.limitations[0]!.text)).not.toBeInTheDocument();
+    expect(within(group).queryByRole("heading")).not.toBeInTheDocument();
+    // The status region still announces the headline.
+    expect(screen.getByRole("status")).toHaveTextContent(headline.text);
+  });
+
+  it.each([["en-SG"], ["zh-SG"]] as const)("%s: a deterministic explanation shows no AI tag, no check line and no AI region, also when remote use was not accepted (C4)", async (locale) => {
+    const { history } = await higherFixture();
+    const explanation = await explain(history, locale);
+    const messages = getMessages(locale);
+    for (const shown of [explanation, { ...explanation, remoteUse: "NOT_ACCEPTED" as const }]) {
+      renderPanel(locale, shown);
+      const region = screen.getByRole("region", { name: messages.history.explanation.title });
+      expect(within(region).queryByText(messages.ai.demoTag)).not.toBeInTheDocument();
+      expect(within(region).queryByText(messages.ai.resultCheck)).not.toBeInTheDocument();
+      expect(within(region).queryByText(messages.history.explanation.aiLabel)).not.toBeInTheDocument();
+      expect(within(region).queryByRole("group")).not.toBeInTheDocument();
+      expect(region.textContent).toContain(payloadOf(explanation).observation.text);
+      cleanup();
+    }
+  });
+
   it("moves focus to the panel heading when it opens, and its status region announces the outcome once", async () => {
     const { history } = await higherFixture();
     const explanation = await explain(history, "en-SG");

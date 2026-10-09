@@ -217,12 +217,42 @@ export async function acceptedAiCareComposition(current: CareSummarySnapshotPayl
 
 /** Rewrites every stored revision of one snapshot in place as the 9c.1 code path would have stored it (test fixture only). */
 export async function rewriteAsLegacy9c1Snapshot(database: JagaOnDatabase, recordId: RecordId): Promise<CareSummarySnapshotPayload> {
+  return rewriteStoredSnapshot(database, recordId, asLegacy9c1Payload);
+}
+
+/**
+ * Packet 11C Addendum C, Task C4 (D3), test-only: what the pre-C4 code path stored for an AI-assisted snapshot: template and renderer
+ * 11c.1 and no AI marking section. `care-summary-legacy-artifact.test.ts` proves that this of a current (11c.2) AI-assisted snapshot
+ * equals the 11c.1 code path's own captured output for the same draft, so it can stand in for an AI-assisted snapshot made before C4.
+ */
+export const LEGACY_11C1 = Object.freeze({ templateVersion: "care-summary-template.11c.1", rendererVersion: "care-summary-renderer.11c.1" });
+
+export async function asLegacy11c1AiAssistedPayload(payload: CareSummarySnapshotPayload): Promise<CareSummarySnapshotPayload> {
+  if (payload.composition.method !== "AI_ASSISTED") throw new Error("legacy fixture: not AI-assisted");
+  const sections = payload.sections.filter((section) => section.sectionId !== "AI_MARKING") as CareSummarySnapshotPayload["sections"];
+  const contentHash = await hashCanonicalJson(careSummaryExportProjection({ ...payload, sections, rendererVersion: LEGACY_11C1.rendererVersion, localePackVersion: payload.rendering.localePackVersion }));
+  const patientApproval = payload.patientApproval.state === "APPROVED" ? { ...payload.patientApproval, approvedContentHash: contentHash } : payload.patientApproval;
+  return {
+    ...payload,
+    sections,
+    composition: { ...payload.composition, templateVersion: LEGACY_11C1.templateVersion },
+    rendering: { ...payload.rendering, rendererVersion: LEGACY_11C1.rendererVersion, contentHash },
+    patientApproval,
+  };
+}
+
+/** Rewrites every stored revision of one AI-assisted snapshot in place as the pre-C4 (11c.1) code path stored it (test fixture only). */
+export async function rewriteAsLegacy11c1AiAssistedSnapshot(database: JagaOnDatabase, recordId: RecordId): Promise<CareSummarySnapshotPayload> {
+  return rewriteStoredSnapshot(database, recordId, asLegacy11c1AiAssistedPayload);
+}
+
+async function rewriteStoredSnapshot(database: JagaOnDatabase, recordId: RecordId, rewrite: (payload: CareSummarySnapshotPayload) => Promise<CareSummarySnapshotPayload>): Promise<CareSummarySnapshotPayload> {
   const rows = await database.table("recordRevisions").where("recordId").equals(recordId).toArray();
   let latest: { revisionNumber: number; payload: CareSummarySnapshotPayload } | null = null;
   for (const raw of rows) {
     const { revision } = carePreparationRevisionRowCodec.validateAfterRead(raw);
     if (revision.recordType !== "CARE_SUMMARY_SNAPSHOT") throw new Error("legacy fixture: not a snapshot");
-    const payload = await asLegacy9c1Payload(revision.payload);
+    const payload = await rewrite(revision.payload);
     await database.table("recordRevisions").put(careSummarySnapshotRevisionCodec.create({ ...revision, payload }));
     if (!latest || revision.revisionNumber > latest.revisionNumber) latest = { revisionNumber: revision.revisionNumber, payload };
   }

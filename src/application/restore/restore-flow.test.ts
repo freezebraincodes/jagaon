@@ -17,7 +17,7 @@ import { projectValidatedAiCareSummary } from "@/application/care-preparation/ai
 import { printableCareSummary } from "@/application/care-preparation/care-summary-artifact";
 import { createCarePreparationQuery } from "@/application/care-preparation/care-preparation-query";
 import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
-import { acceptedAiCareComposition, rewriteAsLegacy9c1Snapshot } from "@/application/care-preparation/care-preparation-test-support";
+import { acceptedAiCareComposition, rewriteAsLegacy11c1AiAssistedSnapshot, rewriteAsLegacy9c1Snapshot } from "@/application/care-preparation/care-preparation-test-support";
 import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
 
 installFakeIndexedDb();
@@ -86,15 +86,19 @@ describe("Packet 11C B1b: backup and restore of 9c.1 and AI-assisted care summar
       if (visit.status !== "READY" || !visit.appointment) throw new Error("visit");
       const glucose = visit.factGroups.find((group) => group.key === "GLUCOSE");
       if (!glucose || glucose.sources.length < 3) throw new Error("glucose");
-      const second = await runtime.carePreparation.commands.prepare({
-        locale: "en-SG",
+      const eligibleSelection = {
+        locale: "en-SG" as const,
         period: visit.period,
-        appointment: { recordType: "APPOINTMENT", recordId: visit.appointment.recordId, revisionId: visit.appointment.revisionId },
-        groups: [{ key: "GLUCOSE", sources: glucose.sources.slice(0, 3) }],
+        appointment: { recordType: "APPOINTMENT" as const, recordId: visit.appointment.recordId, revisionId: visit.appointment.revisionId },
+        groups: [{ key: "GLUCOSE" as const, sources: glucose.sources.slice(0, 3) }],
         questions: visit.questions.map((entry) => ({ recordType: "CARE_QUESTION" as const, recordId: entry.recordId, revisionId: entry.revisionId })),
         notSelected: [],
-      });
+      };
+      const second = await runtime.carePreparation.commands.prepare(eligibleSelection);
       if (second.kind !== "COMMITTED") throw new Error(JSON.stringify(second));
+      // Packet 11C Addendum C, C4: a third preview, replaced by AI wording and then stored as the pre-C4 (11c.1) code stored it.
+      const third = await runtime.carePreparation.commands.prepare(eligibleSelection);
+      if (third.kind !== "COMMITTED") throw new Error(JSON.stringify(third));
       runtime.close();
 
       const database = await openRaw(name);
@@ -103,7 +107,7 @@ describe("Packet 11C B1b: backup and restore of 9c.1 and AI-assisted care summar
       const service = createCarePreparationService(database, { now: () => PACKET10_NOW, ids, projectAiCareSummary: projectValidatedAiCareSummary });
       const query = createCarePreparationQuery(database);
       const snapshotHeads = (await database.table("recordHeads").where("recordType").equals("CARE_SUMMARY_SNAPSHOT").toArray()) as Array<{ recordId: string; headRevisionId: string; headRevisionNumber: number }>;
-      const first = snapshotHeads.find((head) => head.recordId !== second.recordId)!;
+      const first = snapshotHeads.find((head) => head.recordId !== second.recordId && head.recordId !== third.recordId)!;
 
       // The first snapshot: previewed, approved, then stored as the 9c.1 code path stored it.
       const loadedFirst = await query.loadSummary(first.recordId as never);
@@ -124,6 +128,15 @@ describe("Packet 11C B1b: backup and restore of 9c.1 and AI-assisted care summar
       const replaced = await service.replaceWithAiAssistedPreview({ recordId: second.recordId, expectedRevisionId: second.revisionId, expectedRevisionNumber: 1, expectedContentHash: loadedSecond.payload.rendering.contentHash, composition: ai.composition, aiInvocationAuditRef: ai.auditRef, validatedAt: PACKET10_NOW });
       if (replaced.kind !== "COMMITTED") throw new Error(JSON.stringify(replaced));
 
+      // Packet 11C Addendum C, C4: the third snapshot replaced the same way, then stored as the pre-C4 code stored it (11c.1, no marking).
+      const loadedThird = await query.loadSummary(third.recordId);
+      if (loadedThird.status !== "READY") throw new Error("third");
+      const aiOld = await acceptedAiCareComposition(loadedThird.payload, { candidate: shellCandidate, requestId: crypto.randomUUID(), audit: createAiInvocationAuditRepository(database) });
+      const replacedOld = await service.replaceWithAiAssistedPreview({ recordId: third.recordId, expectedRevisionId: third.revisionId, expectedRevisionNumber: 1, expectedContentHash: loadedThird.payload.rendering.contentHash, composition: aiOld.composition, aiInvocationAuditRef: aiOld.auditRef, validatedAt: PACKET10_NOW });
+      if (replacedOld.kind !== "COMMITTED") throw new Error(JSON.stringify(replacedOld));
+      const legacyAi = await rewriteAsLegacy11c1AiAssistedSnapshot(database, replacedOld.recordId);
+      expect([legacyAi.composition.templateVersion, legacyAi.rendering.rendererVersion]).toEqual(["care-summary-template.11c.1", "care-summary-renderer.11c.1"]);
+
       const file = await exportFrom(database);
       const source = await readAllTables(database);
       database.close();
@@ -140,6 +153,7 @@ describe("Packet 11C B1b: backup and restore of 9c.1 and AI-assisted care summar
       const restoredQuery = createCarePreparationQuery(restoredDatabase);
       const legacyView = await restoredQuery.loadSummary(first.recordId as never);
       const aiView = await restoredQuery.loadSummary(replaced.recordId);
+      const legacyAiView = await restoredQuery.loadSummary(replacedOld.recordId);
       restoredDatabase.close();
 
       // Same care-summary rows and the same AI audit rows (row key order is the codec's, so the comparison is deep equality).
@@ -156,8 +170,14 @@ describe("Packet 11C B1b: backup and restore of 9c.1 and AI-assisted care summar
       // The AI-assisted snapshot: still the current unapproved preview, naming its accepted audit.
       if (aiView.status !== "READY") throw new Error("ai view");
       expect(aiView.snapshotStatus).toBe("PREPARED");
-      expect(aiView.payload.composition).toEqual({ method: "AI_ASSISTED", templateVersion: "care-summary-template.11c.1", aiInvocationAuditRef: ai.auditRef, validatedAt: PACKET10_NOW });
+      // Packet 11C Addendum C, C4 (deliberate): made under template 11c.2, with the AI marking section restored as stored (last).
+      expect(aiView.payload.composition).toEqual({ method: "AI_ASSISTED", templateVersion: "care-summary-template.11c.2", aiInvocationAuditRef: ai.auditRef, validatedAt: PACKET10_NOW });
+      expect(aiView.payload.sections.at(-1)!.sectionId).toBe("AI_MARKING");
       expect((restored.aiInvocationAudits as Array<{ requestId: string; outcomeCode: string }>).find((row) => row.requestId === ai.auditRef)?.outcomeCode).toBe("ACCEPTED");
+      // C4: the old 11c.1 AI-assisted snapshot restores byte-identically, still without a marking (and is never approvable: D3).
+      if (legacyAiView.status !== "READY") throw new Error("legacy ai view");
+      expect(JSON.stringify(legacyAiView.payload)).toBe(JSON.stringify(legacyAi));
+      expect(legacyAiView.payload.sections.some((section) => section.sectionId === "AI_MARKING")).toBe(false);
       // A backup whose AI-assisted snapshot names no stored audit is refused by the same Packet 10 rule.
       expect(validateAiAuditReferences({ recordRevisions: restored.recordRevisions, aiInvocationAudits: [] })).toEqual({ kind: "INVALID", reason: "DANGLING" });
     },

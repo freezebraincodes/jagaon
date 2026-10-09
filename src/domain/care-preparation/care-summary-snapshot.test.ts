@@ -3,7 +3,10 @@ import { AI_ORGANISABLE_SECTIONS } from "@/domain/ai/ai-task-contracts";
 import { careSummaryExportPayloadSchema, careSummaryExportRevisionSchema } from "./care-summary-export";
 import {
   CARE_DRAFT_NOTICE_KINDS,
+  CARE_SUMMARY_AI_MARKING_SECTION,
+  CARE_SUMMARY_AI_MARKING_VERSIONS,
   CARE_SUMMARY_AI_WORDING_SECTIONS,
+  CARE_SUMMARY_TEMPLATES_WITH_AI_MARKING,
   CARE_SUMMARY_MAX_SELECTIONS,
   CARE_SUMMARY_PAYLOAD_SECTION_ORDER,
   CARE_SUMMARY_SECTION_ORDER,
@@ -156,10 +159,12 @@ describe("care-summary snapshot: care-draft notice blocks (Packet 11C B1a)", () 
   };
 
   it("declares the notice section after DATA_LIMITATIONS, outside the AI-organisable content order, for the notice templates only", () => {
-    expect(CARE_SUMMARY_PAYLOAD_SECTION_ORDER).toEqual([...CARE_SUMMARY_SECTION_ORDER, "CARE_DRAFT_NOTICES"]);
+    // Packet 11C Addendum C, C4 (deliberate): the AI marking section follows the notices, also outside the content order.
+    expect(CARE_SUMMARY_PAYLOAD_SECTION_ORDER).toEqual([...CARE_SUMMARY_SECTION_ORDER, "CARE_DRAFT_NOTICES", "AI_MARKING"]);
     expect(CARE_SUMMARY_SECTION_ORDER).not.toContain("CARE_DRAFT_NOTICES");
     expect(CARE_DRAFT_NOTICE_KINDS).toEqual(["QUESTIONS_IN_OWN_WORDS", "DRAFT_NOT_SENT_OR_REVIEWED"]);
-    expect(CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES).toEqual([NOTICE_TEMPLATE]);
+    // C4 (deliberate): the AI-assisted template 11c.2 carries the same notices.
+    expect(CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES).toEqual([NOTICE_TEMPLATE, "care-summary-template.11c.2"]);
   });
 
   it("accepts the questions notice then the draft notice with a questions section, and the draft notice alone without one", () => {
@@ -244,21 +249,41 @@ describe("care-summary snapshot: AI-assisted composition (Packet 11C B1b)", () =
   const VALIDATED = "2026-10-04T02:05:00.000Z";
   const notice = (noticeKind: "QUESTIONS_IN_OWN_WORDS" | "DRAFT_NOT_SENT_OR_REVIEWED"): CareSummaryBlock =>
     ({ kind: "CARE_DRAFT_NOTICE", blockId: `notice.${noticeKind.toLowerCase().replaceAll("_", "-")}`, temporalRole: "NOT_APPLICABLE", noticeKind, renderedText: `${noticeKind} text` }) as CareSummaryBlock;
-  const aiComposition = (overrides: Record<string, unknown> = {}) => ({ method: "AI_ASSISTED", templateVersion: NOTICE_TEMPLATE, aiInvocationAuditRef: AUDIT, validatedAt: VALIDATED, ...overrides });
+  // Packet 11C Addendum C, C4 (deliberate): an AI-assisted replacement is made under template and renderer 11c.2 and carries the AI
+  // marking section last (structure only here; its exact approved rows are checked by the application validator).
+  const AI_TEMPLATE = "care-summary-template.11c.2";
+  const AI_RENDERER = "care-summary-renderer.11c.2";
+  const markingSection = (displayOrder: number) =>
+    ({
+      sectionId: "AI_MARKING",
+      titleLocaleAssetId: "care-summary.section.ai-marking",
+      displayOrder,
+      blocks: [{ kind: "AI_MARKING", blockId: "ai-marking", temporalRole: "NOT_APPLICABLE", renderedText: "AI-assisted demo\nCheck the wording against your recorded information. AI can make mistakes." }],
+    }) as CareSummarySnapshotPayload["sections"][number];
+  const aiComposition = (overrides: Record<string, unknown> = {}) => ({ method: "AI_ASSISTED", templateVersion: AI_TEMPLATE, aiInvocationAuditRef: AUDIT, validatedAt: VALIDATED, ...overrides });
   /** A current (11c.1) deterministic snapshot with its notices. */
   const current = (overrides: Partial<CareSummarySnapshotPayload> = {}): CareSummarySnapshotPayload => {
     const base = payload({ composition: { method: "DETERMINISTIC", templateVersion: NOTICE_TEMPLATE }, rendering: { rendererVersion: "care-summary-renderer.11c.1", localePackVersion: "care-summary-locale.11c.1", contentHash: HASH as never } });
     const notices = { sectionId: "CARE_DRAFT_NOTICES", titleLocaleAssetId: "care-summary.section.draft-notices", displayOrder: 4, blocks: [notice("QUESTIONS_IN_OWN_WORDS"), notice("DRAFT_NOT_SENT_OR_REVIEWED")] } as CareSummarySnapshotPayload["sections"][number];
     return { ...base, sections: [...base.sections, notices], ...overrides } as CareSummarySnapshotPayload;
   };
-  /** The same snapshot re-worded by validated AI output: only the measurement block's rendered text changes. */
-  const reworded = (from: CareSummarySnapshotPayload, text = "3 Oct 2026, 9:00 pm · A reading of 6.6 mmol/L.", overrides: Partial<CareSummarySnapshotPayload> = {}): CareSummarySnapshotPayload => ({
-    ...from,
-    sections: from.sections.map((section) => (section.sectionId === "MEASUREMENTS" ? { ...section, blocks: section.blocks.map((block) => ({ ...block, renderedText: text })) } : section)) as CareSummarySnapshotPayload["sections"],
-    composition: aiComposition() as never,
-    rendering: { ...from.rendering, contentHash: "b".repeat(64) as never },
-    ...overrides,
-  });
+  /**
+   * The same snapshot re-worded by validated AI output: only the measurement block's rendered text changes; under 11c.2 (C4) the AI
+   * marking section follows the notices.
+   */
+  const reworded = (from: CareSummarySnapshotPayload, text = "3 Oct 2026, 9:00 pm · A reading of 6.6 mmol/L.", overrides: Partial<CareSummarySnapshotPayload> = {}): CareSummarySnapshotPayload => {
+    const content = from.sections.filter((section) => section.sectionId !== "AI_MARKING");
+    return {
+      ...from,
+      sections: [
+        ...content.map((section) => (section.sectionId === "MEASUREMENTS" ? { ...section, blocks: section.blocks.map((block) => ({ ...block, renderedText: text })) } : section)),
+        markingSection(content.length),
+      ] as CareSummarySnapshotPayload["sections"],
+      composition: aiComposition() as never,
+      rendering: { ...from.rendering, rendererVersion: AI_RENDERER, contentHash: "b".repeat(64) as never },
+      ...overrides,
+    };
+  };
 
   it("keeps the deterministic branch and adds exactly method, templateVersion, aiInvocationAuditRef and validatedAt", () => {
     expect(careSummaryCompositionSchema.safeParse({ method: "DETERMINISTIC", templateVersion: NOTICE_TEMPLATE }).success).toBe(true);
@@ -366,15 +391,101 @@ describe("care-summary snapshot: AI-assisted composition (Packet 11C B1b)", () =
     expect(edit((value) => (value.locale = "zh-SG"))).toEqual(["AI_REPLACEMENT_CONTENT_CHANGED"]);
     expect(edit((value) => (value.limitations[0]!.blockId = "limitation.other"))).toEqual(["AI_REPLACEMENT_CONTENT_CHANGED"]);
     expect(edit((value) => (value.sections[1]!.titleLocaleAssetId = "care-summary.other"))).toEqual(["AI_REPLACEMENT_CONTENT_CHANGED"]);
-    expect(edit((value) => (value.sections = value.sections.slice(0, 4) as never))).toEqual(["AI_REPLACEMENT_CONTENT_CHANGED"]);
+    // C4: a dropped notice section is a content change (the marking section stays last).
+    expect(edit((value) => (value.sections = [...value.sections.slice(0, 4), { ...value.sections.at(-1)!, displayOrder: 4 }] as never))).toEqual(["AI_REPLACEMENT_CONTENT_CHANGED"]);
     expect(edit((value) => (value.rendering.localePackVersion = "care-summary-locale.9c.1"))).toEqual(["AI_REPLACEMENT_CONTENT_CHANGED"]);
     // A new content hash and an actual wording change are required; the result is a fresh, unapproved PREPARED snapshot.
-    expect(careSummaryAiReplacementIssues(from, reworded(from, factBlock(from).renderedText, { rendering: from.rendering }))).toEqual(["AI_REPLACEMENT_WORDING_UNCHANGED"]);
+    expect(careSummaryAiReplacementIssues(from, reworded(from, factBlock(from).renderedText, { rendering: { ...from.rendering, rendererVersion: AI_RENDERER } }))).toEqual(["AI_REPLACEMENT_WORDING_UNCHANGED"]);
     expect(edit((value) => (value.status = "PREVIEWED"))).toEqual(["AI_REPLACEMENT_LIFECYCLE_INVALID"]);
     expect(edit((value) => (value.replacesSnapshot = { recordType: "CARE_SUMMARY_SNAPSHOT", recordId: id(80), revisionId: id(81) } as never))).toEqual([]);
     // Only from a deterministic snapshot, only into a validated AI composition under the same template.
     expect(edit((value) => (value.composition = { method: "DETERMINISTIC", templateVersion: NOTICE_TEMPLATE }))).toEqual(["AI_REPLACEMENT_COMPOSITION_INVALID"]);
     expect(edit((value) => (value.composition = aiComposition({ templateVersion: "care-summary-template.9c.1" }) as never))).toEqual(["AI_REPLACEMENT_COMPOSITION_INVALID"]);
-    expect(careSummaryAiReplacementIssues(reworded(from), reworded(from, "3 Oct 2026, 9:00 pm · Another reading of 6.6 mmol/L.", { rendering: { ...from.rendering, contentHash: "d".repeat(64) as never } }))).toEqual(["AI_REPLACEMENT_SOURCE_NOT_DETERMINISTIC"]);
+    expect(careSummaryAiReplacementIssues(reworded(from), reworded(from, "3 Oct 2026, 9:00 pm · Another reading of 6.6 mmol/L.", { rendering: { ...from.rendering, rendererVersion: AI_RENDERER, contentHash: "d".repeat(64) as never } }))).toEqual(["AI_REPLACEMENT_SOURCE_NOT_DETERMINISTIC"]);
+  });
+
+  /**
+   * Packet 11C Addendum C, Task C4: the AI marking. Only an AI-assisted snapshot under the AI-marking template (11c.2, renderer 11c.2)
+   * carries it: exactly one AI_MARKING section, last (after the notices), holding exactly one AI_MARKING block of two rows. It is block
+   * content, so it is inside the hashed projection. Every deterministic snapshot (any template) and every older AI-assisted snapshot
+   * carries none; an 11c.2 AI-assisted snapshot without it is invalid.
+   */
+  describe("AI marking (Packet 11C Addendum C, C4)", () => {
+    const marked = () => reworded(current());
+    const withSections = (value: CareSummarySnapshotPayload, sections: unknown[]) => ({ ...value, sections: sections.map((section, displayOrder) => ({ ...(section as object), displayOrder })) }) as CareSummarySnapshotPayload;
+    const markingBlock = (overrides: Record<string, unknown> = {}) => ({ ...(markingSection(5).blocks[0] as object), ...overrides }) as CareSummaryBlock;
+
+    it("declares the marking section and templates outside the AI-organisable content and the wording sections", () => {
+      expect(CARE_SUMMARY_AI_MARKING_SECTION).toBe("AI_MARKING");
+      expect(CARE_SUMMARY_PAYLOAD_SECTION_ORDER.at(-1)).toBe("AI_MARKING");
+      expect(CARE_SUMMARY_SECTION_ORDER).not.toContain("AI_MARKING");
+      expect(CARE_SUMMARY_AI_WORDING_SECTIONS).not.toContain("AI_MARKING");
+      expect(AI_ORGANISABLE_SECTIONS).not.toContain("AI_MARKING");
+      expect(CARE_SUMMARY_AI_MARKING_VERSIONS).toEqual({ templateVersion: AI_TEMPLATE, rendererVersion: AI_RENDERER });
+      expect(CARE_SUMMARY_TEMPLATES_WITH_AI_MARKING).toEqual([AI_TEMPLATE]);
+      expect(CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES).toContain(AI_TEMPLATE);
+    });
+
+    it("accepts an 11c.2 AI-assisted snapshot with exactly one marking section after the notices", () => {
+      const value = marked();
+      expect(value.sections.map((section) => section.sectionId)).toEqual(["SUMMARY_SCOPE", "MEASUREMENTS", "QUESTIONS_FOR_CARE_TEAM", "DATA_LIMITATIONS", "CARE_DRAFT_NOTICES", "AI_MARKING"]);
+      expect(issuesOf(value)).toEqual([]);
+    });
+
+    it("rejects an 11c.2 AI-assisted snapshot without the exact marking structure", () => {
+      const value = marked();
+      const [scope, measurements, questions, limitations, notices, marking] = value.sections;
+      // Missing; two blocks; one row; three rows; another block id; before the notices.
+      expect(issuesOf(withSections(value, [scope, measurements, questions, limitations, notices]))).toContain("SUMMARY_AI_MARKING_INVALID");
+      expect(issuesOf(withSections(value, [scope, measurements, questions, limitations, notices, { ...marking!, blocks: [markingBlock(), markingBlock({ blockId: "ai-marking.2" })] }]))).toContain("SUMMARY_AI_MARKING_INVALID");
+      expect(issuesOf(withSections(value, [scope, measurements, questions, limitations, notices, { ...marking!, blocks: [markingBlock({ renderedText: "AI-assisted demo" })] }]))).toContain("SUMMARY_AI_MARKING_INVALID");
+      expect(issuesOf(withSections(value, [scope, measurements, questions, limitations, notices, { ...marking!, blocks: [markingBlock({ renderedText: "AI-assisted demo\nCheck.\nMore." })] }]))).toContain("SUMMARY_AI_MARKING_INVALID");
+      expect(issuesOf(withSections(value, [scope, measurements, questions, limitations, notices, { ...marking!, blocks: [markingBlock({ renderedText: "AI-assisted demo\n" })] }]))).toContain("SUMMARY_AI_MARKING_INVALID");
+      expect(issuesOf(withSections(value, [scope, measurements, questions, limitations, notices, { ...marking!, blocks: [markingBlock({ blockId: "marking" })] }]))).toContain("SUMMARY_AI_MARKING_INVALID");
+      expect(issuesOf(withSections(value, [scope, measurements, questions, limitations, marking, notices]))).toContain("SUMMARY_SECTION_INVALID");
+      // A marking block anywhere else, and a strict block shape (no source, no extra field).
+      expect(issuesOf(withSections(value, [scope, measurements, questions, limitations, { ...notices!, blocks: [...notices!.blocks, markingBlock({ blockId: "ai-marking.extra" })] }, marking]))).toContain("SUMMARY_SECTION_INVALID");
+      expect(careSummarySnapshotPayloadSchema.safeParse(withSections(value, [scope, measurements, questions, limitations, notices, { ...marking!, blocks: [markingBlock({ relatedSources: [GLUCOSE] })] }])).success).toBe(false);
+      // The 11c.2 template is the AI-marking template only with its own renderer.
+      expect(issuesOf({ ...value, rendering: { ...value.rendering, rendererVersion: "care-summary-renderer.11c.1" } })).toContain("SUMMARY_AI_MARKING_INVALID");
+    });
+
+    it("never lets a deterministic snapshot (any template) or an older AI-assisted snapshot carry the marking", () => {
+      const deterministic = current();
+      const withMarking = (value: CareSummarySnapshotPayload) => withSections(value, [...value.sections, markingSection(0)]);
+      expect(issuesOf(deterministic)).toEqual([]);
+      expect(issuesOf(withMarking(deterministic))).toContain("SUMMARY_AI_MARKING_INVALID");
+      expect(issuesOf(withMarking(payload()))).toContain("SUMMARY_AI_MARKING_INVALID");
+      // An 11c.2 snapshot is AI-assisted: a deterministic one is refused, with or without the marking.
+      const deterministic11c2 = { ...deterministic, composition: { method: "DETERMINISTIC" as const, templateVersion: AI_TEMPLATE }, rendering: { ...deterministic.rendering, rendererVersion: AI_RENDERER } };
+      expect(issuesOf(deterministic11c2)).toContain("SUMMARY_AI_MARKING_INVALID");
+      expect(issuesOf(withMarking(deterministic11c2))).toContain("SUMMARY_AI_MARKING_INVALID");
+      // An 11c.1 AI-assisted snapshot (made before C4) stays valid as stored, without the marking, and may never gain one.
+      const legacyAi = { ...withSections(marked(), marked().sections.slice(0, 5)), composition: aiComposition({ templateVersion: NOTICE_TEMPLATE }), rendering: { ...marked().rendering, rendererVersion: "care-summary-renderer.11c.1" } } as CareSummarySnapshotPayload;
+      expect(issuesOf(legacyAi)).toEqual([]);
+      expect(issuesOf(withMarking(legacyAi))).toContain("SUMMARY_AI_MARKING_INVALID");
+    });
+
+    it("puts the marking into the hashed export projection and the immutable content", () => {
+      const value = marked();
+      const projection = careSummaryExportProjection({ ...value, rendererVersion: value.rendering.rendererVersion, localePackVersion: value.rendering.localePackVersion });
+      expect(projection.sections.at(-1)!.blocks.map((block) => block.kind)).toEqual(["AI_MARKING"]);
+      expect(projection.rendererVersion).toBe(AI_RENDERER);
+      expect(careSummaryContentOf(value).sections.at(-1)!.sectionId).toBe("AI_MARKING");
+    });
+
+    it("requires a replacement to move to the AI-marking template and renderer and to add exactly the marking", () => {
+      const from = current();
+      const candidate = reworded(from);
+      expect(careSummaryAiReplacementIssues(from, candidate)).toEqual([]);
+      const without = withSections(candidate, candidate.sections.slice(0, 5));
+      expect(careSummaryAiReplacementIssues(from, without)).toEqual(["AI_REPLACEMENT_MARKING_INVALID"]);
+      const twice = withSections(candidate, [...candidate.sections, markingSection(0)]);
+      expect(careSummaryAiReplacementIssues(from, twice)).toContain("AI_REPLACEMENT_MARKING_INVALID");
+      expect(careSummaryAiReplacementIssues(from, { ...candidate, composition: aiComposition({ templateVersion: NOTICE_TEMPLATE }) as never })).toEqual(["AI_REPLACEMENT_COMPOSITION_INVALID"]);
+      expect(careSummaryAiReplacementIssues(from, { ...candidate, rendering: { ...candidate.rendering, rendererVersion: "care-summary-renderer.11c.1" } })).toEqual(["AI_REPLACEMENT_COMPOSITION_INVALID"]);
+      // The replaced snapshot must be a deterministic notice-template snapshot without a marking.
+      expect(careSummaryAiReplacementIssues(payload(), reworded(payload()))).toContain("AI_REPLACEMENT_COMPOSITION_INVALID");
+    });
   });
 });

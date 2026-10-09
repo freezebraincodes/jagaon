@@ -118,13 +118,29 @@ export type CareSummarySectionId = (typeof CARE_SUMMARY_SECTION_ORDER)[number];
  * a snapshot made under an earlier template never does.
  */
 export const CARE_SUMMARY_DRAFT_NOTICES_SECTION = "CARE_DRAFT_NOTICES" as const;
-export const CARE_SUMMARY_PAYLOAD_SECTION_ORDER = Object.freeze([...CARE_SUMMARY_SECTION_ORDER, CARE_SUMMARY_DRAFT_NOTICES_SECTION] as const);
+/**
+ * Packet 11C Addendum C, Task C4: the AI marking of an AI-assisted snapshot is stored as one AI_MARKING block in its own section, which
+ * follows the notices (so it is inside the hashed export projection and prints with the artifact). Like the notices it is NOT part of
+ * `CARE_SUMMARY_SECTION_ORDER`, so the AI-organisable set and the model-facing contracts are unchanged.
+ */
+export const CARE_SUMMARY_AI_MARKING_SECTION = "AI_MARKING" as const;
+export const CARE_SUMMARY_PAYLOAD_SECTION_ORDER = Object.freeze([...CARE_SUMMARY_SECTION_ORDER, CARE_SUMMARY_DRAFT_NOTICES_SECTION, CARE_SUMMARY_AI_MARKING_SECTION] as const);
 export type CareSummaryPayloadSectionId = (typeof CARE_SUMMARY_PAYLOAD_SECTION_ORDER)[number];
 /** The approved notice kinds, in their fixed order (the questions notice only with a questions section; the draft notice always). */
 export const CARE_DRAFT_NOTICE_KINDS = Object.freeze(["QUESTIONS_IN_OWN_WORDS", "DRAFT_NOT_SENT_OR_REVIEWED"] as const);
 export type CareDraftNoticeBlockKind = (typeof CARE_DRAFT_NOTICE_KINDS)[number];
-/** Template versions whose snapshots must carry exactly the applicable notices. */
-export const CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES: readonly string[] = Object.freeze(["care-summary-template.11c.1"]);
+/**
+ * Packet 11C Addendum C, Task C4: the AI-assisted versions. A snapshot made under this template is AI-assisted, is rendered by this
+ * renderer and carries exactly one AI marking block (two rows; their exact approved text is checked by the application, which owns the
+ * catalogue). Deterministic previews keep the 11c.1 template and renderer and never carry a marking.
+ */
+export const CARE_SUMMARY_AI_MARKING_VERSIONS = Object.freeze({ templateVersion: "care-summary-template.11c.2", rendererVersion: "care-summary-renderer.11c.2" } as const);
+/** Template versions whose snapshots must carry exactly one AI marking block (and that only an AI-assisted snapshot may use). */
+export const CARE_SUMMARY_TEMPLATES_WITH_AI_MARKING: readonly string[] = Object.freeze([CARE_SUMMARY_AI_MARKING_VERSIONS.templateVersion]);
+/** The one block id of the AI marking block. */
+export const CARE_SUMMARY_AI_MARKING_BLOCK_ID = "ai-marking" as const;
+/** Template versions whose snapshots must carry exactly the applicable notices (C4: the AI-assisted 11c.2 template carries them too). */
+export const CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES: readonly string[] = Object.freeze(["care-summary-template.11c.1", CARE_SUMMARY_AI_MARKING_VERSIONS.templateVersion]);
 
 export const CARE_SUMMARY_TEMPORAL_ROLES = Object.freeze(["CURRENT", "HISTORICAL", "DURING_SELECTED_PERIOD", "NOT_APPLICABLE"] as const);
 
@@ -263,6 +279,14 @@ export const careSummaryBlockSchema = z.discriminatedUnion("kind", [
     noticeKind: z.enum(CARE_DRAFT_NOTICE_KINDS),
     renderedText: renderedTextSchema,
   }),
+  // Packet 11C Addendum C, C4: the AI marking of an AI-assisted snapshot, rendered from the approved rows at replacement time (the tag,
+  // a line feed, the check line). Application wording, never a fact, a limitation or a source reference.
+  z.strictObject({
+    kind: z.literal("AI_MARKING"),
+    blockId: blockIdSchema,
+    temporalRole: z.literal("NOT_APPLICABLE"),
+    renderedText: renderedTextSchema,
+  }),
 ]);
 export type CareSummaryBlock = z.infer<typeof careSummaryBlockSchema>;
 
@@ -316,6 +340,7 @@ const SECTION_BLOCK_KINDS: Readonly<Record<CareSummaryPayloadSectionId, readonly
   QUESTIONS_FOR_CARE_TEAM: ["PATIENT_QUESTION"],
   DATA_LIMITATIONS: ["SUMMARY_LIMITATION"],
   CARE_DRAFT_NOTICES: ["CARE_DRAFT_NOTICE"],
+  AI_MARKING: ["AI_MARKING"],
 });
 
 /** Structural rules every snapshot payload must satisfy, reported as stable codes. */
@@ -337,8 +362,8 @@ export function careSummaryPayloadIssues(payload: z.infer<typeof careSummarySnap
   const orderIndex = ids.map((id) => CARE_SUMMARY_PAYLOAD_SECTION_ORDER.indexOf(id));
   if (orderIndex.some((value, index) => index > 0 && value <= orderIndex[index - 1]!)) issues.add("SUMMARY_SECTION_INVALID");
   if (sections.some((section, index) => section.displayOrder !== index)) issues.add("SUMMARY_SECTION_INVALID");
-  // The content always ends with DATA_LIMITATIONS; only the care-draft notice section may follow it.
-  const contentIds = ids.filter((id) => id !== CARE_SUMMARY_DRAFT_NOTICES_SECTION);
+  // The content always ends with DATA_LIMITATIONS; only the care-draft notice section (and, C4, then the AI marking) may follow it.
+  const contentIds = ids.filter((id) => id !== CARE_SUMMARY_DRAFT_NOTICES_SECTION && id !== CARE_SUMMARY_AI_MARKING_SECTION);
   if (ids[0] !== "SUMMARY_SCOPE" || contentIds[contentIds.length - 1] !== "DATA_LIMITATIONS") issues.add("SUMMARY_SECTION_INVALID");
   for (const section of sections) {
     if (section.blocks.some((block) => !SECTION_BLOCK_KINDS[section.sectionId].includes(block.kind))) issues.add("SUMMARY_SECTION_INVALID");
@@ -359,6 +384,27 @@ export function careSummaryPayloadIssues(payload: z.infer<typeof careSummarySnap
   const composition = payload.composition;
   if (composition.method === "AI_ASSISTED" && (!CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES.includes(composition.templateVersion) || Date.parse(composition.validatedAt) < Date.parse(payload.asOf))) {
     issues.add("SUMMARY_AI_VALIDATION_MISSING");
+  }
+
+  // Packet 11C Addendum C, C4: the AI marking. Under an AI-marking template the snapshot is AI-assisted, rendered by the AI-marking
+  // renderer, and holds exactly one marking section with exactly one marking block of two non-empty rows (its exact approved text is
+  // the application's check). Under any other template (every deterministic snapshot, an older AI-assisted one) there is none.
+  const markingSections = sections.filter((section) => section.sectionId === CARE_SUMMARY_AI_MARKING_SECTION);
+  if (CARE_SUMMARY_TEMPLATES_WITH_AI_MARKING.includes(composition.templateVersion)) {
+    const block = markingSections.length === 1 && markingSections[0]!.blocks.length === 1 ? markingSections[0]!.blocks[0] : undefined;
+    const rows = block?.kind === "AI_MARKING" ? block.renderedText.split("\n") : [];
+    if (
+      composition.method !== "AI_ASSISTED" ||
+      payload.rendering.rendererVersion !== CARE_SUMMARY_AI_MARKING_VERSIONS.rendererVersion ||
+      block?.kind !== "AI_MARKING" ||
+      block.blockId !== CARE_SUMMARY_AI_MARKING_BLOCK_ID ||
+      rows.length !== 2 ||
+      rows.some((row) => row.trim().length === 0)
+    ) {
+      issues.add("SUMMARY_AI_MARKING_INVALID");
+    }
+  } else if (markingSections.length > 0) {
+    issues.add("SUMMARY_AI_MARKING_INVALID");
   }
   const blocks = sections.flatMap((section) => section.blocks);
   if (new Set(blocks.map((block) => block.blockId)).size !== blocks.length) issues.add("SUMMARY_SECTION_INVALID");
@@ -522,28 +568,48 @@ export type CareSummaryAiReplacementIssue =
   | "AI_REPLACEMENT_COMPOSITION_INVALID"
   | "AI_REPLACEMENT_CONTENT_CHANGED"
   | "AI_REPLACEMENT_WORDING_UNCHANGED"
-  | "AI_REPLACEMENT_LIFECYCLE_INVALID";
+  | "AI_REPLACEMENT_LIFECYCLE_INVALID"
+  | "AI_REPLACEMENT_MARKING_INVALID";
 
 /**
  * Packet 11C B1b (original Task 1 Step 2): the replacement invariant between the current deterministic snapshot and its AI-assisted
- * replacement. Purpose, condition scope, period, asOf, locale, selection (included and excluded), limitations, renderer and locale-pack
- * versions, every section and every block are identical, except the `renderedText` of RECORDED_FACT blocks in the AI-wording sections,
- * at least one of which changes (with a new content hash). Patient questions, limitations, the scope and the notices never change. The
- * replacement is a new unapproved PREPARED snapshot under the same template. Pure; stable closed codes, sorted.
+ * replacement. Purpose, condition scope, period, asOf, locale, selection (included and excluded), limitations, the locale-pack version,
+ * every section and every block are identical, except the `renderedText` of RECORDED_FACT blocks in the AI-wording sections, at least
+ * one of which changes (with a new content hash). Patient questions, limitations, the scope and the notices never change. The
+ * replacement is a new unapproved PREPARED snapshot. Pure; stable closed codes, sorted.
+ *
+ * Packet 11C Addendum C, C4: the replaced snapshot is a deterministic notice-template snapshot (never an AI-marking one); the replacement
+ * is made under the AI-marking template and renderer (11c.2) and adds exactly one AI marking section after its content and notices.
  */
 export function careSummaryAiReplacementIssues(current: CareSummarySnapshotPayload, candidate: CareSummarySnapshotPayload): CareSummaryAiReplacementIssue[] {
   const issues = new Set<CareSummaryAiReplacementIssue>();
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   if (current.composition.method !== "DETERMINISTIC") issues.add("AI_REPLACEMENT_SOURCE_NOT_DETERMINISTIC");
-  if (candidate.composition.method !== "AI_ASSISTED" || candidate.composition.templateVersion !== current.composition.templateVersion) issues.add("AI_REPLACEMENT_COMPOSITION_INVALID");
+  if (
+    candidate.composition.method !== "AI_ASSISTED" ||
+    candidate.composition.templateVersion !== CARE_SUMMARY_AI_MARKING_VERSIONS.templateVersion ||
+    candidate.rendering.rendererVersion !== CARE_SUMMARY_AI_MARKING_VERSIONS.rendererVersion ||
+    // (An AI-marking-template snapshot is AI-assisted, so it is already refused as AI_REPLACEMENT_SOURCE_NOT_DETERMINISTIC.)
+    !CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES.includes(current.composition.templateVersion)
+  ) {
+    issues.add("AI_REPLACEMENT_COMPOSITION_INVALID");
+  }
   if (candidate.status !== "PREPARED" || candidate.patientApproval.state !== "NOT_APPROVED" || candidate.invalidation !== undefined) issues.add("AI_REPLACEMENT_LIFECYCLE_INVALID");
 
-  const fixed = (value: CareSummarySnapshotPayload) => [value.purpose, value.conditionScope, value.selectedPeriod, value.asOf, value.locale, value.selection, value.limitations, value.rendering.rendererVersion, value.rendering.localePackVersion];
+  // C4: exactly one marking section, the candidate's last, holding exactly one marking block; the rest is compared with the current.
+  const isMarking = (section: CareSummarySection) => section.sectionId === CARE_SUMMARY_AI_MARKING_SECTION;
+  const marking = candidate.sections.filter(isMarking);
+  const last = candidate.sections[candidate.sections.length - 1];
+  if (marking.length !== 1 || !last || !isMarking(last) || last.blocks.length !== 1 || last.blocks[0]!.kind !== "AI_MARKING") issues.add("AI_REPLACEMENT_MARKING_INVALID");
+  const currentSections = current.sections.filter((section) => !isMarking(section));
+  const candidateSections = candidate.sections.filter((section) => !isMarking(section));
+
+  const fixed = (value: CareSummarySnapshotPayload) => [value.purpose, value.conditionScope, value.selectedPeriod, value.asOf, value.locale, value.selection, value.limitations, value.rendering.localePackVersion];
   let reworded = 0;
-  if (!same(fixed(current), fixed(candidate)) || current.sections.length !== candidate.sections.length) issues.add("AI_REPLACEMENT_CONTENT_CHANGED");
+  if (!same(fixed(current), fixed(candidate)) || currentSections.length !== candidateSections.length) issues.add("AI_REPLACEMENT_CONTENT_CHANGED");
   else {
-    current.sections.forEach((section, index) => {
-      const next = candidate.sections[index]!;
+    currentSections.forEach((section, index) => {
+      const next = candidateSections[index]!;
       const { blocks: _blocks, ...meta } = section;
       const { blocks: _nextBlocks, ...nextMeta } = next;
       if (!same(meta, nextMeta) || section.blocks.length !== next.blocks.length) {

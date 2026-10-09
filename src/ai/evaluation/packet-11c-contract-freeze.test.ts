@@ -36,9 +36,16 @@ import { projectShellTaskRequest } from "@/application/ai/language/shell-project
 import { ATOM_SPACING_RESERVE, FIELD_SCHEMA_LIMITS, FIXED_FIELD_BUDGETS } from "@/application/ai/language/slot-planner";
 import { buildCareSummaryAiRequest } from "@/application/care-preparation/ai-care-summary-request";
 import { NOW, syntheticCareDraft, type SyntheticCareDraftShape } from "@/application/care-preparation/care-preparation-test-support";
-import { CARE_SUMMARY_LOCALE_PACK_VERSION, CARE_SUMMARY_RENDERER_VERSION, CARE_SUMMARY_TEMPLATE_VERSION } from "@/application/care-preparation/care-summary-locale-pack";
+import {
+  CARE_SUMMARY_AI_ASSISTED_RENDERER_VERSION,
+  CARE_SUMMARY_AI_ASSISTED_TEMPLATE_VERSION,
+  CARE_SUMMARY_LOCALE_PACK_VERSION,
+  CARE_SUMMARY_RENDERER_VERSION,
+  CARE_SUMMARY_TEMPLATE_VERSION,
+} from "@/application/care-preparation/care-summary-locale-pack";
+import { careSummaryAiMarkingText } from "@/application/care-preparation/care-summary-ai-marking";
 import { renderDeterministicCareSummary } from "@/application/care-preparation/deterministic-care-summary-renderer";
-import { CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES } from "@/domain/care-preparation/care-summary-snapshot";
+import { CARE_SUMMARY_AI_MARKING_VERSIONS, CARE_SUMMARY_TEMPLATES_WITH_AI_MARKING, CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES } from "@/domain/care-preparation/care-summary-snapshot";
 import { AI_LOCALES, AI_TASK_TYPES, SHELL_INPUT_VERSIONS, SHELL_MAX_OUTPUT_TOKENS, SHELL_OUTPUT_VERSIONS, SHELL_PROVIDER_REQUEST_VERSION, SHELL_TASKS, SHELL_TEMPERATURE, SLOT_PLAN_VERSION, type AiLocale } from "@/domain/ai";
 import { getMessages } from "@/i18n/get-messages";
 import { AI_REQUEST_CLASS_CONTRACT, AI_REQUEST_CLASS_DEFINITIONS } from "@/application/ai/request-class-definitions";
@@ -85,6 +92,10 @@ import { SOURCE_BACKED_SCENARIOS, sourceBackedFixture } from "./packet-11-source
  * contract inputs, computed here from the same sources the items above pin), the digest of the 12 generated class definitions, their
  * count per task and locale and samples, and the shipped qualification records: one per class, ALL PENDING, no evidence, no sign-off.
  * None of it is model-facing (checked on every captured body): every body digest is unchanged.
+ *
+ * Packet 11C Addendum C, Task C4 (deliberate, for the CL3 re-freeze): `careSummary` adds the AI-assisted care-summary template and
+ * renderer 11c.2 (hashed AI marking built from the approved rows ai.demoTag and ai.resultCheck), the AI-marking template list and the
+ * sha256 of the marking text per locale; 11c.2 joins the notice templates. Deterministic previews keep 11c.1. Not model-facing.
  *
  * Changing anything pinned here fails with FROZEN_CONTRACT_CHANGED and the item's name. Update this manifest only deliberately, with the
  * owner's re-approval of the contract and the evidence policy (a changed model-facing byte needs fresh evaluation evidence).
@@ -144,11 +155,18 @@ const FROZEN = Object.freeze({
   },
   // Packet 11C Addendum C (C5): the shared pre-send upper bound of one shell call (the former tracer estimateMaxUsd).
   callUpperBound: { peakUsdPerMillion: { inputCacheMiss: 0.3, output: 1.2 }, framingMarginTokens: 256, bodyOverheadMaxBytes: 8192 },
+  // Packet 11C Addendum C, Task C4 (deliberate freeze change, for the CL3 re-freeze): deterministic previews stay on template/renderer
+  // 11c.1 (byte-identical); AI-assisted replacements move to template/renderer 11c.2 with the hashed AI marking (the approved rows
+  // ai.demoTag then ai.resultCheck). 11c.2 joins the notice templates. Never model-facing (checked below on every captured body).
   careSummary: {
     template: "care-summary-template.11c.1",
     renderer: "care-summary-renderer.11c.1",
     localePack: "care-summary-locale.11c.1",
-    templatesWithDraftNotices: ["care-summary-template.11c.1"],
+    templatesWithDraftNotices: ["care-summary-template.11c.1", "care-summary-template.11c.2"],
+    aiAssistedTemplate: "care-summary-template.11c.2",
+    aiAssistedRenderer: "care-summary-renderer.11c.2",
+    templatesWithAiMarking: ["care-summary-template.11c.2"],
+    aiMarkingTextSha256: { "en-SG": "119705928ff2eac844db81bbf2eaa45e9f2bbbe8cd6488f4bab686ad02aee297", "zh-SG": "f2efac82ab2cffd171954a26fcdd9fd716133e6ab99daf5631fbea60b090c5b1" },
   },
   disclosureCopy: { label: "ai-disclosure.11c.1", rowsSha256: "aa65470dd59aa8122f81e7e77dcb105c9724b6541696eb9b23af9d3c84300df1" },
   shellRoute: {
@@ -327,6 +345,10 @@ const ACTUAL: { readonly [K in FrozenItem]: () => unknown } = {
     renderer: CARE_SUMMARY_RENDERER_VERSION,
     localePack: CARE_SUMMARY_LOCALE_PACK_VERSION,
     templatesWithDraftNotices: [...CARE_SUMMARY_TEMPLATES_WITH_DRAFT_NOTICES],
+    aiAssistedTemplate: agree({ CARE_SUMMARY_AI_ASSISTED_TEMPLATE_VERSION, "CARE_SUMMARY_AI_MARKING_VERSIONS.templateVersion": CARE_SUMMARY_AI_MARKING_VERSIONS.templateVersion }),
+    aiAssistedRenderer: agree({ CARE_SUMMARY_AI_ASSISTED_RENDERER_VERSION, "CARE_SUMMARY_AI_MARKING_VERSIONS.rendererVersion": CARE_SUMMARY_AI_MARKING_VERSIONS.rendererVersion }),
+    templatesWithAiMarking: [...CARE_SUMMARY_TEMPLATES_WITH_AI_MARKING],
+    aiMarkingTextSha256: Object.fromEntries(LOCALES.map((locale) => [locale, sha256(careSummaryAiMarkingText(locale))])),
   }),
   disclosureCopy: () => {
     // The disclosure has no runtime version constant: its version is the label beside the corrected row in both catalogues.

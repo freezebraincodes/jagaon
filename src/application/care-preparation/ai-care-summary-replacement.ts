@@ -1,18 +1,13 @@
 import type { Instant } from "@/domain/shared";
-import {
-  careSummaryAiReplacementIssues,
-  careSummaryExportProjection,
-  careSummarySnapshotPayloadSchema,
-  type CareSummaryBlock,
-  type CareSummarySnapshotPayload,
-} from "@/domain/care-preparation/care-summary-snapshot";
+import { careSummaryAiReplacementIssues, careSummarySnapshotPayloadSchema, type CareSummaryBlock, type CareSummarySnapshotPayload } from "@/domain/care-preparation/care-summary-snapshot";
 import { remoteTokenInventory, SHELL_OUTPUT_VERSIONS, slotToken, type AtomTable, type ShellFieldPath, type SlotPlan } from "@/domain/ai";
-import { hashCanonicalJson } from "@/application/contracts/canonical-json";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "@/application/ai/ai-hybrid-runtime-bundles";
 import { composeAiResult } from "@/application/ai/language/ai-composition";
 import { validateShellCandidate } from "@/application/ai/language/shell-validator";
 import { planSlots } from "@/application/ai/language/slot-planner";
 import { buildCareSummaryAiRequest, type CareSummaryAiRequestRefusal } from "./ai-care-summary-request";
+import { careSummaryAiMarkingIssues } from "./care-summary-ai-marking";
+import { renderAiAssistedCareSummary } from "./deterministic-care-summary-renderer";
 
 /**
  * Packet 11C Addendum B, Task B1b (original Task 1 Step 4): the AI-assisted replacement payload of the current deterministic snapshot.
@@ -25,9 +20,13 @@ import { buildCareSummaryAiRequest, type CareSummaryAiRequestRefusal } from "./a
  * as `PhrasedLine.ai(bullets)`: the bullet(s) for its facts plus the deterministic parts the model never saw (time of day, duration).
  * Section intros and question bullets are validated but never stored: headings, group titles and patient questions stay as stored.
  *
- * The result is a new PREPARED, unapproved payload under the same template, renderer and locale pack, with the `AI_ASSISTED` composition
- * and a new content hash; purpose, period, locale, selection, values, questions, limitations, scope and notices are the current
- * snapshot's (`careSummaryAiReplacementIssues` must be empty). The caller adds `replacesSnapshot`. Any failure is a closed refusal.
+ * The result is a new PREPARED, unapproved payload with the `AI_ASSISTED` composition and a new content hash; purpose, period, locale,
+ * selection, values, questions, limitations, scope, notices and locale pack are the current snapshot's (`careSummaryAiReplacementIssues`
+ * must be empty). The caller adds `replacesSnapshot`. Any failure is a closed refusal.
+ *
+ * Packet 11C Addendum C, Task C4: the payload is rendered by `renderAiAssistedCareSummary` (template and renderer 11c.2), which adds the
+ * hashed AI marking (the approved rows ai.demoTag then ai.resultCheck) as the last section; `careSummaryAiMarkingIssues` must be empty.
+ * The model-facing request is built from the current deterministic snapshot as before, so no request byte changes.
  */
 
 export type CareSummaryAiProjectionCode = CareSummaryAiRequestRefusal | "COMPOSITION_INVALID" | "COMPOSITION_MISMATCH" | "SHELL_REJECTED" | "REPLACEMENT_INVALID";
@@ -120,20 +119,11 @@ export async function projectValidatedAiCareSummary(input: { current: CareSummar
     sections[block.sectionIndex]!.blocks[block.blockIndex] = { ...stored, renderedText: [...block.head, ...lines, ...block.tail].join("\n") };
   }
 
-  const contentHash = await hashCanonicalJson(
-    careSummaryExportProjection({ ...current, sections: sections as CareSummarySnapshotPayload["sections"], rendererVersion: current.rendering.rendererVersion, localePackVersion: current.rendering.localePackVersion }),
-  );
-  const { replacesSnapshot: _replaces, invalidation: _invalidation, ...rest } = current;
-  const parsed = careSummarySnapshotPayloadSchema.safeParse({
-    ...rest,
-    status: "PREPARED",
-    sections,
-    composition: { method: "AI_ASSISTED", templateVersion: current.composition.templateVersion, aiInvocationAuditRef: input.auditRef, validatedAt: input.validatedAt },
-    rendering: { ...current.rendering, contentHash },
-    patientApproval: { state: "NOT_APPROVED" },
-  });
+  // Packet 11C Addendum C, C4: renderer and template 11c.2 store the AI marking (the approved rows) after the notices and hash it.
+  const rendered = await renderAiAssistedCareSummary({ current, sections: sections as CareSummarySnapshotPayload["sections"], aiInvocationAuditRef: input.auditRef, validatedAt: input.validatedAt });
+  const parsed = careSummarySnapshotPayloadSchema.safeParse(rendered);
   if (!parsed.success) return refuse("REPLACEMENT_INVALID");
   const next = parsed.data as CareSummarySnapshotPayload;
-  if (careSummaryAiReplacementIssues(current, next).length > 0) return refuse("REPLACEMENT_INVALID");
+  if (careSummaryAiReplacementIssues(current, next).length > 0 || careSummaryAiMarkingIssues(next).length > 0) return refuse("REPLACEMENT_INVALID");
   return next;
 }

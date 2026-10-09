@@ -19,7 +19,10 @@ import { createCarePreparationQuery } from "./care-preparation-query";
 import { projectValidatedAiCareSummary } from "./ai-care-summary-replacement";
 import { buildCareSummaryAiRequest } from "./ai-care-summary-request";
 import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
-import { acceptedAiCareComposition, completedShells, ENABLED_CARE_MANIFEST, fakeCareShellProvider, fakeModelCareShells, rewriteAsLegacy9c1Snapshot } from "./care-preparation-test-support";
+import { acceptedAiCareComposition, completedShells, ENABLED_CARE_MANIFEST, fakeCareShellProvider, fakeModelCareShells, rewriteAsLegacy11c1AiAssistedSnapshot, rewriteAsLegacy9c1Snapshot } from "./care-preparation-test-support";
+import { careSummaryAiMarkingSection } from "./care-summary-ai-marking";
+import { printableCareSummary } from "./care-summary-artifact";
+import { getMessages } from "@/i18n/get-messages";
 import type { ExpectedHead } from "./care-preparation-contracts";
 import { createCareSummaryAiComposer } from "./compose-care-summary-with-ai";
 import type { SlotPlan } from "@/domain/ai";
@@ -129,7 +132,11 @@ describe("replaceWithAiAssistedPreview (Packet 11C B1b)", () => {
     expect(created!.provenance).toEqual({ sourceKind: "SYSTEM_DERIVATION", captureMethod: "RULE_ENGINE", initiator: "JAGAON_SYSTEM", assistance: "AI_ASSISTED" });
     const next = created!.payload;
     expect(next.status).toBe("PREPARED");
-    expect(next.composition).toEqual({ method: "AI_ASSISTED", templateVersion: payload.composition.templateVersion, aiInvocationAuditRef: input.aiInvocationAuditRef, validatedAt: LATER });
+    // Packet 11C Addendum C, C4 (deliberate): made under template and renderer 11c.2, with the AI marking section last.
+    expect(payload.composition.templateVersion).toBe("care-summary-template.11c.1");
+    expect(next.composition).toEqual({ method: "AI_ASSISTED", templateVersion: "care-summary-template.11c.2", aiInvocationAuditRef: input.aiInvocationAuditRef, validatedAt: LATER });
+    expect(next.rendering.rendererVersion).toBe("care-summary-renderer.11c.2");
+    expect(next.sections.at(-1)).toEqual(careSummaryAiMarkingSection("en-SG", payload.sections.length));
     expect(next.replacesSnapshot).toEqual({ recordType: "CARE_SUMMARY_SNAPSHOT", recordId: head.recordId, revisionId: head.expectedRevisionId });
     expect(next.rendering.contentHash).not.toBe(payload.rendering.contentHash);
     expect(next.patientApproval).toEqual({ state: "NOT_APPROVED" });
@@ -183,6 +190,46 @@ describe("replaceWithAiAssistedPreview (Packet 11C B1b)", () => {
     expect(new Set(lifecycle.map((revision) => JSON.stringify(revision.payload.sections))).size).toBe(1);
     const requested = await h.service.requestPrintExport({ recordId: result.recordId, expectedRevisionId: approved.revisionId, expectedRevisionNumber: 3, approvedContentHash: hash });
     expect(requested.kind).toBe("COMMITTED");
+    // Packet 11C Addendum C, C4: the approved artifact is the one with the AI marking (inside the hash it binds), and it prints it.
+    const approvedView = await h.query.loadSummary(result.recordId);
+    if (approvedView.status !== "READY") throw new Error("ready");
+    expect(approvedView.payload.sections.at(-1)!.sectionId).toBe("AI_MARKING");
+    expect(printableCareSummary(approvedView.payload).text.endsWith(`## ${getMessages("en-SG").ai.demoTag}\n${getMessages("en-SG").ai.resultCheck}`)).toBe(true);
+  });
+
+  it("D3 (Packet 11C Addendum C, C4): an unapproved 11c.1 AI-assisted preview is never previewed or approved; it must be prepared again", async () => {
+    const h = await setup();
+    const { input } = await h.aiReady();
+    const result = await h.service.replaceWithAiAssistedPreview(input);
+    if (result.kind !== "COMMITTED") throw new Error(JSON.stringify(result));
+    const target = { recordId: result.recordId, expectedRevisionId: result.revisionId, expectedRevisionNumber: 1 };
+
+    // PREPARED as the pre-C4 code stored it (11c.1, no marking): previewing it is refused and records nothing.
+    const prepared = await rewriteAsLegacy11c1AiAssistedSnapshot(h.database, result.recordId);
+    expect([prepared.composition.method, prepared.composition.templateVersion, prepared.rendering.rendererVersion]).toEqual(["AI_ASSISTED", "care-summary-template.11c.1", "care-summary-renderer.11c.1"]);
+    expect(prepared.sections.some((section) => section.sectionId === "AI_MARKING")).toBe(false);
+    const before = await h.counts();
+    expect(await h.service.markPreviewed({ ...target, contentHash: prepared.rendering.contentHash })).toEqual({ kind: "REJECTED", code: "SUMMARY_TEMPLATE_SUPERSEDED" });
+    expect(await h.counts()).toEqual(before);
+
+    // PREVIEWED under 11c.1 before C4 (the preview recorded by the old code): approval is refused and records nothing.
+    const fresh = await setup();
+    const ready = await fresh.aiReady();
+    const replaced = await fresh.service.replaceWithAiAssistedPreview(ready.input);
+    if (replaced.kind !== "COMMITTED") throw new Error(JSON.stringify(replaced));
+    const view = await fresh.query.loadSummary(replaced.recordId);
+    if (view.status !== "READY") throw new Error("ready");
+    const previewed = await fresh.service.markPreviewed({ recordId: replaced.recordId, expectedRevisionId: replaced.revisionId, expectedRevisionNumber: 1, contentHash: view.payload.rendering.contentHash });
+    if (previewed.kind !== "COMMITTED") throw new Error(JSON.stringify(previewed));
+    const legacy = await rewriteAsLegacy11c1AiAssistedSnapshot(fresh.database, replaced.recordId);
+    expect(legacy.status).toBe("PREVIEWED");
+    const stored = JSON.stringify(await fresh.revisionsOf(replaced.recordId));
+    const counted = await fresh.counts();
+    expect(await fresh.service.approve({ recordId: replaced.recordId, expectedRevisionId: previewed.revisionId, expectedRevisionNumber: 2, contentHash: legacy.rendering.contentHash })).toEqual({ kind: "REJECTED", code: "SUMMARY_TEMPLATE_SUPERSEDED" });
+    // It is never re-worded either; it is left exactly as stored.
+    expect(await fresh.service.replaceWithAiAssistedPreview({ ...ready.input, recordId: replaced.recordId, expectedRevisionId: previewed.revisionId, expectedRevisionNumber: 2, expectedContentHash: legacy.rendering.contentHash })).toEqual({ kind: "REJECTED", code: "SUMMARY_TEMPLATE_SUPERSEDED" });
+    expect(await fresh.counts()).toEqual(counted);
+    expect(JSON.stringify(await fresh.revisionsOf(replaced.recordId))).toBe(stored);
   });
 
   it("is idempotent: a replay of the same command returns its receipt; a second replacement of the old head never commits", async () => {

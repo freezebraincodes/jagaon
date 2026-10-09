@@ -6,7 +6,7 @@ import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
 import { getMessages } from "@/i18n/get-messages";
 import type { SupportedLocale } from "@/i18n/types";
 import type { Instant, RecordHead, RecordId } from "@/domain/shared";
-import { NOW, closeCarePreparationHarnesses, createCarePreparationHarness, ENABLED_CARE_MANIFEST, exact, fakeModelCareShells, rewriteAsLegacy9c1Snapshot, testIds } from "@/application/care-preparation/care-preparation-test-support";
+import { NOW, acceptedAiCareComposition, closeCarePreparationHarnesses, createCarePreparationHarness, ENABLED_CARE_MANIFEST, exact, fakeModelCareShells, rewriteAsLegacy11c1AiAssistedSnapshot, rewriteAsLegacy9c1Snapshot, testIds } from "@/application/care-preparation/care-preparation-test-support";
 import type { CarePreparationCommandPort, CarePreparationQueryPort } from "@/application/care-preparation/care-preparation-contracts";
 import type { CareSummarySnapshotPayload } from "@/domain/care-preparation/care-summary-snapshot";
 import { printableCareSummary } from "@/application/care-preparation/care-summary-artifact";
@@ -832,6 +832,14 @@ describe("Care-summary preview: accepted AI wording (Packet 11C B4b; injected te
     const newId = onReplaced.mock.calls[0]![0] as RecordId;
     expect(newId).not.toBe(ai.recordId);
     await waitFor(() => expect(screen.getByRole("article").textContent).not.toBe(before));
+    // Packet 11C Addendum C, C4: the new preview shows the same AI marking the printed artifact carries (the approved rows, its last
+    // section, after the notices); the deterministic preview showed none. Placement and appearance: human acceptance pending.
+    expect(before).not.toContain(messages.ai.demoTag);
+    expect(before).not.toContain(messages.ai.resultCheck);
+    const article = screen.getByRole("article");
+    const marking = within(article).getByRole("heading", { name: messages.ai.demoTag }).closest("section")!;
+    expect(marking.textContent).toBe(`${messages.ai.demoTag}${messages.ai.resultCheck}`);
+    expect(article.lastElementChild).toBe(marking);
     // The new snapshot is AI-assisted, recorded as previewed by the ordinary flow, and NOT approved.
     await waitFor(async () => {
       const view = await ai.h.query.loadSummary(newId);
@@ -851,6 +859,41 @@ describe("Care-summary preview: accepted AI wording (Packet 11C B4b; injected te
     // The approved AI-assisted summary keeps its AI label; the check notice is for review before approval.
     expect(screen.getByRole("region", { name: messages.ai.careSummary.resultTitle })).toBeTruthy();
     expect(screen.queryByText(messages.ai.careSummary.resultBody)).toBeNull();
+    // C4: the approved artifact on screen is exactly the printable artifact, marking included.
+    if (approved.status !== "READY") throw new Error("ready");
+    expect(screen.getByRole("article").textContent).toBe(printableCareSummaryText(approved.payload));
+    expect(within(screen.getByRole("article")).getByRole("heading", { name: messages.ai.demoTag })).toBeTruthy();
+  });
+
+  it("D3 (Packet 11C Addendum C, C4): an unapproved 11c.1 AI-assisted preview is shown as stored, never approved, and must be prepared again", async () => {
+    const { h, recordId } = await aiPrepared();
+    const commands = createCarePreparationService(h.database, { now: () => LATER, ids: testIds, projectAiCareSummary: projectValidatedAiCareSummary });
+    const view = await h.query.loadSummary(recordId);
+    if (view.status !== "READY") throw new Error("ready");
+    const accepted = await acceptedAiCareComposition(view.payload, { candidate: shellCandidate, requestId: crypto.randomUUID(), audit: createAiInvocationAuditRepository(h.database) });
+    const replaced = await commands.replaceWithAiAssistedPreview({ recordId, expectedRevisionId: view.revisionId, expectedRevisionNumber: view.revisionNumber, expectedContentHash: view.payload.rendering.contentHash, composition: accepted.composition, aiInvocationAuditRef: accepted.auditRef, validatedAt: LATER });
+    if (replaced.kind !== "COMMITTED") throw new Error(JSON.stringify(replaced));
+    // Stored as the pre-C4 code stored it: 11c.1, AI-assisted, no marking.
+    const legacy = await rewriteAsLegacy11c1AiAssistedSnapshot(h.database, replaced.recordId);
+    renderPreview(h, replaced.recordId, { commands });
+    expect(await screen.findByText(en.careSummary.templateSuperseded)).toBeTruthy();
+    expect(screen.getByRole("article").textContent).toBe(printableCareSummaryText(legacy));
+    expect(within(screen.getByRole("article")).queryByRole("heading", { name: en.ai.demoTag })).toBeNull();
+    expect(screen.queryByRole("button", { name: en.careSummary.approveAction })).toBeNull();
+    expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).toBeNull();
+    expect(screen.getAllByRole("button", { name: en.careSummary.backToPreparation }).length).toBeGreaterThan(0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(((await h.database.table("recordHeads").get(replaced.recordId)) as RecordHead).headRevisionNumber).toBe(1);
+  });
+
+  it("a deterministic preview shows no AI marking and no AI label", async () => {
+    const { h, recordId } = await aiPrepared("zh-SG");
+    renderPreview(h, recordId, { locale: "zh-SG" });
+    const article = await screen.findByRole("article");
+    expect(article.textContent).not.toContain(zh.ai.demoTag);
+    expect(article.textContent).not.toContain(zh.ai.resultCheck);
+    expect(screen.queryByText(zh.ai.demoTag)).toBeNull();
+    expect(screen.queryByRole("region", { name: zh.ai.careSummary.resultTitle })).toBeNull();
   });
 
   it("a Cancel during the replacement command still shows the new preview (the replacement committed)", async () => {

@@ -424,6 +424,9 @@ describe("Recorded history explanation panel (Packet 11C Task 7)", () => {
       expect(within(panel).getByRole("heading", { level: 3 })).toHaveFocus();
       await waitFor(() => expect(within(panel).getByRole("status")).toHaveTextContent(headlineOf(expected["en-SG"])));
       expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
+      // Packet 11C Addendum C, C4: no AI tag or check line on the deterministic explanation.
+      expect(within(panel).queryByText(en.ai.demoTag)).not.toBeInTheDocument();
+      expect(within(panel).queryByText(en.ai.resultCheck)).not.toBeInTheDocument();
       // The approved 7A card text is unchanged and still visible.
       expect(screen.getByText(cardText)).toBeVisible();
       expect(screen.getByText(cardText).closest("li")).toContainElement(panel);
@@ -798,6 +801,8 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     await waitFor(() => expect(panelStatus()).not.toBeEmptyDOMElement());
     expect(panelStatus()).not.toHaveTextContent(en.history.explanation.unavailable);
     expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
+    expect(within(panel).queryByText(en.ai.demoTag)).not.toBeInTheDocument();
+    expect(within(panel).queryByText(en.ai.resultCheck)).not.toBeInTheDocument();
     // Packet 11C B4a: the short non-technical line says AI wording was not used (human acceptance pending).
     expect(within(panel).getByText(en.ai.remoteNotAccepted)).toBeInTheDocument();
     expect(run.explain).toHaveBeenCalledTimes(1);
@@ -824,6 +829,9 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     const panel = screen.getByRole("region", { name: en.history.explanation.title });
     expect(within(panel).getByRole("heading", { level: 3 })).toHaveFocus();
     await waitFor(() => expect(within(panel).getByText(en.history.explanation.aiLabel)).toBeInTheDocument());
+    // Packet 11C Addendum C, C4: the accepted AI explanation carries the approved tag and check line, its text inside the tag's region.
+    const aiRegion = within(panel).getByRole("group", { name: en.ai.demoTag });
+    expect(within(aiRegion).getByText(en.ai.resultCheck)).toBeInTheDocument();
     expect(run.fetcher).toHaveBeenCalledTimes(1);
     expect(run.explain.mock.calls[0]![0]).toEqual({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" });
     expect(run.explain.mock.calls[0]![1]).toBeInstanceOf(AbortSignal);

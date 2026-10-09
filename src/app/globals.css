@@ -4105,6 +4105,25 @@ button.summary-tile:hover:not(:disabled) {
   margin: 0;
 }
 
+/* Packet 11C Addendum C, C4: the generated text's region; an AI-sourced one carries the approved tag and check line. Placement and
+   appearance: human acceptance pending. */
+.history-explanation-generated {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.history-explanation-ai {
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--line);
+}
+
+.history-explanation-ai-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .history-explanation-title {
   font-family: var(--font-display);
   font-size: 1.1875rem;
