@@ -1,0 +1,654 @@
+{
+  "version": "traceability.12a.1",
+  "entries": [
+    {
+      "id": "LRJ-001",
+      "requirementRefs": [
+        {"requirementId":"LRJ-001","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:a9e0432091b7649f634936b420cc4e1a323b1bfd645ebc63973d3ffc484c5e03"},
+        {"requirementId":"LRJ-001","documentPath":"internal-docs/regulatory-compliance-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:81e876693f1fd90ba9b36c58ff801c89a84c25008c091a27e4c334272417c453"}
+      ],
+      "lrj": ["LRJ-001"],
+      "jny": [],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST","HUMAN_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [
+        {"suite":"contract","file":"src/components/jagaon/bilingual-evidence.test.ts","title":"catalogue wording boundaries contains no diagnosis, risk, urgency, missed-dose or take-now wording in either locale"},
+        {"suite":"integration","file":"src/components/jagaon/screens/RecordedHistoryScreen.test.tsx","title":"Recorded history screen never renders clinical, causal or adherence wording"}
+      ],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "LRJ-002",
+      "requirementRefs": [
+        {"requirementId":"LRJ-002","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:94b3bc81bded3de38ecbc8b9fcd431f28972682a5024345233c52b9f7b55899d"},
+        {"requirementId":"LRJ-002","documentPath":"internal-docs/regulatory-compliance-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:0161b93927ab7be3278d0e532a1928242eabb7a1e6651a3926d899b859c9c1a4"}
+      ],
+      "lrj": ["LRJ-002"],
+      "jny": [],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST","HUMAN_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [
+        {"suite":"integration","file":"src/components/jagaon/screens/RecordedHistoryScreen.test.tsx","title":"Recorded history screen never renders clinical, causal or adherence wording"}
+      ],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "LRJ-003",
+      "requirementRefs": [
+        {"requirementId":"LRJ-003","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:672d2ff6a443b6c077757273a6adecd529cc9d95452f387e4c04c74b830c798f"},
+        {"requirementId":"LRJ-003","documentPath":"internal-docs/regulatory-compliance-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:18efc08d02f9d480dff65c457e93c7e269f754b8757ad513c4e9fd8933f1cc00"}
+      ],
+      "lrj": ["LRJ-003"],
+      "jny": [],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST","HUMAN_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [
+        {"suite":"integration","file":"src/components/jagaon/screens/TodayScreen.test.tsx","title":"TodayScreen uses 'Not recorded' and never 'missed'"},
+        {"suite":"contract","file":"src/components/jagaon/packet-8-manifest.test.ts","title":"Packet 8 bilingual copy contains no adherence judgement, clinical interpretation, dose advice or unverified delivery claim"}
+      ],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "LRJ-004",
+      "requirementRefs": [
+        {"requirementId":"LRJ-004","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:300af53144f97b1a6eca8346366bf3f137e47ef721c57825ade26821226ea171"},
+        {"requirementId":"LRJ-004","documentPath":"internal-docs/regulatory-compliance-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:82bd5801aa4a27ca284b79ac8255a3184b51a223886e1ddedf63f267de86bd45"}
+      ],
+      "lrj": ["LRJ-004"],
+      "jny": [],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST","HUMAN_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "LRJ-005",
+      "requirementRefs": [
+        {"requirementId":"LRJ-005","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:10a838b6d8af9ba82d9eddc2fcab464ef6886576a3b9e66d95ec4b70309d878a"},
+        {"requirementId":"LRJ-005","documentPath":"internal-docs/regulatory-compliance-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:3bf20575d207e517e6a0d3f7d140a514ad70efaebdcb7c69b8429fefeb5885b6"}
+      ],
+      "lrj": ["LRJ-005"],
+      "jny": [],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST","HUMAN_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [
+        {"suite":"contract","file":"src/components/jagaon/packet-9c-manifest.test.ts","title":"Packet 9C manifest keeps external confirmation NONE on every path and has no delivery or review event"},
+        {"suite":"integration","file":"src/components/jagaon/screens/CareSummaryPreviewScreen.test.tsx","title":"Care-summary preview renders a zh-SG snapshot directly and never claims sending, delivery or review"}
+      ],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "LRJ-006",
+      "requirementRefs": [
+        {"requirementId":"LRJ-006","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:d9841f89e8cce3630fb918d43ff2b189f44d4c2bacd847385d6b7f22299744ab"},
+        {"requirementId":"LRJ-006","documentPath":"internal-docs/regulatory-compliance-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:7f3d4c45ca0a4d4c78855055070d803e9eae42f528d0aa62cd1c492026ad8e56"}
+      ],
+      "lrj": ["LRJ-006"],
+      "jny": [],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST","MODEL_EVALUATION","HUMAN_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [
+        {"suite":"contract","file":"src/domain/ai/ai-task-contracts.test.ts","title":"closed AI task registry is exactly the six ordinary-product tasks, in the locked order"},
+        {"suite":"contract","file":"src/domain/ai/ai-task-contracts.test.ts","title":"closed AI task registry rejects an unknown or Safety task on every envelope"},
+        {"suite":"contract","file":"src/application/ai/ai-activation-manifest.test.ts","title":"AI activation manifest never resolves remote processing in 11A, for any profile"}
+      ],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "LRJ-007",
+      "requirementRefs": [
+        {"requirementId":"LRJ-007","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:49fb07c9cbabbe692380ac5d0fdd16c958d65a998026e7b1d1f06c6384fa7cb7"},
+        {"requirementId":"LRJ-007","documentPath":"internal-docs/regulatory-compliance-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:3647a06c7057e9aed97fce3f2fdf5d6b78a3b7c2be4e0936485661e38bfa5464"}
+      ],
+      "lrj": ["LRJ-007"],
+      "jny": [],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [
+        {"suite":"contract","file":"src/components/jagaon/import-boundary.test.ts","title":"Packet 7A runtime import boundary reaches only the enabled Learning, Pattern and Packet 8 Inquiry modules, never Safety or live providers"},
+        {"suite":"contract","file":"src/components/jagaon/import-boundary.test.ts","title":"Packet 8 import boundary cannot reach Packet 5A Safety, a Safety policy pack, AI, Packet 7B or a live provider"},
+        {"suite":"contract","file":"src/components/jagaon/import-boundary.test.ts","title":"Packet 10 storage, deletion and portability import boundary never reaches Packet 5A Safety records, policy, engine or delivery modules"},
+        {"suite":"contract","file":"src/storage/storage-profile-manifest.test.ts","title":"HACKATHON_DEMO storage profile manifest (Packet 10 freeze Section 3) keeps Packet 5A Safety absent from every profile path"},
+        {"suite":"security","file":"tests/release/build-artifact.test.ts","title":"Packet 12A B1 real build check (JAGAON_RELEASE_BUILD_DIR) passes every B1 structural and secret-shaped check on the release build (exact-value check not claimed: no secret values in the release environment)"}
+      ],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "LRJ-008",
+      "requirementRefs": [
+        {"requirementId":"LRJ-008","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:7481c010bcf36706d8e8448e206a82c1374077cf7fd34ac059ae693b4406bc73"},
+        {"requirementId":"LRJ-008","documentPath":"internal-docs/regulatory-compliance-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:7481c010bcf36706d8e8448e206a82c1374077cf7fd34ac059ae693b4406bc73"}
+      ],
+      "lrj": ["LRJ-008"],
+      "jny": [],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [
+        {"suite":"contract","file":"src/components/jagaon/import-boundary.test.ts","title":"Packet 7A runtime import boundary has no Packet 7B evaluator module or runtime path"},
+        {"suite":"contract","file":"src/application/ai/ai-activation-manifest.test.ts","title":"AI activation manifest never resolves remote processing in 11A, for any profile"}
+      ],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "LRJ-009",
+      "requirementRefs": [
+        {"requirementId":"LRJ-009","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:eb1194a8d555631d2eb6d0a2e67e52bf8f9b5ba7aeaf4a846166bf3a7df0e74d"},
+        {"requirementId":"LRJ-009","documentPath":"internal-docs/regulatory-compliance-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:4112c5ad2313923412c02ff8d3cd08549f81f542ac3660aac056fc6391549b1e"}
+      ],
+      "lrj": ["LRJ-009"],
+      "jny": [],
+      "workflowGroups": [],
+      "methods": ["HUMAN_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "LRJ-010",
+      "requirementRefs": [
+        {"requirementId":"LRJ-010","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:6e5274900736daba24f0d10fbe217680621638391f8773952cf2ed96b30c57a5"},
+        {"requirementId":"LRJ-010","documentPath":"internal-docs/regulatory-compliance-spec.md","sectionAnchor":"2.4","invariantFingerprint":"sha256:6e5274900736daba24f0d10fbe217680621638391f8773952cf2ed96b30c57a5"}
+      ],
+      "lrj": ["LRJ-010"],
+      "jny": [],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST","HUMAN_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [
+        {"suite":"unit","file":"src/config/release-profile.test.ts","title":"release profile locks this application to HACKATHON_DEMO"},
+        {"suite":"unit","file":"src/config/release-profile.test.ts","title":"release profile accepts exactly HACKATHON_DEMO"}
+      ],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-001",
+      "requirementRefs": [
+        {"requirementId":"JNY-001","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:6cb6fc8c1b80eef85f73e949de5dfadd20ffa3c20fc4eb445e2cffc2cd97f29e"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-001"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST","HUMAN_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-002",
+      "requirementRefs": [
+        {"requirementId":"JNY-002","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:51ddacc2cca9de3c58ee6cd42096a035d6b0673505e8f14793ad87fc36e8d443"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-002"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-003",
+      "requirementRefs": [
+        {"requirementId":"JNY-003","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:a97b933f2bccc525fb362badbbad99ae0aac81b4b3cf7e39c7bed78fe6669121"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-003"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-004",
+      "requirementRefs": [
+        {"requirementId":"JNY-004","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:e5073dc06acb410ff260779fc8185d5495d53d3feff60bcce339ede3ec9d0516"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-004"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-005",
+      "requirementRefs": [
+        {"requirementId":"JNY-005","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:1ff0e0faa43f807170967e771da481bc0815a43c91bfd489e5e7d921410a8c73"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-005"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-006",
+      "requirementRefs": [
+        {"requirementId":"JNY-006","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:a0a4027e34a391755bdf76dabc15a472f383eb3de30154f5131d2afa17906f80"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-006"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-007",
+      "requirementRefs": [
+        {"requirementId":"JNY-007","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:9a16118a57c131a2a81dc16d46068f113ec20ecb9e2dded4e6020babae56bd80"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-007"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-008",
+      "requirementRefs": [
+        {"requirementId":"JNY-008","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:8de98f860cabb35909ced03f09e0e777d4542ec6668166580e1076fd6d51dec6"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-008"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-009",
+      "requirementRefs": [
+        {"requirementId":"JNY-009","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:343e154e08e31e44c2b425cca917689c166cd7a3c8937325e8e8645a566f5f69"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-009"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-010",
+      "requirementRefs": [
+        {"requirementId":"JNY-010","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:d3bf2b8242c7f55344e011396b9cc9f61589ad894c7a02efdb8d12dbdea26024"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-010"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST","HUMAN_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-011",
+      "requirementRefs": [
+        {"requirementId":"JNY-011","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:ed1fa19f0683035d12438f29610bc6fdd598b5abf78b2bcab67f6e2f2345f2fb"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-011"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-012",
+      "requirementRefs": [
+        {"requirementId":"JNY-012","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:bbc95e8079b2829a5057fb0965fe6fdd65d8f2ef93dddafcce19d8860655950f"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-012"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-013",
+      "requirementRefs": [
+        {"requirementId":"JNY-013","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:9a5f4cfc27582cebcc842447430a07c7b0899377d1b6ecbbef4607c9094abc69"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-013"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-014",
+      "requirementRefs": [
+        {"requirementId":"JNY-014","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:da6a41d3f1d4cb253794c6e5e9de1e33360c7a5c9fb5ae36df900228a5d40621"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-014"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-015",
+      "requirementRefs": [
+        {"requirementId":"JNY-015","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:8d9336c3f7b88961bb43c3c61ccf21cace604f2d6d478595037d483945329f74"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-015"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-016",
+      "requirementRefs": [
+        {"requirementId":"JNY-016","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:619aa2222e7437d17998bf741c379669028e61e7a0117b834b4be4dc0af18dac"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-016"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-017",
+      "requirementRefs": [
+        {"requirementId":"JNY-017","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:a46d200cde109a254aff4c77e468da45f64a59db744fa44f27eaeee42132fb3f"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-017"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST","HUMAN_REVIEW","DEPLOYMENT_CHECK"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-018",
+      "requirementRefs": [
+        {"requirementId":"JNY-018","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:fc1412d8e84f9a2ec6def00fb12495d3f6e6b7f341a43c85096c28bff407f4c7"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-018"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST","HUMAN_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "JNY-019",
+      "requirementRefs": [
+        {"requirementId":"JNY-019","documentPath":"internal-docs/test-release-spec.md","sectionAnchor":"9.2","invariantFingerprint":"sha256:95469b81ce9c4ce1cea7e657ebf21811f195cd9f11b74cf38b522c7f4620d406"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-019"],
+      "workflowGroups": [],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-01",
+      "requirementRefs": [
+        {"requirementId":"WG-01","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:54301b9a3a0557e3bb67fa81c037a70c979295c2c41d99501a338dcddead13d6"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-001","JNY-014"],
+      "workflowGroups": [1],
+      "methods": ["AUTOMATED_TEST","DEVICE_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-02",
+      "requirementRefs": [
+        {"requirementId":"WG-02","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:5004e8c70216448198399761ebc172f7492f1e5a5ef5ed415dcf40bf240c83d1"}
+      ],
+      "lrj": [],
+      "jny": [],
+      "workflowGroups": [2],
+      "methods": ["AUTOMATED_TEST","HUMAN_REVIEW","DEVICE_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-03",
+      "requirementRefs": [
+        {"requirementId":"WG-03","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:a0680da3e9095b643f7aa44038544ca958a6f06e92b9ca63cce51a2f8b627eeb"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-008","JNY-015"],
+      "workflowGroups": [3],
+      "methods": ["AUTOMATED_TEST","DEVICE_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [
+        {"suite":"e2e","file":"e2e/packet-12/critical-journey.spec.ts","title":"critical journey en-SG 390 prepared profile → language round trip → glucose record and time correction → history → schedule → nearby food map → care preview, print → reset (en-SG, 390)"},
+        {"suite":"e2e","file":"e2e/packet-12/critical-journey.spec.ts","title":"critical journey en-SG 1280 prepared profile → language round trip → glucose record and time correction → history → schedule → nearby food map → care preview, print → reset (en-SG, 1280)"},
+        {"suite":"e2e","file":"e2e/packet-12/critical-journey.spec.ts","title":"critical journey zh-SG 390 prepared profile → language round trip → glucose record and time correction → history → schedule → nearby food map → care preview, print → reset (zh-SG, 390)"},
+        {"suite":"e2e","file":"e2e/packet-12/critical-journey.spec.ts","title":"critical journey zh-SG 1280 prepared profile → language round trip → glucose record and time correction → history → schedule → nearby food map → care preview, print → reset (zh-SG, 1280)"}
+      ],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-04",
+      "requirementRefs": [
+        {"requirementId":"WG-04","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:2891c02903d127bac19f84c921636d7a03f6870bff48c3c19a7fbeece31c0feb"}
+      ],
+      "lrj": ["LRJ-007"],
+      "jny": [],
+      "workflowGroups": [4],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-05",
+      "requirementRefs": [
+        {"requirementId":"WG-05","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:53c0dc885ba40e60a07693e10fca176bab1bf9c5e7ed223d281f17302072613c"}
+      ],
+      "lrj": ["LRJ-003"],
+      "jny": ["JNY-004"],
+      "workflowGroups": [5],
+      "methods": ["AUTOMATED_TEST","DEVICE_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-06",
+      "requirementRefs": [
+        {"requirementId":"WG-06","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:611bda9599bc4949edef9b57890dc26513e9b1b11ae44fc5b206d1247a394714"}
+      ],
+      "lrj": [],
+      "jny": [],
+      "workflowGroups": [6],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-07",
+      "requirementRefs": [
+        {"requirementId":"WG-07","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:105c704dc5472e65580625b2931b9e133208a8480ad1eaf4a376c972490578ee"}
+      ],
+      "lrj": [],
+      "jny": [],
+      "workflowGroups": [7],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-08",
+      "requirementRefs": [
+        {"requirementId":"WG-08","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:c16ad5552712ba40a404f98332e7eaa082cb3eeab96ebc79e2e46ea9043819a6"}
+      ],
+      "lrj": ["LRJ-004"],
+      "jny": ["JNY-019"],
+      "workflowGroups": [8],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-09",
+      "requirementRefs": [
+        {"requirementId":"WG-09","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:16b3509fb47f40a81e1c463d03bb26751078a63a5b5cf203ee4bb056daf389f6"}
+      ],
+      "lrj": [],
+      "jny": [],
+      "workflowGroups": [9],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-10",
+      "requirementRefs": [
+        {"requirementId":"WG-10","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:ad7f9c2391479daf548abf1ec0dadcf29314b535f912975a57f2ed8c4dfdd082"}
+      ],
+      "lrj": ["LRJ-005"],
+      "jny": ["JNY-010"],
+      "workflowGroups": [10],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-11",
+      "requirementRefs": [
+        {"requirementId":"WG-11","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:eff3117ae6c5315095512d5749b13b27af122e3941ae3f67be66913f9ad404e5"}
+      ],
+      "lrj": ["LRJ-006"],
+      "jny": [],
+      "workflowGroups": [11],
+      "methods": ["AUTOMATED_TEST","MODEL_EVALUATION"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-12",
+      "requirementRefs": [
+        {"requirementId":"WG-12","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:62bb5c731ab878eaad47adf5b19b0a4ed5c7b4b9d89dbae7e1d1ab97240a5d8c"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-009","JNY-012"],
+      "workflowGroups": [12],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-13",
+      "requirementRefs": [
+        {"requirementId":"WG-13","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:c8a936c62fb653d99e839b19c5804ad7d3cb9986942d5e14753fd255d910f89d"}
+      ],
+      "lrj": [],
+      "jny": ["JNY-011","JNY-013"],
+      "workflowGroups": [13],
+      "methods": ["AUTOMATED_TEST"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    },
+    {
+      "id": "WG-14",
+      "requirementRefs": [
+        {"requirementId":"WG-14","documentPath":"internal-docs/superpowers/specs/2026-10-05-packet-12-integrated-hackathon-release-design.md","sectionAnchor":"5","invariantFingerprint":"sha256:4491d4cd04c8b6d052c09c87137b9f01d240d3d740985aa6d5cd40ac92d23a3f"}
+      ],
+      "lrj": [],
+      "jny": [],
+      "workflowGroups": [14],
+      "methods": ["AUTOMATED_TEST","DEVICE_REVIEW"],
+      "profiles": ["HACKATHON_DEMO"],
+      "cases": [
+        {"suite":"e2e","file":"e2e/packet-12/critical-journey.spec.ts","title":"critical journey en-SG 390 prepared profile → language round trip → glucose record and time correction → history → schedule → nearby food map → care preview, print → reset (en-SG, 390)"},
+        {"suite":"e2e","file":"e2e/packet-12/critical-journey.spec.ts","title":"critical journey en-SG 1280 prepared profile → language round trip → glucose record and time correction → history → schedule → nearby food map → care preview, print → reset (en-SG, 1280)"},
+        {"suite":"e2e","file":"e2e/packet-12/critical-journey.spec.ts","title":"critical journey zh-SG 390 prepared profile → language round trip → glucose record and time correction → history → schedule → nearby food map → care preview, print → reset (zh-SG, 390)"},
+        {"suite":"e2e","file":"e2e/packet-12/critical-journey.spec.ts","title":"critical journey zh-SG 1280 prepared profile → language round trip → glucose record and time correction → history → schedule → nearby food map → care preview, print → reset (zh-SG, 1280)"}
+      ],
+      "evidence": [],
+      "applicability": "APPLICABLE"
+    }
+  ]
+}

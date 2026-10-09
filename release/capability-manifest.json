@@ -1,0 +1,118 @@
+{
+  "version": "capability-manifest.12a.1",
+  "profile": "HACKATHON_DEMO",
+  "sources": {
+    "releaseProfile": "src/config/release-profile.ts",
+    "aiActivation": "src/application/ai/ai-activation-manifest.ts",
+    "intelligenceActivation": "src/application/intelligence/activation-manifest.ts",
+    "screens": "src/components/jagaon/screen-manifest.ts",
+    "storageProfile": "src/storage/storage-profile-manifest.ts"
+  },
+  "capabilities": {
+    "enabled": [
+      { "id": "JOURNAL_RECORDS", "packet": "6", "note": "Manual glucose, insulin, meal records, time wheel and correction" },
+      { "id": "DEMO_ONBOARDING", "packet": "6", "note": "Synthetic first-run onboarding, skip and resume" },
+      { "id": "MY_MEDICINES", "packet": "6A", "note": "Post-setup medicine management" },
+      { "id": "RECORDED_HISTORY_AND_PATTERNS", "packet": "7A", "note": "History plus the enabled deterministic pattern and learning families" },
+      { "id": "MEDICATION_SCHEDULE", "packet": "8", "note": "Schedules, reminders, occurrences; absent log reads not recorded" },
+      { "id": "NEARBY_FOOD", "packet": "9A", "note": "User-opened nearby food with OneMap search/tiles and the HPB snapshot" },
+      { "id": "PREVENTIVE_CARE_AND_CARE_PREPARATION", "packet": "9B", "note": "Health checks and visit preparation" },
+      { "id": "CARE_SUMMARY_PREVIEW_AND_EXPORT", "packet": "9C", "note": "User-approved local preview, print and export" },
+      { "id": "DATA_BACKUP_RESTORE_DELETION", "packet": "10", "note": "Encrypted backup, restore, permanent deletion, demo reset" },
+      { "id": "AI_DETERMINISTIC_FALLBACK_AND_DISCLOSURE", "packet": "11A-11C", "note": "Deterministic wording only; remote wording stays off (all tasks DETERMINISTIC_ONLY)" }
+    ],
+    "disabled": [
+      { "id": "REMOTE_AI_EXPLAIN_PATTERN", "packet": "11C", "reason": "Task is DETERMINISTIC_ONLY and JAGAON_REMOTE_AI is unset for the candidate; request classes PENDING; D2 open" },
+      { "id": "REMOTE_AI_DRAFT_CARE_PREPARATION_SUMMARY", "packet": "11C", "reason": "Task is DETERMINISTIC_ONLY and JAGAON_REMOTE_AI is unset for the candidate; request classes PENDING; D2 open" },
+      { "id": "PACKET_5A_SAFETY_UI", "packet": "5A", "reason": "No route renders Packet 5A; storage profile safetyRuntime ABSENT (R10, D6)" },
+      { "id": "PACKET_7B", "packet": "7B", "reason": "Deferred; not implemented in the candidate" },
+      { "id": "PACKET_13_TRTC_VOICE", "packet": "13", "reason": "Present (route /api/voice/usersig: POST for the credential, GET for the credential-free availability probe, which answers { available: false } for the candidate); refuses without configuration (JAGAON_VOICE_CLOUD and the voice origins, passcode, limits and TRTC credentials unset); disabled for the candidate. JAGAON_TRUST_VERCEL_CLIENT_IP is optional and off by default (only the exact value on enables it); when on, the failed-passcode throttle buckets by the x-real-ip header only, which is safe only on Vercel (elsewhere a client can forge it, so off means one shared bucket). The TELL_JAGAON screen is present. Live TRTC calls need separate owner authorization" },
+      { "id": "REMOTE_AI_EXTRACT_VOICE_FACTS", "packet": "13", "reason": "Present (route /api/ai/transcript); refuses without configuration (JAGAON_REMOTE_AI, JAGAON_AI_TRANSCRIPT_EXTRACTION and its own daily spend limit JAGAON_AI_TRANSCRIPT_DAILY_SPEND_LIMIT_USD unset), activation (task not registered) and its own qualification (PENDING); disabled for the candidate. Its spend counter is separate from the wording route's JAGAON_AI_DAILY_SPEND_LIMIT_USD (two counters, not one cap; both best-effort per server instance)" },
+      { "id": "PATIENT_RELEASE", "packet": "release", "reason": "Only HACKATHON_DEMO is implemented; real-user release blocked (LRJ-010)" }
+    ]
+  },
+  "ai": {
+    "manifestVersion": "ai-activation.11a.1",
+    "tasks": {
+      "EXTRACT_CANDIDATE_FACTS": "DETERMINISTIC_ONLY",
+      "EXPLAIN_PATTERN": "DETERMINISTIC_ONLY",
+      "DRAFT_NEUTRAL_INQUIRY": "DETERMINISTIC_ONLY",
+      "ANSWER_BOUNDED_RECORD_QUERY": "DETERMINISTIC_ONLY",
+      "DRAFT_CARE_PREPARATION_SUMMARY": "DETERMINISTIC_ONLY",
+      "PHRASE_NON_CLINICAL_RESPONSE": "DETERMINISTIC_ONLY"
+    },
+    "remoteSwitch": "JAGAON_REMOTE_AI",
+    "remoteState": "OFF"
+  },
+  "intelligence": {
+    "manifestVersion": "7a.1",
+    "enabledPatternFamilies": ["FAMILIAR_OR_FREQUENT_ITEM", "COMPARABLE_SLOT_TREND"],
+    "enabledLearningFamilies": ["FAMILIAR_ITEM"]
+  },
+  "screens": [
+    "TODAY",
+    "MEDICATION_SCHEDULE",
+    "HISTORY",
+    "MORE",
+    "LOG_GLUCOSE",
+    "CHANGE_READING_TIME",
+    "RECORD_INSULIN",
+    "LOG_MEAL",
+    "MEDICATION_INFORMATION",
+    "NEARBY_FOOD",
+    "GENERAL_FOOD_INFORMATION",
+    "FOOD_VENUE_DETAILS",
+    "HELP_INFORMATION",
+    "MY_MEDICINES",
+    "PREVENTIVE_CARE",
+    "CARE_PREPARATION",
+    "CARE_SUMMARY_PREVIEW",
+    "DATA_BACKUP",
+    "TELL_JAGAON"
+  ],
+  "onboardingRoutes": ["WELCOME", "PROFILE", "MEDICINES", "ADD_MEDICINE", "DIRECTIONS", "REVIEW", "COMPLETE", "RESUME", "SKIPPED", "STORAGE_FAILURE"],
+  "storage": {
+    "profileId": "HACKATHON_DEMO",
+    "physicalDexieVersion": 2,
+    "logicalStorageSchemaVersion": 1,
+    "tables": [
+      "appPreferences",
+      "recordRevisions",
+      "recordHeads",
+      "deletionTombstones",
+      "auditEvents",
+      "domainEvents",
+      "commandReceipts",
+      "eventWorkItems",
+      "eventConsumerReceipts",
+      "reverseDependencies",
+      "engineEvaluationAudits",
+      "aiInvocationAudits",
+      "runtimeManifests",
+      "governedAssets",
+      "runtimeActivationAudits",
+      "storageMetadata"
+    ],
+    "appPreferenceKeys": ["language", "keepWordingOnDevice"],
+    "deletionSafetyStep": "NOT_ENABLED_IN_PROFILE",
+    "safetyRuntime": "ABSENT"
+  },
+  "routes": {
+    "app": [
+      { "path": "/", "kind": "PAGE", "note": "The bilingual journal app" },
+      { "path": "/api/ai/shell", "kind": "API", "note": "Remote wording route; refuses unless JAGAON_REMOTE_AI and access checks pass (off for the candidate)" },
+      { "path": "/api/ai/task", "kind": "RETIRED_REFUSES", "note": "Retired legacy route; refuses every request" },
+      { "path": "/api/ai/transcript", "kind": "API", "note": "Packet 13 transcript extraction; refuses unless both switches, its own spend limit, activation and its own qualification pass (disabled for the candidate)" },
+      { "path": "/api/onemap/search", "kind": "API", "note": "Server-side OneMap search proxy" },
+      { "path": "/api/voice/usersig", "kind": "API", "note": "Packet 13 TRTC UserSig. POST issues the short-lived credential and refuses without the voice configuration. GET is the credential-free availability probe: it answers { available } only (false unless the switch is on and the configuration is valid; false for a cross-site request; 429 with false above its own per-instance window), and reads no passcode or secret, reserves nothing and signs nothing. Any other method is 405 (disabled for the candidate)" }
+    ],
+    "framework": ["/_global-error", "/_not-found"]
+  },
+  "providers": [
+    { "id": "DEEPSEEK", "side": "SERVER", "state": "OFF", "switch": "JAGAON_REMOTE_AI", "route": "/api/ai/shell", "alsoRoutes": ["/api/ai/transcript"], "hosts": ["api.deepseek.com"] },
+    { "id": "TENCENT_TRTC", "side": "CLIENT_AND_SERVER", "state": "OFF", "switch": "JAGAON_VOICE_CLOUD", "route": "/api/voice/usersig", "hosts": ["*.rtc-web.com", "*.rtc-web.io", "apisgp.my-imcloud.com"] },
+    { "id": "ONEMAP_SEARCH", "side": "SERVER", "state": "ON", "route": "/api/onemap/search", "hosts": ["www.onemap.gov.sg"] },
+    { "id": "ONEMAP_TILES", "side": "CLIENT", "state": "ON", "hosts": ["www.onemap.gov.sg"] },
+    { "id": "HPB_SNAPSHOT", "side": "STATIC", "state": "ON", "files": ["public/data/hpb-nearby-food-v1.json", "public/data/hpb-nearby-food-v1.manifest.json"] }
+  ]
+}

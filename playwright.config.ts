@@ -20,7 +20,7 @@ export default defineConfig({
   webServer: {
     command: "npx next start -p 3210",
     url: "http://localhost:3210",
-    reuseExistingServer: true,
+    reuseExistingServer: process.env.JAGAON_RELEASE !== "1",
     timeout: 120_000,
   },
   projects: [

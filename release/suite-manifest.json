@@ -1,0 +1,493 @@
+{
+  "version": "release-suites.12a.1",
+  "suites": {
+    "unit": {
+      "groups": [
+        {
+          "runner": "vitest",
+          "files": [
+            "src/ai/deepseek/deepseek-responses-provider.test.ts",
+            "src/ai/deepseek/shell-call-upper-bound.test.ts",
+            "src/ai/evaluation/packet-11-approved-meaning-authority.test.ts",
+            "src/ai/evaluation/packet-11-care-reference-fidelity.test.ts",
+            "src/ai/evaluation/packet-11-care-snapshot-guard.test.ts",
+            "src/ai/evaluation/packet-11-diagnostic-selection.test.ts",
+            "src/ai/evaluation/packet-11-duplicate-references.test.ts",
+            "src/ai/evaluation/packet-11-en-explain-synthetic-shells.test.ts",
+            "src/ai/evaluation/packet-11-evaluation.test.ts",
+            "src/ai/evaluation/packet-11-fixtures.test.ts",
+            "src/ai/evaluation/packet-11-hybrid-evaluation.test.ts",
+            "src/ai/evaluation/packet-11-hybrid-human-review.test.ts",
+            "src/ai/evaluation/packet-11-latency.test.ts",
+            "src/ai/evaluation/packet-11-live-trace.test.ts",
+            "src/ai/evaluation/packet-11-meaning-diagnostics.test.ts",
+            "src/ai/evaluation/packet-11-negative-fixtures.test.ts",
+            "src/ai/evaluation/packet-11-number-words.test.ts",
+            "src/ai/evaluation/packet-11-observation-ownership.test.ts",
+            "src/ai/evaluation/packet-11-reference-diagnostics.test.ts",
+            "src/ai/evaluation/packet-11-reference-mismatch.test.ts",
+            "src/ai/evaluation/packet-11-schema-diagnostics.test.ts",
+            "src/ai/evaluation/packet-11-source-backed-fixtures.test.ts",
+            "src/ai/evaluation/packet-11-source-backed-guard.test.ts",
+            "src/ai/evaluation/packet-11-timeout-policy.test.ts",
+            "src/ai/evaluation/packet-11-unit-codes.test.ts",
+            "src/ai/evaluation/packet-11-zh-explain-synthetic-shells.test.ts",
+            "src/ai/evaluation/packet-11c-request-classes.test.ts",
+            "src/ai/evaluation/transcript-extraction/transcript-extraction-evaluation.test.ts",
+            "src/ai/kie/kie-grok-adapter.test.ts",
+            "src/ai/kie/kie-model-catalogue.test.ts",
+            "src/ai/kie/kie-responses-provider.test.ts",
+            "src/ai/kie/kie-route-config.test.ts",
+            "src/ai/kie/kie-shell-responses-provider.test.ts",
+            "src/ai/prompts/packet-11-prompts.test.ts",
+            "src/ai/prompts/packet-11-shell-prompts.test.ts",
+            "src/ai/transcript-extraction/transcript-extraction-request.test.ts",
+            "src/app/layout.test.ts",
+            "src/application/ai/ai-audit-lifecycle.test.ts",
+            "src/application/ai/ai-audit-persistence.test.ts",
+            "src/application/ai/ai-fallbacks.test.ts",
+            "src/application/ai/ai-hybrid-runtime-bundles.test.ts",
+            "src/application/ai/ai-hybrid-task-service.test.ts",
+            "src/application/ai/ai-meaning-registry.test.ts",
+            "src/application/ai/ai-meaning-rules.test.ts",
+            "src/application/ai/ai-output-validator.test.ts",
+            "src/application/ai/ai-runtime-bundles.test.ts",
+            "src/application/ai/ai-task-service-source-backed.test.ts",
+            "src/application/ai/ai-task-service.test.ts",
+            "src/application/ai/browser-history-explainer.test.ts",
+            "src/application/ai/browser-shell-client.test.ts",
+            "src/application/ai/detached-payload-projector.test.ts",
+            "src/application/ai/explain-pattern-request.test.ts",
+            "src/application/ai/explain-pattern.test.ts",
+            "src/application/ai/language/ai-language-copy.test.ts",
+            "src/application/ai/language/assembler.test.ts",
+            "src/application/ai/language/atom-renderer.test.ts",
+            "src/application/ai/language/care-draft-notices.test.ts",
+            "src/application/ai/language/default-shells.test.ts",
+            "src/application/ai/language/deterministic-composition.test.ts",
+            "src/application/ai/language/observation-composer.test.ts",
+            "src/application/ai/language/shell-projector.test.ts",
+            "src/application/ai/language/shell-validator.test.ts",
+            "src/application/ai/language/slot-planner.test.ts",
+            "src/application/ai/request-class-qualification.test.ts",
+            "src/application/care-organisation/care-organisation-query.test.ts",
+            "src/application/care-organisation/care-organisation-service.test.ts",
+            "src/application/care-plan/care-plan-command-service.test.ts",
+            "src/application/care-preparation/ai-care-summary-replacement.test.ts",
+            "src/application/care-preparation/ai-care-summary-request.test.ts",
+            "src/application/care-preparation/care-preparation-ai-replacement.test.ts",
+            "src/application/care-preparation/care-preparation-query.test.ts",
+            "src/application/care-preparation/care-preparation-service.test.ts",
+            "src/application/care-preparation/care-summary-ai-marking.test.ts",
+            "src/application/care-preparation/care-summary-candidates.test.ts",
+            "src/application/care-preparation/care-summary-invalidation.test.ts",
+            "src/application/care-preparation/care-summary-legacy-artifact.test.ts",
+            "src/application/care-preparation/deterministic-care-summary-renderer.test.ts",
+            "src/application/contracts/canonical-json.test.ts",
+            "src/application/contracts/command-envelope.test.ts",
+            "src/application/contracts/command-event-identifiers.test.ts",
+            "src/application/contracts/command-event-names.test.ts",
+            "src/application/contracts/command-receipt.test.ts",
+            "src/application/contracts/domain-event-envelope.test.ts",
+            "src/application/contracts/event-consumer-receipt.test.ts",
+            "src/application/contracts/event-work.test.ts",
+            "src/application/deletion/ai-audit-deletion.test.ts",
+            "src/application/deletion/deletion-plan-integrity.test.ts",
+            "src/application/deletion/deletion-planner.test.ts",
+            "src/application/governed/demo-scenario-fixture.test.ts",
+            "src/application/governed/help-information-adapter.test.ts",
+            "src/application/governed/medication-information-adapter.test.ts",
+            "src/application/history/appointment-note-selection.test.ts",
+            "src/application/history/explainable-pattern-view.test.ts",
+            "src/application/history/recorded-history-query.test.ts",
+            "src/application/history/synthetic-history-seed.test.ts",
+            "src/application/inquiry/inquiry-service.test.ts",
+            "src/application/intelligence/familiar-identity.test.ts",
+            "src/application/intelligence/intelligence-coordinator.test.ts",
+            "src/application/intelligence/intelligence-persistence.test.ts",
+            "src/application/intelligence/intelligence-subscriptions.test.ts",
+            "src/application/intelligence/metrics.test.ts",
+            "src/application/journal/browser-journal-runtime.test.ts",
+            "src/application/journal/journal-command-service.test.ts",
+            "src/application/journal/journal-query-service.test.ts",
+            "src/application/journal/journal-row-codecs.test.ts",
+            "src/application/medication-schedule/barrier-counts.test.ts",
+            "src/application/medication-schedule/medication-schedule-service.test.ts",
+            "src/application/nearby-food/browser-nearby-food.test.ts",
+            "src/application/nearby-food/hpb-snapshot-schema.test.ts",
+            "src/application/nearby-food/hpb-venue-directory.test.ts",
+            "src/application/nearby-food/nearby-food-discovery-service.test.ts",
+            "src/application/nearby-food/onemap-geocoder.test.ts",
+            "src/application/onboarding/demo-medicine-catalogue.test.ts",
+            "src/application/onboarding/demo-onboarding-repository.test.ts",
+            "src/application/onboarding/prepared-onboarding-fixture.test.ts",
+            "src/application/packet9-subscriptions.test.ts",
+            "src/application/restore/ai-audit-restore.test.ts",
+            "src/application/restore/restore-cleanup-marker.test.ts",
+            "src/application/restore/restore-dependency-integrity.test.ts",
+            "src/application/restore/restore-flow.test.ts",
+            "src/application/restore/restore-plan-integrity.test.ts",
+            "src/application/restore/restore-reconciler.test.ts",
+            "src/application/storage/browser-dataset-lifecycle.test.ts",
+            "src/application/storage/integrity-gate.test.ts",
+            "src/application/storage/local-state-cleanup.test.ts",
+            "src/application/storage/profile-row-codecs.test.ts",
+            "src/application/terminology/terminology-backup-restore.test.ts",
+            "src/application/terminology/terminology-service.test.ts",
+            "src/application/transcript-extraction/transcript-extraction-client.test.ts",
+            "src/application/transcript-extraction/transcript-extraction-review-fixes.test.ts",
+            "src/application/transcript-extraction/voice-remote-extraction-adapter.test.ts",
+            "src/application/voice/fake-voice-transcriber.test.ts",
+            "src/application/voice/voice-cloud-disclosure.test.ts",
+            "src/application/voice/voice-session-controller.test.ts",
+            "src/components/jagaon/voice/voice-journal-save.test.ts",
+            "src/components/jagaon/voice/voice-remote-merge.test.ts",
+            "src/components/jagaon/voice/voice-screen-copy.test.ts",
+            "src/config/release-profile.test.ts",
+            "src/domain/ai/ai-invocation-audit.test.ts",
+            "src/domain/care-plan/appointment.test.ts",
+            "src/domain/care-plan/care-plan-packet8.test.ts",
+            "src/domain/care-plan/dose.test.ts",
+            "src/domain/care-plan/medication.test.ts",
+            "src/domain/care-plan/prescription-change-candidate.test.ts",
+            "src/domain/care-plan/prescription-schedule.test.ts",
+            "src/domain/care-plan/prescription-version.test.ts",
+            "src/domain/care-plan/preventive-care.test.ts",
+            "src/domain/care-preparation/care-summary-export.test.ts",
+            "src/domain/care-preparation/care-summary-snapshot.test.ts",
+            "src/domain/health-records/activity-event.test.ts",
+            "src/domain/health-records/body-measurement.test.ts",
+            "src/domain/health-records/context-window.test.ts",
+            "src/domain/health-records/data-validity-assessment.test.ts",
+            "src/domain/health-records/glucose-reading.test.ts",
+            "src/domain/health-records/intake-event.test.ts",
+            "src/domain/health-records/ketone-reading.test.ts",
+            "src/domain/health-records/measurement.test.ts",
+            "src/domain/health-records/medication-event.test.ts",
+            "src/domain/health-records/observation-temporal.test.ts",
+            "src/domain/health-records/patient-authored-note.test.ts",
+            "src/domain/health-records/preventive-care-record.test.ts",
+            "src/domain/health-records/reading-temporal.test.ts",
+            "src/domain/health-records/symptom-report.test.ts",
+            "src/domain/inquiry/inquiry-response.test.ts",
+            "src/domain/inquiry/inquiry.test.ts",
+            "src/domain/learning/learned-knowledge.test.ts",
+            "src/domain/learning/learning-families.test.ts",
+            "src/domain/patient-settings/condition.test.ts",
+            "src/domain/patient-settings/invariants.test.ts",
+            "src/domain/patient-settings/locale.test.ts",
+            "src/domain/patient-settings/preferences.test.ts",
+            "src/domain/patient-settings/profile.test.ts",
+            "src/domain/patterns/pattern-records.test.ts",
+            "src/domain/safety/governance.test.ts",
+            "src/domain/safety/healthhub-hypoglycaemia-assets.test.ts",
+            "src/domain/safety/healthhub-hypoglycaemia-demo.test.ts",
+            "src/domain/safety/index.test.ts",
+            "src/domain/shared/audit.test.ts",
+            "src/domain/shared/deletion.test.ts",
+            "src/domain/shared/identifiers.test.ts",
+            "src/domain/shared/index.test.ts",
+            "src/domain/shared/provenance.test.ts",
+            "src/domain/shared/record-catalogue.test.ts",
+            "src/domain/shared/revision.test.ts",
+            "src/domain/shared/temporal.test.ts",
+            "src/domain/shared/text.test.ts",
+            "src/domain/shared/time.test.ts",
+            "src/domain/shared/typed-revision-ref.test.ts",
+            "src/domain/shared/validation.test.ts",
+            "src/domain/transcript-extraction/transcript-extraction-validator.test.ts",
+            "src/domain/voice/voice-advice-redirect.test.ts",
+            "src/domain/voice/voice-candidate-extractor.test.ts",
+            "src/domain/voice/voice-extractor-cases.test.ts",
+            "src/domain/voice/voice-remote-extraction-gate.test.ts",
+            "src/inquiry/inquiry-engine.test.ts",
+            "src/learning/familiar-item-learning-evaluator.test.ts",
+            "src/patterns/comparable-slot-trend-evaluator.test.ts",
+            "src/patterns/familiar-or-frequent-item-evaluator.test.ts",
+            "src/safety/decimal-comparison.test.ts",
+            "src/safety/healthhub-hypoglycaemia-demo.test.ts",
+            "src/safety/index.test.ts",
+            "src/voice/trtc/trtc-credential-client.test.ts",
+            "src/voice/trtc/trtc-transcriber-adapter.test.ts",
+            "tests/release/evidence.test.ts",
+            "tests/release/release-core.test.ts",
+            "tests/release/run-suite.test.ts",
+            "tests/release/traceability.test.ts"
+          ]
+        }
+      ]
+    },
+    "contract": {
+      "groups": [
+        {
+          "runner": "vitest",
+          "files": [
+            "src/ai/evaluation/packet-11-option-b-contract.test.ts",
+            "src/ai/evaluation/packet-11-outcome-contract.test.ts",
+            "src/ai/evaluation/packet-11c-contract-freeze.test.ts",
+            "src/ai/kie/kie-care-contract-reconciliation.test.ts",
+            "src/ai/kie/kie-shell-contracts.test.ts",
+            "src/application/ai/ai-activation-manifest.test.ts",
+            "src/application/intelligence/activation-manifest.test.ts",
+            "src/application/nearby-food/nearby-food-contracts.test.ts",
+            "src/application/onboarding/demo-onboarding-contracts.test.ts",
+            "src/application/voice/voice-review-contract.test.ts",
+            "src/backup/backup-contracts.test.ts",
+            "src/components/jagaon/bilingual-evidence.test.ts",
+            "src/components/jagaon/import-boundary.test.ts",
+            "src/components/jagaon/packet-11a-manifest.test.ts",
+            "src/components/jagaon/packet-6a-manifest.test.ts",
+            "src/components/jagaon/packet-7a-manifest.test.ts",
+            "src/components/jagaon/packet-8-manifest.test.ts",
+            "src/components/jagaon/packet-9a-manifest.test.ts",
+            "src/components/jagaon/packet-9b-manifest.test.ts",
+            "src/components/jagaon/packet-9c-manifest.test.ts",
+            "src/components/jagaon/screen-manifest.test.ts",
+            "src/domain/ai/ai-language-shell-contracts.test.ts",
+            "src/domain/ai/ai-task-contracts.test.ts",
+            "src/domain/transcript-extraction/transcript-extraction-contract.test.ts",
+            "src/domain/voice/voice-contracts.test.ts",
+            "src/i18n/get-messages.test.ts",
+            "src/i18n/history-messages.test.ts",
+            "src/i18n/packet-11c-ai-marking-rows.test.ts",
+            "src/i18n/packet10-messages.test.ts",
+            "src/storage/storage-profile-manifest.test.ts",
+            "src/voice/trtc/trtc-usersig-contract.test.ts",
+            "src/voice/voice-import-boundary.test.ts",
+            "tests/release/capability-manifest.test.ts",
+            "tests/release/suite-manifest.test.ts"
+          ]
+        }
+      ]
+    },
+    "integration": {
+      "groups": [
+        {
+          "runner": "vitest",
+          "files": [
+            "src/backup/backup-export-service.test.ts",
+            "src/backup/backup-restore-validator.test.ts",
+            "src/backup/base64url.test.ts",
+            "src/backup/browser-backup-file-port.test.ts",
+            "src/backup/passphrase.test.ts",
+            "src/backup/strict-json.test.ts",
+            "src/backup/web-crypto-port.test.ts",
+            "src/components/demo/DemoBoundaryNotice.test.tsx",
+            "src/components/jagaon/JagaOnApp.restore-marker.test.tsx",
+            "src/components/jagaon/JagaOnApp.test.tsx",
+            "src/components/jagaon/ai/AiDisclosureDialog.test.tsx",
+            "src/components/jagaon/data/DataBackupScreen.test.tsx",
+            "src/components/jagaon/data/RestoreBackupPanel.test.tsx",
+            "src/components/jagaon/data/data-components.test.tsx",
+            "src/components/jagaon/history/PatternExplanationPanel.test.tsx",
+            "src/components/jagaon/nearby-food/OneMapView.test.tsx",
+            "src/components/jagaon/onboarding/OnboardingAccessibility.test.tsx",
+            "src/components/jagaon/onboarding/OnboardingFlow.test.tsx",
+            "src/components/jagaon/onboarding/OnboardingRecovery.test.tsx",
+            "src/components/jagaon/primitives/TimeWheel.test.tsx",
+            "src/components/jagaon/screens/CarePreparationScreen.test.tsx",
+            "src/components/jagaon/screens/CareSummaryPreviewScreen.test.tsx",
+            "src/components/jagaon/screens/JournalEntryScreens.test.tsx",
+            "src/components/jagaon/screens/MedicationInformationScreen.test.tsx",
+            "src/components/jagaon/screens/MedicationScheduleScreen.test.tsx",
+            "src/components/jagaon/screens/MoreScreen.test.tsx",
+            "src/components/jagaon/screens/MyMedicinesScreen.test.tsx",
+            "src/components/jagaon/screens/NearbyFoodScreen.test.tsx",
+            "src/components/jagaon/screens/PreventiveCareScreen.test.tsx",
+            "src/components/jagaon/screens/ReadingTimeScreen.test.tsx",
+            "src/components/jagaon/screens/RecordedHistoryScreen.test.tsx",
+            "src/components/jagaon/screens/SettingsScreen.test.tsx",
+            "src/components/jagaon/screens/TimeWheelScreens.test.tsx",
+            "src/components/jagaon/screens/TodayScreen.test.tsx",
+            "src/components/jagaon/voice/JagaOnApp.voice.test.tsx",
+            "src/components/jagaon/voice/TellJagaOnScreen.journal.test.tsx",
+            "src/components/jagaon/voice/TellJagaOnScreen.test.tsx",
+            "src/storage/app-preference-row.test.ts",
+            "src/storage/authoritative-command-transaction.test.ts",
+            "src/storage/bootstrap-locale-repository.test.ts",
+            "src/storage/closed-row-codecs.test.ts",
+            "src/storage/committed-domain-event-row.test.ts",
+            "src/storage/database.test.ts",
+            "src/storage/delete-dataset.test.ts",
+            "src/storage/demo-storage-reset.test.ts",
+            "src/storage/derived-intelligence-rows.test.ts",
+            "src/storage/event-sequence-metadata.test.ts",
+            "src/storage/event-work-repository.test.ts",
+            "src/storage/implemented-row-codecs.test.ts",
+            "src/storage/index.test.ts",
+            "src/storage/keep-wording-preference-repository.test.ts",
+            "src/storage/local-state-cleanup-marker.test.ts",
+            "src/storage/migrations/migration-coordinator.test.ts",
+            "src/storage/permanent-deletion-transaction.test.ts",
+            "src/storage/storage-failure.test.ts",
+            "src/storage/storage-metadata.test.ts",
+            "src/storage/storage-row-codec.test.ts",
+            "src/storage/stored-event-work-item.test.ts",
+            "src/storage/stored-record-revision.test.ts",
+            "src/storage/table-catalogue.test.ts",
+            "tests/home.test.tsx"
+          ]
+        }
+      ]
+    },
+    "fixtures": {
+      "groups": [
+        {
+          "runner": "vitest",
+          "files": [
+            "src/fixtures/core-logging-observations.test.ts",
+            "src/fixtures/core-medication-events.test.ts",
+            "src/fixtures/core-medication-prescriptions.test.ts",
+            "src/fixtures/prescription-change-candidates.test.ts"
+          ]
+        }
+      ]
+    },
+    "browser": {
+      "groups": [
+        {
+          "runner": "playwright",
+          "config": "playwright.config.ts",
+          "files": [
+            "e2e/packet-10/cross-browser.spec.ts",
+            "e2e/packet-10/data-backup.spec.ts"
+          ]
+        },
+        {
+          "runner": "playwright",
+          "config": "playwright.packet-11c.config.ts",
+          "files": [
+            "e2e/packet-11c/harness-care.spec.ts",
+            "e2e/packet-11c/harness-history.spec.ts",
+            "e2e/packet-11c/harness-private.spec.ts",
+            "e2e/packet-11c/isolation.spec.ts"
+          ]
+        },
+        {
+          "runner": "playwright",
+          "config": "playwright.packet-13.config.ts",
+          "files": [
+            "e2e/packet-13/isolation.spec.ts",
+            "e2e/packet-13/voice-demo.spec.ts",
+            "e2e/packet-13/voice-off.spec.ts",
+            "e2e/packet-13/voice-safety.spec.ts"
+          ]
+        }
+      ]
+    },
+    "e2e": {
+      "groups": [
+        {
+          "runner": "playwright",
+          "config": "playwright.packet-12.config.ts",
+          "files": [
+            "e2e/packet-12/critical-journey.spec.ts"
+          ]
+        }
+      ]
+    },
+    "accessibility": {
+      "pendingTask": "B3",
+      "groups": [
+        {
+          "runner": "playwright",
+          "config": "playwright.packet-11c.config.ts",
+          "files": [
+            "e2e/packet-11c/production.spec.ts"
+          ]
+        }
+      ]
+    },
+    "security": {
+      "requiresBuildDir": true,
+      "groups": [
+        {
+          "runner": "vitest",
+          "files": [
+            "src/app/api/ai/shell/ai-spend-ledger.test.ts",
+            "src/app/api/ai/shell/route-access-spend.test.ts",
+            "src/app/api/ai/shell/route-reparse-usage.test.ts",
+            "src/app/api/ai/shell/route.test.ts",
+            "src/app/api/ai/task/route.test.ts",
+            "src/app/api/ai/transcript/route.test.ts",
+            "src/app/api/onemap/search/route.test.ts",
+            "src/app/api/voice/usersig/voice-minute-ledger.test.ts",
+            "src/app/api/voice/usersig/voice-usersig-config.test.ts",
+            "src/app/api/voice/usersig/voice-usersig-handler.test.ts",
+            "src/app/api/voice/usersig/voice-usersig-signer.test.ts",
+            "tests/packet-11c-c7-harness-isolation.test.ts",
+            "tests/release/build-artifact.test.ts",
+            "tests/release/headers.test.ts"
+          ]
+        }
+      ]
+    }
+  },
+  "excluded": [
+    {
+      "file": "src/ai/evaluation/packet-11-live-hybrid-diagnostic.test.ts",
+      "category": "LIVE_PROVIDER",
+      "reason": "Live DeepSeek block gated by RUN_LIVE_HYBRID_SHELL_DIAGNOSTIC (credit-consuming; never run by the release). Same file holds ~18 offline fake-transport tests that are removed with it (D12)."
+    },
+    {
+      "file": "src/ai/evaluation/packet-11-live-hybrid-full.test.ts",
+      "category": "LIVE_PROVIDER",
+      "reason": "Live DeepSeek FULL run gated by RUN_LIVE_HYBRID_SHELL_FULL (up to 140 calls). Same file holds ~15 offline fake-transport tests that are removed with it (D12)."
+    },
+    {
+      "file": "src/ai/evaluation/packet-11-live-hybrid-smoke.test.ts",
+      "category": "LIVE_PROVIDER",
+      "reason": "Live DeepSeek smoke gated by RUN_LIVE_HYBRID_SHELL_SMOKE. Same file holds ~5 offline fake-transport tests that are removed with it (D12)."
+    },
+    {
+      "file": "src/ai/evaluation/packet-11-live-hybrid-targeted.test.ts",
+      "category": "LIVE_PROVIDER",
+      "reason": "Live DeepSeek targeted diagnostic gated by RUN_LIVE_HYBRID_SHELL_TARGETED. Same file holds ~8 offline fake-transport tests that are removed with it (D12)."
+    },
+    {
+      "file": "src/ai/evaluation/packet-11-live-kie.test.ts",
+      "category": "LIVE_PROVIDER",
+      "reason": "Live Kie evaluation gated by RUN_LIVE_KIE_EVALUATION (credit-consuming); the whole file is the live block."
+    },
+    {
+      "file": "src/ai/evaluation/transcript-extraction/transcript-extraction-live.test.ts",
+      "category": "LIVE_PROVIDER",
+      "reason": "Packet 13 Proposal 3 live DeepSeek transcript-extraction run gated by RUN_LIVE_TRANSCRIPT_EXTRACTION (credit-consuming; never run by the release). Same file holds 13 offline fake-transport tests that are removed with it, as with the Packet 11 live files."
+    },
+    {
+      "file": "src/ai/evaluation/packet-11-live-latency.test.ts",
+      "category": "LIVE_PROVIDER",
+      "reason": "Live Kie latency probes gated by RUN_LIVE_KIE_LATENCY (credit-consuming); the whole file is the live block."
+    },
+    {
+      "file": "src/ai/evaluation/packet-11-offline-hybrid-reassessment.test.ts",
+      "category": "LOCAL_ARTIFACT_REPLAY",
+      "reason": "Replay block gated by RUN_OFFLINE_HYBRID_REASSESSMENT over a git-ignored stored run under test-results/. Same file holds ~3 always-running offline tests that are removed with it (D12)."
+    },
+    {
+      "file": "src/ai/evaluation/packet-11-offline-hybrid-replay.test.ts",
+      "category": "LOCAL_ARTIFACT_REPLAY",
+      "reason": "Replay block gated by RUN_OFFLINE_HYBRID_REPLAY over a git-ignored stored run under test-results/. Same file holds ~2 always-running offline tests that are removed with it (D12)."
+    },
+    {
+      "file": "src/ai/evaluation/packet-11-offline-presentation-replay.test.ts",
+      "category": "LOCAL_ARTIFACT_REPLAY",
+      "reason": "Whole file gated by RUN_OFFLINE_PRESENTATION_REPLAY over a git-ignored stored trace under test-results/."
+    },
+    {
+      "file": "src/ai/evaluation/packet-11-source-backed-replay.test.ts",
+      "category": "LOCAL_ARTIFACT_REPLAY",
+      "reason": "Whole file gated by RUN_SOURCE_BACKED_REPLAY over a git-ignored stored trace under test-results/."
+    },
+    {
+      "file": "src/ai/evaluation/packet-11-response-echo-rewrite.test.ts",
+      "category": "LOCAL_ARTIFACT_REPLAY",
+      "reason": "One test runs only when the git-ignored trace test-results/packet-11-hybrid-live-trace/20261007T131032Z-6a13e8630a3464c8 exists, so the file skips on a fresh export. ~3 always-running echo-rewrite tests are removed with it (D12)."
+    },
+    {
+      "file": "src/ai/evaluation/packet-11-presentation-guard.test.ts",
+      "category": "LOCAL_ARTIFACT_REPLAY",
+      "reason": "One test runs only when the git-ignored confirmation trace under test-results/ exists, so the file skips on a fresh export. ~1 always-running presentation-guard test is removed with it (D12)."
+    }
+  ]
+}
