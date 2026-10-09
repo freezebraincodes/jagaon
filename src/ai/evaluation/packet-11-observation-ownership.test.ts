@@ -258,7 +258,7 @@ describe("observation ownership: versions", () => {
     // Packet 11C Task 6R (2026-10-08): application-only copy 11b.10 (the summary-role notice); every model-facing pin is unchanged.
     // Packet 11C B5 contract freeze: labels only, kie-schema.11c.1 and packet11-eval.19; no model-facing byte changed.
     // Packet 11C Addendum C (C5): packet11-eval.20 (the usage accounting); no model-facing byte changed.
-    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.9", atomRenderer: "ai-atoms.11b.7", defaultShells: "ai-shells-default.11b.8", shellRules: "ai-shell-rules.11b.15-r8", languageCopy: "ai-language-copy.11b.10", prompt: "11b.18", providerSchema: "kie-schema.11c.1", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.20", shellRequest: "ai-shell-request.11b.11" });
+    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.9", atomRenderer: "ai-atoms.11b.7", defaultShells: "ai-shells-default.11b.8", shellRules: "ai-shell-rules.11b.16-r10", languageCopy: "ai-language-copy.11b.10", prompt: "11b.18", providerSchema: "kie-schema.11c.1", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.20", shellRequest: "ai-shell-request.11b.11" });
     expect(AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN.bundleKey).toBe("ai.explain-pattern@11b.18");
     expect(AI_HYBRID_RUNTIME_BUNDLES.DRAFT_CARE_PREPARATION_SUMMARY.bundleKey).toBe("ai.draft-care-preparation-summary@11b.18");
     for (const task of ["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"] as const) {

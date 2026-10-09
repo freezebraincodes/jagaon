@@ -148,7 +148,13 @@ const FROZEN = Object.freeze({
   atomRenderer: "ai-atoms.11b.7",
   languageCopy: "ai-language-copy.11b.10",
   defaultShells: "ai-shells-default.11b.8",
-  shellRules: "ai-shell-rules.11b.15-r8",
+  // r10 re-freeze (owner decisions 2026-10-09, offline; one freeze, r9 never frozen on its own): r9 refines the r3 zh 留意 alternative
+  // to (?<!所)留意 (FULL diagnosis case 2); r10 adds the additive no-implied-urgency / no-assigned-importance directive entries and six
+  // Traditional rows (urgency-language assessment). The FULL run under r8 stays FAIL (r9/r10 rescore nothing).
+  // The r10 rule text was tightened before commit (coordinator ruling after the independent review: zh modal + attention verb, the zh
+  // form of "needs your attention"); the label stays 11b.16-r10 because r10 is uncommitted and has no bound evidence, and the rule text
+  // feeds no digest (regenerated with the existing generator: contract digest and classIds unchanged).
+  shellRules: "ai-shell-rules.11b.16-r10",
   shellRequestProfile: "ai-shell-request.11b.11",
   prompt: { version: "11b.18", assetsSha256: "e6e1160cc8796109c3fb974db97a9d9562d2ee888be1ba071744a8de1bf07c9b" },
   providerSchema: { label: "kie-schema.11c.1", schemasSha256: "0e60fbd6cfc630ba69472862e59533f33e46818f90d1c4af7ffc582958c49672" },
@@ -226,11 +232,14 @@ const FROZEN = Object.freeze({
   // CL3 re-freeze (C1-review carry, deliberate): the contract inputs also bind each class's captured model-facing body sha256 and the
   // endpoint sha256, so the contract digest and every classId changed (was f2814202…, definitions 30836f5d…); the records were
   // regenerated, ALL PENDING. The qualification module is pinned outside its generated records literal.
+  // r10 re-freeze (deliberate, includes the r9 refinement): shellRules is a contract input, so the contract digest and all 12 classIds
+  // changed (was 5bec1f2a…, definitions d17c62cd…); no request byte, model-facing body, endpoint or prompt changed; records regenerated
+  // with the existing generator, ALL PENDING with no evidence.
   requestClasses: {
     scheme: "ai-request-class.11c.1",
     remoteEligibilityPolicy: "ai-remote-eligibility.11c.1",
-    contractDigest: "5bec1f2a7a27436456c6e8f348e66c6d7cfb051dce3782068b5ab71adc0437f8",
-    definitionsSha256: "d17c62cdaaf0cdef4cef8fc60732fa6a57bfd442b85e01952e0ac3f453167853",
+    contractDigest: "30bb1549cbcdc31776316df36431718dc5f8683b9573c62491fd47e8261be971",
+    definitionsSha256: "6db8b350440c009825c9e6931a57a62a89609482ea3603116d491a92ace10f7d",
     contractBindings: { classBodies: 12, endpointSha256: "6a440b422e727dd307ca07f0f1df977bd3ac1d0d62917187225a12b9f5f306de", sourceBackedAndCareClassBodiesBound: true },
     classesPerTaskLocale: { "EXPLAIN_PATTERN en-SG": 3, "EXPLAIN_PATTERN zh-SG": 3, "DRAFT_CARE_PREPARATION_SUMMARY en-SG": 3, "DRAFT_CARE_PREPARATION_SUMMARY zh-SG": 3 },
     samples: 70,

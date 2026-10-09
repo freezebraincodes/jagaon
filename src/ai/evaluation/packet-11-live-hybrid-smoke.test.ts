@@ -36,7 +36,7 @@ const SMOKE_IDS = Object.freeze([
 const SENTINEL = "ds-SENTINEL-CREDENTIAL-9a7b3c55e0";
 const NOW = () => "2026-10-06T09:00:00.000Z";
 // The frozen contract (the same literals as the FULL, targeted and diagnostic runners; the whole Packet 11C contract is pinned in
-// packet-11c-contract-freeze.test.ts). CURRENT (Packet 11C B5 contract freeze, offline): prompt 11b.18, rules 11b.15-r8, request 11b.11,
+// packet-11c-contract-freeze.test.ts). CURRENT (Packet 11C B5 contract freeze, offline): prompt 11b.18, rules 11b.16-r10, request 11b.11,
 // bundle set 11b.18, provider schema kie-schema.11c.1, slot plan ai-slot-plan.11b.9, fixtures 11b.16, harness packet11-eval.19, policy
 // hybrid-full-policy.2, caps 512/1024, temperature 0.2. Revision history follows (each line was the contract at its time).
 // Rules r4 (Packet 11B.11, offline only): prompt 11b.14, rules r4, bundle set 11b.11, fixtures 11b.9, harness eval.9.
@@ -67,7 +67,7 @@ const NOW = () => "2026-10-06T09:00:00.000Z";
 // thresholds and every model-facing byte are unchanged. The live block is not run.
 const REQUIRED_CONTRACT = Object.freeze({
   prompt: "11b.18",
-  shellRules: "ai-shell-rules.11b.15-r8",
+  shellRules: "ai-shell-rules.11b.16-r10",
   shellRequest: "ai-shell-request.11b.11",
   explainBundle: "ai.explain-pattern@11b.18",
   careBundle: "ai.draft-care-preparation-summary@11b.18",
@@ -140,7 +140,7 @@ describe("Packet 11 hybrid shell smoke (offline)", () => {
       temperature: SHELL_TEMPERATURE,
     };
     expect(same(REQUIRED_CONTRACT, code)).toBe(true);
-    expect(REQUIRED_CONTRACT).toMatchObject({ prompt: "11b.18", shellRules: "ai-shell-rules.11b.15-r8", shellRequest: "ai-shell-request.11b.11", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18", fixtureSet: "packet11-fixtures.11b.16", harness: "packet11-eval.20", fullEvaluationPolicy: "hybrid-full-policy.2", temperature: 0.2 });
+    expect(REQUIRED_CONTRACT).toMatchObject({ prompt: "11b.18", shellRules: "ai-shell-rules.11b.16-r10", shellRequest: "ai-shell-request.11b.11", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18", fixtureSet: "packet11-fixtures.11b.16", harness: "packet11-eval.20", fullEvaluationPolicy: "hybrid-full-policy.2", temperature: 0.2 });
     // Packet 11C B5 contract freeze: the provider output-schema label (label only; no body byte).
     expect(REQUIRED_CONTRACT.providerSchema).toBe("kie-schema.11c.1");
     expect(APPROVED_HYBRID_CONTRACT.shellTemperature).toBe(REQUIRED_CONTRACT.temperature);

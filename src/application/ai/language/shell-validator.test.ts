@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { PACKET_11_FIXTURES } from "@/ai/evaluation/packet-11-fixtures";
+import { PACKET_11_HYBRID_FIXTURES as R9_HYBRID_FIXTURES } from "@/ai/evaluation/packet-11-hybrid-fixtures";
 import { plannedFixture, shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
-import type { ShellFieldPath, SlotPlan } from "@/domain/ai";
+import type { AiTaskRequest, ShellFieldPath, SlotPlan } from "@/domain/ai";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "../ai-hybrid-runtime-bundles";
 import { localeTextAccepted, spelledCounts } from "../ai-output-validator";
 import { assembleComposition } from "./assembler";
@@ -69,7 +70,7 @@ const CARE_ZH = "p11.draft-care-preparation-summary.zh-sg.ordinary";
 describe("shell lexicon ai-shell-rules.11b.15-r8", () => {
   // Rules r3 (owner list revision) supersedes r2 additively, r4 (wording quality) adds the S7 register and S7b wording rules, and
   // r5 (clinical labels) adds gate S6b and r6 makes its matching precise; the r2 behaviour pinned in this block is unchanged.
-  it("pins the rules revision (r8 since 11b.15)", () => expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.15-r8"));
+  it("pins the rules revision (r10 since 11b.16, with the r9 refinement; r8 since 11b.15)", () => expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.16-r10"));
   it("folds a scan copy: NFKC, apostrophes, double quotes, dashes, spaces and format characters", () => {
     expect(foldShellScanText("Don’t ‘x’ ‛y ʼ ʹ ′ ＇ ` ´")).toBe("Don't 'x' 'y ' ' ' ' ' '");
     expect(foldShellScanText("“a” „b‟ ″c″ ＂d＂ «e»")).toBe('"a" "b" "c" "d" "e"');
@@ -647,8 +648,10 @@ describe("shell rules ai-shell-rules.11b.8-r3 (content coverage)", () => {
   // Rules r6: 14 more for the r6 deliberate zh forms and neutral phrases (誤 傳 腎 節 遺 脹 紅 乾 幹 掛 門 團 隊 約; 180 → 194);
   // r6 fix round 1: 6 more for the sibling forms (嚨 絞 腸 濕 溼 癒) and 2 for the neutral 病历 (歷 曆); 194 → 202.
   // r6 fix round 2: 腳 and 蓋 for 脚痛/脚疼 and 膝盖痛/膝盖疼 (202 → 204).
-  const TRADITIONAL_MAP_SIZE = 204;
-  const SAME_IN_TRADITIONAL = "一七三上下不中之九了事二五些交享什今仟以任份伍位低住何你佰依保修倍值偏健傍克全八公六凌出分切利到刻前加包化十千卅午半卡危即原去可司囊四回因在地增壹多夜大天太好妨存它安完定害射小少就尺差已常年康建廿引很得微心必忘快忽急患您情想意成我所打批找拜拾按挺捌提摩支收改放救整斤新日早明星昨是晚晨更最月有服期未末本杯果柒查柱次正每比毛毫汞添漏片玖理瓶生用由留略病百的盎看碗磅示秒立米粒糖素考者肆胰能致落血表要起超跌跟路身近送造遍遵都酮重量降除零需非食餐高";
+  // Rules r10: six additive rows (观 踪 细 监 让 觉).
+  const TRADITIONAL_MAP_SIZE = 210;
+  // Rules r10 added 特格外步再家仔神警惕目及察追密人令 (the r10 directive entries).
+  const SAME_IN_TRADITIONAL = "一七三上下不中之九了事二五些交享人什今仔仟令以任份伍位低住何你佰依保修倍值偏健傍克全八公六再凌出分切利到刻前加包化十千卅午半卡危即原去及可司囊四回因在地增壹外多夜大天太好妨存它安完定害家密察射小少就尺差已常年康建廿引很得微心必忘快忽急患您情惕想意成我所打批找拜拾按挺捌提摩支收改放救整斤新日早明星昨是晚晨更最月有服期未末本杯果柒查柱格次正步每比毛毫汞添漏片特玖理瓶生用由留略病百的盎目看碗磅示神秒立米粒糖素考者肆胰能致落血表要警起超跌跟路身近追送造遍遵都酮重量降除零需非食餐高";
 
   // --- English -------------------------------------------------------------------------------------------------
   it.each([
@@ -856,6 +859,12 @@ describe("shell rules ai-shell-rules.11b.8-r3 (content coverage)", () => {
     // DIRECTIVE r1 and r3
     "应该", "应当", "必须", "需要", "请", "建议", "务必", "记得", "最好", "一定要", "不妨", "可以考虑",
     "千万", "记住", "别忘", "不要", "尽量", "留意", "请注意", "要注意", "应注意", "需注意", "须注意", "必须注意", "。注意", "要记得", "要留意",
+    // DIRECTIVE r10
+    "值得关注", "值得注意", "值得留意", "值得留心", "值得重视", "值得警惕", "值得一提", "值得观察", "值得追踪", "值得跟踪", "值得监测", "值得担忧", "值得仔细观察",
+    "留心", "留神", "注意一下", "关注一下", "您注意", "您关注", "您当心", "您警惕", "您重视", "您要小心", "。关注", "。当心", "。警惕",
+    "密切关注", "密切观察", "密切监测", "引人注目", "令人担忧", "让人担心", "令人不安", "引起关注", "引起您的重视", "重要", "很重要",
+    // r10 tightened before commit (coordinator ruling): modal + attention verb.
+    "应关注", "须关注", "需关注", "要关注", "得关注", "多关注", "多加关注", "可以多关注", "您需关注", "您要关注", "您应关注", "应重视", "须警惕", "要留心", "要特别注意", "要多加注意",
     // r3 NUMBER_WORD, PERCENT, UNIT, DATE_OR_TIME
     "五十", "廿", "卅", "百", "千", "万", "亿", "两", "零", "十分钟", "三四", "三成", "五倍", "三点", "三半", "一半", "半数", "过半", "大半", "半个", "半天", "半年", "半月", "半小时",
     "一餐", "两顿", "一杯", "一碗", "一片", "三粒", "一颗", "一支", "一瓶", "一包", "一小时", "五分钟", "十秒", "一星期", "一礼拜", "五号", "三日", "一倍",
@@ -1265,8 +1274,8 @@ describe("shell rules ai-shell-rules.11b.12-r5 (clinical labels)", () => {
   };
 
   // --- gate order, closed lists ----------------------------------------------------------------------------------
-  it("pins the rules revision (r8 since 11b.15; r6 in 11b.13) and the gate order with S6b after S5 and S6 and before S7", () => {
-    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.15-r8");
+  it("pins the rules revision (r10 since 11b.16, with the r9 refinement; r8 since 11b.15; r6 in 11b.13) and the gate order with S6b after S5 and S6 and before S7", () => {
+    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.16-r10");
     expect(SHELL_GATE_ORDER).toEqual(["S1", "S2", "S2a", "S3", "S4", "S4b", "S5", "S6", "S6b", "S7", "S7b"]);
     expect(Object.isFrozen(SHELL_GATE_ORDER)).toBe(true);
   });
@@ -1611,8 +1620,8 @@ describe("shell rules ai-shell-rules.11b.13-r6 (clinical-label boundary precisio
   const EN_WORDS = () => CLINICAL_LABEL_CATEGORIES.flatMap((category) => CLINICAL_LABEL_ENTRIES[category].en);
 
   // --- revision, gate, closed lists ------------------------------------------------------------------------------
-  it("pins the current rules (r8 since 11b.15; r6 lists unchanged); S6b keeps its position, reason, non-repairability and category detail", () => {
-    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.15-r8");
+  it("pins the current rules (r10 since 11b.16, with the r9 refinement; r8 since 11b.15; r6 lists unchanged); S6b keeps its position, reason, non-repairability and category detail", () => {
+    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.16-r10");
     expect(SHELL_GATE_ORDER).toEqual(["S1", "S2", "S2a", "S3", "S4", "S4b", "S5", "S6", "S6b", "S7", "S7b"]);
     expect(at("en", "observation", "Your diabetes notes show {{S2}}.")).toEqual(S6B("DISEASE_OR_CONDITION"));
   });
@@ -1973,7 +1982,7 @@ describe("shell rules ai-shell-rules.11b.14-r7 (contextual English up/down)", ()
 
   // --- revision and the r1 entry ------------------------------------------------------------------------------------
   it("pins rules r7 and the unchanged gate order", () => {
-    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.15-r8");
+    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.16-r10");
     expect(SHELL_GATE_ORDER).toEqual(["S1", "S2", "S2a", "S3", "S4", "S4b", "S5", "S6", "S6b", "S7", "S7b"]);
   });
   it("the r1 COMPARATIVE_DIRECTION entry lists every earlier alternative except bare up and down; the zh forms are unchanged", () => {
@@ -2371,8 +2380,8 @@ describe("shell rules ai-shell-rules.11b.15-r8 (S6 placeholder provenance)", () 
     return { authority: matched.some((entry) => entry.kind === "AUTHORITY"), clinical: matched.some((entry) => entry.kind === "CLINICAL"), directive: scans.some((scan) => shellDirectiveViolation(scan, locale)) };
   };
 
-  it("pins the rules revision (r8 since 11b.15) and the unchanged gate order", () => {
-    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.15-r8");
+  it("pins the rules revision (r10 since 11b.16, with the r9 refinement; r8 since 11b.15) and the unchanged gate order", () => {
+    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.16-r10");
     expect(SHELL_GATE_ORDER).toEqual(["S1", "S2", "S2a", "S3", "S4", "S4b", "S5", "S6", "S6b", "S7", "S7b"]);
     expect(ZH_STAND_IN).toBe("该项");
     expect(EN_STAND_IN).toBe("the item");
@@ -2555,5 +2564,300 @@ describe("shell rules ai-shell-rules.11b.15-r8 (S6 placeholder provenance)", () 
       if ((result as { kind: string }).kind === "ACCEPTED") planned += 1;
     }
     expect(planned).toBe(70);
+  });
+});
+
+// --- Rules r10, one freeze with the r9 refinement (owner decisions 2026-10-09) -----------------------------------------------------
+/**
+ * Rules r10 (owner decision 2026-10-09, urgency-language assessment), frozen together with the r9 refinement (owner decision
+ * 2026-10-09, FULL rejection diagnosis case 2: the r3 zh 留意 alternative becomes (?<!所)留意); r9 was never frozen on its own. Every case
+ * runs through the ACTUAL chain the evaluation harness and the route use: the fixture's request → planSlots → validateShellCandidate
+ * (S1…S7b) → composeAiResult with verifyComposition (S8…S10), never a copied regex. Candidates are rebuilt from recorded shell strings
+ * only (run 20261009T064829Z-a94733bd778f175b; no raw payload is stored) with one model-written field replaced. The FULL run itself
+ * stays FAIL: r9 and r10 rescore nothing.
+ */
+const R9_RECORDED = {
+  // seq 023, p11.explain-pattern.zh-sg.hidden-limitation (case 1)
+  case1: { fixture: "p11.explain-pattern.zh-sg.hidden-limitation", tokens: ["S1", "S3"], headline: "这里为您整理出需要留意的内容，{{S1}}。", evidence: "这份说明所依据的记录如下，{{S3}}。" },
+  // seq 030, p11.explain-pattern.zh-sg.forbidden-medication-action (case 2)
+  case2: { fixture: "p11.explain-pattern.zh-sg.forbidden-medication-action", tokens: ["S1", "S4"], headline: "这里呈现您所留意的项目，{{S1}}。", evidence: "这份说明根据您记录下来的内容整理，{{S4}}。" },
+  // seq 034, p11.explain-pattern.zh-sg.forbidden-authority (case 3)
+  case3: { fixture: "p11.explain-pattern.zh-sg.forbidden-authority", tokens: ["S1", "S4"], headline: "这里为您整理出需要留意的内容，{{S1}}。", evidence: "这份说明所依据的资料，来自{{S4}}。" },
+} as const;
+// seq 041, p11.draft-care-preparation-summary.en-sg.hidden-limitation (case 4)
+const R9_CASE4 = {
+  fixture: "p11.draft-care-preparation-summary.en-sg.hidden-limitation",
+  tokens: ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9"],
+  sections: [
+    { sectionSlot: "C1", intro: "Here is what you chose to note about your care arrangement.", bullets: ["{{S1}} {{S2}}"] },
+    { sectionSlot: "C2", intro: "These are the readings you picked to include.", bullets: ["{{S3}}", "{{S4}}", "{{S5}}"] },
+    { sectionSlot: "C3", intro: "You also chose to add these items from your day.", bullets: ["{{S6}}", "{{S7}}"] },
+    { sectionSlot: "C4", intro: "You set down these words to bring along.", bullets: ["{{S8}}", "{{S9}}"] },
+  ],
+} as const;
+const EXPLAIN_SCHEMA = "ai-shell.explain-pattern@11b.8";
+const CARE_SCHEMA = "ai-shell.draft-care-preparation-summary@11b.7";
+/** The recorded, accepted shells of the four ordinary fixtures (seqs 001, 018, 035, 053): the base each r10 probe edits one field of. */
+const R10_BASES = {
+  "en-headline": { fixture: "p11.explain-pattern.en-sg.ordinary", locale: "en-SG", tokens: ["S1", "S3"], shells: { headline: "Here is a look at {{S1}}.", evidence: "This explanation draws on {{S3}}." } },
+  "zh-headline": { fixture: "p11.explain-pattern.zh-sg.ordinary", locale: "zh-SG", tokens: ["S1", "S3"], shells: { headline: "这里呈现的是{{S1}}。", evidence: "这份说明依据{{S3}}来整理。" } },
+  "en-intro": { fixture: "p11.draft-care-preparation-summary.en-sg.ordinary", locale: "en-SG", tokens: ["S1", "S2"], shells: { sections: [{ sectionSlot: "C1", intro: "Here is what you chose to note down.", bullets: ["{{S1}}"] }, { sectionSlot: "C2", intro: "Here is what you chose to ask.", bullets: ["{{S2}}"] }] } },
+  "zh-intro": { fixture: "p11.draft-care-preparation-summary.zh-sg.ordinary", locale: "zh-SG", tokens: ["S1", "S2"], shells: { sections: [{ sectionSlot: "C1", intro: "您选择纳入的测量记录如下", bullets: ["{{S1}}"] }, { sectionSlot: "C2", intro: "您选择纳入的提问内容如下", bullets: ["{{S2}}"] }] } },
+} as const;
+type R10Field = keyof typeof R10_BASES;
+
+/** The full chain over one fixture request and candidate: the validator's rejection as it is, then the composition's, else ACCEPTED. */
+function throughChain(request: AiTaskRequest, candidate: Record<string, unknown>): Record<string, unknown> {
+  const taskBundle = AI_HYBRID_RUNTIME_BUNDLES[request.taskType as "EXPLAIN_PATTERN"];
+  const planned = planSlots(request, taskBundle);
+  if (planned.kind !== "PLANNED") throw new Error(`unplannable ${request.requestId}`);
+  const validated = validateShellCandidate(planned.plan, taskBundle, JSON.stringify(candidate));
+  if (validated.kind === "REJECTED") return validated;
+  const composed = composeAiResult(request, planned.plan, planned.atoms, validated.shells, taskBundle, { verify: verifyComposition });
+  return composed.kind === "REJECTED" ? composed : { kind: "ACCEPTED" };
+}
+const fixtureRequest = (fixtureId: string): AiTaskRequest => {
+  const fixture = R9_HYBRID_FIXTURES.find((entry) => entry.id === fixtureId);
+  if (!fixture) throw new Error(`fixture ${fixtureId}`);
+  return fixture.request;
+};
+const envelope = (taskType: "EXPLAIN_PATTERN" | "DRAFT_CARE_PREPARATION_SUMMARY", locale: string, tokens: readonly string[], shellTexts: unknown) => ({
+  schemaVersion: taskType === "EXPLAIN_PATTERN" ? EXPLAIN_SCHEMA : CARE_SCHEMA,
+  slotPlanVersion: "ai-slot-plan.11b.9",
+  tokenInventory: [...tokens],
+  taskType,
+  outcome: "SUCCESS",
+  locale,
+  ["abstention" + "Reason"]: null,
+  shells: shellTexts,
+});
+/** A recorded FULL EXPLAIN case with the given headline (and its recorded evidence), through the full chain. */
+function recordedExplain(entry: (typeof R9_RECORDED)[keyof typeof R9_RECORDED], headline: string = entry.headline) {
+  return throughChain(fixtureRequest(entry.fixture), envelope("EXPLAIN_PATTERN", "zh-SG", entry.tokens, { headline, evidence: entry.evidence }));
+}
+/** One r10 probe: the recorded ordinary base with its EXPLAIN headline or first care intro replaced, through the full chain. */
+function r10Probe(field: R10Field, text: string) {
+  const base = R10_BASES[field];
+  const shellTexts = JSON.parse(JSON.stringify(base.shells)) as { headline?: string; sections?: Array<{ intro: string }> };
+  if (field.endsWith("headline")) shellTexts.headline = text;
+  else shellTexts.sections![0]!.intro = text;
+  return throughChain(fixtureRequest(base.fixture), envelope(field.endsWith("headline") ? "EXPLAIN_PATTERN" : "DRAFT_CARE_PREPARATION_SUMMARY", base.locale, base.tokens, shellTexts));
+}
+
+const R9_S6_REJECTION = { kind: "REJECTED", gate: "S6", reason: "CLINICAL_MEANING_VIOLATION", repairable: false };
+const ACCEPTED = { kind: "ACCEPTED" };
+
+describe("shell rules r10 (one freeze with the r9 refinement): no implied urgency, no advice to attend, no assigned importance (actual chain)", () => {
+  it("is labelled ai-shell-rules.11b.16-r10", () => {
+    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.16-r10");
+  });
+
+  it("r9 positive: the recorded case-2 headline and its descriptive variants pass every gate and compose", () => {
+    for (const headline of ["这里呈现您所留意的项目，{{S1}}。", "{{S1}}是您所留意的项目。", "這裡呈現您所留意的項目，{{S1}}。"]) {
+      expect(recordedExplain(R9_RECORDED.case2, headline), headline).toEqual(ACCEPTED);
+    }
+  });
+
+  it("r9 negative: 留意 directives, urgency and the case 1/3 headline still reject at S6", () => {
+    const negatives = [
+      "请留意{{S1}}。",
+      "{{S1}}，请留意。",
+      "要留意{{S1}}。",
+      "留意{{S1}}。",
+      "您留意{{S1}}。",
+      "多留意{{S1}}。",
+      "可以留意{{S1}}。",
+      "值得留意的内容，{{S1}}。",
+      "需要留意的内容，{{S1}}。",
+      "这里为您整理出需要留意的内容，{{S1}}。",
+      "您所留意的{{S1}}需要处理。",
+      "您留意到的项目，{{S1}}。",
+      "建议您留意{{S1}}。",
+      // Adversarial forms decided and pinned: 所 + 需要/要 + 留意 still rejects (需要 is r1; 要留意 keeps its own alternative), and a
+      // split of 所…留意 across a token does not open the exemption.
+      "您所需要留意的项目，{{S1}}。",
+      "您所要留意的项目，{{S1}}。",
+      "所{{S1}}留意的项目。",
+      "所、留意的项目，{{S1}}。",
+    ];
+    for (const headline of negatives) expect(recordedExplain(R9_RECORDED.case2, headline), headline).toEqual(R9_S6_REJECTION);
+  });
+
+  it("the recorded FULL rejections re-run: case 2 now accepted; cases 1, 3 and 4 are rejected exactly as recorded", () => {
+    expect(recordedExplain(R9_RECORDED.case2)).toEqual(ACCEPTED);
+    expect(recordedExplain(R9_RECORDED.case1)).toEqual(R9_S6_REJECTION);
+    expect(recordedExplain(R9_RECORDED.case3)).toEqual(R9_S6_REJECTION);
+    const care = envelope("DRAFT_CARE_PREPARATION_SUMMARY", "en-SG", R9_CASE4.tokens, { sections: R9_CASE4.sections });
+    expect(throughChain(fixtureRequest(R9_CASE4.fixture), care)).toEqual({ kind: "REJECTED", gate: "S5", reason: "FACT_FIDELITY_FAILED", repairable: false, lexical: ["DATE_OR_TIME"] });
+  });
+
+  it("the recorded ordinary bases are accepted unchanged (the probes below edit exactly one model-written field)", () => {
+    for (const field of Object.keys(R10_BASES) as R10Field[]) {
+      const base = R10_BASES[field];
+      const text = "headline" in base.shells ? base.shells.headline : base.shells.sections[0]!.intro;
+      expect(r10Probe(field, text), field).toEqual(ACCEPTED);
+    }
+  });
+
+  // The 12 genuine gaps (G) of the urgency-language assessment, each in the field it was found in.
+  it.each<[R10Field, string]>([
+    ["en-headline", "Here are the items that need your attention: {{S1}}."],
+    ["en-headline", "This needs your attention: {{S1}}."],
+    ["en-intro", "These are the readings that need your attention."],
+    ["en-headline", "Pay attention to {{S1}}."],
+    ["en-headline", "Watch {{S1}} closely."],
+    ["en-headline", "Here are the items worth watching: {{S1}}."],
+    ["en-headline", "Here is a concerning pattern in {{S1}}."],
+    ["zh-headline", "这里是值得关注的内容，{{S1}}。"],
+    ["zh-intro", "以下是值得关注的测量记录。"],
+    ["zh-headline", "这里是值得注意的内容，{{S1}}。"],
+    ["zh-headline", "您注意一下这里的内容，{{S1}}。"],
+    ["zh-headline", "留心这里的内容，{{S1}}。"],
+  ])("r10 G: %s %j rejects at S6", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(R9_S6_REJECTION);
+  });
+
+  // The four borderline wordings (A): the owner blocked the evaluative use of important, notable, worth noting and 重要.
+  it.each<[R10Field, string]>([
+    ["en-headline", "Here is something worth noting: {{S1}}."],
+    ["en-headline", "This is an important look at {{S1}}."],
+    ["en-headline", "Here is a notable pattern in {{S1}}."],
+    ["zh-headline", "这里是重要的内容，{{S1}}。"],
+    ["en-intro", "These are the important readings."],
+    ["en-intro", "These readings are notable."],
+    ["en-headline", "Importantly, here is {{S1}}."],
+    ["en-headline", "Notably, here is {{S1}}."],
+    ["en-headline", "Here is a noteworthy look at {{S1}}."],
+    ["en-headline", "Here is a look at {{S1}}, of particular note."],
+    ["zh-headline", "这里是很重要的{{S1}}。"],
+    ["zh-headline", "这里是值得一提的内容，{{S1}}。"],
+    ["zh-intro", "以下是重要的测量记录。"],
+    ["zh-headline", "我们认为重要的是{{S1}}。"],
+  ])("r10 A (evaluative importance): %s %j rejects at S6", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(R9_S6_REJECTION);
+  });
+
+  // Representative variants read through the EXISTING scan copies (fold, NFKC, ideograph gap and separator joins, the en pair/triple
+  // joins of single words, the Traditional→Simplified copy with the additive r10 rows) and close siblings of each G meaning.
+  it.each<[R10Field, string]>([
+    ["en-headline", "PAY ATTENTION to {{S1}}."],
+    ["en-headline", "Pay  close   attention to {{S1}}."],
+    ["en-headline", "Pay attention to {{S1}}."],
+    ["en-headline", "These items deserve your attention: {{S1}}."],
+    ["en-headline", "This calls for attention: {{S1}}."],
+    ["en-headline", "Bringing {{S1}} to your attention."],
+    ["en-headline", "Here is {{S1}}; watch it."],
+    ["en-headline", "Monitor {{S1}}."],
+    ["en-headline", "Keep monitoring {{S1}}."],
+    ["en-headline", "Here is {{S1}}, which is worth a closer look."],
+    ["en-headline", "Here is {{S1}}, worthy of note."],
+    ["en-headline", "Here is something worth   noting: {{S1}}."],
+    ["en-headline", "This looks concerning: {{S1}}."],
+    ["en-headline", "Here is {{S1}}, which is concerning."],
+    ["en-headline", "Here is a concerning {{S1}}."],
+    ["en-headline", "The pattern in {{S1}} is concerning."],
+    ["en-headline", "Here is a very concerning look at {{S1}}."],
+    ["en-headline", "Here are the items of concern: {{S1}}."],
+    ["en-headline", "Here is a worrisome pattern in {{S1}}."],
+    ["en-headline", "Here is an im portant look at {{S1}}."],
+    ["en-headline", "Here is a not able pattern in {{S1}}."],
+    ["en-headline", "Here is a ‘notable’ pattern in {{S1}}."],
+    ["zh-headline", "這裡是值得關注的內容，{{S1}}。"],
+    ["zh-headline", "这里是值 得 关 注的内容，{{S1}}。"],
+    ["zh-headline", "这里是值、得关注的内容，{{S1}}。"],
+    ["zh-headline", "这里是值得特别注意的内容，{{S1}}。"],
+    ["zh-headline", "這裡是重要的內容，{{S1}}。"],
+    ["zh-headline", "这里是重 要的内容，{{S1}}。"],
+    ["zh-headline", "您留心一下{{S1}}。"],
+    ["zh-headline", "留神{{S1}}。"],
+    ["zh-headline", "您关注{{S1}}。"],
+    ["zh-headline", "关注{{S1}}。"],
+    ["zh-headline", "这里呈现的是{{S1}}，密切观察。"],
+    ["zh-headline", "这里呈现的是{{S1}}，密切觀察。"],
+    ["zh-headline", "这里是令人担忧的{{S1}}。"],
+    ["zh-headline", "这里是讓人擔憂的{{S1}}。"],
+    ["zh-headline", "这里是引人注目的{{S1}}。"],
+    ["zh-headline", "这里是值得仔細觀察的{{S1}}。"],
+  ])("r10 variant: %s %j rejects at S6", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(R9_S6_REJECTION);
+  });
+
+  // r10 tightened before commit (coordinator ruling after the independent review): the zh form of the approved gap "need(s) your
+  // attention" — a modal before an attention verb, with or without 您 or 所 — rejects; only bare 您 + verb keeps the 到/的/过 exception.
+  it.each<[R10Field, string]>([
+    ["zh-headline", "这里是您需关注的内容，{{S1}}。"],
+    ["zh-headline", "这里呈现您要关注的{{S1}}。"],
+    ["zh-headline", "这里呈现您应关注的{{S1}}。"],
+    ["zh-headline", "这里呈现您得关注的{{S1}}。"],
+    ["zh-headline", "这里是您所需关注的内容，{{S1}}。"],
+    ["zh-headline", "这里是应关注的内容，{{S1}}。"],
+    ["zh-headline", "这里是须关注的内容，{{S1}}。"],
+    ["zh-headline", "這裡是應關注的內容，{{S1}}。"],
+    ["zh-headline", "這裡是您需關注的內容，{{S1}}。"],
+    ["zh-headline", "這裡是須關注的內容，{{S1}}。"],
+    ["zh-headline", "{{S1}}需关注。"],
+    ["zh-headline", "这里的内容要关注，{{S1}}。"],
+    ["zh-headline", "这里呈现的是{{S1}}，可以多关注。"],
+    ["zh-headline", "这里呈现的是{{S1}}，多关注。"],
+    ["zh-headline", "这里呈现的是{{S1}}，要多加注意。"],
+    ["zh-headline", "这里呈现的是{{S1}}，要特别注意。"],
+    ["zh-headline", "这里呈现的是{{S1}}，要特別注意。"],
+    ["zh-headline", "这里是应重视的内容，{{S1}}。"],
+    ["zh-headline", "这里是须警惕的内容，{{S1}}。"],
+    ["zh-intro", "以下是需关注的测量记录。"],
+  ])("r10 modal + attention verb (zh needs-your-attention): %s %j rejects at S6", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(R9_S6_REJECTION);
+  });
+
+  // Approved descriptive and non-evaluative forms stay accepted (owner decision: 您所关注的, 您所留意的, "notes concerning …"; and the
+  // descriptive person-attributed forms the context checks keep open).
+  it.each<[R10Field, string]>([
+    ["en-headline", "Here is a look at {{S1}}."],
+    ["en-headline", "Here are the notes concerning {{S1}}."],
+    ["en-headline", "Here is everything concerning {{S1}}."],
+    ["en-headline", "Here are your notes concerning the pattern, {{S1}}."],
+    ["en-intro", "Here is what you chose to note down."],
+    ["en-headline", "Here is what the pattern looks at: {{S1}}."],
+    ["en-headline", "Here are the items you noted, {{S1}}."],
+    ["en-headline", "Here are the items you paid attention to: {{S1}}."],
+    ["en-headline", "Here are the items you have been paying attention to: {{S1}}."],
+    ["en-headline", "Here are the items you marked as important: {{S1}}."],
+    ["en-headline", "Here is a closer look at {{S1}}."],
+    ["en-headline", "Here is what you watched: {{S1}}."],
+    ["zh-headline", "这里呈现的是{{S1}}。"],
+    ["zh-headline", "这里呈现您所关注的{{S1}}。"],
+    ["zh-headline", "這裡呈現您所關注的{{S1}}。"],
+    ["zh-headline", "这里呈现您所关注的 {{S1}}。"],
+    ["zh-headline", "这里呈现您所留意的项目，{{S1}}。"],
+    ["zh-headline", "这里为您整理出所关注的内容，{{S1}}。"],
+    ["zh-headline", "这里为您整理出所关注的内容，即{{S1}}。"],
+    ["zh-headline", "您所留心的项目如下，{{S1}}。"],
+    ["zh-headline", "这里呈现您关注的{{S1}}。"],
+    ["zh-headline", "这里呈现您注意到的{{S1}}。"],
+    ["zh-headline", "这里呈现您认为重要的{{S1}}。"],
+    ["zh-headline", "这里呈现您所认为重要的{{S1}}。"],
+    ["zh-headline", "這裡呈現您認為重要的{{S1}}。"],
+    ["zh-headline", "这里呈现您觉得重要的{{S1}}。"],
+  ])("r10 approved form: %s %j is accepted", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(ACCEPTED);
+  });
+
+  it("scope: r10 reads model-written framing only; a patient-written question with the same words composes unchanged", () => {
+    for (const [field, question] of [
+      ["en-intro", "Is this important and worth noting? Do I pay attention to the concerning ones?"],
+      ["zh-intro", "这个值得关注吗？重要吗？我要留心什么？"],
+    ] as const) {
+      const base = R10_BASES[field];
+      const original = fixtureRequest(base.fixture);
+      const facts = original.facts.map((fact) => (fact.field === "QUESTION_TEXT" && fact.value.kind === "TEXT" ? { ...fact, value: { ...fact.value, text: question } } : fact));
+      expect(facts.filter((fact) => fact.value.kind === "TEXT" && fact.value.text === question), question).toHaveLength(1);
+      const request = { ...original, facts } as AiTaskRequest;
+      expect(throughChain(request, envelope("DRAFT_CARE_PREPARATION_SUMMARY", base.locale, base.tokens, base.shells)), question).toEqual(ACCEPTED);
+    }
+  });
+
+  it("English parity with r9: a descriptive phrase passes, a directive rejects", () => {
+    expect(r10Probe("en-headline", "Here are the items you noted, {{S1}}.")).toEqual(ACCEPTED);
+    expect(r10Probe("en-headline", "Please keep track of {{S1}}.")).toEqual(R9_S6_REJECTION);
   });
 });

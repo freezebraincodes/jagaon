@@ -66,7 +66,7 @@ const TARGETED_MAX_USD_LIMIT = 0.02;
 const SENTINEL = "ds-SENTINEL-CREDENTIAL-3c9e71b2d4";
 const NOW = () => "2026-10-07T10:00:00.000Z";
 // The frozen contract (the same literals as the smoke, FULL and diagnostic runners; the whole Packet 11C contract is pinned in
-// packet-11c-contract-freeze.test.ts). CURRENT (Packet 11C B5 contract freeze, offline): prompt 11b.18, rules 11b.15-r8, request 11b.11,
+// packet-11c-contract-freeze.test.ts). CURRENT (Packet 11C B5 contract freeze, offline): prompt 11b.18, rules 11b.16-r10, request 11b.11,
 // bundle set 11b.18, provider schema kie-schema.11c.1, slot plan ai-slot-plan.11b.9, fixtures 11b.16, harness packet11-eval.19, policy
 // hybrid-full-policy.2, caps 512/1024, temperature 0.2. Revision history follows (each line was the contract at its time).
 // At creation (2026-10-07): prompt 11b.17, rules r8, request 11b.11, bundles @11b.17, fixtures 11b.15, harness eval.16, policy
@@ -84,7 +84,7 @@ const NOW = () => "2026-10-07T10:00:00.000Z";
 // thresholds and every model-facing byte are unchanged. The live block is not run.
 const REQUIRED_CONTRACT = Object.freeze({
   prompt: "11b.18",
-  shellRules: "ai-shell-rules.11b.15-r8",
+  shellRules: "ai-shell-rules.11b.16-r10",
   shellRequest: "ai-shell-request.11b.11",
   explainBundle: "ai.explain-pattern@11b.18",
   careBundle: "ai.draft-care-preparation-summary@11b.18",

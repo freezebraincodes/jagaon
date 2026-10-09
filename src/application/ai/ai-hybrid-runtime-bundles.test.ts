@@ -15,7 +15,7 @@ describe("hybrid runtime bundles 11b.18 (observation ownership)", () => {
     expect(AI_HYBRID_RUNTIME_BUNDLES.DRAFT_CARE_PREPARATION_SUMMARY.shellOutputVersion).toBe("ai-shell.draft-care-preparation-summary@11b.7");
     // Packet 11C B5 contract freeze: labels only (provider schema kie-schema.11c.1, harness packet11-eval.19); no model-facing byte changed.
     // Packet 11C Addendum C (C5): harness packet11-eval.20 (the usage accounting); no model-facing byte changed.
-    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.9", shellRules: "ai-shell-rules.11b.15-r8", prompt: "11b.18", providerSchema: "kie-schema.11c.1", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.20", shellRequest: "ai-shell-request.11b.11" });
+    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.9", shellRules: "ai-shell-rules.11b.16-r10", prompt: "11b.18", providerSchema: "kie-schema.11c.1", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.20", shellRequest: "ai-shell-request.11b.11" });
     // Unchanged by 11b.9, 11b.10, 11b.11, 11b.12, 11b.13 and 11b.14 (the prompt also stays 11b.15 in 11b.13 and 11b.14): the shell in/out
     // versions, atoms, default shells and language copy. The request profile moved once more in 11b.14 (ai-shell-request.11b.11, temperature 0.2).
     // 11b.18: the language copy adds the observation variants (ai-language-copy.11b.7); atoms and default shells stay.

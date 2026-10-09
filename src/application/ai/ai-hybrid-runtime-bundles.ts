@@ -91,7 +91,7 @@ export const AI_HYBRID_VERSIONS = deepFreeze({
   slotPlan: SLOT_PLAN_VERSION,
   atomRenderer: "ai-atoms.11b.7",
   defaultShells: "ai-shells-default.11b.8",
-  shellRules: "ai-shell-rules.11b.15-r8",
+  shellRules: "ai-shell-rules.11b.16-r10",
   languageCopy: "ai-language-copy.11b.10",
   prompt: "11b.18",
   providerSchema: "kie-schema.11c.1",

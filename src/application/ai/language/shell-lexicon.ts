@@ -43,8 +43,21 @@ import { spelledCounts } from "../ai-output-validator";
  * 该项 is not 应该); and S6 also reads a token-separated copy (tokens as CLINICAL_TOKEN_SEPARATOR, read as a space) so model-written
  * splits across a token (应{{S2}}该, 建{{S2}}议) still reject. The helpers are standInShadow, standInOccurrence, provenanceSafeMatch,
  * shellDirectiveScanTexts and tokenSeparatedScanText below.
+ * Rules r9 (owner decision 2026-10-09, Packet 11 FULL rejection diagnosis case 2, offline; never frozen on its own, shipped only inside
+ * r10): exactly one change. In the r3 zh directive entry the bare alternative 留意 becomes (?<!所)留意, so the descriptive relative clause
+ * 您所留意的 ("which you have been keeping an eye on") is no longer read as a directive. 请留意, 要留意, 需要留意 and every other
+ * directive or urgency form still reject (要留意 keeps its own alternative; 需要 is r1).
+ * Rules r10 (owner decision 2026-10-09, urgency-language assessment, offline; one freeze together with r9): ADDITIVE only — every r1–r9
+ * entry, table, scan copy, join and provenance rule is unchanged. r10 adds the R10_DIRECTIVE entries (read by S6 exactly as the other
+ * directive entries: every scan copy, the en pair/triple-joined candidates, the token-separated copy, stand-in provenance) and an
+ * additive R10_TRADITIONAL_TABLE. They reject, in model-written shell wording only (S6 reads the REMOTE fields with every slot token
+ * replaced; patient facts, historical content and fixed application notices are never read): a statement that something needs or
+ * deserves the person's attention, an instruction to attend to, watch or monitor something, a risk judgement ("concerning", 令人担忧),
+ * and the evaluative use of important / notable / noteworthy / worth noting / 重要 / 值得一提 that assigns importance or noteworthiness.
+ * Context checks keep the descriptive forms (您所关注的, 您所留意的, 您所留心的, 您关注的, "notes concerning …", "the items you
+ * paid attention to", "the items you marked as important", 您认为重要的) accepted. The FULL run under r8 stays FAIL; r9/r10 rescore nothing.
  */
-export const SHELL_RULES_REVISION = "ai-shell-rules.11b.15-r8";
+export const SHELL_RULES_REVISION = "ai-shell-rules.11b.16-r10";
 export type ShellLexicalViolation = "DIGIT" | "NUMBER_WORD" | "UNIT" | "PERCENT" | "REFERENCE" | "DATE_OR_TIME" | "COMPARATIVE_DIRECTION" | "MEASURE_NAME" | "QUOTATION" | "FORMAT_CHARACTER" | "DISALLOWED_CHARACTER";
 
 /** Format (Cf) and control (Cc) characters, except tab, line feed and carriage return. */
@@ -161,8 +174,13 @@ const R6_TRADITIONAL_TABLE: ReadonlyArray<readonly [string, string]> = [
   // r6 fix round 2: 脚痛/脚疼 (腳) and 膝盖痛/膝盖疼 (膝蓋).
   ["脚", "腳"], ["盖", "蓋"],
 ];
-/** Traditional character → Simplified character (rules r3, extended by r5 and r6); read-only by contract, used only to build scan copies. */
-export const TRADITIONAL_TO_SIMPLIFIED: ReadonlyMap<string, string> = new Map([...TRADITIONAL_TABLE, ...R5_TRADITIONAL_TABLE, ...R6_TRADITIONAL_TABLE].flatMap(([simplified, traditional]) => [...traditional].map((character) => [character, simplified] as const)));
+/**
+ * Rules r10 (additive; the r3, r5 and r6 rows above are unchanged): the Traditional forms the r10 zh directive entries need (观察, 追踪,
+ * 跟踪, 仔细, 监测, 让人, 觉得). Scanning only.
+ */
+const R10_TRADITIONAL_TABLE: ReadonlyArray<readonly [string, string]> = [["观", "觀"], ["踪", "蹤"], ["细", "細"], ["监", "監"], ["让", "讓"], ["觉", "覺"]];
+/** Traditional character → Simplified character (rules r3, extended by r5, r6 and r10); read-only by contract, used only to build scan copies. */
+export const TRADITIONAL_TO_SIMPLIFIED: ReadonlyMap<string, string> = new Map([...TRADITIONAL_TABLE, ...R5_TRADITIONAL_TABLE, ...R6_TRADITIONAL_TABLE, ...R10_TRADITIONAL_TABLE].flatMap(([simplified, traditional]) => [...traditional].map((character) => [character, simplified] as const)));
 const toSimplified = (scan: string): string => Array.from(scan, (character) => TRADITIONAL_TO_SIMPLIFIED.get(character) ?? character).join("");
 
 /**
@@ -366,14 +384,52 @@ const DIRECTIVE: readonly RegExp[] = Object.freeze([
 /**
  * Rules r3 directive (advice) entries, additive to DIRECTIVE. zh 注意 counts after 请/要/应/需 or at the start of a
  * sentence (start of text or after 。！？!?.); fix round 1 adds 须 (so 必须注意 too); "remember" and "be sure" count with or
- * without "to".
+ * without "to". Rules r9: 留意 counts unless it directly follows 所 (the 您所留意的 relative clause).
  */
 const R3_DIRECTIVE: readonly RegExp[] = Object.freeze([
   /\b(?:please|pls|plz|should|shouldn'?t|ought|must|mustn'?t|needs?\s+to|ha(?:ve|s)\s+to|had\s+better|kindly|let's|recommend\w*|suggest\w*|advis\w*|encourage\w*|urge\w*|consider\w*|try(?:ing)?\s+to|make\s+sure|be\s+sure|remember|don'?t\s+forget|do\s+not\s+forget|it\s+is\s+(?:best|better|important|advisable|wise|essential)\s+to|it's\s+(?:best|better|important)\s+to|you\s+(?:may|might|could)\s+(?:want|wish|like)\s+to|you\s+can\s+try|be\s+careful|keep\s+(?:an\s+eye|track)|check\s+with|talk\s+to|speak\s+(?:to|with)|ask\s+your|avoid\w*)\b/i,
-  /千万|记住|别忘|不要|尽量|应当|留意|(?:请|要|应|需|须)注意|(?:^|[。！？!?.])\s*注意|记得|不妨|可以考虑|要记得|要留意/,
+  /千万|记住|别忘|不要|尽量|应当|(?<!所)留意|(?:请|要|应|需|须)注意|(?:^|[。！？!?.])\s*注意|记得|不妨|可以考虑|要记得|要留意/,
 ].map((pattern) => Object.freeze(pattern)));
-/** Every S6 directive pattern (r1/r2 then r3), exported read-only for the Traditional-coverage test. */
-export const SHELL_DIRECTIVE_PATTERNS: readonly RegExp[] = Object.freeze([...DIRECTIVE, ...R3_DIRECTIVE]);
+/**
+ * Rules r10 (owner decision 2026-10-09: no advice and no implied urgency; no assigned importance or noteworthiness), additive to the r1
+ * and r3 directive entries and read by S6 exactly as they are. Context-checked phrases, never a bare keyword:
+ * en attention — "needs/deserves/warrants/requires/merits/calls for (your/close …) attention", "to/for your attention", "attention is
+ *   needed", and "pay/paying (close …) attention" unless it describes the person ("you paid attention to", "you have been paying
+ *   attention to");
+ * en watching — "watch"/"monitor" opening a sentence, "watch/monitor/track/follow/check/observe … closely", "closely watch …", "keep
+ *   watching/monitoring/…", "keep a (close) watch", "watch out", "look out for", "on the lookout";
+ * en worth — "worth watching/monitoring/noting/mentioning/a look/attention/…", "worthy of note/attention/concern";
+ * en concern — "concerning" as an adjective: after a/an or an intensifier; after a copula unless a preposition object follows (a
+ *   determiner, a pronoun or a slot token: in the token-separated reading a token is blank space, so "is concerning {{S1}}." reads as
+ *   the preposition); "the/this … concerning pattern/trend/…"; "concerning." directly at a clause end; "concerningly", "of (some …)
+ *   concern", "worrisome", "troubling". "notes concerning …" stays accepted;
+ * en importance — important(ly), notable/notably, noteworthy, importance, "of (particular) note", unless the person did the marking
+ *   ("you marked/flagged/consider(ed)/find/found … as important");
+ * zh — 值得 + an attention, notice, concern or mention verb (值得关注, 值得注意, 值得一提 …); 留心/留神 unless after 所; 注意一下 and
+ *   its siblings; bare 您 + an attention verb unless 到/的/过 follows (您注意一下 rejects, 您关注的 and 您注意到的 pass); 您 + a modal +
+ *   an attention verb always (您需关注的, 您要关注的); a modal + 关注/留心/留神/重视/警惕 anywhere (应关注, 须关注, 需关注, 多关注, 可以多关注;
+ *   r10 tightened before commit, coordinator ruling: the zh form of "needs your attention") and 要特别注意 / 要多加注意; an
+ *   attention verb opening a sentence; 密切 + a watching verb; 引人注目, 令人担忧 and their siblings; 重要 unless the person is the one
+ *   who regards it so (您认为重要的, 您所觉得重要的).
+ */
+const R10_EN_PERSON_MARKED = String.raw`(?<!\byou(?:\s+(?:have|had)|'ve|'d)?\s+(?:marked|flagged|starred|labell?ed|tagged|find|found|feel|felt|called|noted)\s+(?:(?:it|them|this|these|those)\s+)?(?:as\s+)?)`;
+const R10_DIRECTIVE: readonly RegExp[] = Object.freeze([
+  // en attention.
+  /\b(?:needs?|needed|needing|requir(?:es?|ed|ing)|deserv(?:es?|ed|ing)|warrant(?:s|ed|ing)?|merit(?:s|ed|ing)?|worth|worthy\s+of|call(?:s|ed|ing)?\s+for)\s+(?:(?:your|some|close|closer|careful|special|particular|extra|more|further|immediate|prompt|real|any|a\s+little|a\s+bit\s+of)\s+){0,2}attention\b|\b(?:to|for)\s+your\s+(?:\w+\s+)?attention\b|\battention[\s-]+(?:worthy|needed|required|warranted)\b|\battention\s+(?:is|was|may\s+be|might\s+be|could\s+be)\s+(?:needed|required|warranted|advised|called\s+for)\b/i,
+  /(?<!\byou(?:\s+(?:have|had)\s+been|'ve\s+been|'d\s+been|\s+are|'re|\s+were)\s+)\bpa(?:y|ys|ying)\s+(?:(?:close|closer|careful|special|particular|extra|more|some|full)\s+)?attention\b/i,
+  // en watching.
+  /(?:^|[.!?:;]\s*)(?:watch|monitor)\b|\b(?:watch\w*|monitor\w*|track\w*|follow\w*|check\w*|observ\w*)\b[^.!?]{0,40}?\bclosely\b|\bclosely\s+(?:watch|monitor|track|follow|check|observ)\w*|\bkeep\s+(?:on\s+)?(?:watching|monitoring|checking|tracking|following|observing)\b|\bkeep\s+a\s+(?:close\s+)?watch\b|\bwatch\s+out\b|\blook\s+out\s+for\b|\bon\s+the\s+look-?out\b/i,
+  // en worth.
+  /\bworth\s+(?:(?:a|an|the|some|your|special|particular|closer|close|second|careful|further|another|quick|more|extra)\s+){0,2}(?:watching|monitoring|tracking|following|noting|noticing|mentioning|highlighting|flagging|checking|looking|look|attention|keeping|concern|remembering|observing|pointing\s+out|a\s+mention)\b|\bworthy\s+of\s+(?:\w+\s+)?(?:note|notice|attention|concern|mention)\b/i,
+  // en concern.
+  /\b(?:a|an|quite|rather|somewhat|very|more|most|less|slightly|particularly|especially|potentially|possibly|really|so|too|bit|little)\s+concerning\b|\b(?:is|are|was|were|be|been|being|looks?|looked|seems?|seemed|appears?|appeared|remains?|find|finds|found)\s+concerning\b(?!\s+(?:the|your|you|a|an|each|every|all|its|their|this|that|these|those|how|what|whether|which|when|where)\b|\s+[^\sA-Za-z]|\s*$)|\b(?:the|this|that|these|those)\s+concerning\s+(?:patterns?|trends?|readings?|results?|signs?|changes?|levels?|values?|pictures?|entr(?:y|ies)|findings?|numbers?|records?)\b|\bconcerning[.!?;]|\bconcerningly\b|\bof\s+(?:(?:some|real|particular|potential|possible|special|great|serious|slight|mild|little|any|no)\s+)?concern\b|\bworrisome\b|\btroubling\b/i,
+  // en importance.
+  new RegExp(String.raw`${R10_EN_PERSON_MARKED}\b(?:important(?:ly)?|importance|notabl[ey]|noteworthy)\b|\bof\s+(?:(?:particular|special|some|real)\s+)?note\b`, "i"),
+  // zh.
+  /值得(?:特别|格外|多加|加以|进一步|再|去|您|我们|大家|好好|仔细){0,2}(?:关注|注意|留意|留心|留神|重视|警惕|注目|一提|提及|一看|当心|小心|担心|担忧|关心|观察|追踪|跟踪|跟进|监测)|(?<!所)(?:留心|留神)|(?:注意|留意|留心|留神|关注)一下|您(?:注意|留心|留神|关注|当心|小心|警惕|重视)(?![到的过過])|您(?:要|多|多加|好好|再|得|可以|可|不妨|最好|务必|一定|需|应|应该)(?:注意|留心|留神|关注|当心|小心|警惕|重视)|(?:要|应|需|须|得|多|多加|可以多)(?:关注|留心|留神|重视|警惕)|要(?:特别|多加)注意|(?:^|[。！？!?.；;：:])\s*(?:关注|当心|小心|警惕|重视|留神|留心|密切)(?![到的过過])|密切(?:关注|注意|留意|留心|观察|监测|跟进|追踪|跟踪)|引人(?:注目|关注|注意|担忧|担心)|(?:令|让)人(?:担忧|担心|不安|忧虑|关注|注目)|引起(?:您的?)?(?:关注|注意|重视|警惕)|(?<!您所?(?:[认認][为為爲]|[觉覺]得|[视視][为為爲]|[标標][记記]?[为為爲]))重要/,
+].map((pattern) => Object.freeze(pattern)));
+/** Every S6 directive pattern (r1/r2, r3 with the r9 refinement, then r10), exported read-only for the Traditional-coverage test. */
+export const SHELL_DIRECTIVE_PATTERNS: readonly RegExp[] = Object.freeze([...DIRECTIVE, ...R3_DIRECTIVE, ...R10_DIRECTIVE]);
 
 /** Rules r4: the evaluation-only S7 register detail. */
 export type ShellRegisterCode = "INFORMAL_SECOND_PERSON";
