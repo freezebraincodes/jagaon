@@ -202,6 +202,10 @@ export function TodayScreen({
           <DropIcon size={26} />
           {msg.recordReading}
         </button>
+        {/* Packet 13 slice: Tell JagaOn (always discoverable; the screen explains when voice is unavailable). */}
+        <button type="button" className="btn btn-outline btn-wide tell-jagaon-action" onClick={() => navigate("TELL_JAGAON")} disabled={actionsDisabled}>
+          {messages.voice.entry}
+        </button>
       </section>
 
       {latestGlucose && latestInstant ? (

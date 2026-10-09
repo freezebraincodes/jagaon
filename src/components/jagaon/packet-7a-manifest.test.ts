@@ -124,8 +124,9 @@ describe("Packet 7A public exports and manifests", () => {
     expect(JAGAON_DEXIE_VERSION).toBe(2);
     expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MEDICATION_SCHEDULE", "HISTORY", "MORE"]);
     // Packet 9B adds PREVENTIVE_CARE and CARE_PREPARATION; 9C adds CARE_SUMMARY_PREVIEW.
-    // Packet 10 adds exactly DATA_BACKUP.
-    expect(ALL_SCREENS.size).toBe(18);
+    // Packet 10 adds exactly DATA_BACKUP. The voice slice adds exactly TELL_JAGAON (a child screen reached from Today).
+    expect(ALL_SCREENS.size).toBe(19);
+    expect(ALL_SCREENS.has("TELL_JAGAON")).toBe(true);
     expect(HISTORY_PERIODS).toEqual(["THIS_WEEK", "LAST_WEEK", "THIRTY_DAYS"]);
   });
 

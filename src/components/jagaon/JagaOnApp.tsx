@@ -27,6 +27,10 @@ import { NearbyFoodScreen } from "./screens/NearbyFoodScreen";
 import { FoodGeneralInfoScreen } from "./screens/FoodGeneralInfoScreen";
 import { MoreScreen } from "./screens/MoreScreen";
 import { HelpScreen } from "./screens/HelpScreen";
+import { TellJagaOnScreen } from "./voice/TellJagaOnScreen";
+import { checkTrtcVoiceAvailability, loadTrtcTranscriber } from "./voice/load-trtc-transcriber";
+import { createVoiceJournalSave, createVoiceSaveWithRefresh } from "./voice/voice-journal-save";
+import type { VoiceTranscriberPort } from "@/application/voice/voice-transcriber-port";
 import {
   createBrowserJournalRuntime,
   JagaOnStorageLockedError,
@@ -66,6 +70,8 @@ import { createBrowserAiAssistance } from "@/application/ai/browser-history-expl
 import type { AiInvocationAuditPort } from "@/application/ai/ai-provider-port";
 import type { RecordedHistoryQueryPort } from "@/application/history/recorded-history-contracts";
 import type { PatternExplainerPort } from "./history/PatternExplanationPanel";
+import { isTranscriptExtractionActivated } from "@/application/transcript-extraction/transcript-extraction-qualification";
+import { createVoiceRemoteExtraction } from "@/application/transcript-extraction/voice-remote-extraction-adapter";
 
 // --- Section: Navigation state --------------------------------------------
 
@@ -119,6 +125,16 @@ type JagaOnAppProps = {
    * injected in tests to observe that (and to add a test manifest and a fake route).
    */
   aiAssistanceFactory?: AiAssistanceFactory;
+  /**
+   * Packet 13 slice: loads the voice transcriber after the voice-cloud disclosure was accepted. Default: the TRTC adapter by dynamic
+   * import. Injected in tests and the isolated e2e harness (a scripted fake there; never a production default).
+   */
+  voiceTranscriberLoader?: (accessPasscode: () => string | null) => Promise<VoiceTranscriberPort>;
+  /**
+   * Review I-5: the credential-free voice availability probe, called when Tell JagaOn opens (before its disclosure). Default: one
+   * same-origin GET to the voice route (fails closed). Injected in tests and the isolated e2e harness.
+   */
+  voiceAvailabilityProbe?: () => Promise<boolean>;
 };
 
 /**
@@ -149,6 +165,17 @@ function browserOnboardingRepository(): DemoOnboardingRepository {
   return createDemoOnboardingRepository(createBrowserOnboardingStorage());
 }
 
+/** Packet 13 slice: a runtime without the voice ports (older test runtimes) shows voice as unavailable; nothing is read or stored. */
+const UNAVAILABLE_TERMINOLOGY = Object.freeze({
+  directory: async () => Object.freeze({ terms: [], names: [] }),
+  activeMedicines: async () => [],
+  remember: async () => Object.freeze({ kind: "FAILED" }),
+  // Terminology review Critical #1: nothing to list, change or forget without the voice ports.
+  list: async () => [],
+  change: async () => Object.freeze({ kind: "REJECTED", code: "TERM_NOT_FOUND" }),
+  forget: async () => Object.freeze({ kind: "FAILED" }),
+});
+
 /** Completion of a delete-all is handled once, by the app-level port wrapper. */
 const noop = () => undefined;
 
@@ -165,6 +192,8 @@ export function JagaOnApp({
   deleteAllPortFactory = browserDeleteAllPort,
   restorePortFactory = browserRestorePort,
   aiAssistanceFactory = createBrowserAiAssistance,
+  voiceTranscriberLoader = loadTrtcTranscriber,
+  voiceAvailabilityProbe = checkTrtcVoiceAvailability,
 }: JagaOnAppProps = {}) {
   const printPort = useMemo(() => printPortFactory(), [printPortFactory]);
   const appointmentNotes = useMemo<AppointmentNoteSelectionRepository>(
@@ -924,6 +953,32 @@ export function JagaOnApp({
             goBack={goBack}
           />
         );
+      case "TELL_JAGAON": {
+        if (!runtime) return <p role="status">{messages.shared.loading}</p>;
+        const voice = runtime.voice;
+        // Packet 13 (Q13-6, HELD by the integration gate until the re-review approves): one confirmed fact → the existing command.
+        const saveFact = voice ? createVoiceJournalSave({ commands: runtime.commands, recordMedicationEvent: voice.recordMedicationEvent, now: () => new Date().toISOString() as never }) : null;
+        return (
+          <TellJagaOnScreen
+            messages={messages}
+            locale={locale}
+            voiceAvailable={voice !== undefined}
+            checkAvailability={voiceAvailabilityProbe}
+            loadTranscriber={voiceTranscriberLoader}
+            terminology={voice?.terminology ?? UNAVAILABLE_TERMINOLOGY}
+            glucoseEntryUnit="MMOL_PER_L"
+            reportedAmountSaved
+            // DeepSeek transcript extraction is offered only when its task is activated (never under the shipped manifest). No app-level
+            // reader of the in-memory AI passcode exists yet, so an activated call would end UNAVAILABLE (PASSCODE_MISSING) and send nothing.
+            remoteExtraction={isTranscriptExtractionActivated() ? createVoiceRemoteExtraction({ passcode: () => null }) : undefined}
+            // Integration gate lifted 2026-10-09 after the extractor re-reviews and the targeted confirmation: one confirmed fact goes to
+            // the existing journal command; the Today refresh never decides the save outcome (review I-3).
+            onSaveFacts={saveFact ? createVoiceSaveWithRefresh(saveFact, refreshToday) : async () => ({ kind: "NOT_SAVED" as const })}
+            onManualEntry={(kind) => (kind === "GLUCOSE" ? navigate("LOG_GLUCOSE") : kind === "MEAL" ? navigate("LOG_MEAL") : kind === "MEDICATION" ? navigate("MEDICATION_SCHEDULE") : goBack())}
+            onClose={goBack}
+          />
+        );
+      }
       default:
         return null;
     }

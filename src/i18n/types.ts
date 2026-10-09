@@ -966,6 +966,32 @@ export type AiHistoryFallbackMessages = {
   unavailableAfterRequest: string;
 };
 
+/** Voice transcription slice copy (voice-copy.13s.1). Every row is human acceptance pending. */
+export type VoiceMessages = {
+  entry: string;
+  disclosure: { title: string; body: string; accept: string; decline: string };
+  state: {
+    listening: string;
+    stop: string;
+    cancel: string;
+    stopping: string;
+    cancelled: string;
+    timedOut: string;
+    permissionDenied: string;
+    unsupported: string;
+    unavailable: string;
+  };
+  review: {
+    heading: string;
+    transcriptLabel: string;
+    nothingFound: string;
+    unitUnstated: string;
+    confirm: string;
+    discard: string;
+  };
+  redirect: { body: string; transcribedNote: string };
+};
+
 export type AppMessages = {
   /** Packet 10 data, backup, restore, deletion and integrity copy. */
   packet10: Packet10Messages;
@@ -977,6 +1003,8 @@ export type AppMessages = {
   aiWording: AiWordingMessages;
   /** Owner UI decision U12: the history fallback line after an attempted remote request (ai-history-fallback.11c.1). */
   aiHistoryFallback: AiHistoryFallbackMessages;
+  /** Voice transcription slice (voice-copy.13s.1; human acceptance pending). */
+  voice: VoiceMessages;
   shared: SharedMessages;
   today: TodayMessages;
   glucose: GlucoseMessages;

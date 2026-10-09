@@ -111,8 +111,9 @@ describe("bilingual evidence — en-SG and zh-SG parity", () => {
   });
 
   it("the 11 Packet 6 screens, My medicines, Packet 7A Recorded history, Packet 8 Medication schedule and the Packet 9B care screens are enabled (no Packet 7B or later routes)", () => {
-    // Packet 10 adds exactly DATA_BACKUP.
-    expect(ALL_SCREENS.size).toBe(18);
+    // Packet 10 adds exactly DATA_BACKUP; the Packet 13 slice adds exactly TELL_JAGAON.
+    expect(ALL_SCREENS.size).toBe(19);
+    expect(PACKET_6_ENABLED_SCREENS).toContain("TELL_JAGAON");
     expect(PACKET_6_ENABLED_SCREENS).toContain("CARE_SUMMARY_PREVIEW");
     expect(PACKET_6_ENABLED_SCREENS).toContain("PREVENTIVE_CARE");
     expect(PACKET_6_ENABLED_SCREENS).toContain("CARE_PREPARATION");

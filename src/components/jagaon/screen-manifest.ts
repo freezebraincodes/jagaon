@@ -48,7 +48,9 @@ export type ScreenId =
   /** Child (Packet 9C): care-summary preview, approval and local print, reached from Screen 10 */
   | "CARE_SUMMARY_PREVIEW"
   /** Child (Packet 10): Data and backup, distinct from "Export to other apps" */
-  | "DATA_BACKUP";
+  | "DATA_BACKUP"
+  /** Child (Packet 13 slice): Tell JagaOn voice logging, reached from Today */
+  | "TELL_JAGAON";
 
 // Settings (language and demo reset) render inside More, as in frame 12.
 
@@ -99,6 +101,9 @@ export const PACKET_9C_CHILD_SCREENS: readonly ScreenId[] = Object.freeze(["CARE
 /** Packet 10 Data and backup destination, reached from More (and Settings). */
 export const PACKET_10_CHILD_SCREENS: readonly ScreenId[] = Object.freeze(["DATA_BACKUP"]);
 
+/** Packet 13 slice: Tell JagaOn, reached from Today (shown also while voice is unavailable; owner decision "Voice entry"). */
+export const PACKET_13_CHILD_SCREENS: readonly ScreenId[] = Object.freeze(["TELL_JAGAON"]);
+
 /** Every enabled journal screen (top-level + Packet 6, 6A, 9B, 9C and 10 children). */
 export const PACKET_6_ENABLED_SCREENS: readonly ScreenId[] = Object.freeze([
   ...TOP_LEVEL_SCREENS,
@@ -107,6 +112,7 @@ export const PACKET_6_ENABLED_SCREENS: readonly ScreenId[] = Object.freeze([
   ...PACKET_9B_CHILD_SCREENS,
   ...PACKET_9C_CHILD_SCREENS,
   ...PACKET_10_CHILD_SCREENS,
+  ...PACKET_13_CHILD_SCREENS,
 ]);
 
 /**

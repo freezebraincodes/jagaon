@@ -52,6 +52,39 @@ export const zhSGMessages: AppMessages = {
   aiHistoryFallback: {
     unavailableAfterRequest: "AI 措辞暂时无法使用。您的记录没有改变；现显示标准措辞。",
   },
+  // voice-copy.13s.1: voice transcription slice. Every row is human acceptance pending; not an approved row.
+  voice: {
+    entry: "告诉 JagaOn",
+    disclosure: {
+      title: "使用语音转写？",
+      body: "麦克风开启期间，您的语音会发送到腾讯云（TRTC）转成文字。JagaOn 不保存录音或文字。只有您检查并确认的内容才会保存在此设备上。语音转写与 AI 措辞设置是分开的。",
+      accept: "开启麦克风",
+      decline: "改为手动输入",
+    },
+    state: {
+      listening: "正在聆听…请说中文。",
+      stop: "停止",
+      cancel: "取消",
+      stopping: "正在停止并关闭麦克风…",
+      cancelled: "已取消。没有保存任何内容。",
+      timedOut: "已达到时间上限。麦克风已关闭。没有保存任何内容。",
+      permissionDenied: "未获准使用麦克风。您可以改为手动输入。",
+      unsupported: "此浏览器无法使用语音输入。您可以改为手动输入。",
+      unavailable: "语音转写暂时无法使用。您的记录没有改变。您可以改为手动输入。",
+    },
+    review: {
+      heading: "我听到的内容",
+      transcriptLabel: "您说的话（不会保存）",
+      nothingFound: "没有找到可以填写的内容。您可以改为手动输入。",
+      unitUnstated: "没有说单位。保存前请确认单位。",
+      confirm: "保存已勾选的内容",
+      discard: "放弃",
+    },
+    redirect: {
+      body: "JagaOn 无法回答有关剂量或更改治疗的问题。请咨询您的医生或药剂师。",
+      transcribedNote: "您的语音由腾讯云转写。这个问题没有发送到其他地方，也没有保存任何内容。",
+    },
+  },
   shared: {
     appName: "JagaOn",
     demoBoundary:

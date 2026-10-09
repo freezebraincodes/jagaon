@@ -51,6 +51,39 @@ export const enSGMessages: AppMessages = {
   aiHistoryFallback: {
     unavailableAfterRequest: "AI wording is unavailable. Your records are unchanged; standard wording is shown.",
   },
+  // voice-copy.13s.1: voice transcription slice. Every row is human acceptance pending; not an approved row.
+  voice: {
+    entry: "Tell JagaOn",
+    disclosure: {
+      title: "Use voice transcription?",
+      body: "While the microphone is on, your voice is sent to Tencent Cloud (TRTC) to turn it into text. JagaOn does not store the audio or the text. Only what you check and confirm is saved on this device. Voice transcription is separate from the AI wording setting.",
+      accept: "Turn on microphone",
+      decline: "Type instead",
+    },
+    state: {
+      listening: "Listening… Please speak in English.",
+      stop: "Stop",
+      cancel: "Cancel",
+      stopping: "Stopping and turning off the microphone…",
+      cancelled: "Cancelled. Nothing was saved.",
+      timedOut: "Time limit reached. The microphone is off. Nothing was saved.",
+      permissionDenied: "Microphone access was not allowed. You can type your entry instead.",
+      unsupported: "Voice input is not available in this browser. You can type your entry instead.",
+      unavailable: "Voice transcription is unavailable. Your records are unchanged. You can type your entry instead.",
+    },
+    review: {
+      heading: "What I understood",
+      transcriptLabel: "What you said (not saved)",
+      nothingFound: "I did not find anything to fill in. You can type your entry instead.",
+      unitUnstated: "No unit was said. Check the unit before saving.",
+      confirm: "Save checked items",
+      discard: "Discard",
+    },
+    redirect: {
+      body: "JagaOn cannot answer questions about doses or changing treatment. Please ask your doctor or pharmacist.",
+      transcribedNote: "Your voice was transcribed by Tencent Cloud. This question was not sent anywhere else, and nothing was saved.",
+    },
+  },
   shared: {
     appName: "JagaOn",
     demoBoundary:
