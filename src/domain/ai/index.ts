@@ -35,10 +35,21 @@ export {
 
 export {
   AI_INVOCATION_OUTCOME_CODES,
+  AI_INVOCATION_OUTCOME_CODES_11A,
+  AI_AUDIT_ONLY_OUTCOME_CODES,
+  AI_AUDIT_UNSENT_OUTCOME_CODES,
+  AI_AUDIT_USAGE_BASES,
+  AI_INVOCATION_AUDIT_SCHEMA_VERSION,
+  AI_INVOCATION_AUDIT_LEGACY_SCHEMA_VERSION,
   AI_AUDIT_DOWNSTREAM_RECORD_TYPES,
   aiInvocationAuditRowSchema,
+  aiInvocationAuditSchemaVersionOf,
   type AiInvocationOutcomeCode,
+  type AiAuditOnlyOutcomeCode,
+  type AiAuditUsageBasis,
   type AiInvocationAuditRow,
+  type CurrentAiInvocationAuditRow,
+  type LegacyAiInvocationAuditRow,
 } from "./ai-invocation-audit";
 
 export * from "./ai-language-shell-contracts";

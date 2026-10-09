@@ -237,3 +237,14 @@ export const explainAuditRowFixture = (requestId: string, sourceRevisions: Reado
   sourceRevisions: sourceRevisions.map(({ recordType, recordId, revisionId }) => ({ recordType, recordId, revisionId })),
   downstream: null,
 });
+
+/**
+ * Packet 11C Addendum C (C5): the fixtures above are LEGACY rows (audit schema ai-invocation-audit.11a.1, which carries no version
+ * field), exactly as Packet 11A–11C CP5 wrote them and as existing backups hold them. This returns the same row as a CURRENT
+ * (ai-invocation-audit.11c.2) row: the explicit schema version and the usage basis (NONE when nothing was sent).
+ */
+export const currentAuditRowFixture = <T extends { attempts: { count: number } }>(row: T, usageBasis?: "NONE" | "REPORTED" | "UPPER_BOUND") => ({
+  auditSchemaVersion: "ai-invocation-audit.11c.2",
+  ...row,
+  usageBasis: usageBasis ?? (row.attempts.count === 0 ? "NONE" : "REPORTED"),
+});

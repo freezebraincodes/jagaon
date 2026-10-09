@@ -1,6 +1,6 @@
-import type { AiProviderPort, AiShellProviderPort, ProviderFailureReason, ProviderInvocationResult, ProviderRetentionResult } from "@/application/ai/ai-provider-port";
+import type { AiProviderPort, AiShellProviderPort, ProviderFailureReason, ProviderInvocationResult, ProviderRetentionResult, ProviderUsage } from "@/application/ai/ai-provider-port";
 import { parseStrictJson, toPlainData } from "@/backup/strict-json";
-import { providerTaskRequestSchema, shellMaxOutputTokens, SHELL_TEMPERATURE, shellTaskRequestSchema, type AiLocale, type ProviderTaskRequest } from "@/domain/ai";
+import { providerTaskRequestSchema, shellMaxOutputTokens, SHELL_TEMPERATURE, shellTaskRequestSchema, type AiLocale, type ProviderTaskRequest, type ShellTask } from "@/domain/ai";
 import { isApprovedShellTaskRequest } from "@/application/ai/language/shell-projector";
 import { promptFor, type Packet11RemoteTask } from "@/ai/prompts/packet-11-prompts";
 import { shellPromptFor } from "@/ai/prompts/packet-11-shell-prompts";
@@ -265,6 +265,11 @@ export type ResponsesProviderProfile = Readonly<{
   providerKey: string;
   endpointLayouts: Readonly<Record<string, "INSTRUCTIONS_FIELD" | "SEPARATE_USER_MESSAGES">>;
   spend: (usage: Readonly<{ inputTokens: number; outputTokens: number }>, reportedCredits: number | undefined) => Readonly<{ credits: number | null; costMicroUsd: number | null }>;
+  /**
+   * Packet 11C Addendum C (C5): the pre-send upper bound of one slot-shell call with this exact body (USD-priced providers only; absent
+   * for a provider whose spend cannot be bounded before the call, e.g. Kie credits). Used when a transmitted call's usage is unreadable.
+   */
+  upperBound?: (bodyByteCount: number, task: ShellTask) => Readonly<{ inputTokens: number; outputTokens: number; costMicroUsd: number | null }>;
 }>;
 
 /** Kie: the provider's own `credits_consumed`, which is not USD and never fills `costMicroUsd`. */
@@ -367,6 +372,18 @@ function createResponsesInvoker(profile: ResponsesProviderProfile, config: Respo
     const temperature = contract.temperature();
     const sampled = temperature === null ? base : { ...base, temperature };
     const body = cap === null ? sampled : { ...sampled, max_output_tokens: cap };
+    const bodyText = JSON.stringify(body);
+
+    // Packet 11C Addendum C (C5), slot-shell contract only (the legacy full-prose results are unchanged): every failure after
+    // transmission may have been billed, so it carries usage. Once the response's usage was parsed, that reported usage; before that,
+    // the call's pre-send upper bound for this exact body (a USD-priced profile only), never zero. Result handling only: the body above
+    // is built and sent exactly as before.
+    const upperBound: ProviderUsage | null = cap !== null && profile.upperBound ? { ...profile.upperBound(new TextEncoder().encode(bodyText).byteLength, parsed.task as ShellTask), credits: null, basis: "UPPER_BOUND" } : null;
+    let reported: ProviderUsage | null = null;
+    const failedAfterSend = (reason: ProviderFailureReason): ProviderInvocationResult => {
+      const usage = cap === null ? null : (reported ?? upperBound);
+      return usage ? { kind: "FAILED", reason, usage } : failed(reason);
+    };
 
     // Every exit after transmission reports exactly one redacted diagnostic.
     let diagnostic: KieProviderDiagnostic = {
@@ -395,11 +412,11 @@ function createResponsesInvoker(profile: ResponsesProviderProfile, config: Respo
         method: "POST",
         cache: "no-store",
         headers: { authorization: `Bearer ${config.token}`, "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify(body),
+        body: bodyText,
         signal,
       });
     } catch {
-      return end(failed("TRANSPORT_FAILED"), { code: signal.aborted ? "REQUEST_TIMEOUT" : "TRANSPORT_FAILED" });
+      return end(failedAfterSend("TRANSPORT_FAILED"), { code: signal.aborted ? "REQUEST_TIMEOUT" : "TRANSPORT_FAILED" });
     }
     const typeClass = contentTypeClass(response.headers.get("content-type"));
     diagnostic = { ...diagnostic, httpStatus: response.status, contentTypeClass: typeClass };
@@ -408,7 +425,7 @@ function createResponsesInvoker(profile: ResponsesProviderProfile, config: Respo
     try {
       read = await readBody(response.body, limit);
     } catch {
-      return end(failed(response.ok ? "TRANSPORT_FAILED" : statusReason(response.status)), { code: signal.aborted ? "REQUEST_TIMEOUT" : "TRANSPORT_FAILED", parserStage: "BODY_READ" });
+      return end(failedAfterSend(response.ok ? "TRANSPORT_FAILED" : statusReason(response.status)), { code: signal.aborted ? "REQUEST_TIMEOUT" : "TRANSPORT_FAILED", parserStage: "BODY_READ" });
     }
     let json: unknown;
     let validJson: boolean | null = null;
@@ -422,15 +439,15 @@ function createResponsesInvoker(profile: ResponsesProviderProfile, config: Respo
     }
     diagnostic = { ...diagnostic, bodyValidJson: validJson, topLevelKeys: validJson ? keysOf(json) : null };
 
-    if (!response.ok) return end(failed(statusReason(response.status)), { code: response.status >= 500 ? "HTTP_5XX" : "HTTP_4XX", parserStage: "HTTP_STATUS" });
-    if (read.kind !== "OK") return end(failed("PROVIDER_FAILED"), { code: read.kind === "MISSING" ? "BODY_MISSING" : read.kind === "OVERSIZED" ? "BODY_OVERSIZED" : "BODY_NOT_UTF8", parserStage: "BODY_READ" });
-    if (!validJson) return end(failed("PROVIDER_FAILED"), { code: typeClass === "EVENT_STREAM" ? "CONTENT_TYPE_EVENT_STREAM" : "BODY_NOT_JSON", parserStage: "JSON_PARSE" });
-    if (json === null || typeof json !== "object" || Array.isArray(json)) return end(failed("PROVIDER_FAILED"), { code: "UNKNOWN_PROVIDER_ENVELOPE", documentedSchemaParsed: false, parserStage: "RESPONSE_SCHEMA" });
+    if (!response.ok) return end(failedAfterSend(statusReason(response.status)), { code: response.status >= 500 ? "HTTP_5XX" : "HTTP_4XX", parserStage: "HTTP_STATUS" });
+    if (read.kind !== "OK") return end(failedAfterSend("PROVIDER_FAILED"), { code: read.kind === "MISSING" ? "BODY_MISSING" : read.kind === "OVERSIZED" ? "BODY_OVERSIZED" : "BODY_NOT_UTF8", parserStage: "BODY_READ" });
+    if (!validJson) return end(failedAfterSend("PROVIDER_FAILED"), { code: typeClass === "EVENT_STREAM" ? "CONTENT_TYPE_EVENT_STREAM" : "BODY_NOT_JSON", parserStage: "JSON_PARSE" });
+    if (json === null || typeof json !== "object" || Array.isArray(json)) return end(failedAfterSend("PROVIDER_FAILED"), { code: "UNKNOWN_PROVIDER_ENVELOPE", documentedSchemaParsed: false, parserStage: "RESPONSE_SCHEMA" });
     const bodyError = bodyErrorReason(json as Record<string, unknown>);
-    if (bodyError) return end(failed(bodyError), { code: "ERROR_ENVELOPE", documentedSchemaParsed: false, parserStage: "ERROR_ENVELOPE" });
+    if (bodyError) return end(failedAfterSend(bodyError), { code: "ERROR_ENVELOPE", documentedSchemaParsed: false, parserStage: "ERROR_ENVELOPE" });
 
     const result = kieResponseSchema.safeParse(json);
-    if (!result.success) return end(failed("PROVIDER_FAILED"), { code: schemaFailureCode(json as Record<string, unknown>), documentedSchemaParsed: false, parserStage: "RESPONSE_SCHEMA" });
+    if (!result.success) return end(failedAfterSend("PROVIDER_FAILED"), { code: schemaFailureCode(json as Record<string, unknown>), documentedSchemaParsed: false, parserStage: "RESPONSE_SCHEMA" });
     const reasoning = (result.data.usage as { output_tokens_details?: { reasoning_tokens?: unknown } }).output_tokens_details?.reasoning_tokens;
     const spent = profile.spend({ inputTokens: result.data.usage.input_tokens, outputTokens: result.data.usage.output_tokens }, result.data.credits_consumed);
     const reportedUsage = {
@@ -441,6 +458,8 @@ function createResponsesInvoker(profile: ResponsesProviderProfile, config: Respo
     };
     const retention = classifyKieRetention((json as Record<string, unknown>).store);
     diagnostic = { ...diagnostic, documentedSchemaParsed: true, reportedUsage, retention };
+    // C5: from here on every failure carries this call's reported (schema-bounded) usage, as a completed result would.
+    reported = { inputTokens: result.data.usage.input_tokens, outputTokens: result.data.usage.output_tokens, costMicroUsd: spent.costMicroUsd, credits: spent.credits, basis: "REPORTED" };
     // Shell contract only: a truncated response (incomplete, non-null incomplete_details, or output tokens at the
     // request task's cap or past it) is a billed shell failure; a stored one is still reported as stored.
     if (cap !== null) {
@@ -450,23 +469,23 @@ function createResponsesInvoker(profile: ResponsesProviderProfile, config: Respo
         // Evidence only (outcome unchanged): the returned model identity, as a completed response would record it.
         const expectedSnapshot = config.model.responseModelSnapshot;
         diagnostic = { ...diagnostic, modelIdentity: { requested: config.model.requestModelId, expected: expectedSnapshot, ...classifyModelIdentity(expectedSnapshot, result.data.model) } };
-        if (retention === "PROVIDER_REPORTED_STORED") return end(failed("PROVIDER_FAILED"), { code: "RESPONSE_STORED", parserStage: "RETENTION", mismatchUsage: reportedUsage });
-        return end(failed("PROVIDER_FAILED"), { code: "OUTPUT_TRUNCATED", parserStage: "STATUS", mismatchUsage: reportedUsage });
+        if (retention === "PROVIDER_REPORTED_STORED") return end(failedAfterSend("PROVIDER_FAILED"), { code: "RESPONSE_STORED", parserStage: "RETENTION", mismatchUsage: reportedUsage });
+        return end(failedAfterSend("PROVIDER_FAILED"), { code: "OUTPUT_TRUNCATED", parserStage: "STATUS", mismatchUsage: reportedUsage });
       }
     }
-    if (result.data.status !== "completed") return end(failed("PROVIDER_FAILED"), { code: "STATUS_NOT_COMPLETED", parserStage: "STATUS" });
+    if (result.data.status !== "completed") return end(failedAfterSend("PROVIDER_FAILED"), { code: "STATUS_NOT_COMPLETED", parserStage: "STATUS" });
     const text = singleOutputText(result.data.output);
     const expected = config.model.responseModelSnapshot;
     diagnostic = { ...diagnostic, modelIdentity: { requested: config.model.requestModelId, expected, ...classifyModelIdentity(expected, result.data.model) }, envelopeOtherwiseValid: text !== null };
     // A response the provider reports as stored is never used, whatever else it contains.
-    if (retention === "PROVIDER_REPORTED_STORED") return end(failed("PROVIDER_FAILED"), { code: "RESPONSE_STORED", parserStage: "RETENTION", mismatchUsage: reportedUsage });
+    if (retention === "PROVIDER_REPORTED_STORED") return end(failedAfterSend("PROVIDER_FAILED"), { code: "RESPONSE_STORED", parserStage: "RETENTION", mismatchUsage: reportedUsage });
     // Exact pinning: only the byte-for-byte expected response snapshot is accepted; a missing,
     // aliased, re-dated, prefixed or otherwise similar identifier is rejected.
     if (result.data.model !== expected) {
       const mismatchUsage = text === null ? null : reportedUsage;
-      return end(failed("PROVIDER_FAILED"), { code: result.data.model === undefined ? "RESPONSE_MODEL_MISSING" : "RESPONSE_MODEL_MISMATCH", parserStage: "MODEL", mismatchUsage });
+      return end(failedAfterSend("PROVIDER_FAILED"), { code: result.data.model === undefined ? "RESPONSE_MODEL_MISSING" : "RESPONSE_MODEL_MISMATCH", parserStage: "MODEL", mismatchUsage });
     }
-    if (text === null) return end(failed("PROVIDER_FAILED"), { code: outputFailureCode(result.data.output), parserStage: "OUTPUT" });
+    if (text === null) return end(failedAfterSend("PROVIDER_FAILED"), { code: outputFailureCode(result.data.output), parserStage: "OUTPUT" });
 
     return end(
       {

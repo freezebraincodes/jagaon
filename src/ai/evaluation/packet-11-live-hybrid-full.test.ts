@@ -79,6 +79,8 @@ const NOW = () => "2026-10-06T10:00:00.000Z";
 // echo); still harness eval.18 and kie-schema.11b.6. The live block is not run.
 // Packet 11C B5 contract freeze (offline only): labels only, kie-schema.11c.1 and packet11-eval.19 (no model-facing byte changes). The live
 // block is not run; any live run needs the owner's separate, explicit authorization.
+// Packet 11C Addendum C, C5 (offline only): harness packet11-eval.20 (the conservative usage accounting; owner decision C5-b). Policy,
+// thresholds and every model-facing byte are unchanged. The live block is not run.
 const REQUIRED_CONTRACT = Object.freeze({
   prompt: "11b.18",
   shellRules: "ai-shell-rules.11b.15-r8",
@@ -89,7 +91,7 @@ const REQUIRED_CONTRACT = Object.freeze({
   // Packet 11C phase 2 (option (a), 2026-10-08, offline): eligibility accounting only; request bodies differ only in this version field.
   slotPlan: "ai-slot-plan.11b.9",
   fixtureSet: "packet11-fixtures.11b.16",
-  harness: "packet11-eval.19",
+  harness: "packet11-eval.20",
   fullEvaluationPolicy: "hybrid-full-policy.2",
   maxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 },
   temperature: 0.2,
@@ -781,6 +783,9 @@ describe("Packet 11 hybrid shell FULL runner (offline)", () => {
       [{ required: { ...REQUIRED_CONTRACT, providerSchema: "kie-schema.11b.6" } }, "CONTRACT_MISMATCH:providerSchema"],
       [{ approved: { ...APPROVED_HYBRID_CONTRACT, evaluationReportVersion: "packet11-eval.18" } }, "CONTRACT_MISMATCH:evaluationReportVersion"],
       [{ approved: { ...APPROVED_HYBRID_CONTRACT, providerSchemaVersion: "kie-schema.11b.6" } }, "CONTRACT_MISMATCH:providerSchemaVersion"],
+      // Packet 11C Addendum C (C5): the eval.19 harness label (the earlier usage accounting) is refused.
+      [{ required: { ...REQUIRED_CONTRACT, harness: "packet11-eval.19" } }, "CONTRACT_MISMATCH:harness"],
+      [{ approved: { ...APPROVED_HYBRID_CONTRACT, evaluationReportVersion: "packet11-eval.19" } }, "CONTRACT_MISMATCH:evaluationReportVersion"],
     ];
     for (const [contract, expected] of cases) {
       let tracers = 0;

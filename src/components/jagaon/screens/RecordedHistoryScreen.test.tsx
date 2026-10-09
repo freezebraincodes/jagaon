@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import Dexie from "dexie";
@@ -310,7 +310,8 @@ function shippedExecute(invoke = vi.fn()): Execute {
 
 /** The real use case; `execute` defaults to the shipped hybrid service. */
 function realExplainer(history: RecordedHistoryQueryPort, execute: Execute = shippedExecute()): PatternExplainerPort {
-  return createPatternExplainer({ history, execute, now: () => NOW as Instant, requestId: requestIds() });
+  // Packet 11C Addendum C (C5): the zero-attempt rows go nowhere here (these tests pin the screen, not the audit).
+  return createPatternExplainer({ history, execute, recordUnsent: async () => true, now: () => NOW as Instant, requestId: requestIds() });
 }
 
 /** Each `execute` call waits until the test releases it, then delegates to the real hybrid service. */
@@ -778,8 +779,9 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     expect(run.fetcher).not.toHaveBeenCalled();
     expect(run.remoteUse.accepted()).toBe(false);
     expect(run.rows).toHaveLength(1);
-    // Packet 11C B4a (coordinator ruling): an explicit decline is audited as REQUEST_CANCELLED (no schema change); nothing was sent.
-    expect(run.rows[0]).toMatchObject({ outcomeCode: "REQUEST_CANCELLED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [] });
+    // Packet 11C Addendum C (C5): an explicit decline is audited with the truthful REMOTE_USE_DECLINED (REQUEST_CANCELLED under the B4a
+    // interim ruling); nothing was sent.
+    expect(run.rows[0]).toMatchObject({ outcomeCode: "REMOTE_USE_DECLINED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], usageBasis: "NONE" });
 
     // Not accepted, so the next explicit action asks again.
     fireEvent.click(action);
@@ -828,17 +830,22 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     expect(within(dialog).getAllByRole("button").map((button) => button.textContent)).toEqual([zh.ai.pattern.confirm, zh.ai.cancel]);
   });
 
-  it("a locale or period change while the disclosure is open closes it: nothing is explained, audited or sent; it does not come back", async () => {
+  it("a locale or period change while the disclosure is open closes it: nothing is explained or sent; it does not come back; C5: one DISCLOSURE_CLOSED_MOOT row each", async () => {
     const run = await wired();
     const { rerender } = render(screenElement("en-SG", run.history, run.explainer));
     await openAction();
     expect(dialogOf()).toBeInTheDocument();
+    expect(run.rows).toHaveLength(0);
     rerender(screenElement("zh-SG", run.history, run.explainer));
     await act(async () => undefined);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     rerender(screenElement("en-SG", run.history, run.explainer));
     await act(async () => undefined);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // Packet 11C Addendum C (C5): the moot request is still one explicit request, so it has one zero-attempt row, in the locale it was
+    // asked in (before C5 it had none).
+    await waitFor(() => expect(run.rows).toHaveLength(1));
+    expect(run.rows[0]).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcomeCode: "DISCLOSURE_CLOSED_MOOT", providerModel: null, attempts: { count: 0 }, usageBasis: "NONE" });
 
     await openAction();
     expect(dialogOf()).toBeInTheDocument();
@@ -848,8 +855,51 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     await waitFor(() => expect(screen.queryByText(en.history.loading)).not.toBeInTheDocument());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(run.explain).not.toHaveBeenCalled();
-    expect(run.rows).toHaveLength(0);
+    await waitFor(() => expect(run.rows).toHaveLength(2));
+    expect(run.rows.map((row) => row.outcomeCode)).toEqual(["DISCLOSURE_CLOSED_MOOT", "DISCLOSURE_CLOSED_MOOT"]);
     expect(run.fetcher).not.toHaveBeenCalled();
+  });
+
+  it("C5: closing the screen while the disclosure is open writes one DISCLOSURE_CLOSED_MOOT row; a decided disclosure writes none on close", async () => {
+    const run = await wired();
+    const { unmount } = render(screenElement("en-SG", run.history, run.explainer));
+    await openAction();
+    expect(dialogOf()).toBeInTheDocument();
+    unmount();
+    await waitFor(() => expect(run.rows).toHaveLength(1));
+    expect(run.rows[0]).toMatchObject({ outcomeCode: "DISCLOSURE_CLOSED_MOOT", locale: "en-SG", attempts: { count: 0 } });
+
+    const decided = await wired();
+    const second = render(screenElement("en-SG", decided.history, decided.explainer));
+    await openAction();
+    act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.cancel })));
+    await waitFor(() => expect(decided.rows).toHaveLength(1));
+    second.unmount();
+    await act(async () => undefined);
+    expect(decided.rows.map((row) => row.outcomeCode)).toEqual(["REMOTE_USE_DECLINED"]);
+    expect(run.fetcher).not.toHaveBeenCalled();
+  });
+
+  it("C5 under StrictMode (development double effects): one explicit request still writes exactly one row", async () => {
+    const run = await wired();
+    render(<StrictMode>{screenElement("en-SG", run.history, run.explainer)}</StrictMode>);
+    await openAction();
+    act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.cancel })));
+    await waitFor(() => expect(panelStatus()).not.toBeEmptyDOMElement());
+    await act(async () => undefined);
+    expect(run.rows.map((row) => row.outcomeCode)).toEqual(["REMOTE_USE_DECLINED"]);
+    expect(run.explain).toHaveBeenCalledTimes(1);
+
+    // The dialog itself is not reported moot by the StrictMode remount of its effect.
+    cleanup();
+    const second = await wired();
+    const view = render(<StrictMode>{screenElement("en-SG", second.history, second.explainer)}</StrictMode>);
+    await openAction();
+    await act(async () => undefined);
+    expect(dialogOf()).toBeInTheDocument();
+    expect(second.rows).toHaveLength(0);
+    view.unmount();
+    await waitFor(() => expect(second.rows.map((row) => row.outcomeCode)).toEqual(["DISCLOSURE_CLOSED_MOOT"]));
   });
 
   it("activated + accepted session + open AI panel: a locale switch closes the panel with no POST and no audit row; only a new action explains again", async () => {

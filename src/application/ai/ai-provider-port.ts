@@ -22,7 +22,12 @@ export type ProviderFailureReason = (typeof PROVIDER_FAILURE_REASONS)[number];
  * `credits` is the provider's own reported consumption (Kie `credits_consumed`). It is not a USD
  * amount, so it never fills the audit's `costMicroUsd`; evaluation reports carry it separately.
  */
-export type ProviderUsage = Readonly<{ inputTokens: number | null; outputTokens: number | null; costMicroUsd: number | null; credits?: number | null }>;
+export type ProviderUsage = Readonly<{ inputTokens: number | null; outputTokens: number | null; costMicroUsd: number | null; credits?: number | null; basis?: ProviderUsageBasis }>;
+/**
+ * Packet 11C Addendum C (C5): what a usage figure is. REPORTED (the default when absent) is the provider's own report; UPPER_BOUND is
+ * the pre-send upper bound of a potentially billed call whose usage is missing or unreadable (counted, never treated as zero spend).
+ */
+export type ProviderUsageBasis = "REPORTED" | "UPPER_BOUND";
 
 /**
  * Closed provider-side retention result for a completed response (Packet 11B
@@ -65,8 +70,9 @@ export type ProviderInvocationResult =
    */
   | Readonly<{ kind: "STRUCTURALLY_REJECTED"; reason: ShellStructuralRejectionReason; repairable: boolean; usage: ProviderUsage; retention?: ProviderRetentionResult }>
   /**
-   * `usage` (Packet 11C B2b): present only when a completed, billed response was refused after completion (the shell route's retention
-   * refusal), so the hybrid service still counts that spend. Absent on every other failure.
+   * `usage` (Packet 11C B2b; widened in Addendum C, C5): present on every failure that follows a potentially billed transmission, so the
+   * hybrid service counts that spend: the provider-reported usage when the provider reported it, else the call's pre-send upper bound
+   * (basis UPPER_BOUND). Absent exactly when nothing was transmitted (a refused, unconfigured or not-accepted call), i.e. nothing billed.
    */
   | Readonly<{ kind: "FAILED"; reason: ProviderFailureReason; usage?: ProviderUsage }>;
 
@@ -78,7 +84,8 @@ export type AiProviderPort = Readonly<{
 
 /**
  * "DECLINED" (Packet 11C B4a) is the patient's explicit Cancel of the disclosure for this request: like NOT_ACCEPTED nothing is sent, but
- * the request is audited as REQUEST_CANCELLED (no audit-schema change); NOT_ACCEPTED (no acceptance exists, e.g. the interim fail-closed
+ * the request is audited as REMOTE_USE_DECLINED (Packet 11C Addendum C, C5: an audit-only code of ai-invocation-audit.11c.2; its closed
+ * fallback reason stays REQUEST_CANCELLED); NOT_ACCEPTED (no acceptance exists, e.g. the interim fail-closed
  * path) stays MISSING_CONFIGURATION.
  */
 export type AiRemoteUseDecision = "ACCEPTED" | "NOT_ACCEPTED" | "DECLINED";

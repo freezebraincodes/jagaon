@@ -3,7 +3,7 @@ import Dexie from "dexie";
 import { createAiInvocationAuditRepository } from "@/application/ai/ai-audit-persistence";
 import { installFakeIndexedDb, PACKET10_NOW } from "@/application/storage/packet10-test-support";
 import { aiInvocationAuditRowSchema, type AiInvocationAuditRow } from "@/domain/ai";
-import { deterministicAuditRowFixture, explainAuditRowFixture } from "@/domain/ai/ai-test-fixtures";
+import { currentAuditRowFixture, deterministicAuditRowFixture, explainAuditRowFixture } from "@/domain/ai/ai-test-fixtures";
 import type { PermanentDeletionSnapshot } from "@/storage/permanent-deletion-transaction";
 import { computeDeletionClosure, DeletionPlanRefusedError } from "./deletion-planner";
 import { createDeletionFixture } from "./packet10-deletion-fixture";
@@ -74,6 +74,25 @@ describe("permanent deletion and AI invocation audits", () => {
         for (const ref of [...row.sourceRevisions, ...(row.downstream ? [row.downstream] : [])]) expect(purged.has(ref.recordId)).toBe(false);
       }
       expect(JSON.stringify(tables.aiInvocationAudits)).not.toContain(AFFECTED);
+    },
+    TIMEOUT,
+  );
+
+  // Packet 11C Addendum C (C5): current (11c.2) rows follow the same deletion rule as legacy rows; a zero-attempt row names no record.
+  it(
+    "C5: a current-version audit naming the deleted record is removed with it; a current zero-attempt audit stays",
+    async () => {
+      const { h, target, plan: before, targetRevision, audits } = await setup();
+      const CURRENT_AFFECTED = "4e5f6071-8293-4aab-9cbd-0e1f2a3b4c6e";
+      const CURRENT_UNSENT = "5f607182-93a4-4bbc-8dce-1f2a3b4c5d7f";
+      await audits.append(aiInvocationAuditRowSchema.parse(currentAuditRowFixture(explainAuditRowFixture(CURRENT_AFFECTED, [targetRevision]), "UPPER_BOUND")));
+      await audits.append(aiInvocationAuditRowSchema.parse(currentAuditRowFixture({ ...deterministicAuditRowFixture(), requestId: CURRENT_UNSENT, outcomeCode: "NOT_ELIGIBLE" })));
+      expect(before.closure.aiInvocationRequestIds).toEqual([AFFECTED]);
+      const prepared = await h.service.prepare(target);
+      if (prepared.kind !== "PLAN_READY") throw new Error(prepared.kind);
+      expect(prepared.plan.closure.aiInvocationRequestIds).toEqual([AFFECTED, CURRENT_AFFECTED].sort());
+      expect((await h.service.confirm(prepared.plan, { planHash: prepared.plan.planHash, confirmedAt: PACKET10_NOW })).kind).toBe("DELETED");
+      expect(await auditIds(h)).toEqual([DETERMINISTIC, SURVIVOR, CURRENT_UNSENT].sort());
     },
     TIMEOUT,
   );

@@ -63,14 +63,21 @@ export type BrowserAiAssistanceDependencies = BrowserHistoryExplainerDependencie
  * - `disclosureRequired(current)`: true only when available, this session has not accepted, and the preview can be sent at all (an
  *   ineligible preview, e.g. more facts than one request may carry, sends nothing, so there is nothing to disclose). Reads nothing.
  * - `acceptDisclosure()`: the session's acceptance (the disclosure dialog's primary action only).
- * - `compose(...)`: one explicit request (one audit row whenever the hybrid service runs). `disclosure: "DECLINED"` marks a request
- *   made after the patient cancelled the disclosure: it composes deterministically, sends nothing and is audited REQUEST_CANCELLED.
+ * - `compose(...)`: one explicit request, exactly one audit row (Packet 11C Addendum C, C5: also a not-eligible, stale or unreadable
+ *   preview, as a zero-attempt row). `disclosure: "DECLINED"` marks a request made after the patient cancelled the disclosure: it
+ *   composes deterministically, sends nothing and is audited REMOTE_USE_DECLINED (C5; REQUEST_CANCELLED before C5).
+ * - `disclosureClosed(...)` (C5): the moot disclosure's one DISCLOSURE_CLOSED_MOOT row.
  */
 export type BrowserCareSummaryWording = Readonly<{
   available(): boolean;
   disclosureRequired(current: CareSummarySnapshotPayload): boolean;
   acceptDisclosure(): void;
   compose(input: { snapshotRef: ExpectedHead; locale: AiLocale; disclosure?: "DECLINED" }, signal?: AbortSignal): Promise<CareSummaryAiOutcome>;
+  /**
+   * Packet 11C Addendum C (C5): the disclosure shown for an explicit request closed without the patient's decision (locale or preview
+   * change, or the screen closed), so that request is moot: one zero-attempt DISCLOSURE_CLOSED_MOOT audit row; nothing is sent.
+   */
+  disclosureClosed(input: { locale: AiLocale }): Promise<void>;
 }>;
 
 export type BrowserAiAssistance = Readonly<{ history: BrowserHistoryExplainer; careSummary: BrowserCareSummaryWording | null }>;
@@ -79,13 +86,19 @@ export type BrowserHistoryExplainer = Readonly<{
   /**
    * Explains one comparison (the use case's `explain`). Packet 11C B4a: `disclosure: "DECLINED"` marks a request made after the patient
    * cancelled the disclosure: that request's remote-use decision is DECLINED (whatever the session says), so it composes
-   * deterministically, sends nothing and is audited as REQUEST_CANCELLED. The decline belongs to that one request only.
+   * deterministically, sends nothing and is audited as REMOTE_USE_DECLINED (Packet 11C Addendum C, C5). The decline belongs to that one
+   * request only. Every call writes exactly one audit row (C5: a comparison no longer explainable is one NOT_ELIGIBLE row).
    */
   explain(input: { factId: string; locale: AiLocale; disclosure?: "DECLINED" }, signal?: AbortSignal): Promise<PatternExplanation>;
   /** True only when the next explanation would use the remote route and this app session has not accepted the disclosure. */
   disclosureRequired(): boolean;
   /** Records this app session's acceptance of the disclosure (called by the dialog's primary action only). */
   acceptDisclosure(): void;
+  /**
+   * Packet 11C Addendum C (C5): the disclosure shown for an explicit request closed without the patient's decision (view, period or
+   * locale change, or the screen closed), so that request is moot: one zero-attempt DISCLOSURE_CLOSED_MOOT audit row; nothing is sent.
+   */
+  disclosureClosed(input: { locale: AiLocale }): Promise<void>;
 }>;
 
 const deviceNow = () => new Date().toISOString() as Instant;
@@ -135,17 +148,23 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
   const disclosurePending = (taskType: AiTaskType) => session !== null && !session.accepted() && remoteEnabled(taskType);
   const acceptDisclosure = () => session?.accept();
 
-  const explainer = createPatternExplainer({ history: dependencies.history, execute: service.execute, now, requestId });
+  // Packet 11C Addendum C (C5): a moot disclosure is its explicit request's one audit row (zero attempts, nothing sent).
+  const moot = (taskType: "EXPLAIN_PATTERN" | "DRAFT_CARE_PREPARATION_SUMMARY") => async (input: { locale: AiLocale }): Promise<void> => {
+    await service.recordUnsent({ requestId: requestId(), taskType, locale: input.locale, requestedAt: now(), outcome: "DISCLOSURE_CLOSED_MOOT" });
+  };
+
+  const explainer = createPatternExplainer({ history: dependencies.history, execute: service.execute, recordUnsent: service.recordUnsent, now, requestId });
   const history: BrowserHistoryExplainer = Object.freeze({
     explain: (input: { factId: string; locale: AiLocale; disclosure?: "DECLINED" }, signal?: AbortSignal) =>
       explainer.explain({ factId: input.factId, locale: input.locale }, requestSignal(input.disclosure, signal)),
     disclosureRequired: () => disclosurePending("EXPLAIN_PATTERN"),
     acceptDisclosure,
+    disclosureClosed: moot("EXPLAIN_PATTERN"),
   });
 
   const care = dependencies.carePreparation;
   if (!care) return Object.freeze({ history, careSummary: null });
-  const composer = createCareSummaryAiComposer({ query: care.query, commands: care.commands, execute: service.execute, now, requestId });
+  const composer = createCareSummaryAiComposer({ query: care.query, commands: care.commands, execute: service.execute, recordUnsent: service.recordUnsent, now, requestId });
   const careSummary: BrowserCareSummaryWording = Object.freeze({
     available: () => remoteEnabled("DRAFT_CARE_PREPARATION_SUMMARY"),
     // The eligibility check is the use case's own pure request builder over the snapshot alone; it reads, writes and sends nothing.
@@ -154,6 +173,7 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
     acceptDisclosure,
     compose: (input: { snapshotRef: ExpectedHead; locale: AiLocale; disclosure?: "DECLINED" }, signal?: AbortSignal) =>
       composer.composeCareSummaryWithAi({ snapshotRef: input.snapshotRef, locale: input.locale }, requestSignal(input.disclosure, signal)),
+    disclosureClosed: moot("DRAFT_CARE_PREPARATION_SUMMARY"),
   });
   return Object.freeze({ history, careSummary });
 }

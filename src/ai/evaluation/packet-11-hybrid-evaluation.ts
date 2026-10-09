@@ -4,6 +4,7 @@ import { AI_HYBRID_RUNTIME_BUNDLES, AI_HYBRID_VERSIONS } from "@/application/ai/
 import { createAiHybridTaskService, type AiHybridExecutionResult, type AiLanguageMode } from "@/application/ai/ai-hybrid-task-service";
 import { AI_MEANING_REGISTRY_REVISION } from "@/application/ai/ai-meaning-registry";
 import { PROVIDER_FAILURE_REASONS, type AiShellProviderPort, type ProviderInvocationResult, type ProviderRetentionResult, type ProviderUsage } from "@/application/ai/ai-provider-port";
+import { shellRouteCallUpperBound } from "@/application/ai/ai-shell-route-contract";
 import { composeAiResult } from "@/application/ai/language/ai-composition";
 import { verifyComposition } from "@/application/ai/language/assembler";
 import { atomMultiset, composeDeterministic } from "@/application/ai/language/deterministic-composition";
@@ -130,8 +131,17 @@ import { PACKET_11_HYBRID_FIXTURE_SET_REVISION } from "./packet-11-hybrid-fixtur
  * (r8), request (11b.11), caps, temperature, model and provider are unchanged, and neither label is part of a model-facing body. eval.18-era
  * evidence (kie-schema.11b.6, packet11-eval.18, ai-slot-plan.11b.8) fails CONTRACT_VERSION_MISMATCH. The full frozen contract is pinned in
  * packet-11c-contract-freeze.test.ts.
+ * packet11-eval.20 (Packet 11C Addendum C, Task C5; owner decision C5-b, offline only): the usage accounting changes, nothing else. A
+ * potentially billed call counts its usage from the provider result itself: the reported usage, which the shared Responses adapter now
+ * also carries on a FAILED result (stored, truncated, other-model and similar refusals), or, when the response was unreadable after
+ * transmission (an HTTP error, a transport failure, a fetch aborted at the production timeout), the call's pre-send upper bound (the
+ * former tracer `estimateMaxUsd`, now the shared `shellCallUpperBound`); a provider that throws counts at the request's route upper
+ * bound. A timed-out call counts whatever usage its result carries, not only a completed one's. The eval.7 diagnostic rule remains for a
+ * provider whose FAILED result carries no usage, and a FAILED with neither was not transmitted (no spend). The report's totals add
+ * `upperBoundCalls`. hybrid-full-policy.2, every threshold and gate, the prompt, schema, request, caps, temperature, bundles, fixtures
+ * and model are unchanged, and no label is part of a model-facing body. eval.19 evidence fails CONTRACT_VERSION_MISMATCH.
  */
-export const AI_HYBRID_EVALUATION_REPORT_VERSION = "packet11-eval.19";
+export const AI_HYBRID_EVALUATION_REPORT_VERSION = "packet11-eval.20";
 /**
  * The FULL evaluation policy this harness implements; recorded in the report and compared by the verdict. hybrid-full-policy.1 (eval.13):
  * FULL safe shell fallbacks. hybrid-full-policy.2 (eval.18): policy.1 plus §16.4 structural first-call validity and the owner's §16.3
@@ -178,8 +188,9 @@ export const APPROVED_HYBRID_CONTRACT = Object.freeze({
   validatorRulesRevision: "11b.2-meaning-r7",
   approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
   fixtureSetRevision: "packet11-fixtures.11b.16",
-  // Packet 11C B5 contract freeze (offline): eval.18's harness logic and policy under a new label.
-  evaluationReportVersion: "packet11-eval.19",
+  // Packet 11C B5 contract freeze (offline): eval.18's harness logic and policy under a new label. Packet 11C Addendum C (C5): eval.20,
+  // the conservative usage accounting; the policy is unchanged.
+  evaluationReportVersion: "packet11-eval.20",
   fullEvaluationPolicy: "hybrid-full-policy.2",
   explainBundle: "ai.explain-pattern@11b.18",
   careBundle: "ai.draft-care-preparation-summary@11b.18",
@@ -303,7 +314,8 @@ export type HybridEvaluationReport = Readonly<{
   stoppedReason: EvaluationStop | null;
   completed: boolean;
   hardGatePassed: boolean;
-  totals: Readonly<{ fixtures: number; calls: number; repairs: number; credits: number }>;
+  /** `upperBoundCalls` (eval.20): calls whose spend counted at their pre-send upper bound because their usage was missing or unreadable. */
+  totals: Readonly<{ fixtures: number; calls: number; repairs: number; credits: number; upperBoundCalls: number }>;
   /** eval.13: the hybrid-specific FULL gates (exact ratios, safe shell fallback counts); null outside FULL. */
   utility: HybridFullUtilityGates | null;
   /** Accepted AI results satisfying every language-presence group, of all accepted AI results (100% required). */
@@ -323,7 +335,8 @@ export type BlockedContentReview = Readonly<Record<string, Readonly<{ classifica
 export type BlockedContentItem = Readonly<{ fixtureId: string; taskType: string; locale: string; gate: HybridGate; reason: AiReasonCode }>;
 
 type Replay = { gate: HybridGate | null; reason: AiReasonCode | null; repairable: boolean; integrity: ShellIntegrityCode | null; lexical: readonly ShellLexicalViolation[] | null; register: ShellRegisterCode | null; quality: ShellQualityDetail | null; clinicalLabel: ShellClinicalLabelCategory | null; shells: ShellTexts | null; breach: boolean };
-type CallRecord = { timedOut: boolean; completed: boolean; diagnostic: unknown; retention: ProviderRetentionResult | null; responseModel: string | null; replay: Replay | null; inputTokens: number; outputTokens: number; credits: number };
+/** `upperBound` (eval.20): this call's spend was counted at its pre-send upper bound (its usage was missing or unreadable). */
+type CallRecord = { timedOut: boolean; completed: boolean; diagnostic: unknown; retention: ProviderRetentionResult | null; responseModel: string | null; replay: Replay | null; inputTokens: number; outputTokens: number; credits: number; upperBound: boolean };
 
 const RETENTION_SEVERITY: Readonly<Record<ProviderRetentionResult, number>> = { CONFIRMED_NOT_STORED: 0, RETENTION_UNCONFIRMED: 1, PROVIDER_REPORTED_STORED: 2 };
 function worstRetention(calls: readonly CallRecord[]): ProviderRetentionResult | null {
@@ -478,6 +491,8 @@ export async function evaluateHybridModelSnapshot(options: {
   let refusedRepair = false;
   let totalCalls = 0;
   let totalCredits = 0;
+  /** eval.20: calls whose spend was counted at their pre-send upper bound (usage missing or unreadable). */
+  let upperBoundCalls = 0;
   let stop: HybridEvaluationReport["stoppedReason"] = null;
 
   const wrapper: AiShellProviderPort = {
@@ -494,20 +509,35 @@ export async function evaluateHybridModelSnapshot(options: {
         return { kind: "FAILED", reason: "OPERATIONAL_SPEND_LOCKED" };
       }
       totalCalls += 1;
-      const record: CallRecord = { timedOut: false, completed: false, diagnostic: null, retention: null, responseModel: null, replay: null, inputTokens: 0, outputTokens: 0, credits: 0 };
+      const record: CallRecord = { timedOut: false, completed: false, diagnostic: null, retention: null, responseModel: null, replay: null, inputTokens: 0, outputTokens: 0, credits: 0, upperBound: false };
       const active = current!;
       calls.push(record);
-      const result = await options.provider.invoke(input, signal);
+      // eval.20 (Packet 11C Addendum C, C5): one potentially billed call's usage, counted once: the result's own usage (reported, or
+      // the adapter's pre-send upper bound when the response was unreadable), never zero for a transmitted call.
+      const count = (usage: ProviderUsage) => {
+        record.inputTokens = usage.inputTokens ?? 0;
+        record.outputTokens = usage.outputTokens ?? 0;
+        record.credits = spendOf(usage);
+        record.upperBound = usage.basis === "UPPER_BOUND";
+        if (record.upperBound) upperBoundCalls += 1;
+        totalCredits += record.credits;
+      };
+      let result: ProviderInvocationResult;
+      try {
+        result = await options.provider.invoke(input, signal);
+      } catch (error) {
+        // eval.20: a provider that throws may have sent the request; it counts at the request's route upper bound.
+        count(shellRouteCallUpperBound(input));
+        throw error;
+      }
       record.diagnostic = options.takeDiagnostic?.() ?? null;
       if (signal.aborted) {
         // The service already ended this call at the production timeout: nothing it returns is read or
-        // replayed, except reported usage, which still counts toward the spend ceiling.
+        // replayed, except its usage, which still counts toward the spend ceiling (eval.20: whatever the result kind, including the
+        // adapter's upper bound for a fetch the timeout aborted).
         record.timedOut = true;
         record.diagnostic = null;
-        if (result.kind === "COMPLETED") {
-          record.credits = spendOf(result.usage);
-          totalCredits += record.credits;
-        }
+        if (result.kind === "COMPLETED" || result.usage !== undefined) count(result.usage!);
         return result;
       }
       record.timedOut = result.kind === "FAILED" && result.reason === "PROVIDER_TIMEOUT";
@@ -516,17 +546,17 @@ export async function evaluateHybridModelSnapshot(options: {
         // A completed result without an explicit retention result is unconfirmed.
         record.retention = result.retention ?? "RETENTION_UNCONFIRMED";
         record.responseModel = result.responseModel ?? null;
-        record.inputTokens = result.usage.inputTokens ?? 0;
-        record.outputTokens = result.usage.outputTokens ?? 0;
-        record.credits = spendOf(result.usage);
-        totalCredits += record.credits;
+        count(result.usage);
         record.replay = replayCandidate(active.fixture, active.planned, result.candidate, verify);
       } else {
         // A rejected call keeps the adapter's closed retention result (for example a stored response).
         record.retention = (record.diagnostic as { retention?: ProviderRetentionResult | null } | null)?.retention ?? null;
-        // A call rejected only for model identity or retention was still billed: its provider-reported usage counts.
+        // eval.20: a failure after transmission carries its usage on the result itself (reported, or the call's pre-send upper bound).
+        // A provider that carries none on the result (an older fake) falls back to the eval.7 diagnostic rule below; a FAILED with
+        // neither was not transmitted and counts nothing.
         const mismatch = (record.diagnostic as { mismatchUsage?: { inputTokens: number; outputTokens: number; credits: number | null } | null } | null)?.mismatchUsage;
-        if (mismatch) {
+        if (result.kind === "FAILED" && result.usage !== undefined) count(result.usage);
+        else if (mismatch) {
           record.inputTokens = mismatch.inputTokens;
           record.outputTokens = mismatch.outputTokens;
           // eval.7: the contract provider (deepseek) reports no credits; its billed failure counts at the same
@@ -716,6 +746,7 @@ export async function evaluateHybridModelSnapshot(options: {
       calls: evidence.reduce((sum, item) => sum + item.attempts, 0),
       repairs: evidence.filter((item) => item.repairUsed).length,
       credits: round6(evidence.reduce((sum, item) => sum + item.credits, 0)),
+      upperBoundCalls,
     }),
     utility: options.phase === "FULL" ? hybridFullUtilityGates(evidence) : null,
     languagePresence: languagePresenceOf(evidence),

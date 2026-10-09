@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AiShellProviderPort, ProviderInvocationResult } from "@/application/ai/ai-provider-port";
 import { planSlots } from "@/application/ai/language/slot-planner";
 import type { verifyComposition as verifyCompositionType } from "@/application/ai/language/assembler";
@@ -30,6 +30,8 @@ import { fixturesForPhase } from "./packet-11-fixtures";
 import { AI_ACTIVATION_MANIFEST } from "@/application/ai/ai-activation-manifest";
 import { AI_TASK_RUNTIME_BUNDLES } from "@/application/ai/ai-runtime-bundles";
 import { AI_TASK_TYPES, SHELL_MAX_OUTPUT_TOKENS, SHELL_TEMPERATURE, shellMaxOutputTokens } from "@/domain/ai";
+import { shellCallUpperBound, shellRouteCallUpperBound } from "@/application/ai/ai-shell-route-contract";
+import { projectShellTaskRequest } from "@/application/ai/language/shell-projector";
 
 const MODEL = { requestModelId: "fake-model", responseModelSnapshot: "fake-model" };
 /** A fake model driven only by the value-blind request: framed shells that pass every gate. */
@@ -143,7 +145,7 @@ describe("hybrid harness packet11-eval.12 (offline)", () => {
   it("runs a SMOKE with a fake model and fails the verdict: the fake model and provider are not the approved deepseek-flash", async () => {
     const fixtures = hybridFixturesForPhase("SMOKE");
     const report = await evaluateHybridModelSnapshot({ model: MODEL, provider: framed(), fixtures, phase: "SMOKE", limits: { maxCalls: 4, maxCredits: 0.01, allowRepair: false } });
-    expect(report).toMatchObject({ reportVersion: "packet11-eval.19", completed: true, hardGatePassed: true, assemblyInvariantBreaches: 0 });
+    expect(report).toMatchObject({ reportVersion: "packet11-eval.20", completed: true, hardGatePassed: true, assemblyInvariantBreaches: 0 });
     expect(report.fixtures.every((entry) => entry.source === "AI" && entry.atomEqual === true)).toBe(true);
     const verdict = hybridLiveRunVerdict(report, { phase: "SMOKE", fixtureIds: fixtures.map((entry) => entry.id), maxCalls: 4 }, { maxCredits: 0.01, requestModelId: APPROVED_HYBRID_CONTRACT.requestModelId, responseModelSnapshot: APPROVED_HYBRID_CONTRACT.responseModelSnapshot }, null);
     expect(verdict.kind).toBe("FAIL");
@@ -490,7 +492,7 @@ describe("hybrid versions are tied to the code", () => {
     expect(APPROVED_HYBRID_CONTRACT.shellSchemaVersions).toEqual({ EXPLAIN_PATTERN: "ai-shell.explain-pattern@11b.8", DRAFT_CARE_PREPARATION_SUMMARY: "ai-shell.draft-care-preparation-summary@11b.7" });
     expect(APPROVED_HYBRID_CONTRACT.shellInputVersions).toEqual({ EXPLAIN_PATTERN: "ai-shell-input.explain-pattern@11b.8", DRAFT_CARE_PREPARATION_SUMMARY: "ai-shell-input.draft-care-preparation-summary@11b.7" });
     // eval.12 (rules r7): deepseek-flash is recorded for the hybrid shell path only, with the per-task output caps and temperature 0.2.
-    expect(APPROVED_HYBRID_CONTRACT).toMatchObject({ slotPlanVersion: "ai-slot-plan.11b.9", fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.19", requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash" });
+    expect(APPROVED_HYBRID_CONTRACT).toMatchObject({ slotPlanVersion: "ai-slot-plan.11b.9", fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.20", requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash" });
     expect(APPROVED_HYBRID_CONTRACT).toMatchObject({ providerKey: "deepseek", endpoint: "https://api.deepseek.com/responses", approvalScope: "HYBRID_SHELL_WORDING_ONLY", legacyFactGeneration: "NOT_APPROVED", shellRequestVersion: "ai-shell-request.11b.11", shellMaxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 } });
     // Rules r7 moved the shell rules, the request profile and both bundle keys (bundle set 11b.14); the prompt (11b.15) and provider schema stay.
     expect(APPROVED_HYBRID_CONTRACT).toMatchObject({ shellRulesRevision: "ai-shell-rules.11b.15-r8", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18", promptVersion: "11b.18", providerSchemaVersion: "kie-schema.11c.1" });
@@ -517,7 +519,7 @@ describe("hybrid harness packet11-eval.12: deepseek-flash recorded for the hybri
     expect(APPROVED_HYBRID_CONTRACT).toMatchObject({
       requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash", providerKey: "deepseek", endpoint: "https://api.deepseek.com/responses",
       approvalScope: "HYBRID_SHELL_WORDING_ONLY", legacyFactGeneration: "NOT_APPROVED", shellRequestVersion: "ai-shell-request.11b.11", shellMaxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 },
-      explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18", fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.19",
+      explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18", fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.20",
       promptVersion: "11b.18", shellRulesRevision: "ai-shell-rules.11b.15-r8",
     });
     expect(Object.isFrozen(APPROVED_HYBRID_CONTRACT)).toBe(true);
@@ -726,6 +728,109 @@ describe("Packet 11B.9 fix round 1 / 11B.10: default-shell candidates against th
   });
 });
 
+/**
+ * Packet 11C Addendum C, Task C5 (owner decision C5-b): packet11-eval.20 adopts the conservative usage accounting. A potentially billed
+ * call counts its reported usage (now carried on the FAILED result itself), else its pre-send upper bound, never zero; the report counts
+ * the calls billed at their upper bound. hybrid-full-policy.2 and every threshold are unchanged.
+ */
+describe("packet11-eval.20: conservative usage accounting (Packet 11C Addendum C, C5)", () => {
+  const deepSeekFlash = () => {
+    const selection = selectEvaluationCandidates({ requested: "deepseek-flash", listing: [], documented: DEEPSEEK_DOCUMENTED_MODELS, now: () => "2026-10-06T01:00:00.000Z" });
+    if (selection.kind !== "SELECTED") throw new Error(selection.reason);
+    return selection.candidates[0]!;
+  };
+  const SMOKE = { phase: "SMOKE" as const, limits: { maxCalls: 4, maxCredits: 0.01, allowRepair: false } };
+  const utf8 = (text: string) => new TextEncoder().encode(text).byteLength;
+
+  it("the label is packet11-eval.20; the FULL policy and every threshold are unchanged (pinned)", () => {
+    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.20");
+    expect(APPROVED_HYBRID_CONTRACT.evaluationReportVersion).toBe("packet11-eval.20");
+    expect(AI_HYBRID_VERSIONS.evaluationReport).toBe("packet11-eval.20");
+    expect(HYBRID_FULL_EVALUATION_POLICY).toBe("hybrid-full-policy.2");
+    expect(APPROVED_HYBRID_CONTRACT.fullEvaluationPolicy).toBe("hybrid-full-policy.2");
+    expect(HYBRID_FULL_UTILITY_THRESHOLDS).toEqual({
+      firstCallValid: { numerator: 69, denominator: 70, comparison: "AT_LEAST" },
+      repairs: { numerator: 1, denominator: 70, comparison: "AT_MOST" },
+      usefulAcceptedOutput: { numerator: 67, denominator: 70, comparison: "AT_LEAST" },
+      withinProductionTimeout: { numerator: 67, denominator: 70, comparison: "AT_LEAST" },
+    });
+    expect(LANGUAGE_PRESENCE_MIN_PERCENT).toBe(100);
+  });
+
+  it("eval.19 evidence (the earlier usage accounting) fails with the specific CONTRACT_VERSION_MISMATCH codes", async () => {
+    const fixtures = hybridFixturesForPhase("SMOKE");
+    const model = { requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash", endpoint: DEEPSEEK_RESPONSES_URL };
+    const provider: AiShellProviderPort = { providerModel: { providerKey: "deepseek", modelSnapshot: "deepseek-flash" }, invoke: async (input, signal) => ({ ...(await framed().invoke(input, signal)), responseModel: "deepseek-flash" }) as ProviderInvocationResult };
+    const report = await evaluateHybridModelSnapshot({ model, provider, fixtures, ...SMOKE });
+    const plan = { phase: "SMOKE" as const, fixtureIds: fixtures.map((entry) => entry.id), maxCalls: 4 };
+    const approved = { maxCredits: 0.01, requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash" };
+    expect(report).toMatchObject({ reportVersion: "packet11-eval.20", versions: { evaluationReportVersion: "packet11-eval.20" } });
+    expect(hybridLiveRunVerdict(report, plan, approved, null)).toEqual({ kind: "PASS" });
+    const eval19 = { ...report, reportVersion: "packet11-eval.19", versions: { ...report.versions, evaluationReportVersion: "packet11-eval.19" } };
+    expect((hybridLiveRunVerdict(eval19, plan, approved, null) as { failures: string[] }).failures.sort()).toEqual(["CONTRACT_VERSION_MISMATCH:evaluationReportVersion", "CONTRACT_VERSION_MISMATCH:reportVersion"]);
+  });
+
+  it("a transmitted DeepSeek call without readable usage (HTTP 500) counts at its exact-body upper bound", async () => {
+    const bodies: string[] = [];
+    const fetcher = async (_url: string, init: RequestInit) => {
+      bodies.push(String(init.body));
+      return new Response(JSON.stringify({ error: { message: "x" } }), { status: 500, headers: { "content-type": "application/json" } });
+    };
+    const provider = createDeepSeekShellResponsesProvider({ token: "sentinel", model: deepSeekFlash(), fetcher });
+    const fixtures = hybridFixturesForPhase("SMOKE");
+    const report = await evaluateHybridModelSnapshot({ model: deepSeekFlash(), provider, fixtures, ...SMOKE });
+    const bound = shellCallUpperBound(utf8(bodies[0]!), fixtures[0]!.taskType as "EXPLAIN_PATTERN");
+    expect(report.fixtures[0]).toMatchObject({ reasonCode: "PROVIDER_FAILED", inputTokens: bound.inputTokens, outputTokens: bound.outputTokens });
+    expect(report.fixtures[0]!.credits).toBeCloseTo(bound.costMicroUsd / 1_000_000, 6);
+    expect(report.totals).toMatchObject({ calls: 1, upperBoundCalls: 1 });
+    expect(report.totals.credits).toBeCloseTo(bound.costMicroUsd / 1_000_000, 6);
+  });
+
+  it("a billed refused response counts its reported usage from the FAILED result itself (no diagnostic needed)", async () => {
+    const fetcher = async () => new Response(JSON.stringify({ status: "completed", model: "deepseek-pro", store: false, output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "{}" }] }], usage: { input_tokens: 900, output_tokens: 160 } }), { status: 200, headers: { "content-type": "application/json" } });
+    const provider = createDeepSeekShellResponsesProvider({ token: "sentinel", model: deepSeekFlash(), fetcher });
+    const report = await evaluateHybridModelSnapshot({ model: deepSeekFlash(), provider, fixtures: hybridFixturesForPhase("SMOKE"), ...SMOKE });
+    expect(report.fixtures[0]).toMatchObject({ inputTokens: 900, outputTokens: 160 });
+    expect(report.fixtures[0]!.credits).toBeCloseTo(deepSeekCostMicroUsd(900, 160) / 1_000_000, 6);
+    expect(report.totals).toMatchObject({ upperBoundCalls: 0 });
+  });
+
+  it("a provider that throws counts at the request's route upper bound; a FAILED without usage (nothing transmitted) counts nothing", async () => {
+    const throwing: AiShellProviderPort = { providerModel: { providerKey: "fake", modelSnapshot: "fake-model" }, invoke: async () => Promise.reject(new Error("boom")) };
+    const fixtures = hybridFixturesForPhase("SMOKE");
+    const thrown = await evaluateHybridModelSnapshot({ model: MODEL, provider: throwing, fixtures, ...SMOKE });
+    const planned = planSlots(fixtures[0]!.request, AI_HYBRID_RUNTIME_BUNDLES[fixtures[0]!.taskType as "EXPLAIN_PATTERN"]);
+    if (planned.kind !== "PLANNED") throw new Error("plan");
+    const bound = shellRouteCallUpperBound(projectShellTaskRequest(planned.plan));
+    expect(thrown.fixtures[0]!.credits).toBeCloseTo(bound.costMicroUsd / 1_000_000, 6);
+    expect(thrown.totals).toMatchObject({ calls: 1, upperBoundCalls: 1 });
+
+    const unsent: AiShellProviderPort = { providerModel: { providerKey: "fake", modelSnapshot: "fake-model" }, invoke: async () => ({ kind: "FAILED", reason: "MISSING_CONFIGURATION" }) };
+    const report = await evaluateHybridModelSnapshot({ model: MODEL, provider: unsent, fixtures, ...SMOKE });
+    expect(report.fixtures[0]).toMatchObject({ credits: 0, inputTokens: 0, outputTokens: 0 });
+    expect(report.totals).toMatchObject({ upperBoundCalls: 0, credits: 0 });
+  });
+
+  it("a call the service cut off at its timeout counts what the provider later reports for it (the adapter's upper bound when its fetch was aborted)", async () => {
+    const bound = { inputTokens: 5000, outputTokens: 512, costMicroUsd: 2115, basis: "UPPER_BOUND" as const };
+    const slow: AiShellProviderPort = {
+      providerModel: { providerKey: "fake", modelSnapshot: "fake-model" },
+      invoke: (_input, signal) => new Promise((resolve) => signal.addEventListener("abort", () => resolve({ kind: "FAILED", reason: "TRANSPORT_FAILED", usage: bound }))),
+    };
+    vi.useFakeTimers();
+    try {
+      const pending = evaluateHybridModelSnapshot({ model: MODEL, provider: slow, fixtures: hybridFixturesForPhase("SMOKE"), ...SMOKE, monotonicMs: () => 0 });
+      await vi.advanceTimersByTimeAsync(AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN.executionBudget.perCallTimeoutMs);
+      const report = await pending;
+      expect(report.fixtures[0]).toMatchObject({ reasonCode: "PROVIDER_TIMEOUT", timedOutCalls: 1 });
+      expect(report.fixtures[0]!.credits).toBeCloseTo(0.002115, 6);
+      expect(report.totals).toMatchObject({ upperBoundCalls: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("Packet 11B.10: per-task shell caps in harness eval.8", () => {
   const APPROVED_MODEL = { requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash", endpoint: DEEPSEEK_RESPONSES_URL };
   const APPROVED = { maxCredits: 0.01, requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash" };
@@ -829,10 +934,10 @@ describe("rules r4 in harness packet11-eval.12 (wording quality)", () => {
   const failuresOf = (verdict: ReturnType<typeof hybridLiveRunVerdict>) => (verdict.kind === "FAIL" ? verdict.failures : []);
 
   it("pins the current contract (r6 moved rules, bundles, fixtures and harness again; the prompt is 11b.17 since the en EXPLAIN guidance); model, provider, endpoint, scope, request version and caps are unchanged", () => {
-    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.19");
+    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.20");
     expect(APPROVED_HYBRID_CONTRACT).toMatchObject({
       shellRulesRevision: "ai-shell-rules.11b.15-r8", promptVersion: "11b.18", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18",
-      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.19",
+      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.20",
       requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash", providerKey: "deepseek", endpoint: "https://api.deepseek.com/responses", approvalScope: "HYBRID_SHELL_WORDING_ONLY", legacyFactGeneration: "NOT_APPROVED",
       shellRequestVersion: "ai-shell-request.11b.11", shellMaxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 }, providerSchemaVersion: "kie-schema.11c.1", slotPlanVersion: "ai-slot-plan.11b.9",
       atomRendererVersion: "ai-atoms.11b.7", defaultShellVersion: "ai-shells-default.11b.8", languageCopyRevision: "ai-language-copy.11b.10", validatorRulesRevision: "11b.2-meaning-r7", approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
@@ -906,10 +1011,10 @@ describe("rules r5 in harness packet11-eval.12 (clinical labels)", () => {
   const failuresOf = (verdict: ReturnType<typeof hybridLiveRunVerdict>) => (verdict.kind === "FAIL" ? verdict.failures : []);
 
   it("pins the current contract (r8 since packet11-eval.14; en EXPLAIN guidance since packet11-eval.16: rules 11b.15-r8, prompt 11b.17, @11b.17, fixtures 11b.15, request 11b.11); everything else is unchanged", () => {
-    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.19");
+    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.20");
     expect(APPROVED_HYBRID_CONTRACT).toMatchObject({
       shellRulesRevision: "ai-shell-rules.11b.15-r8", promptVersion: "11b.18", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18",
-      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.19",
+      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.20",
       requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash", providerKey: "deepseek", endpoint: "https://api.deepseek.com/responses", approvalScope: "HYBRID_SHELL_WORDING_ONLY", legacyFactGeneration: "NOT_APPROVED",
       shellRequestVersion: "ai-shell-request.11b.11", shellMaxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 }, providerSchemaVersion: "kie-schema.11c.1", slotPlanVersion: "ai-slot-plan.11b.9",
       atomRendererVersion: "ai-atoms.11b.7", defaultShellVersion: "ai-shells-default.11b.8", languageCopyRevision: "ai-language-copy.11b.10", validatorRulesRevision: "11b.2-meaning-r7", approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
@@ -987,13 +1092,13 @@ describe("rules r6 in harness packet11-eval.12 (clinical-label boundary precisio
   const intro = (text: string) => (candidate: any) => { candidate.shells.sections[0].intro = text; return candidate; };
 
   it("pins the current contract (en EXPLAIN guidance since packet11-eval.16: fixtures 11b.15, bundle set 11b.17, rules 11b.15-r8, request 11b.11, prompt 11b.17); validator component 11b.15 and the caps are unchanged", () => {
-    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.19");
+    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.20");
     expect(PACKET_11_HYBRID_FIXTURE_SET_REVISION).toBe("packet11-fixtures.11b.16");
     expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.15-r8");
     expect(PACKET_11_SHELL_PROMPT_VERSION).toBe("11b.18");
     expect(APPROVED_HYBRID_CONTRACT).toMatchObject({
       shellRulesRevision: "ai-shell-rules.11b.15-r8", promptVersion: "11b.18", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18",
-      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.19", shellRequestVersion: "ai-shell-request.11b.11",
+      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.20", shellRequestVersion: "ai-shell-request.11b.11",
       shellMaxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 }, providerSchemaVersion: "kie-schema.11c.1", slotPlanVersion: "ai-slot-plan.11b.9",
     });
     for (const task of ["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"] as const) {
@@ -1085,7 +1190,7 @@ describe("rules r7 in harness packet11-eval.12 (temperature 0.2, contextual up/d
   };
 
   it("pins packet11-eval.16 (r7 since eval.12; the FULL policy since eval.13; r8 since eval.14; zh EXPLAIN guidance since eval.15; en EXPLAIN guidance since eval.16), packet11-fixtures.11b.15, bundle set 11b.17, rules 11b.15-r8, request 11b.11, prompt 11b.17 and shellTemperature 0.2; schema, slot plan, caps, model and provider are unchanged", () => {
-    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.19");
+    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.20");
     expect(PACKET_11_HYBRID_FIXTURE_SET_REVISION).toBe("packet11-fixtures.11b.16");
     expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.15-r8");
     expect(SHELL_PROVIDER_REQUEST_VERSION).toBe("ai-shell-request.11b.11");
@@ -1096,7 +1201,7 @@ describe("rules r7 in harness packet11-eval.12 (temperature 0.2, contextual up/d
       requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash", providerKey: "deepseek", endpoint: "https://api.deepseek.com/responses",
       approvalScope: "HYBRID_SHELL_WORDING_ONLY", legacyFactGeneration: "NOT_APPROVED",
       shellRulesRevision: "ai-shell-rules.11b.15-r8", promptVersion: "11b.18", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18",
-      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.19", shellRequestVersion: "ai-shell-request.11b.11", shellTemperature: 0.2,
+      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.20", shellRequestVersion: "ai-shell-request.11b.11", shellTemperature: 0.2,
       shellMaxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 }, providerSchemaVersion: "kie-schema.11c.1", slotPlanVersion: "ai-slot-plan.11b.9",
       validatorRulesRevision: "11b.2-meaning-r7", approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
     });
@@ -1113,7 +1218,7 @@ describe("rules r7 in harness packet11-eval.12 (temperature 0.2, contextual up/d
   it("the report records shellTemperature 0.2 from the domain constant, and an approved run passes", async () => {
     const { report, plan } = await smokeReport();
     expect(report.versions.shellTemperature).toBe(0.2);
-    expect(report.versions).toMatchObject({ shellRequestVersion: "ai-shell-request.11b.11", shellRulesRevision: "ai-shell-rules.11b.15-r8", fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.19" });
+    expect(report.versions).toMatchObject({ shellRequestVersion: "ai-shell-request.11b.11", shellRulesRevision: "ai-shell-rules.11b.15-r8", fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.20" });
     expect(hybridLiveRunVerdict(report, plan, APPROVED, null)).toEqual({ kind: "PASS" });
   });
   it("eval.11-era evidence (eval.11, fixtures 11b.11, @11b.13, request 11b.10, rules 11b.13-r6) fails with the specific codes, field by field and all together", async () => {
@@ -1247,11 +1352,11 @@ describe("packet11-eval.13 FULL evaluation policy hybrid-full-policy.1 (offline)
   const varied = (evidence: readonly HybridFixtureEvidence[], count: number, change: Record<string, unknown>) => evidence.map((entry, index) => (index < count ? ({ ...entry, ...change } as unknown as HybridFixtureEvidence) : entry));
 
   it("pins the harness (packet11-eval.16 since the en EXPLAIN guidance; eval.15 for the zh guidance; eval.14 for r8; the policy since eval.13) and the contract field fullEvaluationPolicy hybrid-full-policy.1; everything else in the contract is unchanged", async () => {
-    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.19");
+    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.20");
     expect(HYBRID_FULL_EVALUATION_POLICY).toBe("hybrid-full-policy.2");
-    expect(AI_HYBRID_VERSIONS.evaluationReport).toBe("packet11-eval.19");
+    expect(AI_HYBRID_VERSIONS.evaluationReport).toBe("packet11-eval.20");
     expect(APPROVED_HYBRID_CONTRACT).toMatchObject({
-      evaluationReportVersion: "packet11-eval.19", fullEvaluationPolicy: "hybrid-full-policy.2", shellRulesRevision: "ai-shell-rules.11b.15-r8", promptVersion: "11b.18", shellRequestVersion: "ai-shell-request.11b.11",
+      evaluationReportVersion: "packet11-eval.20", fullEvaluationPolicy: "hybrid-full-policy.2", shellRulesRevision: "ai-shell-rules.11b.15-r8", promptVersion: "11b.18", shellRequestVersion: "ai-shell-request.11b.11",
       explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18", fixtureSetRevision: "packet11-fixtures.11b.16", shellMaxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 }, shellTemperature: 0.2,
       requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash", providerKey: "deepseek", endpoint: "https://api.deepseek.com/responses", providerSchemaVersion: "kie-schema.11c.1", slotPlanVersion: "ai-slot-plan.11b.9",
     });
@@ -1264,8 +1369,8 @@ describe("packet11-eval.13 FULL evaluation policy hybrid-full-policy.1 (offline)
     });
     const fixtures = hybridFixturesForPhase("SMOKE");
     const report = await evaluateHybridModelSnapshot({ model: APPROVED_MODEL, provider: scripted().provider, fixtures, phase: "SMOKE", limits: { maxCalls: 4, maxCredits: 0.01, allowRepair: false } });
-    expect(report.reportVersion).toBe("packet11-eval.19");
-    expect(report.versions).toMatchObject({ evaluationReportVersion: "packet11-eval.19", fullEvaluationPolicy: "hybrid-full-policy.2" });
+    expect(report.reportVersion).toBe("packet11-eval.20");
+    expect(report.versions).toMatchObject({ evaluationReportVersion: "packet11-eval.20", fullEvaluationPolicy: "hybrid-full-policy.2" });
   });
 
   it("eval.12 evidence and a missing or other FULL policy fail with the specific CONTRACT_VERSION_MISMATCH codes", async () => {
@@ -1605,8 +1710,8 @@ describe("rules r8 in harness packet11-eval.14 (S6 placeholder provenance)", () 
   };
 
   it("pins the current versions (eval.16 since the en EXPLAIN guidance): packet11-eval.16, packet11-fixtures.11b.15, bundle set 11b.17 (validator component 11b.15, fixtureSet component 11b.15), prompt 11b.17 and rules 11b.15-r8; policy, request, caps and temperature are unchanged", () => {
-    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.19");
-    expect(AI_HYBRID_VERSIONS.evaluationReport).toBe("packet11-eval.19");
+    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.20");
+    expect(AI_HYBRID_VERSIONS.evaluationReport).toBe("packet11-eval.20");
     expect(AI_HYBRID_VERSIONS.fixtureSet).toBe("packet11-fixtures.11b.16");
     expect(PACKET_11_HYBRID_FIXTURE_SET_REVISION).toBe("packet11-fixtures.11b.16");
     expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.15-r8");
@@ -1614,7 +1719,7 @@ describe("rules r8 in harness packet11-eval.14 (S6 placeholder provenance)", () 
     expect(HYBRID_FULL_EVALUATION_POLICY).toBe("hybrid-full-policy.2");
     expect(APPROVED_HYBRID_CONTRACT).toMatchObject({
       shellRulesRevision: "ai-shell-rules.11b.15-r8", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18",
-      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.19", fullEvaluationPolicy: "hybrid-full-policy.2",
+      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.20", fullEvaluationPolicy: "hybrid-full-policy.2",
       promptVersion: "11b.18", shellRequestVersion: "ai-shell-request.11b.11", shellTemperature: 0.2, shellMaxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 },
       providerSchemaVersion: "kie-schema.11c.1", slotPlanVersion: "ai-slot-plan.11b.9", validatorRulesRevision: "11b.2-meaning-r7", approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
       requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash", providerKey: "deepseek", endpoint: "https://api.deepseek.com/responses",
@@ -1697,8 +1802,8 @@ describe("zh EXPLAIN guidance in harness packet11-eval.15 (prompt 11b.16)", () =
   it("pins the current versions (prompt 11b.17 since the en EXPLAIN guidance; 11b.16 added the zh guidance): bundle set 11b.17 (promptTemplate 11b.17, validator component 11b.15, fixtureSet component 11b.15), packet11-fixtures.11b.15 and packet11-eval.16; rules r8, policy, request, caps, temperature and timeouts are unchanged", () => {
     expect(PACKET_11_SHELL_PROMPT_VERSION).toBe("11b.18");
     expect(AI_HYBRID_VERSIONS.prompt).toBe(PACKET_11_SHELL_PROMPT_VERSION);
-    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.19");
-    expect(AI_HYBRID_VERSIONS.evaluationReport).toBe("packet11-eval.19");
+    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.20");
+    expect(AI_HYBRID_VERSIONS.evaluationReport).toBe("packet11-eval.20");
     expect(PACKET_11_HYBRID_FIXTURE_SET_REVISION).toBe("packet11-fixtures.11b.16");
     expect(AI_HYBRID_VERSIONS.fixtureSet).toBe("packet11-fixtures.11b.16");
     expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.15-r8");
@@ -1707,7 +1812,7 @@ describe("zh EXPLAIN guidance in harness packet11-eval.15 (prompt 11b.16)", () =
     expect(SHELL_TEMPERATURE).toBe(0.2);
     expect(APPROVED_HYBRID_CONTRACT).toMatchObject({
       promptVersion: "11b.18", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18",
-      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.19", fullEvaluationPolicy: "hybrid-full-policy.2",
+      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.20", fullEvaluationPolicy: "hybrid-full-policy.2",
       shellRulesRevision: "ai-shell-rules.11b.15-r8", shellRequestVersion: "ai-shell-request.11b.11", shellTemperature: 0.2, shellMaxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 },
       providerSchemaVersion: "kie-schema.11c.1", slotPlanVersion: "ai-slot-plan.11b.9", validatorRulesRevision: "11b.2-meaning-r7", approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
       requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash", providerKey: "deepseek", endpoint: "https://api.deepseek.com/responses",
@@ -1771,8 +1876,8 @@ describe("en EXPLAIN guidance in harness packet11-eval.16 (prompt 11b.17)", () =
   it("pins prompt 11b.17, bundle set 11b.17 (promptTemplate 11b.17, validator component 11b.15, fixtureSet component 11b.15), packet11-fixtures.11b.15 and packet11-eval.16; rules r8, policy, request, caps, temperature and timeouts are unchanged", () => {
     expect(PACKET_11_SHELL_PROMPT_VERSION).toBe("11b.18");
     expect(AI_HYBRID_VERSIONS.prompt).toBe(PACKET_11_SHELL_PROMPT_VERSION);
-    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.19");
-    expect(AI_HYBRID_VERSIONS.evaluationReport).toBe("packet11-eval.19");
+    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.20");
+    expect(AI_HYBRID_VERSIONS.evaluationReport).toBe("packet11-eval.20");
     expect(PACKET_11_HYBRID_FIXTURE_SET_REVISION).toBe("packet11-fixtures.11b.16");
     expect(AI_HYBRID_VERSIONS.fixtureSet).toBe("packet11-fixtures.11b.16");
     expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.15-r8");
@@ -1781,7 +1886,7 @@ describe("en EXPLAIN guidance in harness packet11-eval.16 (prompt 11b.17)", () =
     expect(SHELL_TEMPERATURE).toBe(0.2);
     expect(APPROVED_HYBRID_CONTRACT).toMatchObject({
       promptVersion: "11b.18", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18",
-      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.19", fullEvaluationPolicy: "hybrid-full-policy.2",
+      fixtureSetRevision: "packet11-fixtures.11b.16", evaluationReportVersion: "packet11-eval.20", fullEvaluationPolicy: "hybrid-full-policy.2",
       shellRulesRevision: "ai-shell-rules.11b.15-r8", shellRequestVersion: "ai-shell-request.11b.11", shellTemperature: 0.2, shellMaxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 },
       providerSchemaVersion: "kie-schema.11c.1", slotPlanVersion: "ai-slot-plan.11b.9", validatorRulesRevision: "11b.2-meaning-r7", approvedMeaningRegistryRevision: "ai-meaning-registry.11b.1",
       requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash", providerKey: "deepseek", endpoint: "https://api.deepseek.com/responses",
@@ -1948,12 +2053,12 @@ describe("packet11-eval.18 structural first-call validity and blocked-content §
   /** A classification entry; deliberately loosely typed so malformed and non-owner entries can be tested. */
   const owner = (classification: string, reviewedBy = "OWNER") => ({ classification, reviewedBy }) as never;
 
-  it("pins hybrid-full-policy.2 and the harness (eval.18's logic, label packet11-eval.19 since the B5 contract freeze); every request-side pin and every threshold is unchanged", () => {
-    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.19");
+  it("pins hybrid-full-policy.2 and the harness (eval.18's gates; label packet11-eval.19 since the B5 freeze, packet11-eval.20 since the C5 usage accounting); every request-side pin and every threshold is unchanged", () => {
+    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.20");
     expect(HYBRID_FULL_EVALUATION_POLICY).toBe("hybrid-full-policy.2");
-    expect(AI_HYBRID_VERSIONS.evaluationReport).toBe("packet11-eval.19");
+    expect(AI_HYBRID_VERSIONS.evaluationReport).toBe("packet11-eval.20");
     expect(APPROVED_HYBRID_CONTRACT).toMatchObject({
-      evaluationReportVersion: "packet11-eval.19", fullEvaluationPolicy: "hybrid-full-policy.2", promptVersion: "11b.18", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18",
+      evaluationReportVersion: "packet11-eval.20", fullEvaluationPolicy: "hybrid-full-policy.2", promptVersion: "11b.18", explainBundle: "ai.explain-pattern@11b.18", careBundle: "ai.draft-care-preparation-summary@11b.18",
       fixtureSetRevision: "packet11-fixtures.11b.16", shellRulesRevision: "ai-shell-rules.11b.15-r8", shellRequestVersion: "ai-shell-request.11b.11", providerSchemaVersion: "kie-schema.11c.1", slotPlanVersion: "ai-slot-plan.11b.9",
       validatorRulesRevision: "11b.2-meaning-r7", shellMaxOutputTokens: { EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 }, shellTemperature: 0.2, requestModelId: "deepseek-flash", responseModelSnapshot: "deepseek-flash",
     });
@@ -1973,7 +2078,7 @@ describe("packet11-eval.18 structural first-call validity and blocked-content §
     const report = await evaluateHybridModelSnapshot({ model: APPROVED_MODEL, provider: fake(() => null).provider, fixtures, phase: "SMOKE", limits: { maxCalls: 4, maxCredits: 0.01, allowRepair: false } });
     const plan = { phase: "SMOKE" as const, fixtureIds: fixtures.map((entry) => entry.id), maxCalls: 4 };
     const approved = { ...APPROVED, maxCredits: 0.01 };
-    expect(report).toMatchObject({ reportVersion: "packet11-eval.19", versions: { evaluationReportVersion: "packet11-eval.19", fullEvaluationPolicy: "hybrid-full-policy.2" } });
+    expect(report).toMatchObject({ reportVersion: "packet11-eval.20", versions: { evaluationReportVersion: "packet11-eval.20", fullEvaluationPolicy: "hybrid-full-policy.2" } });
     expect(hybridLiveRunVerdict(report, plan, approved, null)).toEqual({ kind: "PASS" });
     expect(failuresOf(hybridLiveRunVerdict({ ...report, versions: { ...report.versions, evaluationReportVersion: "packet11-eval.17" } }, plan, approved, null))).toEqual(["CONTRACT_VERSION_MISMATCH:evaluationReportVersion"]);
     expect(failuresOf(hybridLiveRunVerdict({ ...report, versions: { ...report.versions, fullEvaluationPolicy: "hybrid-full-policy.1" } }, plan, approved, null))).toEqual(["CONTRACT_VERSION_MISMATCH:fullEvaluationPolicy"]);
@@ -1986,16 +2091,17 @@ describe("packet11-eval.18 structural first-call validity and blocked-content §
    * Packet 11C B5 contract freeze (offline): the harness label moved packet11-eval.18 -> packet11-eval.19 and the provider output-schema
    * label kie-schema.11b.6 -> kie-schema.11c.1 (its enum carries ai-slot-plan.11b.9). The harness logic and policy are eval.18's; the bump
    * makes new-contract evidence distinguishable, so eval.18-era evidence (labels 11b.6 / eval.18, slot plan 11b.8) cannot qualify.
+   * Packet 11C Addendum C (C5): the current label is packet11-eval.20 (the usage accounting); see the eval.20 block for eval.19 evidence.
    */
   it("B5: eval.18-era evidence (kie-schema.11b.6, packet11-eval.18, ai-slot-plan.11b.8) fails with the specific CONTRACT_VERSION_MISMATCH codes", async () => {
-    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.19");
+    expect(AI_HYBRID_EVALUATION_REPORT_VERSION).toBe("packet11-eval.20");
     expect(HYBRID_FULL_EVALUATION_POLICY).toBe("hybrid-full-policy.2");
-    expect(APPROVED_HYBRID_CONTRACT).toMatchObject({ evaluationReportVersion: "packet11-eval.19", providerSchemaVersion: "kie-schema.11c.1", slotPlanVersion: "ai-slot-plan.11b.9" });
+    expect(APPROVED_HYBRID_CONTRACT).toMatchObject({ evaluationReportVersion: "packet11-eval.20", providerSchemaVersion: "kie-schema.11c.1", slotPlanVersion: "ai-slot-plan.11b.9" });
     const fixtures = hybridFixturesForPhase("SMOKE");
     const report = await evaluateHybridModelSnapshot({ model: APPROVED_MODEL, provider: fake(() => null).provider, fixtures, phase: "SMOKE", limits: { maxCalls: 4, maxCredits: 0.01, allowRepair: false } });
     const plan = { phase: "SMOKE" as const, fixtureIds: fixtures.map((entry) => entry.id), maxCalls: 4 };
     const approved = { ...APPROVED, maxCredits: 0.01 };
-    expect(report).toMatchObject({ reportVersion: "packet11-eval.19", versions: { evaluationReportVersion: "packet11-eval.19", providerSchemaVersion: "kie-schema.11c.1" } });
+    expect(report).toMatchObject({ reportVersion: "packet11-eval.20", versions: { evaluationReportVersion: "packet11-eval.20", providerSchemaVersion: "kie-schema.11c.1" } });
     expect(hybridLiveRunVerdict(report, plan, approved, null)).toEqual({ kind: "PASS" });
     for (const [field, value] of [["providerSchemaVersion", "kie-schema.11b.6"], ["evaluationReportVersion", "packet11-eval.18"], ["slotPlanVersion", "ai-slot-plan.11b.8"]] as const) {
       expect(failuresOf(hybridLiveRunVerdict({ ...report, versions: { ...report.versions, [field]: value } }, plan, approved, null)), field).toEqual([`CONTRACT_VERSION_MISMATCH:${field}`]);

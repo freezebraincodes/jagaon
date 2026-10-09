@@ -420,6 +420,8 @@ function fakeWording(options: { available?: boolean; required?: boolean } = {}) 
       required = false;
     }),
     compose: vi.fn((input: Deferred["input"], signal?: AbortSignal) => new Promise<CareSummaryAiWordingOutcome>((resolve) => void calls.push({ input, signal, resolve }))),
+    // Packet 11C Addendum C (C5): the moot disclosure's audit row.
+    disclosureClosed: vi.fn(async (_input: { locale: SupportedLocale }) => undefined),
   } satisfies CareSummaryAiWordingPort;
   return { port, calls };
 }
@@ -648,6 +650,38 @@ describe("Care-summary preview: AI wording action (Packet 11C B4b)", () => {
     await act(async () => undefined);
     expect(screen.queryByText(zh.ai.unavailable, { exact: false })).toBeNull();
     expect(screen.queryByText(zh.ai.cancelled)).toBeNull();
+  });
+
+  it("C5: a disclosure closed as moot (locale switch, screen closed) reports its one moot request; an answered one never does", async () => {
+    const { h, recordId } = await prepared();
+    const { port } = fakeWording({ required: true });
+    const view = renderAi(h, recordId, port);
+    fireEvent.click(await aiAction());
+    await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    expect(port.disclosureClosed).not.toHaveBeenCalled();
+    view.rerenderLocale("zh-SG");
+    await waitFor(() => expect(port.disclosureClosed).toHaveBeenCalledTimes(1));
+    // The request's own locale (the preview's), not the locale switched to.
+    expect(port.disclosureClosed).toHaveBeenCalledWith({ locale: "en-SG" });
+    view.rerenderLocale("en-SG");
+    await act(async () => undefined);
+
+    fireEvent.click(await aiAction());
+    await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    view.unmount();
+    await waitFor(() => expect(port.disclosureClosed).toHaveBeenCalledTimes(2));
+    expect(port.compose).not.toHaveBeenCalled();
+
+    // Answered (Cancel, or the primary action): the request runs and is audited by it, never also as moot.
+    cleanup();
+    const answered = fakeWording({ required: true });
+    const again = renderAi(h, recordId, answered.port);
+    fireEvent.click(await aiAction());
+    fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.cancel }));
+    await waitFor(() => expect(answered.port.compose).toHaveBeenCalledTimes(1));
+    again.unmount();
+    await act(async () => undefined);
+    expect(answered.port.disclosureClosed).not.toHaveBeenCalled();
   });
 
   it("unmounting aborts a pending request", async () => {

@@ -8,8 +8,9 @@ import { createBackupExportService } from "@/backup/backup-export-service";
 import { createBackupSnapshotRepository } from "@/backup/backup-snapshot-repository";
 import { capturingFilePort } from "@/backup/backup-test-support";
 import { createWebCryptoPort } from "@/backup/web-crypto-port";
-import { aiInvocationAuditRowSchema, type AiInvocationAuditRow } from "@/domain/ai";
-import { deterministicAuditRowFixture, explainAuditRowFixture } from "@/domain/ai/ai-test-fixtures";
+import { aiInvocationAuditRowSchema, aiInvocationAuditSchemaVersionOf, type AiInvocationAuditRow } from "@/domain/ai";
+import { currentAuditRowFixture, deterministicAuditRowFixture, explainAuditRowFixture } from "@/domain/ai/ai-test-fixtures";
+import { validateAiAuditReferences } from "@/application/ai/ai-audit-lifecycle";
 import type { JagaOnDatabase } from "@/storage/database";
 import { createStorageMetadataRepository } from "@/storage/storage-metadata";
 import { createRestoreReconciler } from "./restore-reconciler";
@@ -82,6 +83,61 @@ async function restoreInto(target: string, file: Uint8Array) {
 }
 
 describe("AI invocation audits through backup and restore", () => {
+  /**
+   * Packet 11C Addendum C, Task C5 (owner decision C5-a: a versioned audit with backup compatibility). A backup holding rows of both
+   * audit schema versions (legacy ai-invocation-audit.11a.1 rows exactly as written before C5, and current 11c.2 rows with an audit-only
+   * outcome and a usage basis) restores every row byte-identically, and each keeps its own version. No backup payload, Dexie or index
+   * version changed.
+   */
+  it(
+    "C5: a backup with legacy (11a.1) and current (11c.2) audit rows restores both versions exactly",
+    async () => {
+      const MOOT = "2b3c4d5e-6f70-4a8b-9c0d-1e2f3a4b5c6d";
+      const BILLED = "3c4d5e6f-7081-4b9c-8d0e-2f3a4b5c6d7e";
+      const source = await auditedDataset(async (database, revisions) => {
+        const glucose = revisions.find((row) => row.recordType === "GLUCOSE_READING")!;
+        const audits = createAiInvocationAuditRepository(database);
+        await audits.append(aiInvocationAuditRowSchema.parse(currentAuditRowFixture({ ...deterministicAuditRowFixture(), requestId: MOOT, outcomeCode: "DISCLOSURE_CLOSED_MOOT" })));
+        await audits.append(aiInvocationAuditRowSchema.parse(currentAuditRowFixture({ ...explainAuditRowFixture(BILLED, [glucose]), outcomeCode: "PROVIDER_TIMEOUT", attempts: { count: 1, structuralRepairUsed: false, timedOut: true } }, "UPPER_BOUND")));
+      });
+      const before = (await source.database.table("aiInvocationAudits").toArray()) as AiInvocationAuditRow[];
+      expect(before.map((row) => [row.requestId, aiInvocationAuditSchemaVersionOf(row)]).sort()).toEqual(
+        [
+          [AUDIT, "ai-invocation-audit.11a.1"],
+          [deterministicAuditRowFixture().requestId, "ai-invocation-audit.11a.1"],
+          [MOOT, "ai-invocation-audit.11c.2"],
+          [BILLED, "ai-invocation-audit.11c.2"],
+        ].sort(),
+      );
+      // The legacy rows are exactly the pre-C5 fixtures: no version field, no usage basis.
+      for (const row of before.filter((entry) => aiInvocationAuditSchemaVersionOf(entry) === "ai-invocation-audit.11a.1")) {
+        expect(row).not.toHaveProperty("auditSchemaVersion");
+        expect(row).not.toHaveProperty("usageBasis");
+      }
+      const file = await exportFrom(source.database);
+      source.database.close();
+      const target = await emptyDataset();
+      expect(await restoreInto(target, file)).toEqual({ kind: "COMMITTED" });
+      (await createBrowserJournalRuntime(target, { now: () => LATER as never })).close();
+      const restored = await openRaw(target);
+      const after = (await restored.table("aiInvocationAudits").toArray()) as AiInvocationAuditRow[];
+      expect(after).toEqual(before);
+      const canonical = (rows: AiInvocationAuditRow[]) => rows.map((row) => JSON.stringify(row, Object.keys(row).sort())).sort();
+      expect(canonical(after)).toEqual(canonical(before));
+      expect(after.find((row) => row.requestId === MOOT)).toMatchObject({ auditSchemaVersion: "ai-invocation-audit.11c.2", outcomeCode: "DISCLOSURE_CLOSED_MOOT", usageBasis: "NONE" });
+      expect(after.find((row) => row.requestId === BILLED)).toMatchObject({ outcomeCode: "PROVIDER_TIMEOUT", usageBasis: "UPPER_BOUND" });
+      restored.close();
+    },
+    TIMEOUT,
+  );
+
+  it("C5: a row shaped as legacy but carrying a new code, or a current row with an unknown version, is refused as MALFORMED", () => {
+    const legacyWithNewCode = { ...deterministicAuditRowFixture(), outcomeCode: "DISCLOSURE_CLOSED_MOOT" };
+    const unknownVersion = { ...currentAuditRowFixture(deterministicAuditRowFixture()), auditSchemaVersion: "ai-invocation-audit.11c.9" };
+    for (const row of [legacyWithNewCode, unknownVersion]) expect(validateAiAuditReferences({ recordRevisions: [], aiInvocationAudits: [row] })).toEqual({ kind: "INVALID", reason: "MALFORMED" });
+    expect(validateAiAuditReferences({ recordRevisions: [], aiInvocationAudits: [deterministicAuditRowFixture(), currentAuditRowFixture({ ...deterministicAuditRowFixture(), requestId: "2b3c4d5e-6f70-4a8b-9c0d-1e2f3a4b5c6d" })] })).toEqual({ kind: "VALID" });
+  });
+
   it(
     "a valid AI audit round-trips losslessly into an empty database",
     async () => {

@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { plannedFixture, shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
-import { aiInvocationAuditRowSchema, type AiInvocationAuditRow, type ShellFieldPath, type ShellTaskRequest } from "@/domain/ai";
+import { AI_AUDIT_ONLY_OUTCOME_CODES, aiInvocationAuditRowSchema, type AiInvocationAuditRow, type ShellFieldPath, type ShellTaskRequest } from "@/domain/ai";
 import { AI_ACTIVATION_MANIFEST } from "./ai-activation-manifest";
 import { createAiHybridTaskService } from "./ai-hybrid-task-service";
-import type { AiShellProviderPort, ProviderInvocationResult } from "./ai-provider-port";
+import { PROVIDER_FAILURE_REASONS, type AiShellProviderPort, type ProviderInvocationResult } from "./ai-provider-port";
+import { AI_SHELL_ROUTE_POST_CALL_FAILURE_REASONS, aiShellRouteResponseSchema, shellRouteCallUpperBound } from "./ai-shell-route-contract";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "./ai-hybrid-runtime-bundles";
 import { verifyComposition } from "./language/assembler";
 import { atomMultiset, composeDeterministic } from "./language/deterministic-composition";
@@ -43,7 +44,8 @@ function harness(results: Array<ProviderInvocationResult | Promise<ProviderInvoc
 const expectOneValidRow = (rows: AiInvocationAuditRow[], outcomeCode: string, runtimeBundleKey = "ai.explain-pattern@11b.18") => {
   expect(rows).toHaveLength(1);
   expect(aiInvocationAuditRowSchema.safeParse(rows[0]).success).toBe(true);
-  expect(rows[0]).toMatchObject({ outcomeCode, runtimeBundleKey });
+  // Packet 11C Addendum C (C5): every row the service writes is a current (11c.2) row.
+  expect(rows[0]).toMatchObject({ auditSchemaVersion: "ai-invocation-audit.11c.2", outcomeCode, runtimeBundleKey });
 };
 const CARE = plannedFixture("p11.draft-care-preparation-summary.en-sg.ordinary");
 const INELIGIBLE_CASES = [
@@ -338,10 +340,21 @@ describe("usage carried by a FAILED result", () => {
   });
 
   it("is bounded like any usage, and an unknown reason still fails closed as PROVIDER_FAILED", async () => {
-    const run = harness([{ kind: "FAILED", reason: "SOMETHING_ELSE", usage: { inputTokens: 1e9, outputTokens: -1, costMicroUsd: 3 } } as unknown as ProviderInvocationResult]);
+    const run = harness([{ kind: "FAILED", reason: "SOMETHING_ELSE", usage: { inputTokens: 100_000, outputTokens: 7, costMicroUsd: 1e9 } } as unknown as ProviderInvocationResult]);
     expect(await run.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", reason: "PROVIDER_FAILED" });
     expectOneValidRow(run.rows, "PROVIDER_FAILED");
-    expect(run.rows[0]!.measurements).toMatchObject({ inputTokens: null, outputTokens: null, costMicroUsd: 3 });
+    expect(run.rows[0]!.measurements).toMatchObject({ inputTokens: 100_000, outputTokens: 7, costMicroUsd: null });
+  });
+
+  it.each([
+    ["a negative count", { inputTokens: 10, outputTokens: -1, costMicroUsd: 3 }],
+    ["an implausible count", { inputTokens: 1e9, outputTokens: 7, costMicroUsd: 3 }],
+    ["a missing count", { inputTokens: null, outputTokens: 7, costMicroUsd: 3 }],
+  ])("Packet 11C Addendum C (C5): an unreadable usage (%s) is not treated as zero: the call counts at its upper bound", async (_label, usage) => {
+    const run = harness([{ kind: "FAILED", reason: "PROVIDER_FAILED", usage } as unknown as ProviderInvocationResult]);
+    await run.service.execute(EN.request);
+    const bound = shellRouteCallUpperBound(projectShellTaskRequest(EN.plan));
+    expect(run.rows[0]).toMatchObject({ measurements: { inputTokens: bound.inputTokens, outputTokens: bound.outputTokens, costMicroUsd: bound.costMicroUsd }, usageBasis: "UPPER_BOUND" });
   });
 
   it("a FAILED without usage records no usage, exactly as before", async () => {
@@ -393,13 +406,15 @@ describe("remote-use disclosure decided before the first attempt (Packet 11C B3)
     expect(atomMultiset((result as any).composition)).toEqual(atomMultiset((ai as any).composition));
   });
 
-  it("Packet 11C B4a: DECLINED (the patient's explicit Cancel) is the same deterministic outcome, audited as REQUEST_CANCELLED with nothing sent", async () => {
+  it("Packet 11C B4a: DECLINED (the patient's explicit Cancel) is the same deterministic outcome; C5: audited as REMOTE_USE_DECLINED with nothing sent", async () => {
     const run = gated([completed(VALID)], async () => "DECLINED");
     const result = await run.service.execute(EN.request);
+    // The closed fallback reason stays REQUEST_CANCELLED (matrix reason codes are unchanged); the audit row records the truthful,
+    // audit-only outcome (Packet 11C Addendum C, C5; it was REQUEST_CANCELLED under the B4a interim ruling).
     expect(result).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "REMOTE_NOT_ACCEPTED", reason: "REQUEST_CANCELLED" });
     expect(run.calls).toHaveLength(0);
-    expectOneValidRow(run.rows, "REQUEST_CANCELLED");
-    expect(run.rows[0]).toMatchObject(NOTHING_SENT);
+    expectOneValidRow(run.rows, "REMOTE_USE_DECLINED");
+    expect(run.rows[0]).toMatchObject({ ...NOTHING_SENT, usageBasis: "NONE" });
   });
 
   it("ACCEPTED: asked exactly once, with the request's signal, before the first call; the repair attempt is not asked again", async () => {
@@ -492,5 +507,136 @@ describe("remote-use disclosure decided before the first attempt (Packet 11C B3)
     const run = gated([completed(VALID)], decide);
     expect(await run.service.execute(EN.request, controller.signal)).toMatchObject({ reason: "REQUEST_CANCELLED" });
     expect(decide).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Packet 11C Addendum C, Task C5 (owner decision): preserve reported usage on failed attempts; where an attempted call might have been
+ * billed but its usage is missing, count the call's pre-send upper bound (never zero) and mark the row's usage basis UPPER_BOUND.
+ */
+describe("conservative usage accounting (Packet 11C Addendum C, C5)", () => {
+  const BOUND = shellRouteCallUpperBound(projectShellTaskRequest(EN.plan));
+  const REPORTED = { inputTokens: 10, outputTokens: 5, costMicroUsd: 1 };
+  const measured = (row: AiInvocationAuditRow) => ({ inputTokens: row.measurements.inputTokens, outputTokens: row.measurements.outputTokens, costMicroUsd: row.measurements.costMicroUsd, usageBasis: (row as { usageBasis?: string }).usageBasis });
+
+  it("the audit-only outcome codes are never provider failure reasons or route reasons", () => {
+    for (const code of AI_AUDIT_ONLY_OUTCOME_CODES) {
+      expect((PROVIDER_FAILURE_REASONS as readonly string[]).includes(code), code).toBe(false);
+      expect((AI_SHELL_ROUTE_POST_CALL_FAILURE_REASONS as readonly string[]).includes(code), code).toBe(false);
+      expect(aiShellRouteResponseSchema.safeParse({ kind: "FAILED", reason: code }).success, code).toBe(false);
+    }
+  });
+
+  it("reported usage only: basis REPORTED", async () => {
+    const run = harness([completed(VALID)]);
+    await run.service.execute(EN.request);
+    expect(measured(run.rows[0]!)).toEqual({ ...REPORTED, usageBasis: "REPORTED" });
+  });
+
+  it("nothing sent: basis NONE, no usage", async () => {
+    const run = harness([], { manifest: AI_ACTIVATION_MANIFEST });
+    await run.service.execute(EN.request);
+    expect(measured(run.rows[0]!)).toEqual({ inputTokens: null, outputTokens: null, costMicroUsd: null, usageBasis: "NONE" });
+  });
+
+  it("a call cut off at the per-call timeout is counted at its pre-send upper bound", async () => {
+    vi.useFakeTimers();
+    const run = harness([new Promise<ProviderInvocationResult>(() => undefined)]);
+    const pending = run.service.execute(EN.request);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await pending).toMatchObject({ reason: "PROVIDER_TIMEOUT" });
+    expectOneValidRow(run.rows, "PROVIDER_TIMEOUT");
+    expect(measured(run.rows[0]!)).toEqual({ inputTokens: BOUND.inputTokens, outputTokens: BOUND.outputTokens, costMicroUsd: BOUND.costMicroUsd, usageBasis: "UPPER_BOUND" });
+  });
+
+  it("a call cancelled while in flight is counted at its pre-send upper bound", async () => {
+    const during = new AbortController();
+    const run = harness([new Promise<ProviderInvocationResult>(() => undefined)]);
+    const pending = run.service.execute(EN.request, during.signal);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    during.abort();
+    expect(await pending).toMatchObject({ reason: "REQUEST_CANCELLED" });
+    expectOneValidRow(run.rows, "REQUEST_CANCELLED");
+    expect(measured(run.rows[0]!)).toMatchObject({ costMicroUsd: BOUND.costMicroUsd, usageBasis: "UPPER_BOUND" });
+  });
+
+  it("a provider that throws (possibly after sending) is TRANSPORT_FAILED at the pre-send upper bound", async () => {
+    const run = harness([], { provider: { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, invoke: async () => Promise.reject(new Error("boom")) } satisfies AiShellProviderPort });
+    expect(await run.service.execute(EN.request)).toMatchObject({ reason: "TRANSPORT_FAILED" });
+    expect(measured(run.rows[0]!)).toMatchObject({ costMicroUsd: BOUND.costMicroUsd, usageBasis: "UPPER_BOUND" });
+  });
+
+  it("a completed call whose usage is missing or unreadable is counted at its pre-send upper bound", async () => {
+    const run = harness([{ kind: "COMPLETED", candidate: VALID, usage: { inputTokens: null, outputTokens: 5, costMicroUsd: null }, retention: "CONFIRMED_NOT_STORED" }]);
+    expect(await run.service.execute(EN.request)).toMatchObject({ source: "AI" });
+    expect(measured(run.rows[0]!)).toEqual({ inputTokens: BOUND.inputTokens, outputTokens: BOUND.outputTokens, costMicroUsd: BOUND.costMicroUsd, usageBasis: "UPPER_BOUND" });
+  });
+
+  it("a FAILED with an upper-bound usage (from the route or the adapter) is counted as given, basis UPPER_BOUND", async () => {
+    const given = { inputTokens: 3000, outputTokens: 512, costMicroUsd: 1515, basis: "UPPER_BOUND" as const };
+    const run = harness([{ kind: "FAILED", reason: "PROVIDER_TIMEOUT", usage: given }]);
+    await run.service.execute(EN.request);
+    expect(measured(run.rows[0]!)).toEqual({ inputTokens: 3000, outputTokens: 512, costMicroUsd: 1515, usageBasis: "UPPER_BOUND" });
+  });
+
+  it("a FAILED with reported usage keeps it (basis REPORTED); a FAILED without usage was not sent (no usage)", async () => {
+    const reported = harness([{ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { ...REPORTED, basis: "REPORTED" } }]);
+    await reported.service.execute(EN.request);
+    expect(measured(reported.rows[0]!)).toEqual({ ...REPORTED, usageBasis: "REPORTED" });
+    const unsent = harness([{ kind: "FAILED", reason: "MISSING_CONFIGURATION" }]);
+    await unsent.service.execute(EN.request);
+    expect(measured(unsent.rows[0]!)).toEqual({ inputTokens: null, outputTokens: null, costMicroUsd: null, usageBasis: "REPORTED" });
+  });
+
+  it("a reported first attempt plus an unreadable repair attempt: the sum, basis UPPER_BOUND", async () => {
+    vi.useFakeTimers();
+    const run = harness([completed(`${JSON.stringify(VALID)}}`), new Promise<ProviderInvocationResult>(() => undefined)]);
+    const pending = run.service.execute(EN.request);
+    await vi.advanceTimersByTimeAsync(18_000);
+    await pending;
+    expect(run.rows[0]!.attempts).toMatchObject({ count: 2, structuralRepairUsed: true, timedOut: true });
+    expect(measured(run.rows[0]!)).toEqual({ inputTokens: 10 + BOUND.inputTokens, outputTokens: 5 + BOUND.outputTokens, costMicroUsd: 1 + BOUND.costMicroUsd, usageBasis: "UPPER_BOUND" });
+  });
+});
+
+/**
+ * Packet 11C Addendum C, Task C5: one audit row per explicit request, also when nothing reaches the service's execute (the use cases and
+ * the browser wiring call `recordUnsent` for a request that was not eligible, became moot, was cancelled or could not read its source).
+ */
+describe("recordUnsent: the zero-attempt row of an explicit request (Packet 11C Addendum C, C5)", () => {
+  const unsent = (outcome: string, overrides: Record<string, unknown> = {}) => ({ requestId: "5b4c3d2e-1f0a-4b9c-8d7e-6f5a4b3c2d1e", taskType: "EXPLAIN_PATTERN" as const, locale: "en-SG" as const, requestedAt: "2026-10-06T00:59:59.000Z" as never, outcome: outcome as never, ...overrides });
+
+  it.each(["DISCLOSURE_CLOSED_MOOT", "NOT_ELIGIBLE", "SOURCE_UNAVAILABLE", "SOURCE_CHANGED", "REQUEST_CANCELLED", "PAYLOAD_INVALID"])("%s: one valid current row, nothing sent", async (outcome) => {
+    const run = harness([completed(VALID)]);
+    expect(await run.service.recordUnsent(unsent(outcome))).toBe(true);
+    expectOneValidRow(run.rows, outcome);
+    expect(run.rows[0]).toMatchObject({ requestId: "5b4c3d2e-1f0a-4b9c-8d7e-6f5a4b3c2d1e", taskType: "EXPLAIN_PATTERN", locale: "en-SG", requestedAt: "2026-10-06T00:59:59.000Z", completedAt: "2026-10-06T01:00:00.000Z", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], downstream: null, usageBasis: "NONE", activationManifestVersion: ENABLED.manifestVersion });
+    expect(run.calls).toHaveLength(0);
+  });
+
+  it("uses the hybrid bundle of the request's own task and locale", async () => {
+    const run = harness([]);
+    await run.service.recordUnsent(unsent("NOT_ELIGIBLE", { taskType: "DRAFT_CARE_PREPARATION_SUMMARY", locale: "zh-SG" }));
+    expectOneValidRow(run.rows, "NOT_ELIGIBLE", "ai.draft-care-preparation-summary@11b.18");
+    expect(run.rows[0]!.components.localePack.id).toBe("ai-locale.draft-care-preparation-summary.zh-sg");
+  });
+
+  it.each([
+    ["ACCEPTED", unsent("ACCEPTED")],
+    ["a provider failure", unsent("PROVIDER_FAILED")],
+    ["a server refusal (needs a transmission)", unsent("SPEND_CEILING_REACHED")],
+    ["the declined disclosure (decided inside execute)", unsent("REMOTE_USE_DECLINED")],
+    ["a non-hybrid task", unsent("NOT_ELIGIBLE", { taskType: "DRAFT_NEUTRAL_INQUIRY" })],
+    ["a malformed request id", unsent("NOT_ELIGIBLE", { requestId: "request-1" })],
+    ["an unknown locale", unsent("NOT_ELIGIBLE", { locale: "fr-FR" })],
+  ])("refuses %s and writes nothing", async (_label, input) => {
+    const run = harness([]);
+    expect(await run.service.recordUnsent(input as never)).toBe(false);
+    expect(run.rows).toHaveLength(0);
+  });
+
+  it("an audit store failure is reported as false, never thrown", async () => {
+    const run = harness([], { audit: { append: async () => Promise.reject(new Error("storage")) } });
+    expect(await run.service.recordUnsent(unsent("NOT_ELIGIBLE"))).toBe(false);
   });
 });

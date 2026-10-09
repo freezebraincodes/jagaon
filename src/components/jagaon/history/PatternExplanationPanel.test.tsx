@@ -65,7 +65,7 @@ function realExplainer(history: RecordedHistoryQueryPort, invoke = vi.fn()): Pat
     provider: { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, invoke },
   });
   // Assignability pin: the Task 6 use case is the port the screen and panel consume.
-  return createPatternExplainer({ history, execute: service.execute, now: () => NOW as Instant, requestId: counter() });
+  return createPatternExplainer({ history, execute: service.execute, recordUnsent: service.recordUnsent, now: () => NOW as Instant, requestId: counter() });
 }
 
 type Explained = Extract<PatternExplanationResult, { kind: "EXPLAINED" }>;

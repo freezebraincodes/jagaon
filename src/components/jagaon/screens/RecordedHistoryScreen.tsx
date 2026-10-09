@@ -46,8 +46,11 @@ type Props = {
  * locale switch closes it). `declined` marks an opening that followed a cancelled AI disclosure (explained with the standard wording).
  */
 type OpenExplanation = { factId: string; nonce: number; locale: SupportedLocale; declined: boolean };
-/** Packet 11C B3: the AI disclosure shown for one comparison, valid only for the view load and locale it was asked in. */
-type PendingDisclosure = { factId: string; key: string };
+/**
+ * Packet 11C B3: the AI disclosure shown for one comparison, valid only for the view load and locale it was asked in. `locale` (Packet
+ * 11C Addendum C, C5): the locale of the explicit request it belongs to, named by its audit row if it closes as moot.
+ */
+type PendingDisclosure = { factId: string; key: string; locale: SupportedLocale };
 
 const panelIdFor = (factId: string) => `history-explanation-${factId.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 
@@ -229,6 +232,34 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
   if (pendingDisclosure !== null && pendingDisclosure.key !== disclosureKey) setPendingDisclosure(null);
   const shownDisclosure = explainer && pendingDisclosure?.key === disclosureKey ? pendingDisclosure : null;
 
+  /**
+   * Packet 11C Addendum C, Task C5: the request behind a disclosure that closes without the patient's decision (a view reload, period or
+   * locale change, or the screen closing) is moot, and it still writes its one audit row (DISCLOSURE_CLOSED_MOOT; nothing is sent). A
+   * disclosure the patient answered is marked decided first, so it never also counts as moot. A cleanup that is immediately followed by
+   * the same dialog's effect again (a new explainer identity, or a development StrictMode remount) is not a close: the report is decided
+   * one microtask later, only if that dialog is no longer the live one.
+   */
+  const decidedDisclosures = useRef(new WeakSet<PendingDisclosure>());
+  const liveDisclosure = useRef<PendingDisclosure | null>(null);
+  useEffect(() => {
+    if (!shownDisclosure || !explainer) return;
+    const shown = shownDisclosure;
+    const decided = decidedDisclosures.current;
+    const live = liveDisclosure;
+    const report = explainer.disclosureClosed?.bind(explainer);
+    live.current = shown;
+    return () => {
+      if (live.current === shown) live.current = null;
+      queueMicrotask(() => {
+        if (live.current === shown || decided.has(shown)) return;
+        decided.add(shown);
+        void Promise.resolve()
+          .then(() => report?.({ locale: shown.locale }))
+          .catch(() => undefined);
+      });
+    };
+  }, [shownDisclosure, explainer]);
+
   const openExplanation = useCallback(
     (factId: string, declined = false) => {
       const nonce = openings + 1;
@@ -245,24 +276,26 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
         return;
       }
       if (explainer?.disclosureRequired?.() === true) {
-        setPendingDisclosure({ factId, key: disclosureKey });
+        setPendingDisclosure({ factId, key: disclosureKey, locale });
         return;
       }
       openExplanation(factId);
     },
-    [opened, explainer, disclosureKey, openExplanation],
+    [opened, explainer, disclosureKey, openExplanation, locale],
   );
 
   const acceptDisclosure = useCallback(() => {
     if (!shownDisclosure) return;
+    decidedDisclosures.current.add(shownDisclosure);
     explainer?.acceptDisclosure?.();
     setPendingDisclosure(null);
     openExplanation(shownDisclosure.factId);
   }, [shownDisclosure, explainer, openExplanation]);
 
-  // Packet 11C B4a: an explicit decline is passed with the request (audited as a cancelled request; nothing is sent).
+  // Packet 11C B4a: an explicit decline is passed with the request (audited REMOTE_USE_DECLINED since C5; nothing is sent).
   const cancelDisclosure = useCallback(() => {
     if (!shownDisclosure) return;
+    decidedDisclosures.current.add(shownDisclosure);
     setPendingDisclosure(null);
     openExplanation(shownDisclosure.factId, true);
   }, [shownDisclosure, openExplanation]);

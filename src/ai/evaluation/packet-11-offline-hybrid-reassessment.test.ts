@@ -38,7 +38,10 @@ import { shellCandidate } from "./packet-11-hybrid-test-support";
  * Label note (Packet 11C B5 contract freeze): "eval.18" below names the harness LOGIC and policy (hybrid-full-policy.2) this reassessment
  * applies. Since B5 the current harness carries that logic under the label packet11-eval.19, so a run of this file records
  * `reassessedUnder.harness: "packet11-eval.19"`. The record label OFFLINE_REASSESSMENT_UNDER_EVAL_18 and the recorded reassessment of the
- * real stored run are kept unchanged (historical evidence).
+ * real stored run are kept unchanged (historical evidence). Packet 11C Addendum C (C5): the current harness label is packet11-eval.20;
+ * its gates and policy are still eval.18's, and only its usage accounting changed (a call without readable usage counts at its pre-send
+ * upper bound). The reassessment reports the ORIGINAL run's usage and spend, so a run of this file now records `harness:
+ * "packet11-eval.20"` with the same gates.
  * OFFLINE REASSESSMENT UNDER packet11-eval.18 LOGIC (owner decision 2026-10-07, typed in the owner's own message: "I also authorize a clearly
  * labelled reassessment of the existing 70 stored responses under this corrected definition, without another provider call. Preserve
  * the original FAIL report and trace files."). Decision record: internal-docs/superpowers/decisions/2026-10-07-hybrid-first-call-validity.md.
@@ -497,9 +500,10 @@ describe("Packet 11 hybrid offline reassessment under eval.18 logic (label packe
     expect(record).toMatchObject({ kind: OFFLINE_REASSESSMENT_LABEL, label: OFFLINE_REASSESSMENT_LABEL, liveEvaluation: false, providerCalls: 0, modelQualified: false });
     expect(record.statement).toContain("The original FAIL report and verdict (packet11-eval.17 / hybrid-full-policy.1) stand unchanged");
     expect(record.source).toMatchObject({ storedRun: directory, originalContract: { reportVersion: "packet11-eval.17", evaluationReportVersion: "packet11-eval.17", fullEvaluationPolicy: "hybrid-full-policy.1" }, originalVerdict: { kind: "FAIL", failures: ["UTILITY:FIRST_CALL_VALID", "HUMAN_REVIEW_PENDING"] }, originalVerdictStandsUnchanged: true, storedCalls: 70 });
-    // The synthetic reassessment runs the CURRENT harness: eval.18's logic and policy, labelled packet11-eval.19 since the Packet 11C B5
-    // contract freeze (label only). The recorded reassessment of the real stored run (under eval.18) is historical evidence, unchanged.
-    expect(record.reassessedUnder).toMatchObject({ harness: "packet11-eval.19", fullEvaluationPolicy: "hybrid-full-policy.2" });
+    // The synthetic reassessment runs the CURRENT harness: eval.18's gates and policy, labelled packet11-eval.19 since the Packet 11C B5
+    // contract freeze (label only) and packet11-eval.20 since Addendum C (C5: usage accounting only). The recorded reassessment of the real
+    // stored run (under eval.18) is historical evidence, unchanged.
+    expect(record.reassessedUnder).toMatchObject({ harness: "packet11-eval.20", fullEvaluationPolicy: "hybrid-full-policy.2" });
     expect(record.requestCheck).toEqual({ invocations: 70, compared: 70, identical: 70, mismatches: [] });
     expect(record.outcomeDifferencesFromOriginal).toEqual([]);
     expect(record.reassessedTotals).toMatchObject({ calls: 70, repairs: 0, completed: true, stoppedReason: null, hardGatePassed: true, assemblyInvariantBreaches: 0 });

@@ -1,4 +1,4 @@
-import type { AiInvocationAuditRow, AiTaskRequest } from "@/domain/ai";
+import { AI_INVOCATION_AUDIT_SCHEMA_VERSION, type AiInvocationAuditRow, type AiInvocationOutcomeCode, type AiTaskRequest, type CurrentAiInvocationAuditRow } from "@/domain/ai";
 import type { AiActivationManifest } from "./ai-activation-manifest";
 import type { AiRemoteUseDecision, AiRemoteUseDisclosure, ProviderInvocationResult, ProviderUsage } from "./ai-provider-port";
 import type { AiTaskRuntimeBundle } from "./ai-runtime-bundles";
@@ -9,6 +9,9 @@ import type { AiTaskRuntimeBundle } from "./ai-runtime-bundles";
  * fact-sending service. No behaviour change: the bounded call, the usage folding and the audit row are byte-identical.
  * Packet 11C B3 adds `decideRemoteUse`, the remote-use decision shared by the hybrid service (before the first attempt) and the
  * browser shell client (before each send); it moved here from the B2b client unchanged in behaviour.
+ * Packet 11C Addendum C, Task C5: the audit row is now the ai-invocation-audit.11c.2 row (explicit version and usage basis; the 11A
+ * fields are unchanged), `addAttemptUsage` counts a potentially billed attempt conservatively (reported usage, else its pre-send upper
+ * bound), and `callOnce` marks a provider throw. The legacy task service keeps its reported-only accounting (basis REPORTED).
  */
 
 /**
@@ -33,12 +36,19 @@ export function decideRemoteUse(disclosure: AiRemoteUseDisclosure, signal: Abort
   });
 }
 
-export type Attempts = { count: number; structuralRepairUsed: boolean; timedOut: boolean; usage: ProviderUsage };
-export type CallOutcome = { kind: "RESULT"; result: ProviderInvocationResult } | { kind: "TIMEOUT" } | { kind: "CANCELLED" };
+/**
+ * `upperBoundUsed` (Packet 11C Addendum C, C5): at least one potentially billed attempt without readable usage was counted at its pre-send
+ * upper bound; the audit row's usage basis is then UPPER_BOUND. Absent or false: only reported usage was counted (REPORTED).
+ */
+export type Attempts = { count: number; structuralRepairUsed: boolean; timedOut: boolean; usage: ProviderUsage; upperBoundUsed?: boolean };
+/** `threw` (Packet 11C Addendum C, C5): the provider threw (the call may have been sent); its result is the closed TRANSPORT_FAILED. */
+export type CallOutcome = { kind: "RESULT"; result: ProviderInvocationResult; threw?: true } | { kind: "TIMEOUT" } | { kind: "CANCELLED" };
 
 export const NO_USAGE: ProviderUsage = Object.freeze({ inputTokens: null, outputTokens: null, costMicroUsd: null });
 const bounded = (value: unknown, max: number): number | null => (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= max ? value : null);
 const sum = (a: number | null, b: number | null, max: number) => (a === null && b === null ? null : Math.min((a ?? 0) + (b ?? 0), max));
+/** A readable token count: a whole number within the audit's bound (an implausible or malformed report is unreadable). */
+const isCount = (value: unknown): value is number => bounded(value, 100_000) !== null;
 
 /** One bounded provider call. A provider that ignores the abort signal is still cut off. */
 export function callOnce<TInput>(invoke: (input: TInput, signal: AbortSignal) => Promise<ProviderInvocationResult>, payload: TInput, perCallMs: number, overall: AbortSignal, user: AbortSignal | undefined): Promise<CallOutcome> {
@@ -66,7 +76,7 @@ export function callOnce<TInput>(invoke: (input: TInput, signal: AbortSignal) =>
       .then(() => invoke(payload, controller.signal))
       .then(
       (result) => finish({ kind: "RESULT", result }),
-      () => finish({ kind: "RESULT", result: { kind: "FAILED", reason: "TRANSPORT_FAILED" } }),
+      () => finish({ kind: "RESULT", result: { kind: "FAILED", reason: "TRANSPORT_FAILED" }, threw: true }),
     );
   });
 }
@@ -80,12 +90,32 @@ export function addUsage(attempts: Attempts, usage: ProviderUsage | undefined): 
   };
 }
 
-export function buildAuditRow(input: { request: AiTaskRequest; bundle: AiTaskRuntimeBundle; outcomeCode: AiInvocationAuditRow["outcomeCode"]; attempts: Attempts; startedMs: number; manifest: AiActivationManifest; provider: { providerModel: { providerKey: string; modelSnapshot: string } } | undefined; now: () => string; monotonicMs: () => number }): AiInvocationAuditRow {
+/**
+ * Packet 11C Addendum C (C5): counts one potentially billed attempt. Readable reported usage (both token counts) is counted as reported;
+ * a usage the provider marked UPPER_BOUND is counted as given; anything else (missing or unreadable usage, or no result at all: a
+ * timeout, a cancellation or a throw after the call started) is counted at the call's pre-send upper bound. The latter two make the
+ * row's basis UPPER_BOUND. Never zero for a potentially billed attempt.
+ */
+export function addAttemptUsage(attempts: Attempts, usage: ProviderUsage | undefined, upperBound: ProviderUsage): void {
+  if (usage !== undefined && usage.basis !== "UPPER_BOUND" && isCount(usage.inputTokens) && isCount(usage.outputTokens)) return addUsage(attempts, usage);
+  attempts.upperBoundUsed = true;
+  addUsage(attempts, usage?.basis === "UPPER_BOUND" && isCount(usage.inputTokens) && isCount(usage.outputTokens) ? usage : upperBound);
+}
+
+/** What a zero-attempt row of an explicit request needs to name (Packet 11C Addendum C, C5): no facts, so no source is ever recorded. */
+export type AuditRequestIdentity = Readonly<{ requestId: string; taskType: AiTaskRequest["taskType"]; locale: AiTaskRequest["locale"]; requestedAt: string; facts?: undefined }>;
+
+/**
+ * Builds the CURRENT (ai-invocation-audit.11c.2) row (Packet 11C Addendum C, C5: the explicit schema version and the usage basis; the
+ * fields and rules are the 11A row's, unchanged).
+ */
+export function buildAuditRow(input: { request: AiTaskRequest | AuditRequestIdentity; bundle: AiTaskRuntimeBundle; outcomeCode: AiInvocationOutcomeCode; attempts: Attempts; startedMs: number; manifest: AiActivationManifest; provider: { providerModel: { providerKey: string; modelSnapshot: string } } | undefined; now: () => string; monotonicMs: () => number }): CurrentAiInvocationAuditRow {
   const { request, bundle, outcomeCode, attempts, startedMs, manifest } = input;
   const transmitted = attempts.count > 0;
   const sources = new Map<string, AiInvocationAuditRow["sourceRevisions"][number]>();
-  if (transmitted) for (const fact of request.facts) for (const source of fact.sources) sources.set(source.revisionId, source);
+  if (transmitted && request.facts) for (const fact of request.facts) for (const source of fact.sources) sources.set(source.revisionId, source);
   return {
+    auditSchemaVersion: AI_INVOCATION_AUDIT_SCHEMA_VERSION,
     requestId: request.requestId,
     taskType: request.taskType,
     locale: request.locale,
@@ -114,5 +144,6 @@ export function buildAuditRow(input: { request: AiTaskRequest; bundle: AiTaskRun
     },
     sourceRevisions: [...sources.values()],
     downstream: null,
-  } as AiInvocationAuditRow;
+    usageBasis: !transmitted ? "NONE" : attempts.upperBoundUsed === true ? "UPPER_BOUND" : "REPORTED",
+  } as CurrentAiInvocationAuditRow;
 }

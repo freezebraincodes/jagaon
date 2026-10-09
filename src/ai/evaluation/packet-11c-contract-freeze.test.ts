@@ -5,7 +5,19 @@ import { join } from "node:path";
 import Dexie from "dexie";
 import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { DEEPSEEK_RESPONSES_URL } from "@/ai/deepseek/deepseek-catalogue";
+import { DEEPSEEK_FLASH_PEAK_USD_PER_MILLION, DEEPSEEK_RESPONSES_URL } from "@/ai/deepseek/deepseek-catalogue";
+import { PROVIDER_FAILURE_REASONS } from "@/application/ai/ai-provider-port";
+import { AI_SHELL_INPUT_FRAMING_MARGIN_TOKENS, AI_SHELL_PROVIDER_BODY_OVERHEAD_MAX_BYTES, AI_SHELL_ROUTE_PEAK_USD_PER_MILLION } from "@/application/ai/ai-shell-route-contract";
+import {
+  AI_AUDIT_ONLY_OUTCOME_CODES,
+  AI_AUDIT_UNSENT_OUTCOME_CODES,
+  AI_AUDIT_USAGE_BASES,
+  AI_INVOCATION_AUDIT_LEGACY_SCHEMA_VERSION,
+  AI_INVOCATION_AUDIT_SCHEMA_VERSION,
+  AI_INVOCATION_OUTCOME_CODES,
+  AI_INVOCATION_OUTCOME_CODES_11A,
+  AI_REASON_CODES,
+} from "@/domain/ai";
 import { DEEPSEEK_RESPONSES_PROFILE } from "@/ai/deepseek/deepseek-responses-provider";
 import { SHELL_PROVIDER_SCHEMA_VERSION, shellOutputJsonSchema, shellOutputSchemaName } from "@/ai/kie/kie-shell-contracts";
 import { PACKET_11_SHELL_PROMPT_VERSION, PACKET_11_SHELL_PROMPTS } from "@/ai/prompts/packet-11-shell-prompts";
@@ -56,6 +68,12 @@ import { SOURCE_BACKED_SCENARIOS, sourceBackedFixture } from "./packet-11-source
  * an earlier contract). Neither label is part of any model-facing body (checked below on every captured body), so every body digest is
  * unchanged by the bump.
  *
+ * Packet 11C Addendum C, Task C5 (owner decisions C5-a, C5-b): the harness label moved packet11-eval.19 -> packet11-eval.20 (the
+ * conservative usage accounting; hybrid-full-policy.2 and every threshold unchanged), and two items join the manifest: `audit` (the local
+ * audit row ai-invocation-audit.11c.2 beside the still-valid legacy 11a.1 rows, its audit-only outcome codes and usage bases, and the
+ * unchanged provider failure reasons) and `callUpperBound` (the shared pre-send upper bound of one shell call). None of them is
+ * model-facing: every body digest below is unchanged.
+ *
  * Changing anything pinned here fails with FROZEN_CONTRACT_CHANGED and the item's name. Update this manifest only deliberately, with the
  * owner's re-approval of the contract and the evidence policy (a changed model-facing byte needs fresh evaluation evidence).
  * Fake fetchers only; no provider call; the global fetch is stubbed to throw.
@@ -97,7 +115,20 @@ const FROZEN = Object.freeze({
     shellOutputVersions: { EXPLAIN_PATTERN: "ai-shell.explain-pattern@11b.8", DRAFT_CARE_PREPARATION_SUMMARY: "ai-shell.draft-care-preparation-summary@11b.7" },
   },
   fixtureSet: { revision: "packet11-fixtures.11b.16", fullFixtureCount: 70 },
-  harness: { label: "packet11-eval.19", fullEvaluationPolicy: "hybrid-full-policy.2" },
+  // Packet 11C Addendum C (C5): eval.20, the conservative usage accounting (owner decision C5-b); the policy is unchanged.
+  harness: { label: "packet11-eval.20", fullEvaluationPolicy: "hybrid-full-policy.2" },
+  // Packet 11C Addendum C (C5, owner decision C5-a): the versioned local audit row and its audit-only outcome codes (never model-facing).
+  audit: {
+    schemaVersion: "ai-invocation-audit.11c.2",
+    legacySchemaVersion: "ai-invocation-audit.11a.1",
+    legacyOutcomeCodeCount: 23,
+    auditOnlyOutcomeCodes: ["REMOTE_USE_DECLINED", "DISCLOSURE_CLOSED_MOOT", "NOT_ELIGIBLE", "SOURCE_UNAVAILABLE", "REQUEST_CLASS_NOT_QUALIFIED", "SPEND_CEILING_REACHED", "SPEND_NOT_CONFIGURED", "SPEND_LEDGER_UNAVAILABLE", "ORIGIN_REJECTED", "ACCESS_DENIED"],
+    unsentOutcomeCodes: ["REMOTE_USE_DECLINED", "DISCLOSURE_CLOSED_MOOT", "NOT_ELIGIBLE", "SOURCE_UNAVAILABLE"],
+    usageBases: ["NONE", "REPORTED", "UPPER_BOUND"],
+    providerFailureReasonsUnchanged: ["MISSING_CONFIGURATION", "TRANSPORT_FAILED", "PROVIDER_TIMEOUT", "PROVIDER_REJECTED", "PROVIDER_RATE_LIMITED", "PROVIDER_FAILED", "OPERATIONAL_SPEND_LOCKED"],
+  },
+  // Packet 11C Addendum C (C5): the shared pre-send upper bound of one shell call (the former tracer estimateMaxUsd).
+  callUpperBound: { peakUsdPerMillion: { inputCacheMiss: 0.3, output: 1.2 }, framingMarginTokens: 256, bodyOverheadMaxBytes: 8192 },
   careSummary: {
     template: "care-summary-template.11c.1",
     renderer: "care-summary-renderer.11c.1",
@@ -246,6 +277,20 @@ const ACTUAL: { readonly [K in FrozenItem]: () => unknown } = {
     label: agree({ AI_HYBRID_EVALUATION_REPORT_VERSION, "AI_HYBRID_VERSIONS.evaluationReport": AI_HYBRID_VERSIONS.evaluationReport, "APPROVED_HYBRID_CONTRACT.evaluationReportVersion": APPROVED_HYBRID_CONTRACT.evaluationReportVersion }),
     fullEvaluationPolicy: agree({ HYBRID_FULL_EVALUATION_POLICY, "APPROVED_HYBRID_CONTRACT.fullEvaluationPolicy": APPROVED_HYBRID_CONTRACT.fullEvaluationPolicy }),
   }),
+  audit: () => ({
+    schemaVersion: AI_INVOCATION_AUDIT_SCHEMA_VERSION,
+    legacySchemaVersion: AI_INVOCATION_AUDIT_LEGACY_SCHEMA_VERSION,
+    legacyOutcomeCodeCount: agree({ "AI_INVOCATION_OUTCOME_CODES_11A.length": AI_INVOCATION_OUTCOME_CODES_11A.length, "1 + AI_REASON_CODES.length": 1 + AI_REASON_CODES.length }),
+    auditOnlyOutcomeCodes: agree({ AI_AUDIT_ONLY_OUTCOME_CODES: [...AI_AUDIT_ONLY_OUTCOME_CODES], "AI_INVOCATION_OUTCOME_CODES minus the legacy codes": AI_INVOCATION_OUTCOME_CODES.slice(AI_INVOCATION_OUTCOME_CODES_11A.length) }),
+    unsentOutcomeCodes: [...AI_AUDIT_UNSENT_OUTCOME_CODES],
+    usageBases: [...AI_AUDIT_USAGE_BASES],
+    providerFailureReasonsUnchanged: [...PROVIDER_FAILURE_REASONS],
+  }),
+  callUpperBound: () => ({
+    peakUsdPerMillion: agree({ AI_SHELL_ROUTE_PEAK_USD_PER_MILLION, DEEPSEEK_FLASH_PEAK_USD_PER_MILLION }),
+    framingMarginTokens: AI_SHELL_INPUT_FRAMING_MARGIN_TOKENS,
+    bodyOverheadMaxBytes: AI_SHELL_PROVIDER_BODY_OVERHEAD_MAX_BYTES,
+  }),
   careSummary: () => ({
     template: CARE_SUMMARY_TEMPLATE_VERSION,
     renderer: CARE_SUMMARY_RENDERER_VERSION,
@@ -335,7 +380,7 @@ describe("Packet 11C frozen contract manifest (Addendum B, Task B5; offline)", (
   });
 
   it("a changed value fails with FROZEN_CONTRACT_CHANGED and the item's name; disagreeing sources are named", () => {
-    expect(() => expect({ ...FROZEN.harness, label: "packet11-eval.18" }, failure("harness")).toEqual(FROZEN.harness)).toThrow(/FROZEN_CONTRACT_CHANGED: "harness"/);
+    expect(() => expect({ ...FROZEN.harness, label: "packet11-eval.19" }, failure("harness")).toEqual(FROZEN.harness)).toThrow(/FROZEN_CONTRACT_CHANGED: "harness"/);
     expect(agree({ code: "kie-schema.11c.1", contract: "kie-schema.11b.6" })).toEqual({ SOURCES_DISAGREE: { code: "kie-schema.11c.1", contract: "kie-schema.11b.6" } });
   });
 
@@ -344,7 +389,8 @@ describe("Packet 11C frozen contract manifest (Addendum B, Task B5; offline)", (
     const all = [...fixtures, ...sourceBacked.map((entry) => entry.body), ...care.map((entry) => entry.body)];
     expect(all).toHaveLength(70 + SOURCE_BACKED_SCENARIOS.length * LOCALES.length + CARE_CLASSES.length * LOCALES.length);
     // The schema and harness labels (current and the superseded 11b.6 / eval.18), the fixture set and policy never reach a provider.
-    const labels = [SHELL_PROVIDER_SCHEMA_VERSION, AI_HYBRID_EVALUATION_REPORT_VERSION, "kie-schema", "packet11-eval", "packet11-fixtures", "hybrid-full-policy", "ai-activation", "care-summary-template", "ai-disclosure"];
+    // Packet 11C Addendum C (C5): nor the audit schema label, an audit-only outcome code or a usage basis.
+    const labels = [SHELL_PROVIDER_SCHEMA_VERSION, AI_HYBRID_EVALUATION_REPORT_VERSION, "kie-schema", "packet11-eval", "packet11-fixtures", "hybrid-full-policy", "ai-activation", "care-summary-template", "ai-disclosure", "ai-invocation-audit", "usageBasis", "UPPER_BOUND", ...AI_AUDIT_ONLY_OUTCOME_CODES];
     expect(all.flatMap((body, index) => labels.filter((label) => body.includes(label)).map((label) => `${index}: ${label}`))).toEqual([]);
     // The slot-plan version is the only version echo each body carries twice (the documented version-only difference).
     expect(all.filter((body) => normaliseSlotPlanVersion(body).occurrences !== SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY)).toEqual([]);

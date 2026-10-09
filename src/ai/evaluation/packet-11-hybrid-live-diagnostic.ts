@@ -9,6 +9,7 @@ import { selectEvaluationCandidates } from "@/ai/kie/kie-route-config";
 import { shellOutputJsonSchema, shellOutputSchemaName } from "@/ai/kie/kie-shell-contracts";
 import { shellPromptFor } from "@/ai/prompts/packet-11-shell-prompts";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "@/application/ai/ai-hybrid-runtime-bundles";
+import { AI_SHELL_ROUTE_PEAK_USD_PER_MILLION, shellCallUpperBound } from "@/application/ai/ai-shell-route-contract";
 import { AI_LANGUAGE_COPY } from "@/application/ai/language/ai-language-copy";
 import { composeAiResult } from "@/application/ai/language/ai-composition";
 import { atomMultiset, composeDeterministic } from "@/application/ai/language/deterministic-composition";
@@ -295,12 +296,18 @@ export function checkHybridShellRequestBody(fixture: AiEvaluationFixture, bodyTe
   return { passed: violations.size === 0, violations: [...violations].sort(), summary };
 }
 
-/** Upper-bound USD estimate before the call: every request byte as one input token, plus the task's fixed output cap. */
+/**
+ * Upper-bound USD estimate before the call: every request byte as one input token, plus the task's fixed output cap. Packet 11C
+ * Addendum C (C5): the computation moved, unchanged, into the shared non-evaluation `shellCallUpperBound` (ai-shell-route-contract.ts),
+ * which the adapter, the route, the browser client and the hybrid service use too; this keeps its shape and values (pinned in
+ * shell-call-upper-bound.test.ts against the formula written out, the catalogue prices and this module's framing margin).
+ */
 export function estimateMaxUsd(bodyByteCount: number, task: ShellTask): Readonly<{ inputTokensUpperBound: number; outputTokensMax: number; estimatedMaxUsd: number }> {
-  const inputTokensUpperBound = bodyByteCount + INPUT_FRAMING_MARGIN_TOKENS;
-  const outputTokensMax = shellMaxOutputTokens(task);
-  const micro = inputTokensUpperBound * DEEPSEEK_FLASH_PEAK_USD_PER_MILLION.inputCacheMiss + outputTokensMax * DEEPSEEK_FLASH_PEAK_USD_PER_MILLION.output;
-  return { inputTokensUpperBound, outputTokensMax, estimatedMaxUsd: Math.ceil(micro) / 1_000_000 };
+  const bound = shellCallUpperBound(bodyByteCount, task);
+  if (bound.inputTokens !== bodyByteCount + INPUT_FRAMING_MARGIN_TOKENS || bound.costMicroUsd !== deepSeekCostMicroUsd(bound.inputTokens, bound.outputTokens) || DEEPSEEK_FLASH_PEAK_USD_PER_MILLION.output !== AI_SHELL_ROUTE_PEAK_USD_PER_MILLION.output || DEEPSEEK_FLASH_PEAK_USD_PER_MILLION.inputCacheMiss !== AI_SHELL_ROUTE_PEAK_USD_PER_MILLION.inputCacheMiss) {
+    throw new Error("UPPER_BOUND_PRICING_DIVERGED");
+  }
+  return { inputTokensUpperBound: bound.inputTokens, outputTokensMax: bound.outputTokens, estimatedMaxUsd: bound.costMicroUsd / 1_000_000 };
 }
 
 export type TokenCheck = "EXACT" | "MALFORMED" | "STRAY" | "DUPLICATE" | "MISSING" | "REORDERED";

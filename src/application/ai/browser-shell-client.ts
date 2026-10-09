@@ -2,7 +2,7 @@ import { parseStrictJson, toPlainData } from "@/backup/strict-json";
 import { shellTaskRequestSchema, type ShellTaskRequest } from "@/domain/ai";
 import { decideRemoteUse } from "./ai-call-support";
 import { PROVIDER_FAILURE_REASONS, type AiRemoteUseDecision, type AiRemoteUseDisclosure, type AiShellProviderPort, type ProviderFailureReason, type ProviderInvocationResult, type ProviderUsage } from "./ai-provider-port";
-import { AI_SHELL_MAX_BODY_BYTES, AI_SHELL_ROUTE_PATH, aiShellRouteResponseSchema } from "./ai-shell-route-contract";
+import { AI_SHELL_MAX_BODY_BYTES, AI_SHELL_ROUTE_PATH, aiShellRouteResponseSchema, shellRouteCallUpperBound } from "./ai-shell-route-contract";
 import { isApprovedShellTaskRequest } from "./language/shell-projector";
 
 export type { AiRemoteUseDecision, AiRemoteUseDisclosure };
@@ -89,29 +89,33 @@ export function createBrowserShellClient(options: { disclosure: AiRemoteUseDiscl
 
       if ((await decideRemoteUse(options.disclosure, signal)) !== "ACCEPTED" || signal.aborted) return failed(NOT_ACCEPTED_REASON);
 
+      // Packet 11C Addendum C (C5): from the POST on, the route may have made a billed provider call. A route refusal (4xx) was decided
+      // before any provider call (nothing billed); any other answer without a readable route usage counts this request's pre-send upper
+      // bound, never zero. A readable FAILED answer carries the route's own usage (reported or its bound), or none when nothing was called.
+      const unreadable = (reason: ProviderFailureReason) => failed(reason, shellRouteCallUpperBound(parsed.data));
       let response: Response;
       try {
         response = await fetcher(AI_SHELL_ROUTE_PATH, { method: "POST", headers: { "content-type": "application/json" }, body, cache: "no-store", redirect: "error", signal });
       } catch {
-        return failed("TRANSPORT_FAILED");
+        return unreadable("TRANSPORT_FAILED");
       }
-      if (!response.ok) return failed(statusReason(response.status));
-      if (!/^application\/json(\s*;|$)/i.test(response.headers.get("content-type") ?? "")) return failed("PROVIDER_FAILED");
+      if (!response.ok) return response.status >= 400 && response.status < 500 ? failed(statusReason(response.status)) : unreadable(statusReason(response.status));
+      if (!/^application\/json(\s*;|$)/i.test(response.headers.get("content-type") ?? "")) return unreadable("PROVIDER_FAILED");
       let text: string;
       try {
         text = await response.text();
       } catch {
-        return failed("TRANSPORT_FAILED");
+        return unreadable("TRANSPORT_FAILED");
       }
-      if (text.length > MAX_RESPONSE_CHARS) return failed("PROVIDER_FAILED");
+      if (text.length > MAX_RESPONSE_CHARS) return unreadable("PROVIDER_FAILED");
       let value: unknown;
       try {
         value = toPlainData(parseStrictJson(text, { maxDepth: 16, maxLength: MAX_RESPONSE_CHARS }));
       } catch {
-        return failed("PROVIDER_FAILED");
+        return unreadable("PROVIDER_FAILED");
       }
       const answer = aiShellRouteResponseSchema.safeParse(value);
-      if (!answer.success) return failed("PROVIDER_FAILED");
+      if (!answer.success) return unreadable("PROVIDER_FAILED");
       const route = answer.data;
       if (route.kind === "CANDIDATE") return { kind: "COMPLETED", candidate: route.candidate, usage: route.usage, retention: route.retention };
       if (route.kind === "STRUCTURALLY_REJECTED") return { kind: "STRUCTURALLY_REJECTED", reason: route.reason, repairable: route.repairable, usage: route.usage, retention: route.retention };

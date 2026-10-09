@@ -6,7 +6,8 @@ import { projectShellTaskRequest } from "@/application/ai/language/shell-project
 import { AI_ACTIVATION_MANIFEST } from "@/application/ai/ai-activation-manifest";
 import { createAiHybridTaskService } from "@/application/ai/ai-hybrid-task-service";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "@/application/ai/ai-hybrid-runtime-bundles";
-import { DEEPSEEK_DOCUMENTED_MODELS, DEEPSEEK_RESPONSES_URL } from "@/ai/deepseek/deepseek-catalogue";
+import { DEEPSEEK_DOCUMENTED_MODELS, DEEPSEEK_RESPONSES_URL, deepSeekCostMicroUsd } from "@/ai/deepseek/deepseek-catalogue";
+import { shellCallUpperBound } from "@/application/ai/ai-shell-route-contract";
 import { createDeepSeekResponsesProvider, createDeepSeekShellResponsesProvider } from "@/ai/deepseek/deepseek-responses-provider";
 import { shellPromptFor } from "@/ai/prompts/packet-11-shell-prompts";
 import { projectProviderTaskPayload } from "@/application/ai/detached-payload-projector";
@@ -98,7 +99,8 @@ describe("shell Responses provider (evaluation-only)", () => {
     expect(result).toMatchObject({ kind: "COMPLETED", candidate: raw });
   });
   it("applies the identical identity and retention rules", async () => {
-    expect(await createDeepSeekShellResponsesProvider({ token: TOKEN, model: MODEL, fetcher: reply(documented(VALID, { model: "deepseek-pro" })) }).invoke(shellRequest(), new AbortController().signal)).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED" });
+    // Packet 11C Addendum C (C5): the refused, billed response keeps its reported usage (see "usage on failed shell calls" below).
+    expect(await createDeepSeekShellResponsesProvider({ token: TOKEN, model: MODEL, fetcher: reply(documented(VALID, { model: "deepseek-pro" })) }).invoke(shellRequest(), new AbortController().signal)).toMatchObject({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { inputTokens: 600, outputTokens: 80, basis: "REPORTED" } });
     const unstored = await createDeepSeekShellResponsesProvider({ token: TOKEN, model: MODEL, fetcher: reply(documented(VALID, { store: undefined })) }).invoke(shellRequest(), new AbortController().signal);
     expect(unstored).toMatchObject({ kind: "COMPLETED", retention: "RETENTION_UNCONFIRMED" });
   });
@@ -126,6 +128,8 @@ describe("per-task hybrid shell output caps ai-shell-request.11b.10 (EXPLAIN 512
   const sent = (fetcher: ReturnType<typeof reply>) => JSON.parse(String(fetcher.mock.calls[0]![1].body)) as Record<string, unknown>;
   const requestOf = (id: string) => projectShellTaskRequest(plannedFixture(id).plan);
   const usage = (output: number) => ({ usage: { input_tokens: 600, output_tokens: output, output_tokens_details: { reasoning_tokens: 0 } } });
+  /** Packet 11C Addendum C (C5): the reported usage a refused, billed shell response now carries on its FAILED result. */
+  const BILLED = (output: number) => ({ inputTokens: 600, outputTokens: output, costMicroUsd: deepSeekCostMicroUsd(600, output), credits: null, basis: "REPORTED" });
   async function shellCall(body: unknown, request: ReturnType<typeof requestOf> = shellRequest()) {
     let diagnostic: KieProviderDiagnostic | null = null;
     const fetcher = reply(body);
@@ -244,7 +248,8 @@ describe("per-task hybrid shell output caps ai-shell-request.11b.10 (EXPLAIN 512
   ])("%s is a FAILED shell call (OUTPUT_TRUNCATED) for both tasks, with its billed usage kept", async (_label, extra) => {
     for (const id of [EXPLAIN_ID, CARE_ID]) {
       const { result, diagnostic } = await shellCall(documented(VALID, extra), requestOf(id));
-      expect(result, id).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED" });
+      // Packet 11C Addendum C (C5): the billed usage is now also on the result (it was only in the diagnostic before).
+      expect(result, id).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: BILLED(80) });
       expect(diagnostic, id).toMatchObject({ code: "OUTPUT_TRUNCATED", parserStage: "STATUS", documentedSchemaParsed: true, retention: "CONFIRMED_NOT_STORED" });
       expect(diagnostic!.mismatchUsage, id).toEqual(diagnostic!.reportedUsage);
       expect(diagnostic!.mismatchUsage, id).toMatchObject({ inputTokens: 600, outputTokens: 80 });
@@ -260,20 +265,20 @@ describe("per-task hybrid shell output caps ai-shell-request.11b.10 (EXPLAIN 512
       expect(result).toMatchObject({ kind: "COMPLETED", usage: { outputTokens: output } });
       expect(diagnostic).toMatchObject({ code: "COMPLETED", mismatchUsage: null });
     } else {
-      expect(result).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED" });
+      expect(result).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: BILLED(output) });
       expect(diagnostic).toMatchObject({ code: "OUTPUT_TRUNCATED", parserStage: "STATUS", mismatchUsage: { inputTokens: 600, outputTokens: output } });
     }
   });
   it("a truncated response from the wrong model still records its model identity as evidence (outcome unchanged)", async () => {
     const { result, diagnostic } = await shellCall(documented(VALID, { status: "incomplete", model: "deepseek-pro" }));
-    expect(result).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED" });
+    expect(result).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: BILLED(80) });
     expect(diagnostic).toMatchObject({ code: "OUTPUT_TRUNCATED", modelIdentity: { requested: "deepseek-flash", expected: "deepseek-flash", returned: "deepseek-pro", comparison: "OTHER_SAFE_IDENTIFIER" } });
   });
   it("a truncated response the provider reports as stored is still RESPONSE_STORED, for both tasks", async () => {
     for (const id of [EXPLAIN_ID, CARE_ID]) {
       for (const extra of [{ status: "incomplete" }, { incomplete_details: { reason: "max_output_tokens" } }, usage(CAP[requestOf(id).taskType])]) {
         const { result, diagnostic } = await shellCall(documented(VALID, { ...extra, store: true }), requestOf(id));
-        expect(result, `${id} ${JSON.stringify(extra)}`).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED" });
+        expect(result, `${id} ${JSON.stringify(extra)}`).toMatchObject({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { inputTokens: 600, basis: "REPORTED" } });
         expect(diagnostic, `${id} ${JSON.stringify(extra)}`).toMatchObject({ code: "RESPONSE_STORED", parserStage: "RETENTION", retention: "PROVIDER_REPORTED_STORED", mismatchUsage: { inputTokens: 600 } });
       }
     }
@@ -428,5 +433,88 @@ describe("hybrid shell sampling temperature 0.2 (ai-shell-request.11b.11, r7)", 
     }
     // Digest of the six legacy bodies captured before r7 (pre-change baseline, same fixtures and models).
     expect(createHash("sha256").update(bodies.join("\n")).digest("hex")).toBe("d13dff45b60e5347ccde8861abd5e61366251f31a4c5b2fb501f53ea73c5e8b4");
+  });
+});
+
+/**
+ * Packet 11C Addendum C, Task C5 (owner decision: preserve reported usage on failed attempts; account conservatively when an attempted
+ * call might have been billed but usage is missing). The slot-shell contract only (the DeepSeek shell provider behind the route and the
+ * evaluation runners): every failure after the request was transmitted carries usage, the provider-reported usage when the response
+ * reported it, else the call's pre-send upper bound (`shellCallUpperBound` of the exact body). A failure before transmission carries
+ * none. The request body is unchanged (the digests above and the freeze test pin it); the legacy full-prose contract is unchanged.
+ */
+describe("usage on failed shell calls (Packet 11C Addendum C, C5)", () => {
+  const REPORTED = { inputTokens: 600, outputTokens: 80, costMicroUsd: deepSeekCostMicroUsd(600, 80), credits: null, basis: "REPORTED" };
+  const respond = (status: number, body: string, contentType = "application/json") => vi.fn(async (_url: string, _init: RequestInit) => new Response(body, { status, headers: { "content-type": contentType } }));
+  const boundOf = (fetcher: ReturnType<typeof vi.fn>, task: ShellTask = "EXPLAIN_PATTERN") => ({ ...shellCallUpperBound(new TextEncoder().encode(String((fetcher.mock.calls[0]![1] as RequestInit).body)).byteLength, task), credits: null });
+  const invoke = (fetcher: (url: string, init: RequestInit) => Promise<Response>, request: unknown = shellRequest()) => createDeepSeekShellResponsesProvider({ token: TOKEN, model: MODEL, fetcher }).invoke(request as never, new AbortController().signal);
+  const grokSelection = selectEvaluationCandidates({ requested: "grok-4-7", listing: [], now: () => "2026-10-06T01:00:00.000Z" });
+  const KIE_GROK = (grokSelection.kind === "SELECTED" ? grokSelection.candidates[0] : null)!;
+
+  it.each([
+    ["from another model", { model: "deepseek-pro" }],
+    ["with no model", { model: undefined }],
+    ["reported as stored", { store: true }],
+    ["truncated (incomplete)", { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }],
+    ["at the output cap", { usage: { input_tokens: 600, output_tokens: 512 } }],
+    ["not completed", { status: "failed" }],
+    ["with no output text", { output: [] }],
+  ])("a response %s is FAILED with its reported usage", async (label, extra) => {
+    const result = await invoke(reply(documented(VALID, extra)));
+    const expected = label === "at the output cap" ? { ...REPORTED, outputTokens: 512, costMicroUsd: deepSeekCostMicroUsd(600, 512) } : REPORTED;
+    expect(result, label).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: expected });
+  });
+
+  it.each([
+    ["HTTP 500", () => respond(500, JSON.stringify({ error: { message: "x" } })), "PROVIDER_FAILED"],
+    ["HTTP 429", () => respond(429, JSON.stringify({ error: { message: "x" } })), "PROVIDER_RATE_LIMITED"],
+    ["HTTP 400", () => respond(400, JSON.stringify({ error: { message: "x" } })), "PROVIDER_REJECTED"],
+    ["HTTP 401", () => respond(401, "{}"), "MISSING_CONFIGURATION"],
+    ["a non-JSON body", () => respond(200, "not json", "text/plain"), "PROVIDER_FAILED"],
+    ["an empty body", () => respond(200, ""), "PROVIDER_FAILED"],
+    ["an error envelope", () => respond(200, JSON.stringify({ error: { code: "x", message: "y" } })), "PROVIDER_FAILED"],
+    ["a response without usage", () => respond(200, JSON.stringify({ ...documented(VALID), usage: undefined })), "PROVIDER_FAILED"],
+    ["a transport failure", () => vi.fn(async (_url: string, _init: RequestInit): Promise<Response> => Promise.reject(new Error("offline"))), "TRANSPORT_FAILED"],
+  ])("%s after transmission is FAILED with the call's pre-send upper bound", async (label, make, reason) => {
+    const fetcher = make();
+    const result = await invoke(fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(result, label).toMatchObject({ kind: "FAILED", reason });
+    expect((result as { usage?: unknown }).usage, label).toEqual(boundOf(fetcher));
+  });
+
+  it("the care bound uses the care cap (1024) and the exact care body", async () => {
+    const fetcher = respond(500, "{}");
+    const result = await invoke(fetcher, projectShellTaskRequest(plannedFixture("p11.draft-care-preparation-summary.zh-sg.ordinary").plan));
+    expect(result).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: boundOf(fetcher, "DRAFT_CARE_PREPARATION_SUMMARY") });
+    expect((result as { usage: { outputTokens: number } }).usage.outputTokens).toBe(1024);
+  });
+
+  it("a failure before transmission carries no usage (nothing billed)", async () => {
+    const fetcher = reply(documented(VALID));
+    const tampered = structuredClone(shellRequest()) as unknown as { slots: Array<{ gloss: string }> };
+    tampered.slots[1]!.gloss = "the value 6.2 mmol/L";
+    expect(await invoke(fetcher, tampered)).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("a completed response is unchanged (reported usage, no basis field)", async () => {
+    expect(await invoke(reply(documented(VALID)))).toEqual({ kind: "COMPLETED", candidate: JSON.parse(VALID), usage: { inputTokens: 600, outputTokens: 80, costMicroUsd: deepSeekCostMicroUsd(600, 80), credits: null }, responseModel: "deepseek-flash", retention: "CONFIRMED_NOT_STORED" });
+  });
+
+  it("a provider without a USD price (Kie) keeps its reported usage and credits, and has no pre-send bound", async () => {
+    const kieReply = (extra: Record<string, unknown>) => reply({ status: "completed", model: "other", store: false, output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: VALID }] }], usage: { input_tokens: 600, output_tokens: 80 }, credits_consumed: 0.1, ...extra });
+    const kie = createKieShellResponsesProvider({ token: TOKEN, model: KIE_GROK, fetcher: kieReply({}) });
+    expect(await kie.invoke(shellRequest(), new AbortController().signal)).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { inputTokens: 600, outputTokens: 80, costMicroUsd: null, credits: 0.1, basis: "REPORTED" } });
+    const failing = createKieShellResponsesProvider({ token: TOKEN, model: KIE_GROK, fetcher: respond(500, "{}") });
+    expect(await failing.invoke(shellRequest(), new AbortController().signal)).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED" });
+  });
+
+  it("the legacy full-prose contract is unchanged: its failures carry no usage", async () => {
+    const projected = projectProviderTaskPayload(requestFixture("EXPLAIN_PATTERN"), AI_TASK_RUNTIME_BUNDLES.EXPLAIN_PATTERN);
+    if (projected.kind !== "PROJECTED") throw new Error(projected.reason);
+    const legacy = (fetcher: (url: string, init: RequestInit) => Promise<Response>) => createDeepSeekResponsesProvider({ token: TOKEN, model: MODEL, fetcher }).invoke(projected.payload, new AbortController().signal);
+    expect(await legacy(reply(documented("{}", { model: "deepseek-pro" })))).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED" });
+    expect(await legacy(respond(500, "{}"))).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED" });
   });
 });

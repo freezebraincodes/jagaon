@@ -1338,9 +1338,52 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
     expect(app.fetcher).not.toHaveBeenCalled();
     expect(app.fetchSpy).not.toHaveBeenCalled();
     expect(app.rows).toHaveLength(1);
-    // Packet 11C B4a: the explicit decline is audited as REQUEST_CANCELLED, and the panel says AI wording was not used.
+    // Packet 11C B4a: the panel says AI wording was not used. Packet 11C Addendum C (C5): the explicit decline is audited with the truthful
+    // audit-only REMOTE_USE_DECLINED (REQUEST_CANCELLED under the B4a interim ruling), in a current (11c.2) row.
     expect(within(panel).getByText(en.ai.remoteNotAccepted)).toBeInTheDocument();
-    expect(aiInvocationAuditRowSchema.parse(app.rows[0])).toMatchObject({ outcomeCode: "REQUEST_CANCELLED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], measurements: { inputTokens: null, outputTokens: null, costMicroUsd: null } });
+    expect(aiInvocationAuditRowSchema.parse(app.rows[0])).toMatchObject({ auditSchemaVersion: "ai-invocation-audit.11c.2", outcomeCode: "REMOTE_USE_DECLINED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], measurements: { inputTokens: null, outputTokens: null, costMicroUsd: null }, usageBasis: "NONE" });
+  });
+
+  it("C5: a disclosure closed as moot (period change, leaving the screen) writes one DISCLOSURE_CLOSED_MOOT row each; nothing sent", async () => {
+    const en = getMessages("en-SG");
+    const app = await activatedApp();
+    render(<JagaOnApp {...app.props} />);
+    fireEvent.click(await toHistoryAction());
+    await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    fireEvent.click(screen.getByRole("radio", { name: en.history.periodLastWeek }));
+    await waitFor(() => expect(app.rows).toHaveLength(1));
+    expect(aiInvocationAuditRowSchema.parse(app.rows[0])).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcomeCode: "DISCLOSURE_CLOSED_MOOT", providerModel: null, attempts: { count: 0 }, usageBasis: "NONE" });
+    fireEvent.click(screen.getByRole("radio", { name: en.history.periodThisWeek }));
+    fireEvent.click(await screen.findByRole("button", { name: en.history.explanation.action }));
+    await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    // The modal is open; leaving the screen (here: the whole app closes) makes that request moot too.
+    cleanup();
+    await waitFor(() => expect(app.rows).toHaveLength(2));
+    expect(app.rows.map((row) => row.outcomeCode)).toEqual(["DISCLOSURE_CLOSED_MOOT", "DISCLOSURE_CLOSED_MOOT"]);
+    expect(app.fetcher).not.toHaveBeenCalled();
+    expect(app.fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("C5: an explanation asked for a comparison that stopped being explainable writes one NOT_ELIGIBLE row; the probe wrote none", async () => {
+    const en = getMessages("en-SG");
+    const app = await activatedApp();
+    // The screen probes through the runtime's history (explainable, so the action is offered); the explainer's own read then finds the
+    // comparison no longer explainable (as after a correction between the probe and the click).
+    const factory: AiAssistanceFactory = (ports) =>
+      createBrowserAiAssistance({
+        ...ports,
+        history: { load: (request) => ports.history.load(request), loadExplainablePattern: async () => ({ kind: "INELIGIBLE", reason: "STALE_SOURCE" }) },
+        manifest: AI_ACTIVATION_MANIFEST,
+        fetcher: app.fetcher,
+      });
+    render(<JagaOnApp {...app.props} aiAssistanceFactory={factory} />);
+    const action = await toHistoryAction();
+    expect(app.rows).toHaveLength(0);
+    fireEvent.click(action);
+    await waitFor(() => expect(app.rows).toHaveLength(1));
+    expect(aiInvocationAuditRowSchema.parse(app.rows[0])).toMatchObject({ taskType: "EXPLAIN_PATTERN", outcomeCode: "NOT_ELIGIBLE", providerModel: null, attempts: { count: 0 }, usageBasis: "NONE" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(app.fetcher).not.toHaveBeenCalled();
   });
 
   it("accepted once per app session: navigation keeps the acceptance; a new app session (reload) asks again", async () => {
@@ -1471,7 +1514,7 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("activated (test manifest, fake route): a declined disclosure sends nothing, keeps the preview and writes one REQUEST_CANCELLED row", async () => {
+  it("activated (test manifest, fake route): a declined disclosure sends nothing, keeps the preview and writes one REMOTE_USE_DECLINED row (C5)", async () => {
     const en = getMessages("en-SG");
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
@@ -1491,8 +1534,30 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     expect(screen.queryByRole("region", { name: en.ai.careSummary.resultTitle })).not.toBeInTheDocument();
     expect(screen.getByRole("article").textContent).toBe(before);
     const rows = await care.audits.list();
-    expect(rows.map((row) => [row.taskType, row.outcomeCode, row.attempts.count, row.providerModel, row.sourceRevisions.length])).toEqual([["DRAFT_CARE_PREPARATION_SUMMARY", "REQUEST_CANCELLED", 0, null, 0]]);
+    expect(rows.map((row) => [row.taskType, row.outcomeCode, row.attempts.count, row.providerModel, row.sourceRevisions.length])).toEqual([["DRAFT_CARE_PREPARATION_SUMMARY", "REMOTE_USE_DECLINED", 0, null, 0]]);
     expect(await care.h.database.table("recordHeads").where("recordType").equals("CARE_SUMMARY_SNAPSHOT").count()).toBe(1);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("C5 activated (test manifest, fake route): a care disclosure left open when the app closes writes one DISCLOSURE_CLOSED_MOOT row; nothing sent", async () => {
+    const en = getMessages("en-SG");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const care = await careRuntime();
+    const fetcher = fakeRoute();
+    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, fetcher, now: () => LATER as never });
+    render(<JagaOnApp runtimeFactory={async () => care.runtime} onboardingRepositoryFactory={completed()} printPortFactory={() => ({ print: vi.fn() })} aiAssistanceFactory={factory} />);
+    await toCarePreview();
+    const action = (await screen.findByRole("button", { name: en.ai.careSummary.action })) as HTMLButtonElement;
+    await waitFor(() => expect(action.disabled).toBe(false));
+    fireEvent.click(action);
+    await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    expect(await care.audits.list()).toEqual([]);
+    cleanup();
+    await waitFor(async () => expect(await care.audits.list()).toHaveLength(1));
+    const rows = await care.audits.list();
+    expect(rows.map((row) => [row.taskType, row.locale, row.outcomeCode, row.attempts.count, row.providerModel])).toEqual([["DRAFT_CARE_PREPARATION_SUMMARY", "en-SG", "DISCLOSURE_CLOSED_MOOT", 0, null]]);
     expect(fetcher).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
   });

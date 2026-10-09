@@ -11,7 +11,7 @@ import { AI_ACTIVATION_MANIFEST, type AiActivationManifest } from "@/application
 import { createAiHybridTaskService } from "@/application/ai/ai-hybrid-task-service";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "@/application/ai/ai-hybrid-runtime-bundles";
 import type { AiShellProviderPort, ProviderInvocationResult } from "@/application/ai/ai-provider-port";
-import { AI_SHELL_MAX_BODY_BYTES, aiShellRouteResponseSchema } from "@/application/ai/ai-shell-route-contract";
+import { AI_SHELL_MAX_BODY_BYTES, AI_SHELL_ROUTE_POST_CALL_FAILURE_REASONS, aiShellRouteResponseSchema, shellCallUpperBound, shellRouteCallUpperBound } from "@/application/ai/ai-shell-route-contract";
 import { AI_TASK_RUNTIME_BUNDLES } from "@/application/ai/ai-runtime-bundles";
 import { projectProviderTaskPayload } from "@/application/ai/detached-payload-projector";
 import { defaultShells } from "@/application/ai/language/default-shells";
@@ -332,7 +332,9 @@ describe("provider outcomes", () => {
     [401, "MISSING_CONFIGURATION"],
   ])("maps provider HTTP %s to %s without echoing provider details", async (status, reason) => {
     const result = await call(post(shellRequest()), { fetcher: deepseek({ error: { message: `upstream detail ${TOKEN}`, type: "x" } }, {}, status) });
-    expect(result.body).toEqual({ kind: "FAILED", reason });
+    // Packet 11C Addendum C (C5): the transmitted call's usage is unreadable, so it carries its pre-send upper bound (nothing else).
+    expect(result.body).toMatchObject({ kind: "FAILED", reason, usage: { basis: "UPPER_BOUND" } });
+    expect(Object.keys(result.body).sort()).toEqual(["kind", "reason", "usage"]);
     expect(JSON.stringify(result.body)).not.toMatch(/upstream detail|SENTINEL/);
   });
 
@@ -347,29 +349,32 @@ describe("provider outcomes", () => {
   it.each([
     ["reported as stored", { store: true }],
     ["from another model", { model: "deepseek-pro" }],
-  ])("fails closed on a response %s, with no candidate and no detail", async (_label, extra) => {
+  ])("fails closed on a response %s, with no candidate and no detail (only the billed usage)", async (_label, extra) => {
     const result = await call(post(shellRequest()), { fetcher: deepseek(VALID, extra) });
-    expect(result.body).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED" });
+    // Packet 11C Addendum C (C5): the billed call's reported usage is forwarded (it was dropped inside the adapter before C5).
+    expect(result.body).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { ...USAGE, basis: "REPORTED" } });
     expect(JSON.stringify(result.body)).not.toMatch(/store|RETENTION|deepseek|headline/);
   });
 
   // Packet 11C B2b (B2a review follow-up): a completed, billed response refused for retention reports its bounded usage, so the browser
-  // service counts the spend. Still no candidate, retention code or detail. (A stored or other-model response is refused inside the
-  // adapter without usage; that adapter-level gap is deferred to B5 by the owner.)
+  // service counts the spend. Still no candidate, retention code or detail.
   it("fails closed on a completed response with retention unconfirmed, reporting only the bounded usage", async () => {
     const result = await call(post(shellRequest()), { fetcher: deepseek(VALID, { store: null }) });
-    expect(result.body).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: USAGE });
+    expect(result.body).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { ...USAGE, basis: "REPORTED" } });
     expect(aiShellRouteResponseSchema.safeParse(result.body).success).toBe(true);
     expect(JSON.stringify(result.body)).not.toMatch(/store|RETENTION|deepseek|headline|candidate/);
   });
 
-  // Packet 11C B5 (carried B2b minor): the shared contract allows `usage` on any FAILED body; the handler gives it ONLY to the completed,
-  // billed response refused for retention. Every other FAILED path (refusal, not activated, configuration, provider HTTP status, stored
-  // or other-model response refused inside the adapter, transport, cancellation, rate limit) carries a closed reason and nothing else.
-  it("only the retention refusal's FAILED body carries usage; every other FAILED body is exactly { kind, reason }", async () => {
+  /**
+   * Packet 11C Addendum C, Task C5 (supersedes the B5 "retention refusal only" pin; owner decision: preserve reported usage on failed
+   * attempts, account conservatively when an attempted call might have been billed but usage is missing). A FAILED decided before any
+   * provider call carries no usage. Every FAILED after the route called the provider carries that call's usage: the reported usage when
+   * the provider reported it, otherwise the call's pre-send upper bound (the adapter's, for the exact body it sent), each with its basis.
+   */
+  it("a FAILED before any provider call carries no usage; every FAILED after a provider call carries reported usage or the upper bound", async () => {
     const aborted = new AbortController();
     aborted.abort();
-    const cases: Array<[string, () => Promise<{ body: unknown }>]> = [
+    const beforeCall: Array<[string, () => Promise<{ body: unknown }>]> = [
       ["a GET", () => call(post(undefined, { method: "GET" }), { fetcher: deepseek() })],
       ["a non-JSON content type", () => call(post(shellRequest(), { headers: { "content-type": "text/plain" } }), { fetcher: deepseek() })],
       ["an oversized body", () => call(post(undefined, { raw: "x".repeat(AI_SHELL_MAX_BODY_BYTES + 1) }), { fetcher: deepseek() })],
@@ -378,17 +383,9 @@ describe("provider outcomes", () => {
       ["the shipped manifest", () => call(post(shellRequest()), { fetcher: deepseek(), activationManifest: AI_ACTIVATION_MANIFEST })],
       ["another release profile", () => call(post(shellRequest()), { fetcher: deepseek(), releaseProfile: "PRODUCTION" })],
       ["a missing key", () => call(post(shellRequest()), { fetcher: deepseek(), environment: {} })],
-      ["provider HTTP 429", () => call(post(shellRequest()), { fetcher: deepseek({ error: "x" }, {}, 429) })],
-      ["provider HTTP 500", () => call(post(shellRequest()), { fetcher: deepseek({ error: "x" }, {}, 500) })],
-      ["provider HTTP 400", () => call(post(shellRequest()), { fetcher: deepseek({ error: "x" }, {}, 400) })],
-      ["provider HTTP 401", () => call(post(shellRequest()), { fetcher: deepseek({ error: "x" }, {}, 401) })],
-      ["a response reported as stored", () => call(post(shellRequest()), { fetcher: deepseek(VALID, { store: true }) })],
-      ["a response from another model", () => call(post(shellRequest()), { fetcher: deepseek(VALID, { model: "deepseek-pro" }) })],
-      ["an incomplete (truncated) response", () => call(post(shellRequest()), { fetcher: deepseek(VALID, { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }) })],
-      ["a transport failure", () => call(post(shellRequest()), { fetcher: vi.fn(async () => Promise.reject(new Error("offline"))) })],
       ["a request cancelled before the call", () => call(post(shellRequest(), { signal: aborted.signal }), { fetcher: deepseek() })],
     ];
-    for (const [label, run] of cases) {
+    for (const [label, run] of beforeCall) {
       const { body } = await run();
       expect(body, label).toMatchObject({ kind: "FAILED" });
       expect(Object.keys(body as object).sort(), label).toEqual(["kind", "reason"]);
@@ -397,8 +394,63 @@ describe("provider outcomes", () => {
     const limited = handler({ fetcher: deepseek(), rateLimit: { maxRequests: 1, windowMs: 60_000 }, now: () => new Date("2026-10-08T01:00:00.000Z") });
     await limited(post(shellRequest()));
     expect(await (await limited(post(shellRequest()))).json()).toEqual({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED" });
-    // The one FAILED body with usage: a completed, billed response whose retention is not confirmed.
-    expect((await call(post(shellRequest()), { fetcher: deepseek(VALID, { store: null }) })).body).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: USAGE });
+
+    const reported: Array<[string, Record<string, unknown>]> = [
+      ["a response reported as stored", { store: true }],
+      ["a response from another model", { model: "deepseek-pro" }],
+      ["an incomplete (truncated) response", { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }],
+      ["a response with retention unconfirmed", { store: null }],
+    ];
+    for (const [label, extra] of reported) {
+      expect((await call(post(shellRequest()), { fetcher: deepseek(VALID, extra) })).body, label).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { ...USAGE, basis: "REPORTED" } });
+    }
+
+    // No readable usage after transmission: the adapter's pre-send upper bound of the exact body it sent (never zero).
+    const exactBound = (fetcher: ReturnType<typeof vi.fn>) => {
+      const { inputTokens, outputTokens, costMicroUsd } = shellCallUpperBound(new TextEncoder().encode(String((fetcher.mock.calls[0]![1] as RequestInit).body)).byteLength, "EXPLAIN_PATTERN");
+      return { inputTokens, outputTokens, costMicroUsd, basis: "UPPER_BOUND" };
+    };
+    const unreadable: Array<[string, () => ReturnType<typeof vi.fn>, string]> = [
+      ["provider HTTP 429", () => deepseek({ error: "x" }, {}, 429), "PROVIDER_RATE_LIMITED"],
+      ["provider HTTP 500", () => deepseek({ error: "x" }, {}, 500), "PROVIDER_FAILED"],
+      ["provider HTTP 400", () => deepseek({ error: "x" }, {}, 400), "PROVIDER_REJECTED"],
+      ["provider HTTP 401", () => deepseek({ error: "x" }, {}, 401), "MISSING_CONFIGURATION"],
+      ["a transport failure", () => vi.fn(async (_url: string, _init: RequestInit): Promise<Response> => Promise.reject(new Error("offline"))), "TRANSPORT_FAILED"],
+    ];
+    for (const [label, make, reason] of unreadable) {
+      const fetcher = make();
+      const { body } = await call(post(shellRequest()), { fetcher });
+      expect(body, label).toEqual({ kind: "FAILED", reason, usage: exactBound(fetcher) });
+      expect(aiShellRouteResponseSchema.safeParse(body).success, label).toBe(true);
+    }
+  });
+
+  // C5 fix round 1: a provider that throws after its request was transmitted may have been billed: the route's pre-send upper bound.
+  it("a provider throw after transmission is FAILED TRANSPORT_FAILED with the route's upper bound (basis UPPER_BOUND), never without usage", async () => {
+    // A response whose headers cannot be read makes the real adapter's invoke reject after the fetch returned.
+    const hostile = { ok: true, status: 200, body: null, headers: { get: () => { throw new Error("hostile headers"); } } } as unknown as Response;
+    const fetcher = vi.fn(async (_url: string, _init: RequestInit) => hostile);
+    const { body } = await call(post(shellRequest()), { fetcher });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(body).toEqual({ kind: "FAILED", reason: "TRANSPORT_FAILED", usage: shellRouteCallUpperBound(shellRequest()) });
+    expect(aiShellRouteResponseSchema.safeParse(body).success).toBe(true);
+  });
+
+  it("the tightened contract refuses usage on a FAILED that cannot follow a provider call, and an implicit basis on a FAILED", () => {
+    const usage = { inputTokens: 1, outputTokens: 1, costMicroUsd: 1 };
+    for (const reason of AI_SHELL_ROUTE_POST_CALL_FAILURE_REASONS) expect(aiShellRouteResponseSchema.safeParse({ kind: "FAILED", reason, usage: { ...usage, basis: "UPPER_BOUND" } }).success, reason).toBe(true);
+    for (const reason of ["PAYLOAD_INVALID", "BUDGET_EXCEEDED", "TASK_DISABLED", "PROFILE_NOT_PERMITTED", "PRIVACY_REJECTED", "SCHEMA_INVALID"]) {
+      expect(aiShellRouteResponseSchema.safeParse({ kind: "FAILED", reason, usage: { ...usage, basis: "REPORTED" } }).success, reason).toBe(false);
+      expect(aiShellRouteResponseSchema.safeParse({ kind: "FAILED", reason }).success, reason).toBe(true);
+    }
+    expect(aiShellRouteResponseSchema.safeParse({ kind: "FAILED", reason: "PROVIDER_FAILED", usage }).success).toBe(false);
+    expect(aiShellRouteResponseSchema.safeParse({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { ...usage, basis: "ESTIMATE" } }).success).toBe(false);
+    // A completed call's usage is reported: an explicit or implicit REPORTED basis, never an upper bound.
+    expect(aiShellRouteResponseSchema.safeParse({ kind: "STRUCTURALLY_REJECTED", reason: "SCHEMA_INVALID", repairable: true, retention: "CONFIRMED_NOT_STORED", usage }).success).toBe(true);
+    expect(aiShellRouteResponseSchema.safeParse({ kind: "STRUCTURALLY_REJECTED", reason: "SCHEMA_INVALID", repairable: true, retention: "CONFIRMED_NOT_STORED", usage: { ...usage, basis: "REPORTED" } }).success).toBe(true);
+    expect(aiShellRouteResponseSchema.safeParse({ kind: "STRUCTURALLY_REJECTED", reason: "SCHEMA_INVALID", repairable: true, retention: "CONFIRMED_NOT_STORED", usage: { ...usage, basis: "UPPER_BOUND" } }).success).toBe(false);
+    // The audit-only outcome codes are not route reasons.
+    expect(aiShellRouteResponseSchema.safeParse({ kind: "FAILED", reason: "REMOTE_USE_DECLINED" }).success).toBe(false);
   });
 
   it("limits requests per window before calling the provider", async () => {
@@ -424,7 +476,8 @@ describe("provider outcomes", () => {
     const pending = handler({ fetcher })(post(shellRequest()));
     await vi.advanceTimersByTimeAsync(AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN.executionBudget.perCallTimeoutMs);
     release?.();
-    expect(await (await pending).json()).toEqual({ kind: "FAILED", reason: "PROVIDER_TIMEOUT" });
+    // Packet 11C Addendum C (C5): the call was made and may be billed; its usage is unknown, so the route reports its pre-send upper bound.
+    expect(await (await pending).json()).toEqual({ kind: "FAILED", reason: "PROVIDER_TIMEOUT", usage: shellRouteCallUpperBound(shellRequest()) });
     expect(aborted).toBe(true);
   });
 
@@ -435,7 +488,8 @@ describe("provider outcomes", () => {
     const pending = handler({ fetcher })(post(shellRequest(), { signal: controller.signal }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     controller.abort();
-    expect(await (await pending).json()).toEqual({ kind: "FAILED", reason: "REQUEST_CANCELLED" });
+    // C5: cancelled after the provider call started: potentially billed, so the pre-send upper bound (the browser counts its own too).
+    expect(await (await pending).json()).toEqual({ kind: "FAILED", reason: "REQUEST_CANCELLED", usage: shellRouteCallUpperBound(shellRequest()) });
     expect(aborted).toBe(true);
   });
 

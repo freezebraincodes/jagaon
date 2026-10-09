@@ -1,7 +1,7 @@
 import { AI_ACTIVATION_MANIFEST, resolveAiTaskActivation, type AiActivationManifest } from "@/application/ai/ai-activation-manifest";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "@/application/ai/ai-hybrid-runtime-bundles";
 import { PROVIDER_FAILURE_REASONS, type ProviderInvocationResult, type ProviderUsage, type ShellStructuralRejectionReason } from "@/application/ai/ai-provider-port";
-import { AI_SHELL_MAX_BODY_BYTES, aiShellRouteResponseSchema, type AiShellRouteResponse } from "@/application/ai/ai-shell-route-contract";
+import { AI_SHELL_MAX_BODY_BYTES, aiShellRouteResponseSchema, shellRouteCallUpperBound, type AiShellRouteResponse } from "@/application/ai/ai-shell-route-contract";
 import { isApprovedShellTaskRequest, shellPlanView } from "@/application/ai/language/shell-projector";
 import { validateShellCandidate, type ShellValidationReason } from "@/application/ai/language/shell-validator";
 import { FIXED_FIELD_BUDGETS, type FieldKind } from "@/application/ai/language/slot-planner";
@@ -28,6 +28,10 @@ import { HACKATHON_STORAGE_PROFILE } from "@/storage/storage-profile-manifest";
  * usage) and never the candidate. The route makes one call per request and never repairs; the single structural repair is the browser
  * hybrid service's, within the bundle's maxAttempts. Failures return a closed reason only. Nothing is activated here: the shipped manifest
  * is deterministic-only, so the shipped route refuses every request before the credential read.
+ * Packet 11C Addendum C, Task C5: every FAILED after the provider call started (a potentially billed call) carries that call's usage:
+ * the reported usage (also for a candidate that fails the re-parse), else the adapter's exact-body upper bound, else (no result: the
+ * timeout, a cancellation) the route's pre-send upper bound for the request, with its basis. A FAILED decided before the call carries
+ * none. Result handling only: the model-facing body is unchanged.
  */
 
 const DEFAULT_RATE_LIMIT = Object.freeze({ maxRequests: 10, windowMs: 60_000 });
@@ -91,6 +95,8 @@ function fixedFieldShape(request: ShellTaskRequest): boolean {
 
 const bounded = (value: unknown, max: number): number | null => (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= max ? value : null);
 const boundedUsage = (usage: ProviderUsage) => ({ inputTokens: bounded(usage.inputTokens, 100_000), outputTokens: bounded(usage.outputTokens, 100_000), costMicroUsd: bounded(usage.costMicroUsd, 10_000_000) });
+/** Packet 11C Addendum C (C5): a potentially billed FAILED call's usage, with its basis (the provider's report, or a pre-send bound). */
+const failedUsage = (usage: ProviderUsage) => ({ ...boundedUsage(usage), basis: usage.basis === "UPPER_BOUND" ? ("UPPER_BOUND" as const) : ("REPORTED" as const) });
 /** Compile-time check: every shell-gate reason is a closed structural-rejection reason of the port (D6). */
 const asRejectionReason = (reason: ShellValidationReason): ShellStructuralRejectionReason => reason;
 
@@ -156,19 +162,42 @@ export function createAiShellHandler(options: AiShellHandlerOptions): (request: 
     const timer = setTimeout(() => stop("PROVIDER_TIMEOUT"), bundle.executionBudget.perCallTimeoutMs);
     request.signal.addEventListener("abort", onCancel);
     if (request.signal.aborted) onCancel();
+    // Packet 11C Addendum C (C5): once the provider call has started it may be billed. From then on every FAILED carries usage: the
+    // call's reported usage when known, else the provider's own pre-send bound for the exact body, else (no result at all: the route's
+    // timeout, a cancellation, a provider that ignored the abort) the route's pre-send upper bound for this request. Never zero.
+    let called = false;
+    // C5 fix round 1: the provider threw (possibly after transmitting), so the call counts at the route's upper bound, never zero.
+    let threw = false;
+    let billed: ProviderUsage | null = null;
+    const failedAfterCall = (reason: AiReasonCode) => reply({ kind: "FAILED", reason, usage: failedUsage(billed ?? shellRouteCallUpperBound(shellRequest)) });
     try {
       const provider = createDeepSeekShellResponsesProvider({ token: token.token, model, fetcher: options.fetcher });
       const aborted = new Promise<null>((resolve) => controller.signal.addEventListener("abort", () => resolve(null)));
-      const result: ProviderInvocationResult | null = controller.signal.aborted
-        ? null
-        : await Promise.race([provider.invoke(shellRequest, controller.signal).catch((): ProviderInvocationResult => ({ kind: "FAILED", reason: "TRANSPORT_FAILED" })), aborted]);
-      if (stopped || !result) return failed(stopped ?? "TRANSPORT_FAILED");
-      if (result.kind === "FAILED") return failed((PROVIDER_FAILURE_REASONS as readonly string[]).includes(result.reason) ? result.reason : "PROVIDER_FAILED");
+      let result: ProviderInvocationResult | null = null;
+      if (!controller.signal.aborted) {
+        called = true;
+        result = await Promise.race([
+          provider.invoke(shellRequest, controller.signal).catch((): ProviderInvocationResult => {
+            threw = true;
+            return { kind: "FAILED", reason: "TRANSPORT_FAILED" };
+          }),
+          aborted,
+        ]);
+      }
+      if (!called) return failed(stopped ?? "TRANSPORT_FAILED");
+      if (stopped || !result) return failedAfterCall(stopped ?? "TRANSPORT_FAILED");
+      if (result.usage) billed = result.usage;
+      if (result.kind === "FAILED") {
+        const reason = (PROVIDER_FAILURE_REASONS as readonly string[]).includes(result.reason) ? result.reason : "PROVIDER_FAILED";
+        // The adapter gives every failure after transmission its usage; one without usage was never transmitted (nothing billed), unless
+        // the adapter threw, which counts at the route's upper bound (consistent with the hybrid service).
+        return result.usage || threw ? failedAfterCall(reason) : failed(reason);
+      }
       // Fail closed: only a completed response the provider explicitly reports as not stored is gated and answered. A completed (billed)
       // response refused for retention reports only its bounded usage (Packet 11C B2b), so the browser service counts the spend.
-      if (result.kind !== "COMPLETED") return failed("PROVIDER_FAILED");
+      if (result.kind !== "COMPLETED") return failedAfterCall("PROVIDER_FAILED");
       const usage = boundedUsage(result.usage);
-      if (result.retention !== "CONFIRMED_NOT_STORED") return reply({ kind: "FAILED", reason: "PROVIDER_FAILED", usage });
+      if (result.retention !== "CONFIRMED_NOT_STORED") return failedAfterCall("PROVIDER_FAILED");
 
       // The server shell gates over the value-blind plan view. A rejection returns the closed reason only (never the candidate or a
       // gate detail); the browser makes the one structural repair, if any.
@@ -177,9 +206,10 @@ export function createAiShellHandler(options: AiShellHandlerOptions): (request: 
         gates.kind === "REJECTED"
           ? { kind: "STRUCTURALLY_REJECTED", reason: asRejectionReason(gates.reason), repairable: gates.repairable, retention: "CONFIRMED_NOT_STORED", usage }
           : { kind: "CANDIDATE", candidate: shellOutputSchema(shellRequest.taskType).parse(typeof result.candidate === "string" ? toPlainData(parseStrictJson(result.candidate, { maxDepth: 16, maxLength: 65_536 })) : result.candidate) as never, retention: "CONFIRMED_NOT_STORED", usage };
-      return aiShellRouteResponseSchema.safeParse(body).success ? reply(body) : failed("PROVIDER_FAILED");
+      return aiShellRouteResponseSchema.safeParse(body).success ? reply(body) : failedAfterCall("PROVIDER_FAILED");
     } catch {
-      return failed("PROVIDER_FAILED");
+      // C5: a candidate that fails the re-parse above (after a completed, billed call) keeps that call's usage.
+      return called ? failedAfterCall("PROVIDER_FAILED") : failed("PROVIDER_FAILED");
     } finally {
       clearTimeout(timer);
       request.signal.removeEventListener("abort", onCancel);

@@ -97,7 +97,8 @@ export const AI_HYBRID_VERSIONS = deepFreeze({
   providerSchema: "kie-schema.11c.1",
   validatorRules: "11b.2-meaning-r7",
   fixtureSet: "packet11-fixtures.11b.16",
-  evaluationReport: "packet11-eval.19",
+  // Packet 11C Addendum C (C5): the conservative usage accounting (a version record only; no bundle key or body changes).
+  evaluationReport: "packet11-eval.20",
   shellRequest: SHELL_PROVIDER_REQUEST_VERSION,
 } as const);
 /** The audit fixtureSet component of bundle set 11b.18 (packet11-fixtures.11b.16). */

@@ -38,6 +38,11 @@ export type CareSummaryAiWordingPort = {
   disclosureRequired(current: CareSummarySnapshotPayload): boolean;
   acceptDisclosure(): void;
   compose(input: { snapshotRef: ExpectedHead; locale: SupportedLocale; disclosure?: "DECLINED" }, signal?: AbortSignal): Promise<CareSummaryAiWordingOutcome>;
+  /**
+   * Packet 11C Addendum C (C5): the disclosure shown for an explicit request closed without the patient's decision (locale or preview
+   * change, or the screen closed): that moot request's one audit row. Nothing is sent.
+   */
+  disclosureClosed?(input: { locale: SupportedLocale }): Promise<void>;
 };
 
 type Props = {
@@ -62,7 +67,8 @@ type Notice = "HASH_MISMATCH" | "SOURCE_CHANGED" | "TEMPLATE_SUPERSEDED" | "FAIL
  */
 type AiPhase =
   | { kind: "IDLE" }
-  | { kind: "DISCLOSURE"; key: string }
+  /** `locale` (Packet 11C Addendum C, C5): the locale of the explicit request the disclosure belongs to (the preview's own). */
+  | { kind: "DISCLOSURE"; key: string; locale: SupportedLocale }
   | { kind: "LOADING"; locale: SupportedLocale }
   | { kind: "CANCELLED" }
   | { kind: "NOT_ACCEPTED" }
@@ -196,6 +202,33 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
   const disclosureKey = `${ready?.revisionId ?? ""}|${locale}`;
   // The dialog or the request belongs to the locale (and, for the dialog, the snapshot revision) it was opened in.
   if ((aiPhase.kind === "DISCLOSURE" && aiPhase.key !== disclosureKey) || (aiPhase.kind === "LOADING" && aiPhase.locale !== locale)) setAiPhase(IDLE);
+
+  /**
+   * Packet 11C Addendum C, Task C5: the request behind a disclosure that closes without the patient's decision (a locale or preview
+   * change, or the screen closing) is moot, and it still writes its one audit row (DISCLOSURE_CLOSED_MOOT; nothing is sent). An answered
+   * disclosure is marked decided first. A cleanup immediately followed by the same dialog's effect again (a new port identity, or a
+   * development StrictMode remount) is not a close: the report is decided one microtask later, only if that dialog is no longer live.
+   */
+  const decidedDisclosures = useRef(new WeakSet<AiPhase>());
+  const liveDisclosure = useRef<AiPhase | null>(null);
+  useEffect(() => {
+    if (aiPhase.kind !== "DISCLOSURE" || !aiWording) return;
+    const shown = aiPhase;
+    const decided = decidedDisclosures.current;
+    const live = liveDisclosure;
+    const report = aiWording.disclosureClosed?.bind(aiWording);
+    live.current = shown;
+    return () => {
+      if (live.current === shown) live.current = null;
+      queueMicrotask(() => {
+        if (live.current === shown || decided.has(shown)) return;
+        decided.add(shown);
+        void Promise.resolve()
+          .then(() => report?.({ locale: shown.locale }))
+          .catch(() => undefined);
+      });
+    };
+  }, [aiPhase, aiWording]);
   const aiResult = ready !== null && ready.payload.composition.method === "AI_ASSISTED";
 
   // After an accepted replacement, focus moves to the new preview's AI label once it is shown.
@@ -227,7 +260,7 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
     }
   }
 
-  /** One explicit request. `declined`: the patient cancelled the disclosure, so nothing may be sent (audited REQUEST_CANCELLED). */
+  /** One explicit request. `declined`: the patient cancelled the disclosure, so nothing may be sent (audited REMOTE_USE_DECLINED, C5). */
   function runAiWording(declined: boolean) {
     if (!ready || !aiWording || unsettled.current > 0 || replacing) return;
     aiRequest.current?.controller.abort();
@@ -269,18 +302,21 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
 
   function startAiWording() {
     if (!ready || !aiWording || !aiOffered || aiBusy || unsettled.current > 0) return;
-    if (aiWording.disclosureRequired(ready.payload)) setAiPhase({ kind: "DISCLOSURE", key: disclosureKey });
+    if (aiWording.disclosureRequired(ready.payload)) setAiPhase({ kind: "DISCLOSURE", key: disclosureKey, locale: ready.payload.locale });
     else runAiWording(false);
   }
 
   function acceptAiDisclosure() {
     if (aiPhase.kind !== "DISCLOSURE" || !aiWording) return;
     aiWording.acceptDisclosure();
+    // Answered, so never also moot (C5).
+    decidedDisclosures.current.add(aiPhase);
     runAiWording(false);
   }
 
   function declineAiDisclosure() {
     if (aiPhase.kind !== "DISCLOSURE") return;
+    decidedDisclosures.current.add(aiPhase);
     runAiWording(true);
   }
 

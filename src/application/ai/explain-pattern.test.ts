@@ -13,7 +13,7 @@ import {
 import { databases, dayBefore, FACT, higherFixture, local, NOW, reading, RECENT, REFERENCE, setup, TODAY } from "@/application/history/history-test-support";
 import { AI_ACTIVATION_MANIFEST, type AiActivationManifest } from "./ai-activation-manifest";
 import { resolveAiHybridBundle } from "./ai-hybrid-runtime-bundles";
-import { createAiHybridTaskService, type AiHybridExecutionResult } from "./ai-hybrid-task-service";
+import { createAiHybridTaskService, type AiHybridExecutionResult, type AiUnsentRequest } from "./ai-hybrid-task-service";
 import { renderExplainLimitations } from "./ai-meaning-registry";
 import type { AiShellProviderPort, ProviderInvocationResult } from "./ai-provider-port";
 import { createPatternExplainer, type PatternExplanation } from "./explain-pattern";
@@ -74,8 +74,13 @@ const counter = () => {
   return () => `6f1c2b9e-3d4a-4b5c-8d6e-${(n++).toString(16).padStart(12, "0")}`;
 };
 
-function explainer(history: RecordedHistoryQueryPort, execute: Execute) {
-  return createPatternExplainer({ history, execute, now: () => NOW as Instant, requestId: counter() });
+/** Packet 11C Addendum C (C5): the zero-attempt rows the use case asked for (cleared per test). */
+let unsent: AiUnsentRequest[] = [];
+afterEach(() => {
+  unsent = [];
+});
+function explainer(history: RecordedHistoryQueryPort, execute: Execute, recordUnsent: (request: AiUnsentRequest) => Promise<boolean> = async (request) => (unsent.push(request), true)) {
+  return createPatternExplainer({ history, execute, recordUnsent, now: () => NOW as Instant, requestId: counter() });
 }
 
 async function viewOf(history: RecordedHistoryQueryPort): Promise<ExplainablePatternView> {
@@ -410,5 +415,107 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
     // The same explanation either way: only the marker differs.
     expect(declined.composition).toEqual(shipped.composition);
     expect(declined.limitations).toEqual(shipped.limitations);
+  });
+});
+
+/**
+ * Packet 11C Addendum C, Task C5: one truthful audit row per explicit request. Every explanation the patient asks for ends with exactly
+ * one row: written by the hybrid service once the request reaches `execute`, otherwise by `recordUnsent` with a zero-attempt outcome
+ * (never both). The request id and instant are the request's own.
+ */
+describe("createPatternExplainer: one audit row per explicit request (Packet 11C Addendum C, C5)", () => {
+  const ID0 = "6f1c2b9e-3d4a-4b5c-8d6e-000000000000";
+  const one = (outcome: string, locale: AiLocale = "en-SG") => [{ requestId: ID0, taskType: "EXPLAIN_PATTERN", locale, requestedAt: NOW, outcome }];
+
+  it.each(EXPLAINABLE_INELIGIBLE_REASONS.filter((reason) => reason !== "UNAVAILABLE").map((reason) => [reason]))("a comparison that is not explainable (%s): one NOT_ELIGIBLE row, execute never called", async (reason) => {
+    const execute = vi.fn<Execute>();
+    const port: RecordedHistoryQueryPort = { load: vi.fn(), loadExplainablePattern: async () => ({ kind: "INELIGIBLE", reason }) };
+    expect(await explainer(port, execute).explain({ factId: FACT, locale: "zh-SG" })).toEqual({ kind: "UNAVAILABLE", reason });
+    expect(unsent).toEqual(one("NOT_ELIGIBLE", "zh-SG"));
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("an already-aborted request, or one aborted while its source loads: one REQUEST_CANCELLED row", async () => {
+    const { history } = await higherFixture();
+    const execute = vi.fn<Execute>();
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(await explainer(history, execute).explain({ factId: FACT, locale: "en-SG" }, aborted.signal)).toEqual({ kind: "UNAVAILABLE", reason: "CANCELLED" });
+    expect(unsent).toEqual(one("REQUEST_CANCELLED"));
+    unsent = [];
+    const during = new AbortController();
+    const port: RecordedHistoryQueryPort = { load: vi.fn(), loadExplainablePattern: async (request) => {
+      during.abort();
+      return history.loadExplainablePattern(request);
+    } };
+    expect(await explainer(port, execute).explain({ factId: FACT, locale: "en-SG" }, during.signal)).toEqual({ kind: "UNAVAILABLE", reason: "CANCELLED" });
+    expect(unsent).toEqual(one("REQUEST_CANCELLED"));
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  // C5 fix round 1: the shipped query folds a storage, view-schema or window-integrity failure into INELIGIBLE/UNAVAILABLE; that is an
+  // unreadable source, not an ineligible comparison.
+  it("the view's UNAVAILABLE refusal (a source that could not be read) is one SOURCE_UNAVAILABLE row, not NOT_ELIGIBLE", async () => {
+    const execute = vi.fn<Execute>();
+    const port: RecordedHistoryQueryPort = { load: vi.fn(), loadExplainablePattern: async () => ({ kind: "INELIGIBLE", reason: "UNAVAILABLE" }) };
+    expect(await explainer(port, execute).explain({ factId: FACT, locale: "zh-SG" })).toEqual({ kind: "UNAVAILABLE", reason: "UNAVAILABLE" });
+    expect(unsent).toEqual(one("SOURCE_UNAVAILABLE", "zh-SG"));
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("with the REAL Recorded-history query over stored history that fails integrity: one SOURCE_UNAVAILABLE row", async () => {
+    const { database, journal, history } = await setup();
+    const stored = await reading(journal, "2026-09-29", "07:30", "6.0");
+    await database.table("recordRevisions").update(stored.revisionId, { "revision.payload.measurement.enteredValue": "not-a-number" });
+    const execute = vi.fn<Execute>();
+    expect(await explainer(history, execute).explain({ factId: FACT, locale: "en-SG" })).toEqual({ kind: "UNAVAILABLE", reason: "UNAVAILABLE" });
+    expect(unsent).toEqual(one("SOURCE_UNAVAILABLE"));
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("a source that cannot be read: one SOURCE_UNAVAILABLE row", async () => {
+    const execute = vi.fn<Execute>();
+    const port: RecordedHistoryQueryPort = { load: vi.fn(), loadExplainablePattern: async () => Promise.reject(new Error("storage")) };
+    expect(await explainer(port, execute).explain({ factId: FACT, locale: "en-SG" })).toEqual({ kind: "UNAVAILABLE", reason: "UNAVAILABLE" });
+    expect(unsent).toEqual(one("SOURCE_UNAVAILABLE"));
+  });
+
+  it("a request execute rejects (the service writes no row for it): one PAYLOAD_INVALID row, even when aborted meanwhile", async () => {
+    const { history } = await higherFixture();
+    expect(await explainer(history, async () => ({ kind: "REQUEST_REJECTED" })).explain({ factId: FACT, locale: "en-SG" })).toEqual({ kind: "UNAVAILABLE", reason: "UNAVAILABLE" });
+    expect(unsent).toEqual(one("PAYLOAD_INVALID"));
+    unsent = [];
+    const controller = new AbortController();
+    const run = onDemand(async () => ({ kind: "REQUEST_REJECTED" }));
+    const pending = explainer(history, run.execute).explain({ factId: FACT, locale: "en-SG" }, controller.signal);
+    await run.started;
+    controller.abort();
+    expect(await pending).toEqual({ kind: "UNAVAILABLE", reason: "CANCELLED" });
+    run.release();
+    await vi.waitFor(() => expect(unsent).toEqual(one("PAYLOAD_INVALID")));
+  });
+
+  it("a request that reaches execute gets its row from the service only (none from the use case), including stale and aborted ones", async () => {
+    const { history } = await higherFixture();
+    const rows: unknown[] = [];
+    const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async (row) => void rows.push(row) }, now: () => NOW, monotonicMs: () => 0, manifest: AI_ACTIVATION_MANIFEST });
+    expect(await explainer(history, service.execute).explain({ factId: FACT, locale: "en-SG" })).toMatchObject({ kind: "EXPLAINED" });
+    expect(rows).toHaveLength(1);
+    expect(unsent).toEqual([]);
+    const controller = new AbortController();
+    const run = onDemand(service.execute);
+    const pending = explainer(history, run.execute).explain({ factId: FACT, locale: "en-SG" }, controller.signal);
+    await run.started;
+    controller.abort();
+    await pending;
+    run.release();
+    await vi.waitFor(() => expect(rows).toHaveLength(2));
+    expect(unsent).toEqual([]);
+  });
+
+  it("a failed zero-attempt row never changes the outcome", async () => {
+    const port: RecordedHistoryQueryPort = { load: vi.fn(), loadExplainablePattern: async () => ({ kind: "INELIGIBLE", reason: "NOT_FOUND" }) };
+    expect(await explainer(port, vi.fn<Execute>(), async () => false).explain({ factId: FACT, locale: "en-SG" })).toEqual({ kind: "UNAVAILABLE", reason: "NOT_FOUND" });
+    expect(await explainer(port, vi.fn<Execute>(), async () => Promise.reject(new Error("storage"))).explain({ factId: FACT, locale: "en-SG" })).toEqual({ kind: "UNAVAILABLE", reason: "NOT_FOUND" });
   });
 });

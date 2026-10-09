@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createClosedRowCodecRegistry, createUnionRowCodec, emptyInProfileRowCodec, EMPTY_IN_PROFILE_TABLES, STORAGE_OWNED_CLOSED_CODECS } from "./closed-row-codecs";
 import { StorageRowValidationError, type StorageRowCodec } from "./storage-row-codec";
 import { storageMetadataRowCodec } from "./storage-metadata";
-import { acceptedCareAuditRowFixture, deterministicAuditRowFixture } from "@/domain/ai/ai-test-fixtures";
+import { acceptedCareAuditRowFixture, currentAuditRowFixture, deterministicAuditRowFixture } from "@/domain/ai/ai-test-fixtures";
 
 const accepts = (tag: string): StorageRowCodec<unknown> => ({
   validateForWrite(value) {
@@ -50,6 +50,18 @@ describe("closed row-codec registry", () => {
     const read = failure(() => codec.validateAfterRead({ ...deterministicAuditRowFixture(), prompt: "6.2 mmol/L" }));
     expect(read).toMatchObject({ code: "STORAGE_INTEGRITY_FAILED", table: "aiInvocationAudits" });
     expect(JSON.stringify(read) + read.message).not.toContain("6.2");
+  });
+
+  // Packet 11C Addendum C (C5): both audit schema versions pass the codec at both boundaries; a legacy-shaped row cannot carry a new code.
+  it("accepts legacy (11a.1) and current (11c.2) AI audit rows at both boundaries, and nothing in between", () => {
+    const codec = STORAGE_OWNED_CLOSED_CODECS.aiInvocationAudits;
+    const current = currentAuditRowFixture({ ...deterministicAuditRowFixture(), outcomeCode: "NOT_ELIGIBLE" });
+    for (const row of [deterministicAuditRowFixture(), current, currentAuditRowFixture(acceptedCareAuditRowFixture(), "UPPER_BOUND")]) {
+      expect(codec.validateForWrite(row)).toEqual(row);
+      expect(codec.validateAfterRead(row)).toEqual(row);
+    }
+    expect(failure(() => codec.validateForWrite({ ...deterministicAuditRowFixture(), outcomeCode: "NOT_ELIGIBLE" })).code).toBe("STORAGE_VALIDATION_FAILED");
+    expect(failure(() => codec.validateAfterRead({ ...current, auditSchemaVersion: "ai-invocation-audit.12a.1" })).code).toBe("STORAGE_INTEGRITY_FAILED");
   });
 
   it("accepts a union row only through a registered member and retains no rejected value", () => {

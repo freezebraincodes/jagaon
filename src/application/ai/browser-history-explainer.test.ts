@@ -230,7 +230,7 @@ describe("browser history explainer: session disclosure (Packet 11C B3)", () => 
     expect(log.rows[0]!.sourceRevisions.length).toBeGreaterThan(0);
   });
 
-  it("Packet 11C B4a: an explicit decline (the dialog's Cancel) is audited as REQUEST_CANCELLED; nothing sent; the session is not changed", async () => {
+  it("Packet 11C B4a: an explicit decline (the dialog's Cancel) is audited (C5: as REMOTE_USE_DECLINED); nothing sent; the session is not changed", async () => {
     const { history } = await higherFixture();
     const log = audit();
     const fetcher = fakeRoute();
@@ -242,7 +242,8 @@ describe("browser history explainer: session disclosure (Packet 11C B3)", () => 
     expect(remoteUse.accepted()).toBe(false);
     expect(log.rows).toHaveLength(1);
     expect(aiInvocationAuditRowSchema.safeParse(log.rows[0]).success).toBe(true);
-    expect(log.rows[0]).toMatchObject({ outcomeCode: "REQUEST_CANCELLED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [] });
+    // Packet 11C Addendum C (C5): the truthful audit-only outcome (REQUEST_CANCELLED under the B4a interim ruling).
+    expect(log.rows[0]).toMatchObject({ auditSchemaVersion: "ai-invocation-audit.11c.2", outcomeCode: "REMOTE_USE_DECLINED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], usageBasis: "NONE" });
     expect(log.rows[0]!.measurements).toMatchObject({ inputTokens: null, outputTokens: null, costMicroUsd: null });
 
     // The decline belongs to that one request: the next request without it is the ordinary not-accepted (fail-closed) path.
@@ -251,7 +252,7 @@ describe("browser history explainer: session disclosure (Packet 11C B3)", () => 
     // A decline never overrides into a send, even after the session accepted (each decline is its own request's answer).
     explainer.acceptDisclosure();
     await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "DECLINED" }, new AbortController().signal);
-    expect(log.rows[2]).toMatchObject({ outcomeCode: "REQUEST_CANCELLED", attempts: { count: 0 } });
+    expect(log.rows[2]).toMatchObject({ outcomeCode: "REMOTE_USE_DECLINED", attempts: { count: 0 } });
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -267,7 +268,7 @@ describe("browser history explainer: session disclosure (Packet 11C B3)", () => 
     // The same signal without the decline flag: still DECLINED, deterministic and nothing sent (never an unintended send).
     const again = await explainer.explain({ factId: FACT, locale: "en-SG" }, reused);
     expect(again).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
-    expect(log.rows.map((row) => [row.outcomeCode, row.attempts.count])).toEqual([["REQUEST_CANCELLED", 0], ["REQUEST_CANCELLED", 0]]);
+    expect(log.rows.map((row) => [row.outcomeCode, row.attempts.count])).toEqual([["REMOTE_USE_DECLINED", 0], ["REMOTE_USE_DECLINED", 0]]);
     expect(fetcher).not.toHaveBeenCalled();
     // A fresh signal per request (what every caller does) is unaffected: the accepted session sends one value-blind POST.
     expect(await explainer.explain({ factId: FACT, locale: "en-SG" }, new AbortController().signal)).toMatchObject({ kind: "EXPLAINED", source: "AI" });
@@ -415,7 +416,7 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
     expect((await care.audits.list()).map((row) => [row.outcomeCode, row.providerModel])).toEqual([["ACCEPTED", { providerKey: "deepseek", modelSnapshot: "deepseek-flash" }]]);
   });
 
-  it("an explicit decline (the dialog's Cancel): nothing sent, no replacement, one REQUEST_CANCELLED audit row with no attempt", async () => {
+  it("an explicit decline (the dialog's Cancel): nothing sent, no replacement, one REMOTE_USE_DECLINED audit row (C5) with no attempt", async () => {
     const care = await careSetup();
     const fetcher = fakeCareRoute();
     const remoteUse = createAiRemoteUseSession();
@@ -425,17 +426,69 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
     expect(remoteUse.accepted()).toBe(false);
     expect(await care.snapshots()).toBe(1);
     const rows = await care.audits.list();
-    expect(rows.map((row) => [row.outcomeCode, row.attempts.count, row.providerModel, row.sourceRevisions.length])).toEqual([["REQUEST_CANCELLED", 0, null, 0]]);
+    expect(rows.map((row) => [row.outcomeCode, row.attempts.count, row.providerModel, row.sourceRevisions.length])).toEqual([["REMOTE_USE_DECLINED", 0, null, 0]]);
   });
 
-  it("a preview with nothing to phrase is not eligible: no disclosure, no hybrid call, no audit row, no POST", async () => {
+  // Packet 11C Addendum C (C5; owner decision (e) resolved: each explicit request writes one audit row, including zero-attempt ones).
+  it("a preview with nothing to phrase is not eligible: no disclosure, no hybrid call, no POST, and one NOT_ELIGIBLE audit row (C5)", async () => {
     const care = await careSetup({ questionsOnly: true });
     const fetcher = fakeCareRoute();
     const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, remoteUse: createAiRemoteUseSession(), manifest: BOTH, fetcher, now: () => LATER }).careSummary!;
     expect(wording.available()).toBe(true);
     expect(wording.disclosureRequired(care.payload)).toBe(false);
+    // The eligibility probes are not requests: still no row.
+    expect(await care.audits.list()).toEqual([]);
     expect(await wording.compose({ snapshotRef: care.snapshotRef, locale: "en-SG" })).toEqual({ kind: "NOT_ELIGIBLE", reason: "NOTHING_TO_PHRASE" });
     expect(fetcher).not.toHaveBeenCalled();
-    expect(await care.audits.list()).toEqual([]);
+    const rows = await care.audits.list();
+    expect(rows.map((row) => [row.taskType, row.locale, row.outcomeCode, row.attempts.count, row.providerModel, row.sourceRevisions.length, (row as { usageBasis?: string }).usageBasis])).toEqual([["DRAFT_CARE_PREPARATION_SUMMARY", "en-SG", "NOT_ELIGIBLE", 0, null, 0, "NONE"]]);
+  });
+
+  it("C5: a care disclosure closed as moot writes one DISCLOSURE_CLOSED_MOOT row for the request's locale; nothing sent", async () => {
+    const care = await careSetup();
+    const fetcher = fakeCareRoute();
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, remoteUse: createAiRemoteUseSession(), manifest: BOTH, fetcher, now: () => LATER }).careSummary!;
+    await wording.disclosureClosed({ locale: "zh-SG" });
+    const rows = await care.audits.list();
+    expect(rows.map((row) => [row.taskType, row.locale, row.outcomeCode, row.attempts.count, row.providerModel])).toEqual([["DRAFT_CARE_PREPARATION_SUMMARY", "zh-SG", "DISCLOSURE_CLOSED_MOOT", 0, null]]);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+/** Packet 11C Addendum C, Task C5: every explicit history request writes exactly one audit row; the background probes write none. */
+describe("browser history explainer: one audit row per explicit request (Packet 11C Addendum C, C5)", () => {
+  it("an explanation asked for a comparison that is no longer explainable writes one NOT_ELIGIBLE row; nothing sent", async () => {
+    const log = audit();
+    const fetcher = fakeRoute();
+    const history: RecordedHistoryQueryPort = { load: vi.fn(), loadExplainablePattern: vi.fn(async () => ({ kind: "INELIGIBLE" as const, reason: "STALE_SOURCE" as const })) };
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, remoteUse: createAiRemoteUseSession(), fetcher, now: () => NOW as Instant });
+    expect(await explainer.explain({ factId: FACT, locale: "zh-SG" })).toMatchObject({ kind: "UNAVAILABLE" });
+    expect(log.rows).toHaveLength(1);
+    expect(aiInvocationAuditRowSchema.parse(log.rows[0])).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "zh-SG", outcomeCode: "NOT_ELIGIBLE", providerModel: null, attempts: { count: 0 }, sourceRevisions: [], usageBasis: "NONE" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("a disclosure closed as moot writes one DISCLOSURE_CLOSED_MOOT row; the probes (disclosureRequired) write none", async () => {
+    const { history } = await higherFixture();
+    const log = audit();
+    const fetcher = fakeRoute();
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, remoteUse: createAiRemoteUseSession(), fetcher, now: () => NOW as Instant });
+    expect(explainer.disclosureRequired()).toBe(true);
+    expect(log.rows).toHaveLength(0);
+    await explainer.disclosureClosed({ locale: "en-SG" });
+    expect(log.rows).toHaveLength(1);
+    expect(aiInvocationAuditRowSchema.parse(log.rows[0])).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcomeCode: "DISCLOSURE_CLOSED_MOOT", providerModel: null, attempts: { count: 0 }, usageBasis: "NONE" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("shipped manifest: the probes never write; one explicit explanation writes exactly one row", async () => {
+    const { history } = await higherFixture();
+    const log = audit();
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port });
+    explainer.disclosureRequired();
+    await history.loadExplainablePattern({ factId: FACT });
+    expect(log.rows).toHaveLength(0);
+    await explainer.explain({ factId: FACT, locale: "en-SG" });
+    expect(log.rows.map((row) => row.outcomeCode)).toEqual(["TASK_DISABLED"]);
   });
 });

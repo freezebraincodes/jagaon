@@ -1,7 +1,7 @@
 import type { CommandId } from "@/application/contracts/command-event-identifiers";
 import type { Instant } from "@/domain/shared";
 import type { AiLocale, AiReasonCode } from "@/domain/ai";
-import type { AiHybridExecutionResult, createAiHybridTaskService } from "@/application/ai/ai-hybrid-task-service";
+import type { AiHybridExecutionResult, AiUnsentRequestOutcome, createAiHybridTaskService } from "@/application/ai/ai-hybrid-task-service";
 import { buildCareSummaryAiRequest, type CareSummaryAiRequestRefusal } from "./ai-care-summary-request";
 import type { CarePreparationCommandPort, CarePreparationQueryPort, ExpectedHead } from "./care-preparation-contracts";
 
@@ -19,6 +19,9 @@ import type { CarePreparationCommandPort, CarePreparationQueryPort, ExpectedHead
  * - STALE: the preview or a source changed before or during the request (nothing is written);
  * - CANCELLED: aborted before the replacement was requested (the use case does not wait for a pending `execute` once aborted);
  * - UNAVAILABLE: anything else, fail closed.
+ * Audit (Packet 11C Addendum C, C5): every call is one explicit request with its own id and instant, and writes exactly one audit row:
+ * the hybrid service's once the request reaches `execute`; otherwise a zero-attempt row through `recordUnsent` (NOT_ELIGIBLE,
+ * SOURCE_CHANGED, SOURCE_UNAVAILABLE, REQUEST_CANCELLED before sending, PAYLOAD_INVALID for a request `execute` rejects).
  * No UI here. Packet 11C B4b: the browser wiring (`createBrowserAiAssistance`) builds it over the app's one hybrid service.
  */
 
@@ -32,10 +35,15 @@ export type CareSummaryAiOutcome =
   | Readonly<{ kind: "CANCELLED" }>
   | Readonly<{ kind: "UNAVAILABLE" }>;
 
+/**
+ * `recordUnsent` (Packet 11C Addendum C, C5): the hybrid service's zero-attempt audit row, for an explicit request that never reaches
+ * `execute` (or that `execute` rejects without a row). Every `composeCareSummaryWithAi` call writes exactly one audit row.
+ */
 export type CareSummaryAiComposerDependencies = {
   query: CarePreparationQueryPort;
   commands: Pick<CarePreparationCommandPort, "replaceWithAiAssistedPreview">;
   execute: AiHybridTaskService["execute"];
+  recordUnsent: AiHybridTaskService["recordUnsent"];
   now: () => Instant;
   requestId: () => string;
   commandId?: () => CommandId;
@@ -74,19 +82,37 @@ export function createCareSummaryAiComposer(deps: CareSummaryAiComposerDependenc
   return Object.freeze({
     async composeCareSummaryWithAi(input: { snapshotRef: ExpectedHead; locale: AiLocale }, signal?: AbortSignal): Promise<CareSummaryAiOutcome> {
       const cancelled: CareSummaryAiOutcome = { kind: "CANCELLED" };
-      if (signal?.aborted) return cancelled;
+      // Packet 11C Addendum C (C5): this explicit request's identity, fixed at the patient's action; its one audit row names it.
+      const requestId = deps.requestId();
+      const requestedAt = deps.now();
+      let handedToService = false;
+      /** The zero-attempt row of this request (best effort: a failed audit write never changes the outcome and never throws). */
+      const record = (outcome: AiUnsentRequestOutcome) => Promise.resolve().then(() => deps.recordUnsent({ requestId, taskType: "DRAFT_CARE_PREPARATION_SUMMARY", locale: input.locale, requestedAt, outcome })).catch(() => false);
+      const unsent = async (outcome: AiUnsentRequestOutcome, result: CareSummaryAiOutcome): Promise<CareSummaryAiOutcome> => {
+        await record(outcome);
+        return result;
+      };
+      if (signal?.aborted) return unsent("REQUEST_CANCELLED", cancelled);
       try {
         const { snapshotRef } = input;
         const view = await deps.query.loadSummary(snapshotRef.recordId);
-        if (signal?.aborted) return cancelled;
-        if (view.status !== "READY" || view.payload.locale !== input.locale) return { kind: "UNAVAILABLE" };
-        if (view.revisionId !== snapshotRef.expectedRevisionId || view.revisionNumber !== snapshotRef.expectedRevisionNumber || !view.sourcesCurrent) return { kind: "STALE" };
+        if (signal?.aborted) return unsent("REQUEST_CANCELLED", cancelled);
+        if (view.status !== "READY") return unsent("SOURCE_UNAVAILABLE", { kind: "UNAVAILABLE" });
+        // A request in another locale than the preview's cannot be formed for that preview.
+        if (view.payload.locale !== input.locale) return unsent("NOT_ELIGIBLE", { kind: "UNAVAILABLE" });
+        if (view.revisionId !== snapshotRef.expectedRevisionId || view.revisionNumber !== snapshotRef.expectedRevisionNumber || !view.sourcesCurrent) return unsent("SOURCE_CHANGED", { kind: "STALE" });
 
-        const requestId = deps.requestId();
-        const built = buildCareSummaryAiRequest({ current: view.payload, requestId, requestedAt: deps.now() });
-        if (built.kind !== "READY") return { kind: "NOT_ELIGIBLE", reason: built.reason };
+        const built = buildCareSummaryAiRequest({ current: view.payload, requestId, requestedAt });
+        if (built.kind !== "READY") return unsent("NOT_ELIGIBLE", { kind: "NOT_ELIGIBLE", reason: built.reason });
 
-        const result: AiHybridExecutionResult | typeof ABORTED = await untilAborted(deps.execute(built.request, signal), signal);
+        handedToService = true;
+        // The service writes this request's row, except for a request it rejects outright: that one is recorded here, also when the
+        // patient has meanwhile cancelled (the use case does not wait for it).
+        const executed = deps.execute(built.request, signal).then(async (result) => {
+          if (result.kind === "REQUEST_REJECTED") await record("PAYLOAD_INVALID");
+          return result;
+        });
+        const result: AiHybridExecutionResult | typeof ABORTED = await untilAborted(executed, signal);
         if (result === ABORTED || signal?.aborted) return cancelled;
         if (result.kind === "FALLBACK") return { kind: "KEPT_DETERMINISTIC", reason: result.fallback.reason };
         if (result.kind !== "COMPOSED" || result.auditRef !== requestId) return { kind: "UNAVAILABLE" };
@@ -106,8 +132,11 @@ export function createCareSummaryAiComposer(deps: CareSummaryAiComposerDependenc
         if (replaced.kind === "REJECTED" && STALE_CODES.has(replaced.code)) return { kind: "STALE" };
         return { kind: "UNAVAILABLE" };
       } catch {
-        // A storage failure, an invalid snapshot or a failed execute never becomes a replacement.
-        return signal?.aborted ? cancelled : { kind: "UNAVAILABLE" };
+        // A storage failure, an invalid snapshot or a failed execute never becomes a replacement. Before the request reached the service,
+        // its one row is recorded here (C5); after, the service owns it.
+        const result: CareSummaryAiOutcome = signal?.aborted ? cancelled : { kind: "UNAVAILABLE" };
+        if (handedToService) return result;
+        return unsent(signal?.aborted ? "REQUEST_CANCELLED" : "SOURCE_UNAVAILABLE", result);
       }
     },
   });

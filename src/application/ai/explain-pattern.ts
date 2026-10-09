@@ -1,7 +1,7 @@
 import type { Instant } from "@/domain/shared/time";
 import type { AiLocale, AiTaskRequest } from "@/domain/ai";
 import type { ExplainablePatternResult, ExplainablePatternView, RecordedHistoryQueryPort } from "@/application/history/recorded-history-contracts";
-import type { AiHybridExecutionResult, createAiHybridTaskService } from "./ai-hybrid-task-service";
+import type { AiHybridExecutionResult, AiUnsentRequestOutcome, createAiHybridTaskService } from "./ai-hybrid-task-service";
 import { buildSourceBackedExplainRequest } from "./explain-pattern-request";
 import type { AiComposition } from "./language/assembler";
 import { renderSummaryRoleNotice } from "./language/atom-renderer";
@@ -21,6 +21,11 @@ import { renderSummaryRoleNotice } from "./language/atom-renderer";
  * - Abort: an abort before, during or right after `execute` is `CANCELLED`; the caller's signal is passed to `execute`, and the
  *   use case does not wait for a pending `execute` once aborted.
  * - Anything else that is not an EXPLAIN composition for this request and locale fails closed (`UNAVAILABLE`).
+ * - Audit (Packet 11C Addendum C, C5): every `explain` call is one explicit request with its own id and instant, and writes exactly one
+ *   audit row: the hybrid service's once the request reaches `execute`; otherwise a zero-attempt row through `recordUnsent`
+ *   (NOT_ELIGIBLE for a comparison that is not explainable, REQUEST_CANCELLED before sending, SOURCE_UNAVAILABLE for an unreadable
+ *   source, including the view refusal UNAVAILABLE that the query returns for a storage or integrity failure, PAYLOAD_INVALID for a
+ *   request `execute` rejects). Background probes (`loadExplainablePattern` from the screen) write none.
  *
  * The limitations are the ones the hybrid service rendered with the existing limitation renderer (`renderExplainLimitations`, the
  * approved copy, identical on the AI and deterministic paths); incomplete limitation copy fails closed. The summary-role notice is
@@ -45,9 +50,14 @@ export type PatternExplanation =
   | { kind: "EXPLAINED"; source: "AI" | "DETERMINISTIC"; view: ExplainablePatternView; composition: AiComposition; limitations: readonly PatternLimitation[]; summaryRoleNotice: string; remoteUse?: "NOT_ACCEPTED" }
   | { kind: "UNAVAILABLE"; reason: PatternExplanationUnavailableReason };
 
+/**
+ * `recordUnsent` (Packet 11C Addendum C, C5): the hybrid service's zero-attempt audit row, for an explicit request that never reaches
+ * `execute` (or that `execute` rejects without a row). Every `explain` call writes exactly one audit row: through `execute`, or here.
+ */
 export type PatternExplainerDependencies = {
   history: RecordedHistoryQueryPort;
   execute: AiHybridTaskService["execute"];
+  recordUnsent: AiHybridTaskService["recordUnsent"];
   now: () => Instant;
   requestId: () => string;
 };
@@ -117,15 +127,34 @@ function sameSource(built: ExplainablePatternView, reloaded: ExplainablePatternR
 export function createPatternExplainer(deps: PatternExplainerDependencies): { explain(input: { factId: string; locale: AiLocale }, signal?: AbortSignal): Promise<PatternExplanation> } {
   return Object.freeze({
     async explain(input: { factId: string; locale: AiLocale }, signal?: AbortSignal): Promise<PatternExplanation> {
-      if (signal?.aborted) return unavailable("CANCELLED");
+      // Packet 11C Addendum C (C5): this explicit request's identity, fixed at the patient's action; its one audit row names it.
+      const requestId = deps.requestId();
+      const requestedAt = deps.now();
+      let handedToService = false;
+      /** The zero-attempt row of this request (best effort: a failed audit write never changes the outcome and never throws). */
+      const record = (outcome: AiUnsentRequestOutcome) => Promise.resolve().then(() => deps.recordUnsent({ requestId, taskType: "EXPLAIN_PATTERN", locale: input.locale, requestedAt, outcome })).catch(() => false);
+      const unsent = async (outcome: AiUnsentRequestOutcome, result: PatternExplanation): Promise<PatternExplanation> => {
+        await record(outcome);
+        return result;
+      };
+      if (signal?.aborted) return unsent("REQUEST_CANCELLED", unavailable("CANCELLED"));
       try {
         const loaded = await deps.history.loadExplainablePattern({ factId: input.factId });
-        if (signal?.aborted) return unavailable("CANCELLED");
-        if (loaded.kind !== "EXPLAINABLE") return unavailable(loaded.reason);
+        if (signal?.aborted) return unsent("REQUEST_CANCELLED", unavailable("CANCELLED"));
+        // C5 fix round 1: the query folds a storage, view-schema or window-integrity failure into the view refusal UNAVAILABLE; that
+        // is an unreadable source (SOURCE_UNAVAILABLE), not an ineligible comparison (every other refusal: NOT_ELIGIBLE).
+        if (loaded.kind !== "EXPLAINABLE") return unsent(loaded.reason === "UNAVAILABLE" ? "SOURCE_UNAVAILABLE" : "NOT_ELIGIBLE", unavailable(loaded.reason));
         const view = loaded.view;
 
-        const request: AiTaskRequest = buildSourceBackedExplainRequest({ view, locale: input.locale, requestId: deps.requestId(), requestedAt: deps.now() });
-        const result: AiHybridExecutionResult | typeof ABORTED = await untilAborted(deps.execute(request, signal), signal);
+        const request: AiTaskRequest = buildSourceBackedExplainRequest({ view, locale: input.locale, requestId, requestedAt });
+        handedToService = true;
+        // The service writes this request's row, except for a request it rejects outright: that one is recorded here, also when the
+        // patient has meanwhile cancelled (the use case does not wait for it).
+        const executed = deps.execute(request, signal).then(async (result) => {
+          if (result.kind === "REQUEST_REJECTED") await record("PAYLOAD_INVALID");
+          return result;
+        });
+        const result: AiHybridExecutionResult | typeof ABORTED = await untilAborted(executed, signal);
         if (result === ABORTED || signal?.aborted) return unavailable("CANCELLED");
 
         // Stale protection: keep the result only if its sources are exactly the ones still recorded now.
@@ -150,8 +179,11 @@ export function createPatternExplainer(deps: PatternExplainerDependencies): { ex
           ...(result.mode === "REMOTE_NOT_ACCEPTED" ? { remoteUse: "NOT_ACCEPTED" as const } : {}),
         };
       } catch {
-        // A storage failure, an invalid view or a failed execute never becomes an explanation.
-        return signal?.aborted ? unavailable("CANCELLED") : unavailable("UNAVAILABLE");
+        // A storage failure, an invalid view or a failed execute never becomes an explanation. Before the request reached the service,
+        // its one row is recorded here (C5); after, the service owns it.
+        const result = signal?.aborted ? unavailable("CANCELLED") : unavailable("UNAVAILABLE");
+        if (handedToService) return result;
+        return unsent(signal?.aborted ? "REQUEST_CANCELLED" : "SOURCE_UNAVAILABLE", result);
       }
     },
   });

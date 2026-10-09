@@ -373,9 +373,12 @@ describe("composeCareSummaryWithAi (Packet 11C B1b)", () => {
     const provider = options.provider ?? fakeCareShellProvider(() => ({ kind: "FAILED", reason: "PROVIDER_FAILED" }));
     const hybrid = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: h.audits, now: () => LATER, monotonicMs: () => 0, manifest: options.manifest ?? ENABLED_CARE_MANIFEST, provider });
     const execute = vi.fn(hybrid.execute);
-    const use = createCareSummaryAiComposer({ query: h.query, commands: h.service, execute, now: () => LATER, requestId: () => crypto.randomUUID(), commandId: uuid });
-    return { use, execute, provider };
+    // Packet 11C Addendum C (C5): the service's zero-attempt row for a request that never reaches execute.
+    const recordUnsent = vi.fn(hybrid.recordUnsent);
+    const use = createCareSummaryAiComposer({ query: h.query, commands: h.service, execute, recordUnsent, now: () => LATER, requestId: () => crypto.randomUUID(), commandId: uuid });
+    return { use, execute, provider, recordUnsent };
   }
+  const outcomes = async (h: H) => (await h.audits.list()).map((row) => [row.taskType, row.outcomeCode, row.attempts.count, row.providerModel, row.sourceRevisions.length]);
   /** A provider that answers with fake model wording for the plan of the request it receives (re-planned from that request). */
   const answering = (h: H, before?: () => Promise<void>) => {
     let plan: SlotPlan | null = null;
@@ -483,5 +486,82 @@ describe("composeCareSummaryWithAi (Packet 11C B1b)", () => {
     expect(await use.composeCareSummaryWithAi({ snapshotRef: head, locale: "en-SG" })).toEqual({ kind: "NOT_ELIGIBLE", reason: "NOT_CURRENT_DETERMINISTIC" });
     expect(await use.composeCareSummaryWithAi({ snapshotRef: { ...head, recordId: crypto.randomUUID() as never }, locale: "en-SG" })).toEqual({ kind: "UNAVAILABLE" });
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Packet 11C Addendum C, Task C5 (owner decision (e) resolved by the owner's C5 wording: one truthful audit outcome per explicit
+   * request, including zero-attempt outcomes). Every composeCareSummaryWithAi call writes exactly one audit row.
+   */
+  describe("one audit row per explicit request (Packet 11C Addendum C, C5)", () => {
+    const ZERO = (code: string) => ["DRAFT_CARE_PREPARATION_SUMMARY", code, 0, null, 0];
+
+    it("NOT_ELIGIBLE (a preview that cannot be sent): one NOT_ELIGIBLE row, execute never called", async () => {
+      const h = await setup();
+      const { head } = await h.prepared();
+      await rewriteAsLegacy9c1Snapshot(h.database, head.recordId);
+      const { use, execute } = composer(h);
+      expect(await use.composeCareSummaryWithAi({ snapshotRef: head, locale: "en-SG" })).toEqual({ kind: "NOT_ELIGIBLE", reason: "NOT_CURRENT_DETERMINISTIC" });
+      expect(await outcomes(h)).toEqual([ZERO("NOT_ELIGIBLE")]);
+      expect((await h.audits.list())[0]).toMatchObject({ auditSchemaVersion: "ai-invocation-audit.11c.2", locale: "en-SG", requestedAt: LATER, usageBasis: "NONE" });
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it("another locale than the preview's: one NOT_ELIGIBLE row for the requested locale", async () => {
+      const h = await setup();
+      const { head } = await h.prepared();
+      const { use } = composer(h);
+      expect(await use.composeCareSummaryWithAi({ snapshotRef: head, locale: "zh-SG" })).toEqual({ kind: "UNAVAILABLE" });
+      expect(await outcomes(h)).toEqual([ZERO("NOT_ELIGIBLE")]);
+      expect((await h.audits.list())[0]!.locale).toBe("zh-SG");
+    });
+
+    it("a preview that cannot be read: one SOURCE_UNAVAILABLE row", async () => {
+      const h = await setup();
+      const { head } = await h.prepared();
+      const { use } = composer(h);
+      expect(await use.composeCareSummaryWithAi({ snapshotRef: { ...head, recordId: crypto.randomUUID() as never }, locale: "en-SG" })).toEqual({ kind: "UNAVAILABLE" });
+      expect(await outcomes(h)).toEqual([ZERO("SOURCE_UNAVAILABLE")]);
+    });
+
+    it("a preview that changed before sending: one SOURCE_CHANGED row", async () => {
+      const h = await setup();
+      const { head } = await h.prepared();
+      const { use } = composer(h);
+      expect(await use.composeCareSummaryWithAi({ snapshotRef: { ...head, expectedRevisionNumber: 2 }, locale: "en-SG" })).toEqual({ kind: "STALE" });
+      expect(await outcomes(h)).toEqual([ZERO("SOURCE_CHANGED")]);
+    });
+
+    it("cancelled before sending: one REQUEST_CANCELLED row", async () => {
+      const h = await setup();
+      const { head } = await h.prepared();
+      const { use } = composer(h);
+      const early = new AbortController();
+      early.abort();
+      expect(await use.composeCareSummaryWithAi({ snapshotRef: head, locale: "en-SG" }, early.signal)).toEqual({ kind: "CANCELLED" });
+      expect(await outcomes(h)).toEqual([ZERO("REQUEST_CANCELLED")]);
+    });
+
+    it("a request that reaches execute gets exactly the service's row (none from the use case), also when cancelled during the call", async () => {
+      const h = await setup();
+      const { head } = await h.prepared();
+      const during = new AbortController();
+      const fake = answering(h, async () => {
+        during.abort();
+      });
+      await fake.capture(head);
+      const { use, recordUnsent } = composer(h, { provider: fake.provider });
+      expect(await use.composeCareSummaryWithAi({ snapshotRef: head, locale: "en-SG" }, during.signal)).toEqual({ kind: "CANCELLED" });
+      await vi.waitFor(async () => expect(await h.audits.list()).toHaveLength(1));
+      expect(recordUnsent).not.toHaveBeenCalled();
+    });
+
+    it("a request execute rejects writes one PAYLOAD_INVALID row", async () => {
+      const h = await setup();
+      const { head } = await h.prepared();
+      const hybrid = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: h.audits, now: () => LATER, monotonicMs: () => 0, manifest: ENABLED_CARE_MANIFEST });
+      const use = createCareSummaryAiComposer({ query: h.query, commands: h.service, execute: async () => ({ kind: "REQUEST_REJECTED" }), recordUnsent: hybrid.recordUnsent, now: () => LATER, requestId: () => crypto.randomUUID() });
+      expect(await use.composeCareSummaryWithAi({ snapshotRef: head, locale: "en-SG" })).toEqual({ kind: "UNAVAILABLE" });
+      expect(await outcomes(h)).toEqual([ZERO("PAYLOAD_INVALID")]);
+    });
   });
 });

@@ -12,7 +12,7 @@ import { AI_HYBRID_RUNTIME_BUNDLES } from "./ai-hybrid-runtime-bundles";
 import { createAiHybridTaskService } from "./ai-hybrid-task-service";
 import { PROVIDER_FAILURE_REASONS, type ProviderInvocationResult } from "./ai-provider-port";
 import { AI_TASK_RUNTIME_BUNDLES } from "./ai-runtime-bundles";
-import { AI_SHELL_ROUTE_PATH } from "./ai-shell-route-contract";
+import { AI_SHELL_ROUTE_PATH, shellRouteCallUpperBound } from "./ai-shell-route-contract";
 import * as client from "./browser-shell-client";
 import { BROWSER_SHELL_CLIENT_PROVIDER_MODEL, createAiRemoteUseSession, createBrowserShellClient, INTERIM_FAIL_CLOSED_DISCLOSURE, type AiRemoteUseDisclosure, type BrowserShellFetcher } from "./browser-shell-client";
 import { projectProviderTaskPayload } from "./detached-payload-projector";
@@ -250,8 +250,11 @@ describe("the response: strictly parsed with the shared route contract, closed r
 
   it("maps a typed structural rejection (D6) and a FAILED response with its usage", async () => {
     expect(await invoke(() => json({ kind: "STRUCTURALLY_REJECTED", reason: "SCHEMA_INVALID", repairable: true, retention: "CONFIRMED_NOT_STORED", usage: USAGE }))).toEqual({ kind: "STRUCTURALLY_REJECTED", reason: "SCHEMA_INVALID", repairable: true, usage: USAGE, retention: "CONFIRMED_NOT_STORED" });
-    expect(await invoke(() => json({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: USAGE }))).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: USAGE });
-    expect(await invoke(() => json({ kind: "FAILED", reason: "PROVIDER_TIMEOUT" }))).toEqual({ kind: "FAILED", reason: "PROVIDER_TIMEOUT" });
+    // Packet 11C Addendum C (C5): a FAILED body's usage names its basis (reported, or the route's pre-send upper bound); passed on as is.
+    expect(await invoke(() => json({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { ...USAGE, basis: "REPORTED" } }))).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { ...USAGE, basis: "REPORTED" } });
+    expect(await invoke(() => json({ kind: "FAILED", reason: "PROVIDER_TIMEOUT", usage: { ...USAGE, basis: "UPPER_BOUND" } }))).toEqual({ kind: "FAILED", reason: "PROVIDER_TIMEOUT", usage: { ...USAGE, basis: "UPPER_BOUND" } });
+    // A FAILED the route decided before any provider call carries no usage: nothing was billed.
+    expect(await invoke(() => json({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED" }))).toEqual({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED" });
   });
 
   it.each([["TASK_DISABLED"], ["PROFILE_NOT_PERMITTED"], ["PAYLOAD_INVALID"], ["REQUEST_CANCELLED"], ["BUDGET_EXCEEDED"]])("maps the route reason %s, which is not a provider failure reason, to PROVIDER_FAILED", async (reason) => {
@@ -277,9 +280,15 @@ describe("the response: strictly parsed with the shared route contract, closed r
     ["a FAILED with an unknown reason", () => json({ kind: "FAILED", reason: SENTINEL }), "PROVIDER_FAILED"],
     ["a FAILED with a diagnostic", () => json({ kind: "FAILED", reason: "PROVIDER_FAILED", diagnostic: SENTINEL }), "PROVIDER_FAILED"],
     ["an oversize body", () => json({ kind: "FAILED", reason: "PROVIDER_FAILED", padding: "x".repeat(70_000) }), "PROVIDER_FAILED"],
-  ])("%s is a closed %s with no technical text", async (_label, response, reason) => {
+    ["a FAILED with usage but no basis", () => json({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: USAGE }), "PROVIDER_FAILED"],
+    ["a pre-call FAILED with usage", () => json({ kind: "FAILED", reason: "PAYLOAD_INVALID", usage: { ...USAGE, basis: "REPORTED" } }), "PROVIDER_FAILED"],
+  ])("%s is a closed %s with no technical text", async (label, response, reason) => {
     const result = await invoke(response);
-    expect(result).toEqual({ kind: "FAILED", reason });
+    // Packet 11C Addendum C (C5): a 4xx is the route's own refusal before any provider call (nothing billed, no usage). Any other answer
+    // without a readable route usage followed a POST the route may have turned into a billed call: the client counts the request's
+    // pre-send upper bound (basis UPPER_BOUND), never zero.
+    const refusedByRoute = /\b4\d\d\b/.test(label);
+    expect(result).toEqual(refusedByRoute ? { kind: "FAILED", reason } : { kind: "FAILED", reason, usage: shellRouteCallUpperBound(REQUEST()) });
     expect(JSON.stringify(result)).not.toContain(SENTINEL);
   });
 
@@ -287,11 +296,18 @@ describe("the response: strictly parsed with the shared route contract, closed r
     ["a network error", async () => Promise.reject(new TypeError(`Failed to fetch ${SENTINEL}`))],
     ["a synchronous throw", () => { throw new Error(SENTINEL); }],
     ["a body that cannot be read", async () => new Response(new ReadableStream({ start: (c) => c.error(new Error(SENTINEL)) }), { headers: { "content-type": "application/json" } })],
-  ])("%s is a closed TRANSPORT_FAILED, never retried", async (_label, fetcher) => {
+  ])("%s is a closed TRANSPORT_FAILED with the pre-send upper bound (C5), never retried", async (_label, fetcher) => {
     const spy = vi.fn(fetcher);
     const result = await createBrowserShellClient({ disclosure: ACCEPTED, fetcher: spy }).invoke(REQUEST(), signal());
-    expect(result).toEqual({ kind: "FAILED", reason: "TRANSPORT_FAILED" });
+    expect(result).toEqual({ kind: "FAILED", reason: "TRANSPORT_FAILED", usage: shellRouteCallUpperBound(REQUEST()) });
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("C5: a request refused or not accepted before any POST carries no usage (nothing sent)", async () => {
+    const fetcher = answering(() => json({}));
+    expect(await createBrowserShellClient({ disclosure: INTERIM_FAIL_CLOSED_DISCLOSURE, fetcher }).invoke(REQUEST(), signal())).toEqual({ kind: "FAILED", reason: "MISSING_CONFIGURATION" });
+    expect(await createBrowserShellClient({ disclosure: ACCEPTED, fetcher }).invoke({ ...REQUEST(), facts: [] } as never, signal())).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED" });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });
 
@@ -356,9 +372,10 @@ describe("the client under the hybrid service", () => {
   });
 
   it("a route FAILED that carries usage (a billed response refused for retention) is counted in the audit row", async () => {
-    const run = service({ fetcher: answering(() => json({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: USAGE })) });
+    const run = service({ fetcher: answering(() => json({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { ...USAGE, basis: "REPORTED" } })) });
     expect(await run.hybrid.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", reason: "PROVIDER_FAILED" });
     expect(run.rows[0]!.measurements).toMatchObject(USAGE);
+    expect(run.rows[0]).toMatchObject({ auditSchemaVersion: "ai-invocation-audit.11c.2", usageBasis: "REPORTED" });
   });
 
   it("the bundle's per-call timeout aborts the fetch, and a late answer is never used", async () => {

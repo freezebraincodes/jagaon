@@ -1,4 +1,5 @@
 import type { AiProviderPort, AiShellProviderPort } from "@/application/ai/ai-provider-port";
+import { shellCallUpperBound } from "@/application/ai/ai-shell-route-contract";
 import { createResponsesProvider, createShellResponsesProvider, type ResponsesProviderConfig, type ResponsesProviderProfile } from "@/ai/kie/kie-responses-provider";
 import { deepSeekCostMicroUsd, DEEPSEEK_RESPONSES_URL } from "./deepseek-catalogue";
 
@@ -18,6 +19,12 @@ export const DEEPSEEK_RESPONSES_PROFILE: ResponsesProviderProfile = Object.freez
   providerKey: "deepseek",
   endpointLayouts: Object.freeze({ [DEEPSEEK_RESPONSES_URL]: "INSTRUCTIONS_FIELD" as const }),
   spend: (usage) => ({ credits: null, costMicroUsd: deepSeekCostMicroUsd(usage.inputTokens, usage.outputTokens) }),
+  // Packet 11C Addendum C (C5): the shared pre-send upper bound of one shell call with this exact body (the evaluation tracer's
+  // estimateMaxUsd, moved into ai-shell-route-contract.ts), counted when a transmitted call's usage is missing or unreadable.
+  upperBound: (bodyByteCount, task) => {
+    const { inputTokens, outputTokens, costMicroUsd } = shellCallUpperBound(bodyByteCount, task);
+    return { inputTokens, outputTokens, costMicroUsd };
+  },
 });
 
 export function createDeepSeekResponsesProvider(config: ResponsesProviderConfig): AiProviderPort {

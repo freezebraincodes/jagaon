@@ -49,6 +49,11 @@ export type PatternExplainerPort = {
   disclosureRequired?(): boolean;
   /** Packet 11C B3: records this app session's acceptance (the disclosure's primary action only). */
   acceptDisclosure?(): void;
+  /**
+   * Packet 11C Addendum C (C5): the disclosure the screen showed for an explicit request closed without the patient's decision (view,
+   * period or locale change, or the screen closed): that moot request's one audit row. Nothing is sent.
+   */
+  disclosureClosed?(input: { locale: SupportedLocale }): Promise<void>;
 };
 
 type Props = {

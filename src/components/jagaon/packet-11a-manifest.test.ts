@@ -231,8 +231,21 @@ describe("Packet 11A scope", () => {
     // unchanged, to the shared ai-call-support module, so the legacy service exports only its factory.
     expect(exportsOf(service)).toEqual(["createAiTaskService"]);
     // Packet 11C B3 (deliberate): the remote-use decision moved here from the B2b client, shared by the hybrid service and the client.
-    expect(exportsOf(callSupport)).toEqual(["NO_USAGE", "addUsage", "buildAuditRow", "callOnce", "decideRemoteUse"]);
-    expect(exportsOf(shellRouteContract)).toEqual(["AI_SHELL_MAX_BODY_BYTES", "AI_SHELL_ROUTE_PATH", "aiShellRouteResponseSchema"]);
+    // Packet 11C Addendum C, C5 (deliberate): plus the conservative per-attempt usage count.
+    expect(exportsOf(callSupport)).toEqual(["NO_USAGE", "addAttemptUsage", "addUsage", "buildAuditRow", "callOnce", "decideRemoteUse"]);
+    // Packet 11C Addendum C, C5 (deliberate): plus the shared pre-send upper bound of one shell call (prices, margin, body overhead, the
+    // exact-body and the route-request bounds) and the FAILED reasons that may carry usage. Browser-safe: no credential, prompt or network.
+    expect(exportsOf(shellRouteContract)).toEqual([
+      "AI_SHELL_INPUT_FRAMING_MARGIN_TOKENS",
+      "AI_SHELL_MAX_BODY_BYTES",
+      "AI_SHELL_PROVIDER_BODY_OVERHEAD_MAX_BYTES",
+      "AI_SHELL_ROUTE_PATH",
+      "AI_SHELL_ROUTE_PEAK_USD_PER_MILLION",
+      "AI_SHELL_ROUTE_POST_CALL_FAILURE_REASONS",
+      "aiShellRouteResponseSchema",
+      "shellCallUpperBound",
+      "shellRouteCallUpperBound",
+    ]);
     // Packet 11C B2b: no production module exports a disclosure that accepts remote use by itself. Packet 11C B3 (deliberate retarget):
     // the session disclosure accepts only after its accept(), which only the disclosure dialog's primary action calls (pinned below).
     expect(exportsOf(browserShellClient)).toEqual(["BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createAiRemoteUseSession", "createBrowserShellClient"]);
@@ -280,8 +293,10 @@ describe("Packet 11A scope", () => {
       if (!file.startsWith("src/ai/kie/") && !file.startsWith("src/app/api/ai/")) expect(source, file).not.toMatch(/KIE_API_KEY/);
     }
     // Packet 11C B2a (deliberate retarget): the value-blind shell route is added beside the retired legacy task route.
+    // Packet 11C Addendum C, C5 (deliberate): plus one test-only file (the route's re-parse usage path, isolated for its module mock).
     expect(walk("src/app/api").filter((file) => /(^|\/)ai(\/|-)/i.test(file))).toEqual([
       "src/app/api/ai/shell/ai-shell-handler.ts",
+      "src/app/api/ai/shell/route-reparse-usage.test.ts",
       "src/app/api/ai/shell/route.test.ts",
       "src/app/api/ai/shell/route.ts",
       "src/app/api/ai/task/ai-task-handler.ts",
