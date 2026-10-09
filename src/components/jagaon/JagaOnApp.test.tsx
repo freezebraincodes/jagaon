@@ -1166,6 +1166,45 @@ describe("durable local-state cleanup across app instances (Corrective Pass C)",
     expect(dev.disk.marker).toBeNull();
   });
 
+  /**
+   * Packet 11C C7 finding D1 (fix round 1): the language chosen on Welcome is the setup's own locale. The first runtime's stored locale
+   * (en-SG here) never replaces it, whether the runtime opens after the prepared setup finished (a) or while Welcome is still shown (b).
+   */
+  it("D1 (a): zh-SG chosen on Welcome stays zh-SG when the first runtime opens after the prepared setup finished", async () => {
+    const zh = getMessages("zh-SG");
+    const dev = device(false);
+    dev.holdOpen();
+    mount(dev, ownerStorage({}, false), ownerStorage({}, false));
+    await welcome();
+    fireEvent.click(screen.getByRole("radio", { name: en.settings.chinese }));
+    fireEvent.click(await screen.findByRole("button", { name: zh.onboarding.usePrepared }));
+    await screen.findByRole("button", { name: zh.today.recordReading });
+    dev.releaseOpen();
+    await waitFor(() => expect(dev.runtimeFactory).toHaveBeenCalled());
+    await waitFor(() => expect(dev.disk.exists).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole("button", { name: zh.today.recordReading })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: en.today.recordReading })).toBeNull();
+    expect(document.documentElement.lang).toBe("zh-SG");
+  });
+
+  it("D1 (b): zh-SG chosen on Welcome stays zh-SG when the first runtime opens while Welcome is still shown", async () => {
+    const zh = getMessages("zh-SG");
+    const dev = device(false);
+    dev.holdOpen();
+    mount(dev, ownerStorage({}, false), ownerStorage({}, false));
+    await welcome();
+    fireEvent.click(screen.getByRole("radio", { name: en.settings.chinese }));
+    await screen.findByRole("heading", { level: 1, name: zh.onboarding.welcomeTitle });
+    dev.releaseOpen();
+    await waitFor(() => expect(dev.runtimeFactory).toHaveBeenCalled());
+    await waitFor(() => expect(dev.disk.exists).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole("heading", { level: 1, name: zh.onboarding.welcomeTitle })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: zh.onboarding.usePrepared })).toBeInTheDocument();
+    expect(document.documentElement.lang).toBe("zh-SG");
+  });
+
   it("E: a successful delete-all with complete cleanup leaves no marker", async () => {
     const dev = device(true);
     const onboarding = ownerStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(prepared) }, false);
@@ -1286,6 +1325,16 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
  * acceptance): an acceptance covers the one explicit request it was given for; every new request asks again; nothing is persisted. Activated behaviour only through an injected factory that adds a test manifest and a fake route
  * to the real browser wiring; the shipped app never shows the dialog.
  */
+/**
+ * Owner UI decision U03 (2026-10-09): while the disclosure shows the demo passcode field, its primary action needs non-whitespace input,
+ * so the activated tests fill a test-only value first (only when the field is shown), then accept.
+ */
+function acceptDisclosure(dialog: HTMLElement, confirm: string) {
+  const field = within(dialog).queryByLabelText(getMessages("en-SG").aiAccess.passcodeLabel);
+  if (field) fireEvent.change(field, { target: { value: "TEST-ONLY-passcode-value" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: confirm }));
+}
+
 describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
   const originalIndexedDB = Dexie.dependencies.indexedDB;
   const originalIDBKeyRange = Dexie.dependencies.IDBKeyRange;
@@ -1401,7 +1450,7 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
     const app = await activatedApp();
     const { unmount } = render(<JagaOnApp {...app.props} />);
     fireEvent.click(await toHistoryAction());
-    fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.pattern.confirm }));
+    acceptDisclosure(await screen.findByRole("dialog", { name: en.ai.remoteTitle }), en.ai.pattern.confirm);
     const panel = await screen.findByRole("region", { name: en.history.explanation.title });
     await waitFor(() => expect(within(panel).getByText(en.history.explanation.aiLabel)).toBeInTheDocument());
     expect(app.fetcher).toHaveBeenCalledTimes(1);
@@ -1413,7 +1462,7 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
     fireEvent.click(await toHistoryAction());
     const again = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
     expect(app.fetcher).toHaveBeenCalledTimes(1);
-    fireEvent.click(within(again).getByRole("button", { name: en.ai.pattern.confirm }));
+    acceptDisclosure(again, en.ai.pattern.confirm);
     await waitFor(() => expect(app.fetcher).toHaveBeenCalledTimes(2));
 
     // A reload: the disclosure is asked again before any POST (nothing is persisted).
@@ -1824,7 +1873,7 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     // The disclosure is accepted for one history request.
     fireEvent.click(within(await screen.findByRole("navigation")).getByRole("button", { name: en.shared.navHistory }));
     fireEvent.click(await screen.findByRole("button", { name: en.history.explanation.action }));
-    fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.pattern.confirm }));
+    acceptDisclosure(await screen.findByRole("dialog", { name: en.ai.remoteTitle }), en.ai.pattern.confirm);
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navToday }));
 
@@ -1835,7 +1884,7 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     fireEvent.click(action);
     const careDialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
     expect(fetcher).toHaveBeenCalledTimes(1);
-    fireEvent.click(within(careDialog).getByRole("button", { name: en.ai.careSummary.confirm }));
+    acceptDisclosure(careDialog, en.ai.careSummary.confirm);
     const region = await screen.findByRole("region", { name: en.ai.careSummary.resultTitle });
     expect(within(region).getByText(en.ai.careSummary.resultBody)).toBeInTheDocument();
     expect(fetcher).toHaveBeenCalledTimes(2);

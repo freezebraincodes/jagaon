@@ -528,6 +528,8 @@ export function JagaOnApp({
   );
 
   const finishOnboarding = useCallback((exit: OnboardingExit) => {
+    // Packet 11C C7 finding D1: the finished setup's locale is the setup's own; a runtime that opens later never replaces it.
+    onboardingLocaleRef.current = true;
     setOnboarding(exit.state);
     setPhase({ kind: "APP" });
     setStack(
@@ -1015,7 +1017,11 @@ export function JagaOnApp({
         key={phase.initial?.updatedAt ?? "fresh"}
         messages={messages}
         locale={locale}
-        onLocaleChange={setLocale}
+        onLocaleChange={(next) => {
+          // Packet 11C C7 finding D1: a language chosen during setup is the setup's own; a runtime that opens meanwhile keeps it.
+          onboardingLocaleRef.current = true;
+          setLocale(next);
+        }}
         repository={repository}
         initialState={phase.initial}
         onExit={(exit) => {
