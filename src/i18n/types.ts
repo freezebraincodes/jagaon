@@ -947,13 +947,23 @@ export type AiAccessMessages = {
 };
 
 /**
- * Packet 11C Addendum C, Task C2 (ai-wording-setting.11c.1): the "Keep wording on this device" setting on the More screen (hybrid spec
- * D11). `keepOnDeviceLabel` en is fixed by the spec; the explanatory line and both zh strings (您) are new candidates. Human acceptance
- * pending for every string and for the placement. Kept outside the approved groups so their rows stay byte-identical.
+ * Packet 11C Addendum C, Task C2: the "Keep wording on this device" setting on the More screen (hybrid spec D11). ai-wording-setting.11c.2:
+ * `keepOnDeviceLabel` en is fixed by the spec; the zh label (U04) and both explanatory lines (U05) are owner-decided wording (owner UI
+ * decisions 2026-10-09, owner-ui-decisions-2026-10-09.md), not APPROVED_PACKET_11 rows. Kept outside the approved groups so their rows
+ * stay byte-identical.
  */
 export type AiWordingMessages = {
   keepOnDeviceLabel: string;
   keepOnDeviceBody: string;
+};
+
+/**
+ * Owner UI decision U12 (ai-history-fallback.11c.1; owner-ui-decisions-2026-10-09.md, verbatim; owner-decided, not APPROVED_PACKET_11):
+ * the short history line shown with the standard wording after a remote request was actually attempted (POSTed) and then failed or was
+ * refused. Never for ordinary deterministic use, private mode, or a request that was not attempted. Kept outside the approved groups.
+ */
+export type AiHistoryFallbackMessages = {
+  unavailableAfterRequest: string;
 };
 
 export type AppMessages = {
@@ -963,8 +973,10 @@ export type AppMessages = {
   ai: AiMessages;
   /** Packet 11C Addendum C (C6): the demo passcode field of the AI disclosure (human acceptance pending). */
   aiAccess: AiAccessMessages;
-  /** Packet 11C Addendum C (C2): the "Keep wording on this device" setting (human acceptance pending). */
+  /** Packet 11C Addendum C (C2): the "Keep wording on this device" setting (ai-wording-setting.11c.2; owner-decided U04/U05). */
   aiWording: AiWordingMessages;
+  /** Owner UI decision U12: the history fallback line after an attempted remote request (ai-history-fallback.11c.1). */
+  aiHistoryFallback: AiHistoryFallbackMessages;
   shared: SharedMessages;
   today: TodayMessages;
   glucose: GlucoseMessages;

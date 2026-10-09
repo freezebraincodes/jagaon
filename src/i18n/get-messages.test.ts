@@ -109,29 +109,35 @@ describe("getMessages", () => {
 });
 
 /**
- * Packet 11C Addendum C, Task C2 (hybrid spec D11): the "Keep wording on this device" setting copy (ai-wording-setting.11c.1). The
- * English label is fixed by the spec; the explanatory line and the zh label and line (您) are new candidates, human acceptance pending.
- * The group sits outside every approved group, so approved rows stay byte-identical.
+ * Packet 11C Addendum C, Task C2 (hybrid spec D11): the "Keep wording on this device" setting copy. ai-wording-setting.11c.2 (owner UI
+ * decisions U04 and U05, 2026-10-09, owner-ui-decisions-2026-10-09.md, verbatim): the zh label and both explanatory lines are the
+ * owner's own wording; the English label is still the spec's (D11). Owner-decided strings, not APPROVED_PACKET_11 rows. The group sits
+ * outside every approved group, so approved rows stay byte-identical.
  */
-describe("Packet 11C C2: Keep wording on this device copy (human acceptance pending)", () => {
-  it("ships exactly the spec's English label, the candidate line and the zh candidates", () => {
+describe("Packet 11C C2: Keep wording on this device copy (ai-wording-setting.11c.2, owner-decided U04/U05)", () => {
+  it("ships exactly the spec's English label and the owner's U04/U05 strings, byte for byte", () => {
     expect(getMessages("en-SG").aiWording).toEqual({
       keepOnDeviceLabel: "Keep wording on this device",
-      keepOnDeviceBody: "When on, JagaOn uses its standard wording and never sends an AI request.",
+      keepOnDeviceBody: "When on, pattern explanations and visit summaries use JagaOn’s standard wording without requesting DeepSeek wording. This setting does not control voice transcription.",
     });
     expect(getMessages("zh-SG").aiWording).toEqual({
-      keepOnDeviceLabel: "措辞只在这部装置上生成",
-      keepOnDeviceBody: "开启后，JagaOn 会为您使用标准措辞，不会发送任何 AI 请求。",
+      keepOnDeviceLabel: "仅在此设备上生成措辞",
+      keepOnDeviceBody: "开启后，比较说明和就诊摘要使用 JagaOn 的标准措辞，不向 DeepSeek 请求措辞建议。此设置不控制语音转写。",
     });
   });
 
-  // Fix round 1 (M-6): 这部装置 follows the Packet 10 data copy; the main catalogue uses 此设备. The wording is pending human review
-  // (an alternative candidate is listed in the C2 report), so this only pins the current candidate.
-  it("zh uses 您 (never 你) and full-width punctuation; the current candidate label says 这部装置", () => {
+  it("U12: the history fallback line after an attempted remote request (ai-history-fallback.11c.1, owner-decided), byte for byte", () => {
+    expect(getMessages("en-SG").aiHistoryFallback).toEqual({ unavailableAfterRequest: "AI wording is unavailable. Your records are unchanged; standard wording is shown." });
+    expect(getMessages("zh-SG").aiHistoryFallback).toEqual({ unavailableAfterRequest: "AI 措辞暂时无法使用。您的记录没有改变；现显示标准措辞。" });
+    // Outside every approved group, so approved rows (and the frozen disclosure rows) stay byte-identical.
+    for (const locale of ["en-SG", "zh-SG"] as const) expect(Object.keys(getMessages(locale).ai)).not.toContain("unavailableAfterRequest");
+  });
+
+  it("zh uses full-width punctuation and never 你; en uses the curly apostrophe", () => {
     const zh = getMessages("zh-SG").aiWording;
-    expect(zh.keepOnDeviceBody).toContain("您");
     expect(Object.values(zh).join("")).not.toMatch(/你|[,.;:!?]/);
-    expect(zh.keepOnDeviceLabel).toContain("这部装置");
+    expect(getMessages("en-SG").aiWording.keepOnDeviceBody).toContain("JagaOn’s");
+    expect(getMessages("en-SG").aiWording.keepOnDeviceBody).not.toContain("JagaOn's");
   });
 
   it("adds no key to an approved group", () => {

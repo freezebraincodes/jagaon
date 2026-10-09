@@ -41,11 +41,16 @@ export const zhSGMessages: AppMessages = {
   aiAccess: {
     passcodeLabel: "演示通行码",
   },
-  // ai-wording-setting.11c.1 (Packet 11C Addendum C, C2): new candidate wording (您 register, full-width punctuation, the catalogue's
-  // 这部装置 for "this device"). Human acceptance pending.
+  // ai-wording-setting.11c.2 (Packet 11C Addendum C, C2): owner-decided wording (owner UI decisions U04 label and U05 line, 2026-10-09,
+  // owner-ui-decisions-2026-10-09.md, verbatim; replaces the 11c.1 candidates). Not APPROVED_PACKET_11 rows.
   aiWording: {
-    keepOnDeviceLabel: "措辞只在这部装置上生成",
-    keepOnDeviceBody: "开启后，JagaOn 会为您使用标准措辞，不会发送任何 AI 请求。",
+    keepOnDeviceLabel: "仅在此设备上生成措辞",
+    keepOnDeviceBody: "开启后，比较说明和就诊摘要使用 JagaOn 的标准措辞，不向 DeepSeek 请求措辞建议。此设置不控制语音转写。",
+  },
+  // ai-history-fallback.11c.1: owner-decided wording (owner UI decision U12, 2026-10-09, owner-ui-decisions-2026-10-09.md, verbatim). Not
+  // an APPROVED_PACKET_11 row.
+  aiHistoryFallback: {
+    unavailableAfterRequest: "AI 措辞暂时无法使用。您的记录没有改变；现显示标准措辞。",
   },
   shared: {
     appName: "JagaOn",

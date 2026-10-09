@@ -39,11 +39,17 @@ export const enSGMessages: AppMessages = {
   aiAccess: {
     passcodeLabel: "Demo passcode",
   },
-  // ai-wording-setting.11c.1 (Packet 11C Addendum C, C2): the label is fixed by the hybrid spec (D11); the line is new wording. Human
-  // acceptance pending.
+  // ai-wording-setting.11c.2 (Packet 11C Addendum C, C2): the label is fixed by the hybrid spec (D11). The line is owner-decided wording
+  // (owner UI decision U05, 2026-10-09, owner-ui-decisions-2026-10-09.md, verbatim; replaces the 11c.1 candidate). Not an
+  // APPROVED_PACKET_11 row.
   aiWording: {
     keepOnDeviceLabel: "Keep wording on this device",
-    keepOnDeviceBody: "When on, JagaOn uses its standard wording and never sends an AI request.",
+    keepOnDeviceBody: "When on, pattern explanations and visit summaries use JagaOn’s standard wording without requesting DeepSeek wording. This setting does not control voice transcription.",
+  },
+  // ai-history-fallback.11c.1: owner-decided wording (owner UI decision U12, 2026-10-09, owner-ui-decisions-2026-10-09.md, verbatim). Not
+  // an APPROVED_PACKET_11 row.
+  aiHistoryFallback: {
+    unavailableAfterRequest: "AI wording is unavailable. Your records are unchanged; standard wording is shown.",
   },
   shared: {
     appName: "JagaOn",
