@@ -91,6 +91,10 @@ export type TodayMessages = {
   noMedicinesNotMissed: string;
   noMedicinesNote: string;
   greetingNoName: string;
+  /** Finding T-1: the measurement/event time was not given (shown only for an UNKNOWN occurrence, never as missing or missed). */
+  timeNotRecorded: string;
+  /** Finding T-1: the recording timestamp (recordedAt), labelled as such; never presented as the measurement/event time. */
+  enteredAt: (time: string) => string;
 };
 
 /** Glucose entry and time-correction messages (frames 02–03). */

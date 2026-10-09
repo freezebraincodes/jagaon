@@ -5,7 +5,8 @@ import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-
 import type { AppMessages } from "@/i18n/types";
 import type { ScreenId } from "../screen-manifest";
 import { TodayScreen } from "./TodayScreen";
-import type { TodayJournalViewModel } from "@/application/journal/journal-contracts";
+import type { TodayJournalEntry, TodayJournalViewModel } from "@/application/journal/journal-contracts";
+import { formatSingaporeDateTime, formatSingaporeTime } from "../journal/singapore-time";
 
 // 12:00 in Singapore on the same day as the fixture reading (07:48 SGT).
 const NOW = new Date("2026-10-02T04:00:00Z");
@@ -405,5 +406,139 @@ describe("TodayScreen", () => {
       <TodayScreen messages={messages} locale="en-SG" fixture={freeTextOnly} journal={journal} navigate={vi.fn()} now={NOW} />,
     );
     expect(queryByRole("button", { name: messages.today.addRecord })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Finding T-1 (owner-approved display correction): the measurement/event time and the recording time stay separate. An UNKNOWN occurrence
+ * (`occurrenceSortInstant: null`, as the voice save writes it) is never shown at `recordedAt`, never placed in a Morning/Afternoon/Evening
+ * slot, never counted as stamped and never called missing or missed; it is labelled "Time not recorded · Entered at {time}".
+ */
+describe.each(["en-SG", "zh-SG"] as const)("TodayScreen unknown occurrence time (T-1) %s", (locale) => {
+  afterEach(() => cleanup());
+  const messages = getMessages(locale);
+  const fixture = createDemoScenarioFixture();
+  // 00:45 on 2 Oct in Singapore: entered just after midnight, so the old fallback stamped it into Morning at 12:45 am.
+  const ENTERED = "2026-10-01T16:45:00Z";
+  const unknownTimeText = (when: string) => `${messages.today.timeNotRecorded} · ${messages.today.enteredAt(when)}`;
+  const unknownReading: TodayJournalEntry = {
+    recordId: "00000000-0000-4000-8000-000000000401" as never,
+    revisionId: "00000000-0000-4000-8000-000000000402" as never,
+    recordType: "GLUCOSE_READING",
+    revisionNumber: 1,
+    recordedAt: ENTERED as never,
+    occurrenceSortInstant: null,
+    summary: "6.8 mmol/L",
+    displayValue: "6.8",
+    displayUnit: "mmol/L",
+    displayContext: "UNSPECIFIED",
+  };
+  const knownReading = journal.entries[0]!;
+
+  function renderToday(entries: TodayJournalEntry[], extra?: { recordDeletion?: Parameters<typeof TodayScreen>[0]["recordDeletion"]; now?: Date }) {
+    return render(
+      <TodayScreen
+        messages={messages}
+        locale={locale}
+        fixture={fixture}
+        journal={{ unavailable: false, entries }}
+        navigate={vi.fn()}
+        now={extra?.now ?? NOW}
+        recordDeletion={extra?.recordDeletion}
+      />,
+    );
+  }
+  const bookletSlots = (rendered: ReturnType<typeof renderToday>) =>
+    within(rendered.container.querySelector(".booklet-slots") as HTMLElement).getAllByRole("listitem");
+
+  it("keeps an unknown-time reading visible on its entry day without a slot or a stamp", () => {
+    const rendered = renderToday([unknownReading]);
+    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(0, 3));
+    for (const slot of bookletSlots(rendered)) {
+      expect(slot).toHaveTextContent(messages.today.notRecorded);
+      expect(slot).not.toHaveTextContent("6.8");
+    }
+    const listed = rendered.container.querySelector(".booklet-unknown-time");
+    expect(listed).toHaveTextContent("6.8");
+    expect(listed).toHaveTextContent(unknownTimeText(formatSingaporeTime(locale, ENTERED)));
+    expect((listed?.textContent ?? "").toLowerCase()).not.toMatch(/miss|漏|缺/);
+  });
+
+  it("stamps only the known-time reading when both are present", () => {
+    // Entered at 13:00 Singapore time: the old fallback would have stamped it into Afternoon.
+    const afternoonEntry = { ...unknownReading, recordedAt: "2026-10-02T05:00:00Z" as never };
+    const rendered = renderToday([afternoonEntry, knownReading], { now: new Date("2026-10-02T08:00:00Z") });
+    const slots = bookletSlots(rendered);
+    expect(slots[0]).toHaveTextContent("6.2");
+    expect(slots[1]).toHaveTextContent(messages.today.notRecorded);
+    expect(slots[2]).toHaveTextContent(messages.today.notRecorded);
+    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(1, 3));
+    expect(rendered.container.querySelector(".booklet-unknown-time")).toHaveTextContent(
+      unknownTimeText(formatSingaporeTime(locale, "2026-10-02T05:00:00Z")),
+    );
+  });
+
+  it("shows the latest reading's unknown time as not recorded, with the entry time labelled, and keeps Edit time", () => {
+    const rendered = renderToday([unknownReading]);
+    const meta = rendered.container.querySelector(".reading-meta");
+    expect(meta).toHaveTextContent(unknownTimeText(formatSingaporeTime(locale, ENTERED)));
+    expect(meta?.textContent?.startsWith(messages.today.timeNotRecorded)).toBe(true);
+    expect(rendered.getByRole("button", { name: messages.readingTime.editTime })).toBeInTheDocument();
+  });
+
+  it("shows the entry date with the entry time when an unknown-time reading was entered on another day", () => {
+    const rendered = renderToday([unknownReading], { now: new Date("2026-10-03T04:00:00Z") });
+    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(0, 3));
+    expect(rendered.container.querySelector(".booklet-unknown-time")).toBeNull();
+    expect(rendered.container.querySelector(".reading-meta")).toHaveTextContent(unknownTimeText(formatSingaporeDateTime(locale, ENTERED)));
+  });
+
+  it("leaves a known-time reading exactly as before (regression)", () => {
+    const rendered = renderToday([knownReading]);
+    const meta = rendered.container.querySelector(".reading-meta");
+    expect(meta).toHaveTextContent(formatSingaporeTime(locale, knownReading.occurrenceSortInstant!));
+    expect(meta).not.toHaveTextContent(messages.today.timeNotRecorded);
+    expect(rendered.container.querySelector(".booklet-unknown-time")).toBeNull();
+    expect(bookletSlots(rendered)[0]).toHaveTextContent(formatSingaporeTime(locale, knownReading.occurrenceSortInstant!));
+  });
+
+  it("labels a medicine event with an unknown time as entered, and keeps a known time as recorded", () => {
+    const medicine = (occurrence: string | null, id: string): TodayJournalEntry => ({
+      recordId: `00000000-0000-4000-8000-00000000${id}` as never,
+      revisionId: `00000000-0000-4000-8000-00000001${id}` as never,
+      recordType: "MEDICATION_EVENT",
+      revisionNumber: 1,
+      recordedAt: ENTERED as never,
+      occurrenceSortInstant: occurrence as never,
+      summary: "Medicine",
+      displayContext: fixture.recordedPrescriptions[0]!.medicationRecordId,
+    });
+    const group = (rendered: ReturnType<typeof renderToday>) =>
+      rendered.getByRole("group", { name: fixture.recordedPrescriptions[0]!.displayName });
+
+    const unknown = renderToday([medicine(null, "0501")]);
+    expect(group(unknown)).toHaveTextContent(unknownTimeText(formatSingaporeTime(locale, ENTERED)));
+    expect(group(unknown)).not.toHaveTextContent(messages.shared.recordedAt(formatSingaporeTime(locale, ENTERED)));
+    unknown.unmount();
+
+    const known = renderToday([medicine("2026-10-02T01:00:00Z", "0502")]);
+    expect(group(known)).toHaveTextContent(messages.shared.recordedAt(formatSingaporeTime(locale, "2026-10-02T01:00:00Z")));
+    expect(group(known)).not.toHaveTextContent(messages.today.timeNotRecorded);
+  });
+
+  it("names the unknown time and the entry date-time in the deletion dialog; a known time is unchanged", () => {
+    const port = { prepare: () => new Promise<never>(() => {}), confirm: vi.fn() };
+    const unknown = renderToday([unknownReading], { recordDeletion: port });
+    fireEvent.click(unknown.getByRole("button", { name: messages.packet10.deletion.deleteRecordAction }));
+    expect(unknown.container.ownerDocument.querySelector(".data-plan-meta")).toHaveTextContent(
+      unknownTimeText(formatSingaporeDateTime(locale, ENTERED)),
+    );
+    unknown.unmount();
+
+    const known = renderToday([knownReading], { recordDeletion: port });
+    fireEvent.click(known.getByRole("button", { name: messages.packet10.deletion.deleteRecordAction }));
+    const when = known.container.ownerDocument.querySelector(".data-plan-meta");
+    expect(when).toHaveTextContent(formatSingaporeDateTime(locale, knownReading.occurrenceSortInstant!));
+    expect(when).not.toHaveTextContent(messages.today.timeNotRecorded);
   });
 });

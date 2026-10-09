@@ -157,6 +157,9 @@ export const enSGMessages: AppMessages = {
     noMedicinesNotMissed: "This does not mean medicine was missed.",
     noMedicinesNote: "Shows only medicines you record. The app doesn't decide what to take.",
     greetingNoName: "Hello",
+    // Finding T-1 (owner-approved wording, accepted in owner review 2026-10-10): unknown measurement/event time vs entry time.
+    timeNotRecorded: "Time not recorded",
+    enteredAt: (time) => `Entered at ${time}`,
   },
   glucose: {
     title: "Log glucose reading",

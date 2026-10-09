@@ -157,6 +157,9 @@ export const zhSGMessages: AppMessages = {
     noMedicinesNotMissed: "这不代表漏用了药物。",
     noMedicinesNote: "只显示您记录的药物。应用不会决定要用什么药物。",
     greetingNoName: "您好",
+    // Finding T-1 (owner-approved wording, accepted in owner review 2026-10-10): unknown measurement/event time vs entry time.
+    timeNotRecorded: "时间未记录",
+    enteredAt: (time) => `录入于 ${time}`,
   },
   glucose: {
     title: "记录血糖读数",

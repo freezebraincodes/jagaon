@@ -57,14 +57,24 @@ type TodayScreenProps = {
 type BookletSlot = {
   label: string;
   entry: TodayJournalEntry | null;
+  at: string | null;
 };
 
-function occurrenceOf(entry: TodayJournalEntry): string {
+/**
+ * Finding T-1: the measurement/event time, only when it is known. The recording time (`recordedAt`) is never substituted for it; an
+ * unknown time stays unknown and is labelled "Time not recorded · Entered at {time}".
+ */
+function knownOccurrence(entry: TodayJournalEntry): string | null {
+  return entry.occurrenceSortInstant;
+}
+
+/** Which Singapore day an entry belongs to on Today: its occurrence day, or, for an unknown time, the day it was entered. Never shown as a time. */
+function dayAnchor(entry: TodayJournalEntry): string {
   return entry.occurrenceSortInstant ?? entry.recordedAt;
 }
 
-function slotIndexFor(entry: TodayJournalEntry): number {
-  const hour = singaporeHour(occurrenceOf(entry));
+function slotIndexFor(occurrence: string): number {
+  const hour = singaporeHour(occurrence);
   return hour < 12 ? 0 : hour < 18 ? 1 : 2;
 }
 
@@ -121,23 +131,45 @@ export function TodayScreen({
   const allPens = prescriptions.length > 0 && prescriptions.every((p) => p.catalogueForm === "PRE_FILLED_PEN");
   const canRecordInsulin = prescriptions.some(isDemoInsulinPrescription);
   const todayEntries = journal.entries.filter((entry) =>
-    isSameSingaporeDay(occurrenceOf(entry), now),
+    isSameSingaporeDay(dayAnchor(entry), now),
   );
+  /** "Time not recorded · Entered at {time}": the unrecorded time is the measurement/event time; "Entered at" is the recording time. */
+  const unknownTimeText = (entry: TodayJournalEntry, withDate: boolean) =>
+    `${msg.timeNotRecorded} · ${msg.enteredAt(
+      withDate ? formatSingaporeDateTime(locale, entry.recordedAt) : formatSingaporeTime(locale, entry.recordedAt),
+    )}`;
 
-  // Entries arrive newest first, so the first reading per slot is the latest.
+  // Entries arrive newest first, so the first reading per slot is the latest. Only a known time places a reading in a slot; a reading
+  // with an unknown time is listed under the slots instead and does not count as stamped (finding T-1).
   const slots: BookletSlot[] = [msg.slotMorning, msg.slotAfternoon, msg.slotEvening].map(
-    (label) => ({ label, entry: null }),
+    (label) => ({ label, entry: null, at: null }),
   );
+  const unknownTimeReadings: TodayJournalEntry[] = [];
   for (const entry of todayEntries) {
     if (entry.recordType !== "GLUCOSE_READING") continue;
-    const slot = slots[slotIndexFor(entry)]!;
-    slot.entry ??= entry;
+    const at = knownOccurrence(entry);
+    if (at === null) {
+      unknownTimeReadings.push(entry);
+      continue;
+    }
+    const slot = slots[slotIndexFor(at)]!;
+    if (slot.entry === null) {
+      slot.entry = entry;
+      slot.at = at;
+    }
   }
   const stamped = slots.filter((slot) => slot.entry).length;
 
   const latestGlucose =
     journal.entries.find((entry) => entry.recordType === "GLUCOSE_READING") ?? null;
-  const latestInstant = latestGlucose ? occurrenceOf(latestGlucose) : null;
+  const latestInstant = latestGlucose ? knownOccurrence(latestGlucose) : null;
+  const latestWhen = latestGlucose
+    ? latestInstant
+      ? isSameSingaporeDay(latestInstant, now)
+        ? formatSingaporeTime(locale, latestInstant)
+        : formatSingaporeDateTime(locale, latestInstant)
+      : unknownTimeText(latestGlucose, !isSameSingaporeDay(latestGlucose.recordedAt, now))
+    : null;
   const latestContext = latestGlucose
     ? storedGlucoseContextLabel(messages, latestGlucose.displayContext)
     : null;
@@ -169,7 +201,7 @@ export function TodayScreen({
               className={`booklet-slot ${slot.entry ? "booklet-slot--recorded" : "booklet-slot--empty"}`}
             >
               <span className="booklet-slot-label">{slot.label}</span>
-              {slot.entry ? (
+              {slot.entry && slot.at ? (
                 <>
                   <span className="booklet-slot-value">
                     {slot.entry.displayValue}
@@ -177,7 +209,7 @@ export function TodayScreen({
                   </span>
                   <span className="booklet-slot-detail">
                     {[
-                      formatSingaporeTime(locale, occurrenceOf(slot.entry)),
+                      formatSingaporeTime(locale, slot.at),
                       storedGlucoseContextLabel(messages, slot.entry.displayContext),
                     ]
                       .filter(Boolean)
@@ -193,6 +225,21 @@ export function TodayScreen({
             </li>
           ))}
         </ul>
+        {unknownTimeReadings.length > 0 ? (
+          <ul className="booklet-unknown-time">
+            {unknownTimeReadings.map((entry) => (
+              <li key={entry.recordId} className="booklet-slot-detail">
+                {[
+                  `${messages.glucose.valueLabel} ${entry.displayValue ?? ""} ${entry.displayUnit ?? messages.glucose.unit}`,
+                  unknownTimeText(entry, false),
+                  storedGlucoseContextLabel(messages, entry.displayContext),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <button
           type="button"
           className="btn btn-primary btn-hero record-reading-action"
@@ -208,7 +255,7 @@ export function TodayScreen({
         </button>
       </section>
 
-      {latestGlucose && latestInstant ? (
+      {latestGlucose && latestWhen ? (
         <section className="today-card" aria-labelledby="latest-reading-heading">
           <h2 id="latest-reading-heading" className="eyebrow">
             {msg.latestRecordedReading}
@@ -218,9 +265,7 @@ export function TodayScreen({
             <span className="reading-unit">{latestGlucose.displayUnit ?? messages.glucose.unit}</span>
           </p>
           <p className="reading-meta">
-            {isSameSingaporeDay(latestInstant, now)
-              ? formatSingaporeTime(locale, latestInstant)
-              : formatSingaporeDateTime(locale, latestInstant)}
+            {latestWhen}
             {latestContext ? ` · ${latestContext}` : ""}
           </p>
           <div className="card-links">
@@ -252,7 +297,7 @@ export function TodayScreen({
               port={recordDeletion}
               target={{ recordType: "GLUCOSE_READING", recordId: latestGlucose.recordId }}
               recordLabel={`${messages.glucose.valueLabel} ${latestGlucose.displayValue ?? ""} ${latestGlucose.displayUnit ?? messages.glucose.unit}`.trim()}
-              recordWhen={formatSingaporeDateTime(locale, latestInstant)}
+              recordWhen={latestInstant ? formatSingaporeDateTime(locale, latestInstant) : unknownTimeText(latestGlucose, true)}
               now={() => new Date().toISOString()}
               onClose={() => setDeleting(false)}
               onDeleted={() => {
@@ -292,9 +337,12 @@ export function TodayScreen({
                     entry.recordType === "MEDICATION_EVENT" &&
                     entry.displayContext === prescription.medicationRecordId,
                 );
+                const recordedOccurrence = recorded ? knownOccurrence(recorded) : null;
                 const recordedText = recorded
                   ? (insulinAmountText(messages, recorded) ??
-                    messages.shared.recordedAt(formatSingaporeTime(locale, occurrenceOf(recorded))))
+                    (recordedOccurrence
+                      ? messages.shared.recordedAt(formatSingaporeTime(locale, recordedOccurrence))
+                      : unknownTimeText(recorded, false)))
                   : null;
                 return (
                   <div

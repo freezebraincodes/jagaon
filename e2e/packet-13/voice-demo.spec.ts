@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { DARK_PEN, LOCALES, SCRIPTS, VIEWPORTS, expectNoHorizontalOverflow, pending, savedText, speak, startPreparedProfile, HARNESS_URL } from "./support";
+import { DARK_PEN, LOCALES, SCRIPTS, VIEWPORTS, expectNoHorizontalOverflow, openTab, pending, savedText, speak, startPreparedProfile, HARNESS_URL } from "./support";
 
 /**
  * Packet 13 demo interactions (owner): TRTC transcription (scripted fake here) → multi-fact extraction → unknown-term clarification →
@@ -13,6 +13,9 @@ for (const locale of LOCALES) {
     test("demo 1: one utterance → three separate facts; 'dark pen' clarified and remembered separately; each fact confirmed on its own", async ({ page }) => {
       const m = await startPreparedProfile(page, HARNESS_URL, locale);
       const copy = pending(locale).card;
+      // Finding T-1: the booklet's stamped count before the voice save (the synthetic seed may already stamp known-time readings today).
+      const bookletProgress = page.locator(".booklet-progress");
+      const progressBefore = await bookletProgress.textContent();
       await speak(page, m, SCRIPTS[locale].demo);
       const cards = page.getByRole("article");
       await expect(cards).toHaveCount(3);
@@ -33,6 +36,21 @@ for (const locale of LOCALES) {
       await expect(cards.nth(2).getByText(copy.remembered)).toBeVisible();
       await cards.nth(2).getByRole("button", { name: copy.save }).click();
       await expect(cards.nth(2).getByText(savedText(locale))).toBeVisible();
+
+      // Finding T-1: the spoken reading has no time, so Today lists it as "Time not recorded · Entered at …", not in a Morning/Afternoon/
+      // Evening slot, and the stamped count does not change; the medicine event is labelled the same way. Checked again after a reload.
+      const unknownTime = `${m.today.timeNotRecorded} · ${m.today.enteredAt("")}`;
+      for (const step of ["after save", "after reload"] as const) {
+        if (step === "after save") await openTab(page, m.shared.navToday);
+        else await page.reload();
+        const listed = page.locator(".booklet-unknown-time li");
+        await expect(listed, step).toHaveCount(1);
+        await expect(listed, step).toContainText(`${m.glucose.valueLabel} 6.8`);
+        await expect(listed, step).toContainText(unknownTime);
+        await expect(page.locator(".booklet-slots"), step).not.toContainText(unknownTime);
+        await expect(bookletProgress, step).toHaveText(progressBefore ?? "");
+        await expect(page.locator(".insulin-list"), step).toContainText(unknownTime);
+      }
     });
 
     test("demo 2: after a reload the remembered term is reused with no question; the fact still needs its own Save", async ({ page }) => {
