@@ -43,9 +43,11 @@ type Props = {
 
 /**
  * One opened explanation: `nonce` makes every opening its own request. `locale` is the locale it was opened in (Packet 11C B4a: a
- * locale switch closes it). `declined` marks an opening that followed a cancelled AI disclosure (explained with the standard wording).
+ * locale switch closes it). `decision` (Packet 11C Addendum C, C3) is the patient's answer to the AI disclosure shown for THIS opening
+ * ("DECLINED": Cancel or Escape, explained with the standard wording; "ACCEPTED": the dialog's primary action), or null when no
+ * disclosure was shown. It travels with this one request only.
  */
-type OpenExplanation = { factId: string; nonce: number; locale: SupportedLocale; declined: boolean };
+type OpenExplanation = { factId: string; nonce: number; locale: SupportedLocale; decision: "ACCEPTED" | "DECLINED" | null };
 /**
  * Packet 11C B3: the AI disclosure shown for one comparison, valid only for the view load and locale it was asked in. `locale` (Packet
  * 11C Addendum C, C5): the locale of the explicit request it belongs to, named by its audit row if it closes as moot.
@@ -178,8 +180,10 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
   useEffect(() => {
     if (!explainer || !opened || opened.locale !== locale) return;
     const key = `${viewToken}|${opened.factId}|${opened.nonce}|${locale}`;
+    // Packet 11C Addendum C (C3): this request's own signal is its decision token; aborting it (a new opening, a view, period or locale
+    // change, unmount) ends the decision, and the decision is never reused for another request.
     const controller = new AbortController();
-    const input = opened.declined ? { factId: opened.factId, locale, disclosure: "DECLINED" as const } : { factId: opened.factId, locale };
+    const input = opened.decision ? { factId: opened.factId, locale, disclosure: opened.decision } : { factId: opened.factId, locale };
     explainer.explain(input, controller.signal).then(
       (explanation) => {
         if (!controller.signal.aborted) setAnswer({ key, explanation });
@@ -222,15 +226,26 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
 
   /**
    * Packet 11C Addendum B, Task B3: the AI disclosure is decided here, on the patient's action and BEFORE the explainer is called (so
-   * before the hybrid service and its timers), only when the explainer says the next explanation would use the remote route and this
-   * app session has not accepted it (never while NOT_ACTIVATED). Accepting records the session's acceptance and opens the explanation;
-   * Cancel or Escape opens it too, composed deterministically with nothing sent. A view reload, period change or locale change while
-   * it is open makes the request moot: the disclosure closes, nothing is explained, and it does not come back.
+   * before the hybrid service and its timers), never while NOT_ACTIVATED. Cancel or Escape opens the explanation composed
+   * deterministically with nothing sent. A view reload, period change or locale change while it is open makes the request moot: the
+   * disclosure closes, nothing is explained, and it does not come back.
+   * Packet 11C Addendum C, Task C3 (owner decision: acceptance is per explicit request): the dialog is shown for THIS request only when
+   * the explainer says a remote attempt could actually happen for it (its own class qualified, activated, online). Accepting opens the
+   * explanation with that one request's acceptance; nothing is remembered, so the next action (another comparison, the same one again,
+   * after a locale, period or view change) asks again.
    */
   const [pendingDisclosure, setPendingDisclosure] = useState<PendingDisclosure | null>(null);
   const disclosureKey = `${viewToken}|${locale}`;
   if (pendingDisclosure !== null && pendingDisclosure.key !== disclosureKey) setPendingDisclosure(null);
   const shownDisclosure = explainer && pendingDisclosure?.key === disclosureKey ? pendingDisclosure : null;
+
+  /**
+   * Packet 11C Addendum C, Task C3: the action the patient just took, waiting for its per-request disclosure check (one local read). A
+   * newer action, a view reload, a period or locale change or the screen closing supersedes a check still in flight: its answer is
+   * ignored, so nothing opens and no dialog appears by itself.
+   */
+  const [pendingCheck, setPendingCheck] = useState<PendingDisclosure | null>(null);
+  if (pendingCheck !== null && pendingCheck.key !== disclosureKey) setPendingCheck(null);
 
   /**
    * Packet 11C Addendum C, Task C5: the request behind a disclosure that closes without the patient's decision (a view reload, period or
@@ -261,49 +276,104 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
   }, [shownDisclosure, explainer]);
 
   const openExplanation = useCallback(
-    (factId: string, declined = false) => {
+    (factId: string, decision: "ACCEPTED" | "DECLINED" | null = null) => {
       const nonce = openings + 1;
       setOpenings(nonce);
-      setOpened({ factId, nonce, locale, declined });
+      setOpened({ factId, nonce, locale, decision });
     },
     [openings, locale],
   );
 
+  /**
+   * Packet 11C Addendum C (C3): the check is asked for THIS request (this comparison, in this locale); a failure counts as "not required".
+   * Its effect is cleaned up (so its answer no longer opens anything) when a newer action replaces it, the key changes or the screen
+   * closes. C3 fix round 1: the click was an explicit request, so a superseded check still ends in exactly ONE zero-attempt audit row,
+   * decided by what the check answers: DISCLOSURE_CLOSED_MOOT when a disclosure would have been needed (the request closed without the
+   * patient's decision, as for a moot dialog), otherwise REQUEST_CANCELLED (written by the use case for a request whose signal is already
+   * aborted: no read, no send). A rerun of the same check (a new explainer identity or a development StrictMode remount) is not a
+   * supersession: only the run that acts on a check, or the one that reports it, handles it, and each check is handled once.
+   */
+  const handledChecks = useRef(new WeakSet<PendingDisclosure>());
+  const liveCheck = useRef<PendingDisclosure | null>(null);
+  useEffect(() => {
+    if (!pendingCheck || !explainer) return;
+    const check = pendingCheck;
+    const handled = handledChecks.current;
+    const live = liveCheck;
+    const port = explainer;
+    const required = port.disclosureRequired;
+    live.current = check;
+    let active = true;
+    void Promise.resolve()
+      .then(() => (required ? required.call(port, { factId: check.factId, locale: check.locale }) : false))
+      .then(
+        (value) => value === true,
+        () => false,
+      )
+      .then((needed) => {
+        if (handled.has(check)) return;
+        if (active) {
+          handled.add(check);
+          setPendingCheck(null);
+          if (needed) setPendingDisclosure(check);
+          else openExplanation(check.factId);
+          return;
+        }
+        // Another run of this same check is still live and will act on it.
+        if (live.current === check) return;
+        handled.add(check);
+        if (needed) return void Promise.resolve().then(() => port.disclosureClosed?.({ locale: check.locale })).catch(() => undefined);
+        const cancelled = new AbortController();
+        cancelled.abort();
+        return void Promise.resolve().then(() => port.explain({ factId: check.factId, locale: check.locale }, cancelled.signal)).catch(() => undefined);
+      });
+    return () => {
+      active = false;
+      if (live.current === check) live.current = null;
+    };
+  }, [pendingCheck, explainer, openExplanation]);
+
   const toggleExplanation = useCallback(
     (factId: string) => {
+      setPendingCheck(null);
       if (opened?.factId === factId) {
         setOpened(null);
         return;
       }
-      if (explainer?.disclosureRequired?.() === true) {
-        setPendingDisclosure({ factId, key: disclosureKey, locale });
+      if (!explainer?.disclosureRequired) {
+        openExplanation(factId);
         return;
       }
-      openExplanation(factId);
+      // C3 fix round 1: a new click ends the previous request at once (its effect aborts it, so its decision ends) before this
+      // request's own check settles.
+      setOpened(null);
+      setPendingCheck({ factId, key: disclosureKey, locale });
     },
     [opened, explainer, disclosureKey, openExplanation, locale],
   );
 
+  // Packet 11C Addendum C (C3): the primary action accepts remote use for this one request only (it travels with it, and nothing else
+  // is accepted or remembered).
   const acceptDisclosure = useCallback(() => {
     if (!shownDisclosure) return;
     decidedDisclosures.current.add(shownDisclosure);
-    explainer?.acceptDisclosure?.();
     setPendingDisclosure(null);
-    openExplanation(shownDisclosure.factId);
-  }, [shownDisclosure, explainer, openExplanation]);
+    openExplanation(shownDisclosure.factId, "ACCEPTED");
+  }, [shownDisclosure, openExplanation]);
 
   // Packet 11C B4a: an explicit decline is passed with the request (audited REMOTE_USE_DECLINED since C5; nothing is sent).
   const cancelDisclosure = useCallback(() => {
     if (!shownDisclosure) return;
     decidedDisclosures.current.add(shownDisclosure);
     setPendingDisclosure(null);
-    openExplanation(shownDisclosure.factId, true);
+    openExplanation(shownDisclosure.factId, "DECLINED");
   }, [shownDisclosure, openExplanation]);
 
   const changePeriod = useCallback(
     (next: HistoryPeriod) => {
       noteFocusBeforeRemoval();
       setOpened(null);
+      setPendingCheck(null);
       setPendingDisclosure(null);
       setPeriod(next);
     },

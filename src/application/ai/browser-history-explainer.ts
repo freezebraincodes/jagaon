@@ -12,8 +12,9 @@ import type { AiInvocationAuditPort } from "./ai-provider-port";
 import { projectShellTaskRequest } from "./language/shell-projector";
 import { planSlots } from "./language/slot-planner";
 import { SHIPPED_REQUEST_CLASS_GATE, type AiRequestClassGate } from "./request-class-qualification";
-import type { AiLocale, ShellTask } from "@/domain/ai";
-import { createBrowserShellClient, INTERIM_FAIL_CLOSED_DISCLOSURE, type AiRemoteUseDecision, type AiRemoteUseDisclosure, type AiRemoteUseSession, type BrowserShellFetcher } from "./browser-shell-client";
+import type { AiLocale, AiTaskRequest, ShellTask } from "@/domain/ai";
+import { createAiRemoteUseDecisions, createBrowserShellClient, type AiRemoteUseRequestDecision, type BrowserShellFetcher } from "./browser-shell-client";
+import { buildSourceBackedExplainRequest } from "./explain-pattern-request";
 import { createPatternExplainer, type PatternExplanation } from "./explain-pattern";
 
 /**
@@ -26,34 +27,38 @@ import { createPatternExplainer, type PatternExplanation } from "./explain-patte
  * local audit row. With the shipped manifest every explanation is composed deterministically in the browser, nothing is sent, no
  * disclosure is asked and the result carries no AI source.
  *
- * Packet 11C Addendum B, Task B3: the app passes its in-memory disclosure session (`remoteUse`, one per app session). The screen asks
- * `disclosureRequired()` on the patient's action and, when it is true, shows the disclosure dialog BEFORE calling `explain`, so the
- * decision is made before the hybrid service and its timers start. `disclosureRequired()` is true only while EXPLAIN_PATTERN is
- * SYNTHETIC_REMOTE_ENABLED for the release profile and the session has not accepted; it is never true while NOT_ACTIVATED, and never
- * without a session (then the interim fail-closed disclosure applies and there is nothing to accept). `acceptDisclosure()` records the
- * session's acceptance (the dialog's primary action only). A cancelled dialog still explains, deterministically, with nothing sent.
+ * Packet 11C Addendum C, Task C3 (owner decision: "Disclosure acceptance is per explicit request; one permitted structural repair shares
+ * that request's decision. A new request needs a new decision."), replacing the B3 once-per-app-session acceptance:
+ * - The screen asks `disclosureRequired(...)` for the ONE request the patient's action starts and, when it is true, shows the disclosure
+ *   BEFORE calling `explain` / `compose`, so the decision is made before the hybrid service and its timers start. Its answer travels with
+ *   that request only (`disclosure: "ACCEPTED" | "DECLINED"`) and is bound to the request's own signal, its decision token
+ *   (`createAiRemoteUseDecisions`): the service reads it once before any attempt, the single structural repair re-reads it without a
+ *   prompt, and it ends when that request settles or its signal aborts (the screens abort on a new click, Retry, locale, period or view
+ *   change and unmount). A request without its own decision is never sent (audited REMOTE_USE_NOT_ACCEPTED); an acceptance in one flow
+ *   never covers the other flow or a later request. There is no session, no injectable disclosure and no other way to accept.
+ * - The disclosure (and the care AI action) is offered only when a remote attempt could actually happen for THAT request: the task is
+ *   SYNTHETIC_REMOTE_ENABLED for the release profile, the device is online, the server-side remote switch is not known to be off
+ *   (`remoteSwitchKnownOff`, pluggable for C6; absent = not known off) and the request's own projected class is QUALIFIED (C1). History:
+ *   the request built for that comparison and locale (one local read of the comparison's source projection; replaces C1's task-level
+ *   `anyAdmissible`). Care: that preview's own request. With the shipped manifest and the all-PENDING records it is never offered.
  *
- * Only the history, care-preparation, audit and session ports are passed by the shipped app. The other dependencies are test seams (an
- * injected test manifest, a test-only disclosure, a fake fetcher, a fixed clock); the session takes precedence over the disclosure seam.
+ * Only the history, care-preparation and audit ports are passed by the shipped app. The other dependencies are test seams (an injected
+ * test manifest, a fake fetcher, a fixed clock, a test-only request-class gate, a remote switch signal).
  *
  * Packet 11C Addendum B, Task B4b: `createBrowserAiAssistance` is the app's ONE AI wiring per opened runtime. The SAME hybrid service
- * (so the same browser shell client, session disclosure, per-request decline and audit port) serves the history explanation and the
- * care-summary AI wording (`composeCareSummaryWithAi` over the runtime's care-preparation ports). `createBrowserHistoryExplainer` is its
- * history half. With the shipped manifest the care wording is never `available()`, never asks the disclosure and never sends; the
- * preview screen does not show its action. A DETERMINISTIC hybrid result never creates a replacement snapshot (the use case replaces
- * only from a validated AI composition, and the runtime's care service re-validates it with `projectValidatedAiCareSummary`).
+ * (so the same browser shell client, per-request decisions and audit port) serves the history explanation and the care-summary AI
+ * wording (`composeCareSummaryWithAi` over the runtime's care-preparation ports). `createBrowserHistoryExplainer` is its history half.
+ * With the shipped manifest the care wording is never `available()`, never asks the disclosure and never sends; the preview screen does
+ * not show its action. A DETERMINISTIC hybrid result never creates a replacement snapshot (the use case replaces only from a validated AI
+ * composition, and the runtime's care service re-validates it with `projectValidatedAiCareSummary`).
  *
  * Packet 11C Addendum C, Task C1: the one hybrid service gets the request-class gate (shipped: all PENDING, so every request composes
- * deterministically before any disclosure or send, audited REQUEST_CLASS_NOT_QUALIFIED). The disclosure is offered only when a send
- * could happen: for history, while some EXPLAIN_PATTERN class is QUALIFIED (`anyAdmissible`, task-level; the per-request check stays in
- * the service and becomes per-request in C3); for the care preview, when that preview's own projected request class is QUALIFIED.
+ * deterministically before any disclosure or send, audited REQUEST_CLASS_NOT_QUALIFIED).
  */
 export type BrowserHistoryExplainerDependencies = Readonly<{
   history: RecordedHistoryQueryPort;
   audit: AiInvocationAuditPort;
-  remoteUse?: AiRemoteUseSession;
   manifest?: AiActivationManifest;
-  disclosure?: AiRemoteUseDisclosure;
   fetcher?: BrowserShellFetcher;
   now?: () => Instant;
   monotonicMs?: () => number;
@@ -64,6 +69,12 @@ export type BrowserHistoryExplainerDependencies = Readonly<{
    * definitions and the shipped qualification records, all PENDING, so nothing is sent and no disclosure is shown. Test seam only.
    */
   requestClassGate?: AiRequestClassGate;
+  /**
+   * Packet 11C Addendum C (C3): a client-visible signal that the server-side remote-AI switch is known to be off (C6 may supply one).
+   * True means no AI action or disclosure is offered (a remote attempt could not happen). Absent means "not known off"; a check that
+   * throws counts as known off. It never accepts anything: the service and the route decide independently.
+   */
+  remoteSwitchKnownOff?: () => boolean;
 }>;
 
 /** Packet 11C B4b: the runtime's care-preparation ports the care-summary wording reads and replaces through. */
@@ -72,21 +83,21 @@ export type BrowserAiAssistanceDependencies = BrowserHistoryExplainerDependencie
 
 /**
  * Packet 11C B4b: the care-summary preview's AI wording (structurally the preview screen's `CareSummaryAiWordingPort`).
- * - `available()`: DRAFT_CARE_PREPARATION_SUMMARY is SYNTHETIC_REMOTE_ENABLED for the release profile and the device is online. Never
- *   true with the shipped manifest. The screen adds the snapshot conditions (current, unapproved, current-template, deterministic).
- * - `disclosureRequired(current)`: true only when available, this session has not accepted, and the preview can be sent at all (an
- *   ineligible preview, e.g. more facts than one request may carry, sends nothing, so there is nothing to disclose). Reads nothing.
- * - `acceptDisclosure()`: the session's acceptance (the disclosure dialog's primary action only).
+ * - `available(current)`: a remote attempt could actually happen for THIS preview's request: DRAFT_CARE_PREPARATION_SUMMARY is
+ *   SYNTHETIC_REMOTE_ENABLED for the release profile, the device is online, the remote switch is not known off, and (Packet 11C
+ *   Addendum C, C3, C1 carry) the preview's own projected request class is QUALIFIED. Never true with the shipped manifest or the shipped
+ *   records. The screen adds the snapshot conditions (current, unapproved, current-template, deterministic). Reads nothing.
+ * - `disclosureRequired(current)` (C3): true whenever `available(current)` is: every explicit request needs its own decision.
  * - `compose(...)`: one explicit request, exactly one audit row (Packet 11C Addendum C, C5: also a not-eligible, stale or unreadable
- *   preview, as a zero-attempt row). `disclosure: "DECLINED"` marks a request made after the patient cancelled the disclosure: it
- *   composes deterministically, sends nothing and is audited REMOTE_USE_DECLINED (C5; REQUEST_CANCELLED before C5).
+ *   preview, as a zero-attempt row). `disclosure` (C3) is the patient's answer to the disclosure shown for THIS request: "ACCEPTED" may
+ *   send it (bound to its signal; the single repair re-reads it); "DECLINED" composes deterministically, sends nothing and is audited
+ *   REMOTE_USE_DECLINED (C5); absent, the request is never sent (REMOTE_USE_NOT_ACCEPTED once it reaches the remote decision).
  * - `disclosureClosed(...)` (C5): the moot disclosure's one DISCLOSURE_CLOSED_MOOT row.
  */
 export type BrowserCareSummaryWording = Readonly<{
-  available(): boolean;
+  available(current: CareSummarySnapshotPayload): boolean;
   disclosureRequired(current: CareSummarySnapshotPayload): boolean;
-  acceptDisclosure(): void;
-  compose(input: { snapshotRef: ExpectedHead; locale: AiLocale; disclosure?: "DECLINED" }, signal?: AbortSignal): Promise<CareSummaryAiOutcome>;
+  compose(input: { snapshotRef: ExpectedHead; locale: AiLocale; disclosure?: AiRemoteUseRequestDecision }, signal?: AbortSignal): Promise<CareSummaryAiOutcome>;
   /**
    * Packet 11C Addendum C (C5): the disclosure shown for an explicit request closed without the patient's decision (locale or preview
    * change, or the screen closed), so that request is moot: one zero-attempt DISCLOSURE_CLOSED_MOOT audit row; nothing is sent.
@@ -98,16 +109,18 @@ export type BrowserAiAssistance = Readonly<{ history: BrowserHistoryExplainer; c
 
 export type BrowserHistoryExplainer = Readonly<{
   /**
-   * Explains one comparison (the use case's `explain`). Packet 11C B4a: `disclosure: "DECLINED"` marks a request made after the patient
-   * cancelled the disclosure: that request's remote-use decision is DECLINED (whatever the session says), so it composes
-   * deterministically, sends nothing and is audited as REMOTE_USE_DECLINED (Packet 11C Addendum C, C5). The decline belongs to that one
-   * request only. Every call writes exactly one audit row (C5: a comparison no longer explainable is one NOT_ELIGIBLE row).
+   * Explains one comparison (the use case's `explain`): one explicit request, exactly one audit row (C5: a comparison no longer
+   * explainable is one NOT_ELIGIBLE row). `disclosure` (Packet 11C Addendum C, C3) is the patient's answer to the disclosure shown for
+   * THIS request, bound to its signal: "ACCEPTED" may send it; "DECLINED" (B4a) composes deterministically, sends nothing and is audited
+   * REMOTE_USE_DECLINED (C5); absent, it is never sent (REMOTE_USE_NOT_ACCEPTED once it reaches the remote decision).
    */
-  explain(input: { factId: string; locale: AiLocale; disclosure?: "DECLINED" }, signal?: AbortSignal): Promise<PatternExplanation>;
-  /** True only when the next explanation would use the remote route and this app session has not accepted the disclosure. */
-  disclosureRequired(): boolean;
-  /** Records this app session's acceptance of the disclosure (called by the dialog's primary action only). */
-  acceptDisclosure(): void;
+  explain(input: { factId: string; locale: AiLocale; disclosure?: AiRemoteUseRequestDecision }, signal?: AbortSignal): Promise<PatternExplanation>;
+  /**
+   * Packet 11C Addendum C (C3): true only when a remote attempt could actually happen for the request the patient is about to make for
+   * this comparison in this locale (activated, online, remote switch not known off, and that request's own class QUALIFIED). Reads the
+   * comparison's source projection only; writes and sends nothing; never rejects (any failure is false).
+   */
+  disclosureRequired(input: { factId: string; locale: AiLocale }): Promise<boolean>;
   /**
    * Packet 11C Addendum C (C5): the disclosure shown for an explicit request closed without the patient's decision (view, period or
    * locale change, or the screen closed), so that request is moot: one zero-attempt DISCLOSURE_CLOSED_MOOT audit row; nothing is sent.
@@ -129,24 +142,9 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
   const manifest = dependencies.manifest ?? AI_ACTIVATION_MANIFEST;
   const online = dependencies.online ?? browserOnline;
   const requestId = dependencies.requestId ?? newRequestId;
-  const session = dependencies.remoteUse ?? null;
-  const disclosure = session?.disclosure ?? dependencies.disclosure ?? INTERIM_FAIL_CLOSED_DISCLOSURE;
-  // Packet 11C B4a: the signals of the requests the patient declined. The hybrid service decides remote use with the request's own
-  // signal, so a declined request answers DECLINED (and never ACCEPTED), and no other request is affected.
-  // Packet 11C B5: a signal belongs to ONE request (every caller creates a fresh AbortController per request). Reusing an AbortSignal
-  // across requests is not supported for decline marking: once a request with that signal was declined, every later request carrying the
-  // same signal is also DECLINED. That fails safe (deterministic, nothing sent) and is pinned in browser-history-explainer.test.ts.
-  const declined = new WeakSet<AbortSignal>();
-  const perRequest: AiRemoteUseDisclosure = Object.freeze({
-    decide: (signal: AbortSignal): Promise<AiRemoteUseDecision> => (declined.has(signal) ? Promise.resolve("DECLINED") : disclosure.decide(signal)),
-  });
-  /** The request's own signal, registered as declined when the patient cancelled the disclosure for it. */
-  const requestSignal = (decline: "DECLINED" | undefined, signal: AbortSignal | undefined): AbortSignal | undefined => {
-    if (decline !== "DECLINED") return signal;
-    const own = signal ?? new AbortController().signal;
-    declined.add(own);
-    return own;
-  };
+  // Packet 11C Addendum C (C3): the per-request decisions of this runtime. Only a request's own explicit decision can accept; there is
+  // no session and no injectable disclosure. (B4a/B5: a declined signal stays DECLINED; a reused signal never carries an acceptance.)
+  const decisions = createAiRemoteUseDecisions();
   const requestClassGate = dependencies.requestClassGate ?? SHIPPED_REQUEST_CLASS_GATE;
   // ONE hybrid service for every flow of this runtime (Packet 11C B4b).
   const service = createAiHybridTaskService({
@@ -155,39 +153,61 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
     now,
     monotonicMs: dependencies.monotonicMs ?? deviceMonotonicMs,
     manifest,
-    provider: createBrowserShellClient({ disclosure: perRequest, fetcher: dependencies.fetcher }),
+    provider: createBrowserShellClient({ disclosure: decisions.disclosure, fetcher: dependencies.fetcher }),
     online,
     requestClassGate,
   });
-  // Packet 11C B4a: never while offline either (the service would not send, so there is nothing to disclose).
-  const remoteEnabled = (taskType: ShellTask) => online() && resolveAiTaskActivation(taskType, CURRENT_RELEASE_PROFILE, manifest).state === "SYNTHETIC_REMOTE_ENABLED";
-  // Packet 11C Addendum C (C1): nor while no class of the task is QUALIFIED (shipped: none), so no disclosure is shown for a request that
-  // the service would compose deterministically before any send. Never throws.
-  const anyClassAdmissible = (taskType: ShellTask) => {
+  // Packet 11C B4a: never while offline either (the service would not send, so there is nothing to disclose). Packet 11C Addendum C
+  // (C3): nor while the server-side remote switch is known to be off (pluggable; a throwing check counts as off).
+  const switchKnownOff = () => {
     try {
-      return requestClassGate.anyAdmissible(taskType) === true;
+      return dependencies.remoteSwitchKnownOff?.() === true;
     } catch {
-      return false;
+      return true;
     }
   };
-  const disclosurePending = (taskType: ShellTask) => session !== null && !session.accepted() && remoteEnabled(taskType) && anyClassAdmissible(taskType);
+  const remoteEnabled = (taskType: ShellTask) => online() && !switchKnownOff() && resolveAiTaskActivation(taskType, CURRENT_RELEASE_PROFILE, manifest).state === "SYNTHETIC_REMOTE_ENABLED";
   /**
-   * Packet 11C Addendum C (C1): whether this care preview's own request could be sent: the same pure request builder, planner and
-   * value-blind projection as the service (reads, writes and sends nothing), then the class gate. A preview that is not eligible, not
-   * remote-eligible or of an unqualified class needs no disclosure.
+   * Packet 11C Addendum C (C1, C3): whether exactly this request could be sent: the same planner and value-blind projection as the
+   * service (reads, writes and sends nothing), then the class gate. A request that is not remote-eligible or of an unqualified class
+   * needs no disclosure. Never throws.
    */
-  const careRequestAdmissible = (current: CareSummarySnapshotPayload) => {
+  const requestAdmissible = (request: AiTaskRequest) => {
     try {
-      const built = buildCareSummaryAiRequest({ current, requestId: requestId(), requestedAt: now() });
-      if (built.kind !== "READY") return false;
-      const planned = planSlots(built.request, resolveAiHybridBundle("DRAFT_CARE_PREPARATION_SUMMARY", built.request.locale));
+      const planned = planSlots(request, resolveAiHybridBundle(request.taskType as ShellTask, request.locale));
       if (planned.kind !== "PLANNED" || planned.plan.remote.eligible !== true) return false;
       return requestClassGate.admit(projectShellTaskRequest(planned.plan)).admitted === true;
     } catch {
       return false;
     }
   };
-  const acceptDisclosure = () => session?.accept();
+  /** The care preview's own request (the use case's pure builder over the snapshot alone); cached per preview payload object. */
+  const careAdmission = new WeakMap<CareSummarySnapshotPayload, boolean>();
+  const careRequestAdmissible = (current: CareSummarySnapshotPayload) => {
+    const known = careAdmission.get(current);
+    if (known !== undefined) return known;
+    let admissible = false;
+    try {
+      const built = buildCareSummaryAiRequest({ current, requestId: requestId(), requestedAt: now() });
+      admissible = built.kind === "READY" && requestAdmissible(built.request);
+    } catch {
+      admissible = false;
+    }
+    if (typeof current === "object" && current !== null) careAdmission.set(current, admissible);
+    return admissible;
+  };
+  /** The history request the patient is about to make for this comparison and locale (one local read; writes and sends nothing). */
+  const historyRequestAdmissible = async (input: { factId: string; locale: AiLocale }): Promise<boolean> => {
+    try {
+      if (!remoteEnabled("EXPLAIN_PATTERN")) return false;
+      const loaded = await dependencies.history.loadExplainablePattern({ factId: input.factId });
+      if (loaded.kind !== "EXPLAINABLE") return false;
+      const request = buildSourceBackedExplainRequest({ view: loaded.view, locale: input.locale, requestId: requestId(), requestedAt: now() });
+      return requestAdmissible(request) && remoteEnabled("EXPLAIN_PATTERN");
+    } catch {
+      return false;
+    }
+  };
 
   // Packet 11C Addendum C (C5): a moot disclosure is its explicit request's one audit row (zero attempts, nothing sent).
   const moot = (taskType: "EXPLAIN_PATTERN" | "DRAFT_CARE_PREPARATION_SUMMARY") => async (input: { locale: AiLocale }): Promise<void> => {
@@ -196,24 +216,23 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
 
   const explainer = createPatternExplainer({ history: dependencies.history, execute: service.execute, recordUnsent: service.recordUnsent, now, requestId });
   const history: BrowserHistoryExplainer = Object.freeze({
-    explain: (input: { factId: string; locale: AiLocale; disclosure?: "DECLINED" }, signal?: AbortSignal) =>
-      explainer.explain({ factId: input.factId, locale: input.locale }, requestSignal(input.disclosure, signal)),
-    disclosureRequired: () => disclosurePending("EXPLAIN_PATTERN"),
-    acceptDisclosure,
+    explain: (input: { factId: string; locale: AiLocale; disclosure?: AiRemoteUseRequestDecision }, signal?: AbortSignal) =>
+      decisions.run(input.disclosure, signal, (token) => explainer.explain({ factId: input.factId, locale: input.locale }, token)),
+    disclosureRequired: historyRequestAdmissible,
     disclosureClosed: moot("EXPLAIN_PATTERN"),
   });
 
   const care = dependencies.carePreparation;
   if (!care) return Object.freeze({ history, careSummary: null });
   const composer = createCareSummaryAiComposer({ query: care.query, commands: care.commands, execute: service.execute, recordUnsent: service.recordUnsent, now, requestId });
+  // Packet 11C Addendum C (C3, C1 carry): the action is offered only when this preview's own request could be sent.
+  const careAvailable = (current: CareSummarySnapshotPayload) => remoteEnabled("DRAFT_CARE_PREPARATION_SUMMARY") && careRequestAdmissible(current);
   const careSummary: BrowserCareSummaryWording = Object.freeze({
-    available: () => remoteEnabled("DRAFT_CARE_PREPARATION_SUMMARY"),
-    // The eligibility check is the use case's own pure request builder over the snapshot alone; it reads, writes and sends nothing.
-    // Packet 11C Addendum C (C1): and the preview's own request class must be QUALIFIED.
-    disclosureRequired: (current: CareSummarySnapshotPayload) => disclosurePending("DRAFT_CARE_PREPARATION_SUMMARY") && careRequestAdmissible(current),
-    acceptDisclosure,
-    compose: (input: { snapshotRef: ExpectedHead; locale: AiLocale; disclosure?: "DECLINED" }, signal?: AbortSignal) =>
-      composer.composeCareSummaryWithAi({ snapshotRef: input.snapshotRef, locale: input.locale }, requestSignal(input.disclosure, signal)),
+    available: careAvailable,
+    // Every explicit request needs its own decision (C3), so the disclosure is required exactly when the request could be sent.
+    disclosureRequired: careAvailable,
+    compose: (input: { snapshotRef: ExpectedHead; locale: AiLocale; disclosure?: AiRemoteUseRequestDecision }, signal?: AbortSignal) =>
+      decisions.run(input.disclosure, signal, (token) => composer.composeCareSummaryWithAi({ snapshotRef: input.snapshotRef, locale: input.locale }, token)),
     disclosureClosed: moot("DRAFT_CARE_PREPARATION_SUMMARY"),
   });
   return Object.freeze({ history, careSummary });

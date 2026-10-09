@@ -260,9 +260,10 @@ describe("Packet 11A scope", () => {
       "shellCallUpperBound",
       "shellRouteCallUpperBound",
     ]);
-    // Packet 11C B2b: no production module exports a disclosure that accepts remote use by itself. Packet 11C B3 (deliberate retarget):
-    // the session disclosure accepts only after its accept(), which only the disclosure dialog's primary action calls (pinned below).
-    expect(exportsOf(browserShellClient)).toEqual(["BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createAiRemoteUseSession", "createBrowserShellClient"]);
+    // Packet 11C B2b: no production module exports a disclosure that accepts remote use by itself. Packet 11C Addendum C, C3 (deliberate
+    // retarget of the B3 session): the per-request decisions accept only the one request the screen passes "ACCEPTED" with, which only
+    // the disclosure dialog's primary action does (pinned below).
+    expect(exportsOf(browserShellClient)).toEqual(["BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createAiRemoteUseDecisions", "createBrowserShellClient"]);
     // Packet 11C B4b (deliberate): the one AI wiring of both flows (history explanation and care-summary wording) over one hybrid service.
     expect(exportsOf(browserHistoryExplainer)).toEqual(["createBrowserAiAssistance", "createBrowserHistoryExplainer"]);
     expect(exportsOf(persistence)).toEqual(["createAiInvocationAuditRepository"]);
@@ -446,15 +447,61 @@ describe("Packet 11C Checkpoint 2 guards", () => {
     expect(aiImports("src/components/jagaon/screens/RecordedHistoryScreen.tsx")).toEqual(["../ai/AiDisclosureDialog"]);
     expect(aiImports("src/components/jagaon/history/PatternExplanationPanel.tsx")).toEqual([]);
     expect(aiImports("src/components/jagaon/screens/CareSummaryPreviewScreen.tsx")).toEqual(["../ai/AiDisclosureDialog"]);
-    // Only the dialog's primary action accepts remote use: the session's accept() is reached from exactly one place per flow in the app
-    // graph (Packet 11C B4b, deliberate retarget: the care-summary preview's dialog is the second flow).
+    // Only the dialog's primary action accepts remote use. Packet 11C Addendum C, C3 (deliberate retarget of the B3/B4b session pins):
+    // there is no accept() call anywhere in the app graph any more; the "ACCEPTED" decision is created in exactly one place per flow, the
+    // dialog's onConfirm handler, and travels with that one request.
     const acceptCallers = CLIENT_GRAPH.filter((file) => !file.startsWith("src/application/ai/") && /\.accept(Disclosure)?\?*\.?\(/.test(strip(readFileSync(join(ROOT, file), "utf8"))));
-    expect(acceptCallers).toEqual(["src/components/jagaon/screens/CareSummaryPreviewScreen.tsx", "src/components/jagaon/screens/RecordedHistoryScreen.tsx"]);
-    expect(strip(readFileSync(join(ROOT, "src/components/jagaon/screens/RecordedHistoryScreen.tsx"), "utf8")).match(/acceptDisclosure\?\.\(\)/g)).toHaveLength(1);
+    expect(acceptCallers).toEqual([]);
+    const decisionSites = CLIENT_GRAPH.filter((file) => file.startsWith("src/components/") && /"ACCEPTED"\s*\)/.test(strip(readFileSync(join(ROOT, file), "utf8"))));
+    expect(decisionSites).toEqual(["src/components/jagaon/screens/CareSummaryPreviewScreen.tsx", "src/components/jagaon/screens/RecordedHistoryScreen.tsx"]);
+    const historyScreen = strip(readFileSync(join(ROOT, "src/components/jagaon/screens/RecordedHistoryScreen.tsx"), "utf8"));
+    expect(historyScreen.match(/"ACCEPTED"\s*\)/g)).toHaveLength(1);
+    expect(historyScreen).toMatch(/const acceptDisclosure = useCallback\(\(\) => \{\s*if \(!shownDisclosure\) return;\s*decidedDisclosures\.current\.add\(shownDisclosure\);\s*setPendingDisclosure\(null\);\s*openExplanation\(shownDisclosure\.factId, "ACCEPTED"\);/);
+    expect(historyScreen).toMatch(/onConfirm=\{acceptDisclosure\}/);
     const careScreen = strip(readFileSync(join(ROOT, "src/components/jagaon/screens/CareSummaryPreviewScreen.tsx"), "utf8"));
-    expect(careScreen.match(/\.accept(Disclosure)?\?*\.?\(/g)).toHaveLength(1);
-    expect(careScreen).toMatch(/function acceptAiDisclosure\(\) \{\s*if \(aiPhase\.kind !== "DISCLOSURE" \|\| !aiWording\) return;\s*aiWording\.acceptDisclosure\(\);/);
+    expect(careScreen.match(/"ACCEPTED"\s*\)/g)).toHaveLength(1);
+    expect(careScreen).toMatch(/function acceptAiDisclosure\(\) \{\s*if \(aiPhase\.kind !== "DISCLOSURE" \|\| !aiWording\) return;\s*decidedDisclosures\.current\.add\(aiPhase\);\s*runAiWording\("ACCEPTED"\);/);
     expect(careScreen).toMatch(/onConfirm=\{acceptAiDisclosure\}/);
+
+    // C3 fix round 1 (broadened): a literal scan of the WHOLE client graph (comments stripped). Any "ACCEPTED" string literal (in any
+    // quote, as an object literal, `as const`, a variable or an argument) is allowed only in this exact list of files; a new file with
+    // one fails here. Outside the remote-use decision machinery the literal is either a type, the one dialog handler per screen, or an
+    // unrelated closed vocabulary (the audit outcome ACCEPTED, the validator's and composer's ACCEPTED result kinds).
+    const ACCEPTED_LITERAL = /(["'`])ACCEPTED\1/;
+    const acceptedFiles = CLIENT_GRAPH.filter((file) => ACCEPTED_LITERAL.test(strip(readFileSync(join(ROOT, file), "utf8"))));
+    expect(acceptedFiles).toEqual(
+      [
+        // The remote-use decision machinery: the per-request decisions and the client (browser-shell-client), the decision type
+        // (ai-provider-port), the shared decision helper (ai-call-support) and the service that reads the decision once.
+        "src/application/ai/browser-shell-client.ts",
+        "src/application/ai/ai-provider-port.ts",
+        "src/application/ai/ai-call-support.ts",
+        "src/application/ai/ai-hybrid-task-service.ts",
+        // The two screens (the one dialog handler each, pinned above, plus types) and the panel's port type.
+        "src/components/jagaon/screens/RecordedHistoryScreen.tsx",
+        "src/components/jagaon/screens/CareSummaryPreviewScreen.tsx",
+        "src/components/jagaon/history/PatternExplanationPanel.tsx",
+        // Unrelated closed vocabularies: the audit outcome ACCEPTED and the validator's or composer's ACCEPTED result kind.
+        "src/domain/ai/ai-invocation-audit.ts",
+        "src/application/ai/ai-audit-lifecycle.ts",
+        "src/application/ai/ai-output-validator.ts",
+        "src/application/ai/language/ai-composition.ts",
+        "src/application/care-preparation/care-preparation-service.ts",
+        "src/application/care-preparation/ai-care-summary-replacement.ts",
+      ].sort(),
+    );
+    // Nowhere in the graph is a decision written as an object field, a const assertion or a stored value outside the screens' handlers.
+    for (const file of CLIENT_GRAPH) {
+      const source = strip(readFileSync(join(ROOT, file), "utf8"));
+      expect(source, file).not.toMatch(/disclosure\s*:\s*(["'`])ACCEPTED\1|(["'`])ACCEPTED\2\s+as\s+const|(?:const|let|var)\s+\w+\s*(?::[^=]+)?=\s*(["'`])ACCEPTED\3/);
+    }
+    // In the components, after removing type unions, the literal is left only at the one dialog handler per screen.
+    const valueLiterals = (file: string) => (strip(readFileSync(join(ROOT, file), "utf8")).replace(/(["'`])ACCEPTED\1\s*\|/g, "").match(/(["'`])ACCEPTED\1/g) ?? []).length;
+    expect(valueLiterals("src/components/jagaon/screens/RecordedHistoryScreen.tsx")).toBe(1);
+    expect(valueLiterals("src/components/jagaon/screens/CareSummaryPreviewScreen.tsx")).toBe(1);
+    expect(valueLiterals("src/components/jagaon/history/PatternExplanationPanel.tsx")).toBe(0);
+    // Positive controls for the scan.
+    for (const sample of ['const d = "ACCEPTED";', "x({ disclosure: 'ACCEPTED' })", "const y = `ACCEPTED` as const;"]) expect(sample, sample).toMatch(/disclosure\s*:\s*(["'`])ACCEPTED\1|(["'`])ACCEPTED\2\s+as\s+const|(?:const|let|var)\s+\w+\s*(?::[^=]+)?=\s*(["'`])ACCEPTED\3/);
   });
 });
 

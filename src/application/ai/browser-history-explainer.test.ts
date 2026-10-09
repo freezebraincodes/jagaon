@@ -13,12 +13,15 @@ import { AI_ACTIVATION_MANIFEST, type AiActivationManifest } from "./ai-activati
 import { AI_SHELL_ROUTE_PATH } from "./ai-shell-route-contract";
 import * as wiring from "./browser-history-explainer";
 import { createBrowserAiAssistance, createBrowserHistoryExplainer } from "./browser-history-explainer";
-import { createAiRemoteUseSession, type AiRemoteUseDisclosure, type BrowserShellFetcher } from "./browser-shell-client";
-import { shellPlanView } from "./language/shell-projector";
+import type { BrowserShellFetcher } from "./browser-shell-client";
+import { buildSourceBackedExplainRequest } from "./explain-pattern-request";
+import { resolveAiHybridBundle } from "./ai-hybrid-runtime-bundles";
+import { projectShellTaskRequest, shellPlanView } from "./language/shell-projector";
+import { planSlots } from "./language/slot-planner";
 import { createAiHybridTaskService } from "./ai-hybrid-task-service";
 import { createAiInvocationAuditRepository } from "./ai-audit-persistence";
 import { AI_REQUEST_CLASS_DEFINITIONS } from "./request-class-definitions";
-import { AI_REQUEST_CLASS_QUALIFICATION_RECORDS, createRequestClassGate, SHIPPED_REQUEST_CLASS_GATE } from "./request-class-qualification";
+import { AI_REQUEST_CLASS_QUALIFICATION_RECORDS, createRequestClassGate, requestClassIdentity, SHIPPED_REQUEST_CLASS_GATE } from "./request-class-qualification";
 // Packet 11C Addendum C (C1): every activated (test manifest) path below also injects test-only QUALIFIED records; the shipped records
 // are all PENDING (proven in the C1 block).
 import { qualifiedTestRequestClassGate } from "./request-class-test-support";
@@ -56,7 +59,6 @@ afterEach(async () => {
 });
 
 const ENABLED: AiActivationManifest = { ...AI_ACTIVATION_MANIFEST, tasks: { ...AI_ACTIVATION_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED" } };
-const ACCEPTED: AiRemoteUseDisclosure = { decide: async () => "ACCEPTED" };
 const USAGE = { inputTokens: 600, outputTokens: 80, costMicroUsd: 5 };
 
 function audit() {
@@ -81,9 +83,12 @@ describe("browser history explainer wiring (Packet 11C B2b)", () => {
     expect(Object.keys(wiring).sort()).toEqual(["createBrowserAiAssistance", "createBrowserHistoryExplainer"]);
     const source = readFileSync(join(process.cwd(), "src/application/ai/browser-history-explainer.ts"), "utf8");
     expect(source).not.toMatch(/\bfetch\s*\(|process\.env|NEXT_PUBLIC_|API_KEY|https?:\/\/|@\/ai\/|@\/app\/|ai-task-service|createAiTaskService|detached-payload-projector|\/api\/ai\/task/);
-    // The shipped defaults: the shipped manifest and the interim fail-closed disclosure.
+    // The shipped defaults: the shipped manifest; Packet 11C Addendum C (C3): the per-request decisions, with no acceptance seam at all
+    // (no session, no injectable disclosure): only a request's own explicit decision can accept remote use.
     expect(source).toMatch(/manifest \?\? AI_ACTIVATION_MANIFEST/);
-    expect(source).toMatch(/disclosure \?\? INTERIM_FAIL_CLOSED_DISCLOSURE/);
+    expect(source).toMatch(/const decisions = createAiRemoteUseDecisions\(\);/);
+    expect(source).toMatch(/createBrowserShellClient\(\{ disclosure: decisions\.disclosure, fetcher: dependencies\.fetcher \}\)/);
+    expect(source).not.toMatch(/AiRemoteUseSession|createAiRemoteUseSession|dependencies\.disclosure|dependencies\.remoteUse|acceptDisclosure/);
   });
 
   it("is assignable to the history panel's explainer port", async () => {
@@ -128,25 +133,25 @@ describe("browser history explainer wiring (Packet 11C B2b)", () => {
     expect(log.rows.map((row) => row.requestedAt)).toEqual([NOW, NOW]);
   });
 
-  it("activated (test manifest) with the default interim disclosure: still DETERMINISTIC and never a POST; the audit row records nothing sent", async () => {
+  it("activated (test manifest): a request without its own decision is DETERMINISTIC, never a POST, audited REMOTE_USE_NOT_ACCEPTED (C3)", async () => {
     const { history } = await higherFixture();
     const log = audit();
     const fetcher = fakeRoute();
     const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
-    // Without a session there is nothing the patient could accept: no dialog is offered and remote use fails closed.
-    expect(explainer.disclosureRequired()).toBe(false);
+    // The request reached the remote decision with no acceptance of its own: fail closed, and the row says so truthfully (C3; it was
+    // MISSING_CONFIGURATION before, carried from the C5 review). The closed reason stays MISSING_CONFIGURATION (matrix codes unchanged).
     const result = await explainer.explain({ factId: FACT, locale: "en-SG" });
     expect(result).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
     expect(fetcher).not.toHaveBeenCalled();
     expect(log.rows).toHaveLength(1);
-    expect(log.rows[0]).toMatchObject({ outcomeCode: "MISSING_CONFIGURATION", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [] });
+    expect(aiInvocationAuditRowSchema.parse(log.rows[0])).toMatchObject({ outcomeCode: "REMOTE_USE_NOT_ACCEPTED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], usageBasis: "NONE" });
   });
 
-  it("activated with a test-only accepted disclosure and a fake route: an AI explanation from one value-blind POST", async () => {
+  it("activated with the request's own acceptance and a fake route: an AI explanation from one value-blind POST", async () => {
     const { history } = await higherFixture();
     const log = audit();
     const fetcher = fakeRoute();
-    const result = await createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), disclosure: ACCEPTED, fetcher }).explain({ factId: FACT, locale: "en-SG" });
+    const result = await createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher }).explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" });
     expect(result).toMatchObject({ kind: "EXPLAINED", source: "AI" });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0]![0]).toBe(AI_SHELL_ROUTE_PATH);
@@ -155,68 +160,171 @@ describe("browser history explainer wiring (Packet 11C B2b)", () => {
     expect(log.rows[0]).toMatchObject({ outcomeCode: "ACCEPTED", providerModel: { providerKey: "deepseek", modelSnapshot: "deepseek-flash" }, measurements: USAGE });
   });
 
-  it("offline (activated): DETERMINISTIC without asking the disclosure or sending", async () => {
+  it("offline (activated): DETERMINISTIC without a disclosure or a send, even for an accepted request", async () => {
     const { history } = await higherFixture();
-    const decide = vi.fn<AiRemoteUseDisclosure["decide"]>(async () => "ACCEPTED");
     const fetcher = fakeRoute();
     const log = audit();
-    const result = await createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), disclosure: { decide }, fetcher, online: () => false }).explain({ factId: FACT, locale: "en-SG" });
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher, online: () => false });
+    expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+    const result = await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" });
     expect(result).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
-    expect(decide).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty("remoteUse");
     expect(fetcher).not.toHaveBeenCalled();
     expect(log.rows[0]!.outcomeCode).toBe("TRANSPORT_FAILED");
   });
 });
 
+/** The EXPLAIN class of this comparison's own request in `locale` (the same pure builder, planner and projection as the wiring). */
+async function explainClassOf(history: RecordedHistoryQueryPort, locale: "en-SG" | "zh-SG"): Promise<string> {
+  const loaded = await history.loadExplainablePattern({ factId: FACT });
+  if (loaded.kind !== "EXPLAINABLE") throw new Error("fixture");
+  const request = buildSourceBackedExplainRequest({ view: loaded.view, locale, requestId: "8b3d4e5f-6a70-4b1c-9d2e-000000000000", requestedAt: NOW as Instant });
+  const planned = planSlots(request, resolveAiHybridBundle("EXPLAIN_PATTERN", locale));
+  if (planned.kind !== "PLANNED") throw new Error("plan");
+  return requestClassIdentity(projectShellTaskRequest(planned.plan)).classId;
+}
+
+/** A gate built over the shipped definitions with test-only owner records QUALIFIED for exactly `classIds` (all others PENDING). */
+function gateQualifying(classIds: readonly string[]) {
+  const signed = { evidenceRef: "test/evidence", signedOffBy: "test", signedOffAt: "2026-10-08T00:00:00.000Z" };
+  return createRequestClassGate({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => (classIds.includes(record.classId) ? { ...record, status: "QUALIFIED" as const, ...signed } : record)) });
+}
+
 /**
- * Packet 11C Addendum B, Task B3: the session disclosure. The app passes one in-memory session per app session; the screen asks
- * `disclosureRequired()` on the patient's action and shows the dialog BEFORE `explain` (so before the hybrid service and its timers).
- * Accepting records the session's acceptance; cancelling still explains, deterministically, with nothing sent.
+ * Packet 11C Addendum C, Task C3 (owner decision: disclosure acceptance is per explicit request; one permitted structural repair shares
+ * that request's decision; a new request needs a new decision). Replaces the B3 session disclosure. The screen asks
+ * `disclosureRequired(request)` on the patient's action for THAT request (activated, online, remote switch not known off, and that
+ * request's own class QUALIFIED) and shows the dialog BEFORE `explain`; its answer travels with that one request (`disclosure:
+ * "ACCEPTED" | "DECLINED"`) and is bound to the request's own signal. Nothing else can accept.
  */
-describe("browser history explainer: session disclosure (Packet 11C B3)", () => {
-  it("never requires the disclosure while NOT_ACTIVATED (shipped manifest), even with a session that has not accepted", async () => {
+describe("browser history explainer: per-request disclosure (Packet 11C Addendum C, C3)", () => {
+  it("never requires the disclosure while NOT_ACTIVATED (shipped manifest), reads nothing for it, and an accepted request still sends nothing", async () => {
     const { history } = await higherFixture();
-    const remoteUse = createAiRemoteUseSession();
-    const explainer = createBrowserHistoryExplainer({ history, audit: audit().port, remoteUse });
-    expect(explainer.disclosureRequired()).toBe(false);
-    const result = await explainer.explain({ factId: FACT, locale: "en-SG" });
+    const probe = vi.fn((request: { factId: string }) => history.loadExplainablePattern(request));
+    const log = audit();
+    const explainer = createBrowserHistoryExplainer({ history: { load: history.load, loadExplainablePattern: probe }, audit: log.port });
+    expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+    expect(probe).not.toHaveBeenCalled();
+    const result = await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" });
     expect(result).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
     expect(result).not.toHaveProperty("remoteUse");
+    expect(log.rows.map((row) => row.outcomeCode)).toEqual(["TASK_DISABLED"]);
   });
 
-  it("activated: required until accepted, then not again for the session; asking reads, writes and sends nothing", async () => {
+  it("activated: required for every request (asking twice answers twice); asking reads only the comparison, writes and sends nothing", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    const history: RecordedHistoryQueryPort = { load: vi.fn(), loadExplainablePattern: vi.fn() };
+    const { history } = await higherFixture();
+    const probe = vi.fn((request: { factId: string }) => history.loadExplainablePattern(request));
+    const load = vi.fn(history.load);
     const log = audit();
-    const remoteUse = createAiRemoteUseSession();
-    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteUse });
-    expect(explainer.disclosureRequired()).toBe(true);
-    expect(explainer.disclosureRequired()).toBe(true);
-    expect(remoteUse.accepted()).toBe(false);
-    explainer.acceptDisclosure();
-    expect(remoteUse.accepted()).toBe(true);
-    expect(explainer.disclosureRequired()).toBe(false);
-    // Another explainer over the same session (a re-opened dataset): the session's acceptance holds.
-    expect(createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteUse }).disclosureRequired()).toBe(false);
-    expect(history.load).not.toHaveBeenCalled();
-    expect(history.loadExplainablePattern).not.toHaveBeenCalled();
+    const explainer = createBrowserHistoryExplainer({ history: { load, loadExplainablePattern: probe }, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate() });
+    expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+    expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+    expect(probe).toHaveBeenCalledTimes(2);
+    expect(probe).toHaveBeenCalledWith({ factId: FACT });
+    expect(load).not.toHaveBeenCalled();
     expect(log.port.append).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
+    // A comparison that is not explainable, or a read that fails, needs no disclosure (nothing could be sent).
+    const ineligible = createBrowserHistoryExplainer({ history: { load, loadExplainablePattern: async () => ({ kind: "INELIGIBLE" as const, reason: "STALE_SOURCE" as const }) }, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate() });
+    expect(await ineligible.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+    const failing = createBrowserHistoryExplainer({ history: { load, loadExplainablePattern: async () => Promise.reject(new Error("storage")) }, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate() });
+    expect(await failing.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+    expect(log.port.append).not.toHaveBeenCalled();
   });
 
-  it("cancelled (not accepted): the deterministic explanation marked not used, no POST, one audit row with no attempt, provider or source", async () => {
+  it("the admission is per request: only this comparison's own class in this locale counts, never 'some class of the task' (C1 carry)", async () => {
+    const { history } = await higherFixture();
+    const own = await explainClassOf(history, "en-SG");
+    const others = AI_REQUEST_CLASS_DEFINITIONS.filter((definition) => definition.taskType === "EXPLAIN_PATTERN" && definition.classId !== own).map((definition) => definition.classId);
+    const log = audit();
+    const fetcher = fakeRoute();
+    // Every OTHER EXPLAIN class is QUALIFIED (the C1 task-level check would have offered the dialog); this request's class is not.
+    const elsewhere = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: gateQualifying(others), fetcher });
+    expect(gateQualifying(others).anyAdmissible("EXPLAIN_PATTERN")).toBe(true);
+    expect(await elsewhere.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+    // Even if the screen sent an acceptance, the service refuses the class before the decision: nothing sent, one truthful row.
+    expect(await elsewhere.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" })).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(log.rows.map((row) => [row.outcomeCode, row.attempts.count])).toEqual([["REQUEST_CLASS_NOT_QUALIFIED", 0]]);
+    // Only this request's own en-SG class: offered in en-SG, not for the same comparison in zh-SG (a different request class).
+    const ownOnly = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: gateQualifying([own]), fetcher });
+    expect(await ownOnly.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+    expect(await ownOnly.disclosureRequired({ factId: FACT, locale: "zh-SG" })).toBe(false);
+    // A gate that throws offers nothing.
+    const throwing = { admit: () => { throw new Error("broken"); }, anyAdmissible: () => true };
+    expect(await createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: throwing }).disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+  });
+
+  it("the server-side remote switch check is pluggable (C6 may supply it): known off means no disclosure; a throwing check counts as off", async () => {
+    const { history } = await higherFixture();
+    let off = true;
+    const explainer = createBrowserHistoryExplainer({ history, audit: audit().port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteSwitchKnownOff: () => off });
+    expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+    off = false;
+    expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+    const throwing = createBrowserHistoryExplainer({ history, audit: audit().port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteSwitchKnownOff: () => { throw new Error("unknown"); } });
+    expect(await throwing.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+  });
+
+  it("two consecutive requests need two decisions: an acceptance covers its own request only (one POST); the next is not accepted", async () => {
     const { history } = await higherFixture();
     const log = audit();
     const fetcher = fakeRoute();
-    const remoteUse = createAiRemoteUseSession();
-    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteUse, fetcher });
-    const result = await explainer.explain({ factId: FACT, locale: "zh-SG" });
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ source: "AI" });
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG" }, new AbortController().signal)).toMatchObject({ source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG" })).toMatchObject({ source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    // The next explicit acceptance is its own new decision.
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ source: "AI" });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(log.rows.map((row) => [row.outcomeCode, row.attempts.count])).toEqual([["ACCEPTED", 1], ["REMOTE_USE_NOT_ACCEPTED", 0], ["REMOTE_USE_NOT_ACCEPTED", 0], ["ACCEPTED", 1]]);
+    expect(new Set(log.rows.map((row) => row.requestId)).size).toBe(4);
+  });
+
+  it("a repairable rejection under one acceptance: one decision, repaired once (two POSTs), one row", async () => {
+    const { history } = await higherFixture();
+    const log = audit();
+    const answer = fakeRoute();
+    let posts = 0;
+    const fetcher = vi.fn<BrowserShellFetcher>(async (url, init) => {
+      posts += 1;
+      if (posts === 1) return new Response(JSON.stringify({ kind: "STRUCTURALLY_REJECTED", reason: "SCHEMA_INVALID", repairable: true, retention: "CONFIRMED_NOT_STORED", usage: USAGE }), { headers: { "content-type": "application/json" } });
+      return answer(url, init);
+    });
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ kind: "EXPLAINED", source: "AI" });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(log.rows).toHaveLength(1);
+    expect(log.rows[0]).toMatchObject({ outcomeCode: "ACCEPTED", attempts: { count: 2, structuralRepairUsed: true, timedOut: false } });
+  });
+
+  it("an aborted request (a new click, Retry, locale, period or view change, unmount) carries no acceptance: nothing sent", async () => {
+    const { history } = await higherFixture();
+    const log = audit();
+    const fetcher = fakeRoute();
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
+    const controller = new AbortController();
+    const pending = explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, controller.signal);
+    controller.abort();
+    expect(await pending).toEqual({ kind: "UNAVAILABLE", reason: "CANCELLED" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("not accepted (no decision of its own): the deterministic explanation marked not used, no POST, one REMOTE_USE_NOT_ACCEPTED row with no attempt", async () => {
+    const { history } = await higherFixture();
+    const log = audit();
+    const fetcher = fakeRoute();
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
+    const result = await explainer.explain({ factId: FACT, locale: "zh-SG" }, new AbortController().signal);
     expect(result).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
     expect(fetcher).not.toHaveBeenCalled();
     expect(log.rows).toHaveLength(1);
     expect(aiInvocationAuditRowSchema.safeParse(log.rows[0]).success).toBe(true);
-    expect(log.rows[0]).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "zh-SG", outcomeCode: "MISSING_CONFIGURATION", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [] });
+    expect(log.rows[0]).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "zh-SG", outcomeCode: "REMOTE_USE_NOT_ACCEPTED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], usageBasis: "NONE" });
     expect(log.rows[0]!.measurements).toMatchObject({ inputTokens: null, outputTokens: null, costMicroUsd: null });
   });
 
@@ -224,10 +332,8 @@ describe("browser history explainer: session disclosure (Packet 11C B3)", () => 
     const { history } = await higherFixture();
     const log = audit();
     const fetcher = fakeRoute();
-    const remoteUse = createAiRemoteUseSession();
-    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteUse, fetcher });
-    explainer.acceptDisclosure();
-    const result = await explainer.explain({ factId: FACT, locale: "en-SG" });
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
+    const result = await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
     expect(result).toMatchObject({ kind: "EXPLAINED", source: "AI" });
     expect(result).not.toHaveProperty("remoteUse");
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -235,39 +341,43 @@ describe("browser history explainer: session disclosure (Packet 11C B3)", () => 
     expect(log.rows[0]!.sourceRevisions.length).toBeGreaterThan(0);
   });
 
-  it("Packet 11C B4a: an explicit decline (the dialog's Cancel) is audited (C5: as REMOTE_USE_DECLINED); nothing sent; the session is not changed", async () => {
+  it("Packet 11C B4a: an explicit decline (the dialog's Cancel) is audited (C5: as REMOTE_USE_DECLINED); nothing sent; it covers that request only", async () => {
     const { history } = await higherFixture();
     const log = audit();
     const fetcher = fakeRoute();
-    const remoteUse = createAiRemoteUseSession();
-    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteUse, fetcher });
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
     const result = await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "DECLINED" });
     expect(result).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
     expect(fetcher).not.toHaveBeenCalled();
-    expect(remoteUse.accepted()).toBe(false);
     expect(log.rows).toHaveLength(1);
     expect(aiInvocationAuditRowSchema.safeParse(log.rows[0]).success).toBe(true);
     // Packet 11C Addendum C (C5): the truthful audit-only outcome (REQUEST_CANCELLED under the B4a interim ruling).
     expect(log.rows[0]).toMatchObject({ auditSchemaVersion: "ai-invocation-audit.11c.2", outcomeCode: "REMOTE_USE_DECLINED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], usageBasis: "NONE" });
     expect(log.rows[0]!.measurements).toMatchObject({ inputTokens: null, outputTokens: null, costMicroUsd: null });
 
-    // The decline belongs to that one request: the next request without it is the ordinary not-accepted (fail-closed) path.
+    // The decline belongs to that one request: the next request without a decision is the not-accepted (fail-closed) path (C3).
     await explainer.explain({ factId: FACT, locale: "en-SG" });
-    expect(log.rows[1]).toMatchObject({ outcomeCode: "MISSING_CONFIGURATION", attempts: { count: 0 } });
-    // A decline never overrides into a send, even after the session accepted (each decline is its own request's answer).
-    explainer.acceptDisclosure();
+    expect(log.rows[1]).toMatchObject({ outcomeCode: "REMOTE_USE_NOT_ACCEPTED", attempts: { count: 0 } });
+    // A decline never overrides into a send, even after another request was accepted (each decision is its own request's answer).
+    await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
     await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "DECLINED" }, new AbortController().signal);
-    expect(log.rows[2]).toMatchObject({ outcomeCode: "REMOTE_USE_DECLINED", attempts: { count: 0 } });
-    expect(fetcher).not.toHaveBeenCalled();
+    expect(log.rows.map((row) => row.outcomeCode)).toEqual(["REMOTE_USE_DECLINED", "REMOTE_USE_NOT_ACCEPTED", "ACCEPTED", "REMOTE_USE_DECLINED"]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("Packet 11C B5: a reused AbortSignal is not supported for decline marking; a later request with a declined signal stays DECLINED (fails safe)", async () => {
+  it("Packet 11C B5 / C3: a reused AbortSignal never carries a decision into a later request; a declined signal stays DECLINED (fails safe)", async () => {
     const { history } = await higherFixture();
     const log = audit();
     const fetcher = fakeRoute();
-    const remoteUse = createAiRemoteUseSession();
-    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteUse, fetcher });
-    remoteUse.accept();
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
+    // C3: an accepted signal reused for a later request carries no acceptance (and a second acceptance on it is refused).
+    const acceptedOnce = new AbortController().signal;
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, acceptedOnce)).toMatchObject({ source: "AI" });
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG" }, acceptedOnce)).toMatchObject({ source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, acceptedOnce)).toMatchObject({ source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    log.rows.splice(0);
+    fetcher.mockClear();
     const reused = new AbortController().signal;
     await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "DECLINED" }, reused);
     // The same signal without the decline flag: still DECLINED, deterministic and nothing sent (never an unintended send).
@@ -275,26 +385,30 @@ describe("browser history explainer: session disclosure (Packet 11C B3)", () => 
     expect(again).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
     expect(log.rows.map((row) => [row.outcomeCode, row.attempts.count])).toEqual([["REMOTE_USE_DECLINED", 0], ["REMOTE_USE_DECLINED", 0]]);
     expect(fetcher).not.toHaveBeenCalled();
-    // A fresh signal per request (what every caller does) is unaffected: the accepted session sends one value-blind POST.
-    expect(await explainer.explain({ factId: FACT, locale: "en-SG" }, new AbortController().signal)).toMatchObject({ kind: "EXPLAINED", source: "AI" });
+    // A fresh signal per request (what every caller does) with its own acceptance sends one value-blind POST.
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ kind: "EXPLAINED", source: "AI" });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("Packet 11C B4a: never requires the disclosure while offline (nothing would be sent), even when activated and not accepted", async () => {
+  it("Packet 11C B4a: never requires the disclosure while offline (nothing would be sent)", async () => {
     const { history } = await higherFixture();
     let online = false;
-    const explainer = createBrowserHistoryExplainer({ history, audit: audit().port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteUse: createAiRemoteUseSession(), online: () => online });
-    expect(explainer.disclosureRequired()).toBe(false);
+    const explainer = createBrowserHistoryExplainer({ history, audit: audit().port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), online: () => online });
+    expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
     online = true;
-    expect(explainer.disclosureRequired()).toBe(true);
+    expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
   });
 
-  it("the session takes precedence over a test-only disclosure seam (production passes the session only)", async () => {
+  it("there is no acceptance seam: no session, no injectable disclosure; an unknown decision value is no decision", async () => {
     const { history } = await higherFixture();
     const fetcher = fakeRoute();
-    const result = await createBrowserHistoryExplainer({ history, audit: audit().port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteUse: createAiRemoteUseSession(), disclosure: ACCEPTED, fetcher }).explain({ factId: FACT, locale: "en-SG" });
-    expect(result).toMatchObject({ source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
+    const log = audit();
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher, ...({ disclosure: { decide: async () => "ACCEPTED" }, remoteUse: { accepted: () => true } } as object) });
+    expect(Object.keys(explainer).sort()).toEqual(["disclosureClosed", "disclosureRequired", "explain"]);
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG" })).toMatchObject({ source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
+    expect(await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "accepted" as never })).toMatchObject({ source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
     expect(fetcher).not.toHaveBeenCalled();
+    expect(log.rows.map((row) => row.outcomeCode)).toEqual(["REMOTE_USE_NOT_ACCEPTED", "REMOTE_USE_NOT_ACCEPTED"]);
   });
 });
 
@@ -345,9 +459,9 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
     const history: RecordedHistoryQueryPort = { load: vi.fn(), loadExplainablePattern: vi.fn() };
     const query = { loadSummary: vi.fn(care.carePreparation.query.loadSummary) };
     const before = vi.mocked(createAiHybridTaskService).mock.calls.length;
-    const assistance = createBrowserAiAssistance({ history, carePreparation: { query, commands: care.carePreparation.commands }, audit: care.audits, remoteUse: createAiRemoteUseSession() });
+    const assistance = createBrowserAiAssistance({ history, carePreparation: { query, commands: care.carePreparation.commands }, audit: care.audits });
     expect(vi.mocked(createAiHybridTaskService).mock.calls.length - before).toBe(1);
-    // The one service's provider is the browser shell client behind this session's disclosure, writing to the one audit port.
+    // The one service's provider is the browser shell client behind the per-request decisions (C3), writing to the one audit port.
     const deps = vi.mocked(createAiHybridTaskService).mock.calls.at(-1)![0];
     expect(deps.audit).toBe(care.audits);
     expect(deps.provider?.providerModel).toEqual({ providerKey: "deepseek", modelSnapshot: "deepseek-flash" });
@@ -367,18 +481,17 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
       const care = await careSetup();
       const { history } = await higherFixture();
       const fetcher = fakeCareRoute();
-      const remoteUse = createAiRemoteUseSession();
       const before = vi.mocked(createAiHybridTaskService).mock.calls.length;
-      const assistance = createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, remoteUse, manifest: BOTH, fetcher, now: () => LATER });
+      const assistance = createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, fetcher, now: () => LATER });
       // The one service gets the shipped gate.
       expect(vi.mocked(createAiHybridTaskService).mock.calls.slice(before).map((call) => call[0].requestClassGate)).toEqual([SHIPPED_REQUEST_CLASS_GATE]);
-      expect(assistance.history.disclosureRequired()).toBe(false);
-      expect(assistance.careSummary!.available()).toBe(true);
+      expect(await assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+      // Packet 11C Addendum C (C3, C1 carry): the care AI action is hidden when this preview's class is not QUALIFIED (shipped: never shown).
+      expect(assistance.careSummary!.available(care.payload)).toBe(false);
       expect(assistance.careSummary!.disclosureRequired(care.payload)).toBe(false);
-      // Even after an acceptance (as a C3 per-request decision would give), the class decides first: nothing is sent.
-      remoteUse.accept();
-      expect(await assistance.history.explain({ factId: FACT, locale: "en-SG" })).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
-      expect(await assistance.careSummary!.compose({ snapshotRef: care.snapshotRef, locale: "en-SG" })).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "TASK_DISABLED" });
+      // Even with an explicit per-request acceptance, the class decides first: nothing is sent.
+      expect(await assistance.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" })).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
+      expect(await assistance.careSummary!.compose({ snapshotRef: care.snapshotRef, locale: "en-SG", disclosure: "ACCEPTED" })).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "TASK_DISABLED" });
       expect(fetcher).not.toHaveBeenCalled();
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(await care.snapshots()).toBe(1);
@@ -390,33 +503,38 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
       for (const row of rows) expect(aiInvocationAuditRowSchema.safeParse(row).success).toBe(true);
     });
 
-    it("the care disclosure is offered only for this preview's own QUALIFIED class; the history disclosure only while some EXPLAIN class is QUALIFIED", async () => {
+    it("the care action and disclosure are offered only for this preview's own QUALIFIED class; the history disclosure only for that comparison's own class", async () => {
       const care = await careSetup();
-      const history: RecordedHistoryQueryPort = { load: vi.fn(), loadExplainablePattern: vi.fn() };
-      // An owner record for one EXPLAIN class and one care class that are NOT this preview's (its section counts differ from every
-      // evaluated class): the history flow may disclose; the care preview may not.
-      const explain = AI_REQUEST_CLASS_DEFINITIONS.find((definition) => definition.taskType === "EXPLAIN_PATTERN")!.classId;
+      const { history } = await higherFixture();
+      const load = vi.fn(history.load);
+      const ports: RecordedHistoryQueryPort = { load, loadExplainablePattern: (request) => history.loadExplainablePattern(request) };
+      // An owner record for this comparison's own EXPLAIN class and for one care class that is NOT this preview's (its section counts
+      // differ from every evaluated class): the history request may disclose; the care preview may not, and its action is hidden.
+      const explain = await explainClassOf(history, "en-SG");
       const careClass = AI_REQUEST_CLASS_DEFINITIONS.find((definition) => definition.taskType === "DRAFT_CARE_PREPARATION_SUMMARY")!.classId;
-      const signed = { evidenceRef: "test/evidence", signedOffBy: "test", signedOffAt: "2026-10-08T00:00:00.000Z" };
-      const gate = createRequestClassGate({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => ([explain, careClass].includes(record.classId) ? { ...record, status: "QUALIFIED", ...signed } : record)) });
-      const assistance = createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, remoteUse: createAiRemoteUseSession(), manifest: BOTH, requestClassGate: gate, now: () => LATER });
-      expect(assistance.history.disclosureRequired()).toBe(true);
+      const assistance = createBrowserAiAssistance({ history: ports, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: gateQualifying([explain, careClass]), now: () => LATER });
+      expect(await assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+      expect(assistance.careSummary!.available(care.payload)).toBe(false);
       expect(assistance.careSummary!.disclosureRequired(care.payload)).toBe(false);
-      // The test-only gate qualifies this preview's class: the disclosure is offered.
-      const qualified = createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, remoteUse: createAiRemoteUseSession(), manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), now: () => LATER });
+      // The test-only gate qualifies this preview's class: the action and the disclosure are offered.
+      const qualified = createBrowserAiAssistance({ history: ports, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), now: () => LATER });
+      expect(qualified.careSummary!.available(care.payload)).toBe(true);
       expect(qualified.careSummary!.disclosureRequired(care.payload)).toBe(true);
-      // A gate that throws offers nothing. The probes read, write and send nothing.
+      // A gate that throws offers nothing. The probes read nothing beyond the comparison, and write and send nothing.
       const throwing = { admit: () => { throw new Error("broken"); }, anyAdmissible: () => { throw new Error("broken"); } };
-      const broken = createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, remoteUse: createAiRemoteUseSession(), manifest: BOTH, requestClassGate: throwing, now: () => LATER });
-      expect(broken.history.disclosureRequired()).toBe(false);
+      const broken = createBrowserAiAssistance({ history: ports, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: throwing, now: () => LATER });
+      expect(await broken.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+      expect(broken.careSummary!.available(care.payload)).toBe(false);
       expect(broken.careSummary!.disclosureRequired(care.payload)).toBe(false);
-      expect(history.load).not.toHaveBeenCalled();
+      expect(load).not.toHaveBeenCalled();
       expect(await care.audits.list()).toEqual([]);
     });
 
     it("the shipped app passes no request-class gate (production uses the shipped records)", () => {
       const app = readFileSync(join(process.cwd(), "src/components/jagaon/JagaOnApp.tsx"), "utf8");
-      expect(app).toMatch(/aiAssistanceFactory\(\{ history: runtime\.history, carePreparation: runtime\.carePreparation, audit: runtime\.aiAudit, remoteUse \}\)/);
+      // Packet 11C Addendum C (C3, deliberate retarget): no session either; the app passes exactly the three runtime ports.
+      expect(app).toMatch(/aiAssistanceFactory\(\{ history: runtime\.history, carePreparation: runtime\.carePreparation, audit: runtime\.aiAudit \}\)/);
+      expect(app).not.toMatch(/remoteUse|RemoteUseSession|acceptDisclosure/);
       expect(app).not.toMatch(/requestClassGate|request-class/);
       const wiringSource = readFileSync(join(process.cwd(), "src/application/ai/browser-history-explainer.ts"), "utf8");
       expect(wiringSource).toMatch(/const requestClassGate = dependencies\.requestClassGate \?\? SHIPPED_REQUEST_CLASS_GATE;/);
@@ -433,46 +551,70 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const care = await careSetup();
-    const remoteUse = createAiRemoteUseSession();
-    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, remoteUse, now: () => LATER }).careSummary!;
-    expect(wording.available()).toBe(false);
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, now: () => LATER }).careSummary!;
+    expect(wording.available(care.payload)).toBe(false);
     expect(wording.disclosureRequired(care.payload)).toBe(false);
-    expect(await wording.compose({ snapshotRef: care.snapshotRef, locale: "en-SG" })).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "TASK_DISABLED" });
+    expect(await wording.compose({ snapshotRef: care.snapshotRef, locale: "en-SG", disclosure: "ACCEPTED" })).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "TASK_DISABLED" });
     expect(await care.snapshots()).toBe(1);
     expect((await care.audits.list()).map((row) => [row.taskType, row.outcomeCode, row.attempts.count, row.providerModel])).toEqual([["DRAFT_CARE_PREPARATION_SUMMARY", "TASK_DISABLED", 0, null]]);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("activated (test manifest): available only online; the disclosure is required until this session accepts, in either flow", async () => {
+  it("activated (test manifest): available only online and with the remote switch not known off; the disclosure is required for every request", async () => {
     const care = await careSetup();
     let online = true;
-    const remoteUse = createAiRemoteUseSession();
-    const assistance = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, remoteUse, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), online: () => online });
+    let switchOff = false;
+    const assistance = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), online: () => online, remoteSwitchKnownOff: () => switchOff });
     const wording = assistance.careSummary!;
-    expect(wording.available()).toBe(true);
+    expect(wording.available(care.payload)).toBe(true);
+    expect(wording.disclosureRequired(care.payload)).toBe(true);
     expect(wording.disclosureRequired(care.payload)).toBe(true);
     online = false;
-    expect(wording.available()).toBe(false);
+    expect(wording.available(care.payload)).toBe(false);
     expect(wording.disclosureRequired(care.payload)).toBe(false);
     online = true;
-    // One session for the app: accepting in the history flow covers the care flow too (and the reverse).
-    assistance.history.acceptDisclosure();
+    switchOff = true;
+    expect(wording.available(care.payload)).toBe(false);
     expect(wording.disclosureRequired(care.payload)).toBe(false);
-    expect(remoteUse.accepted()).toBe(true);
+    switchOff = false;
     // Only the care task's own activation counts.
-    const historyOnly = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, remoteUse: createAiRemoteUseSession(), manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate() });
-    expect(historyOnly.careSummary!.available()).toBe(false);
+    const historyOnly = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate() });
+    expect(historyOnly.careSummary!.available(care.payload)).toBe(false);
     expect(historyOnly.careSummary!.disclosureRequired(care.payload)).toBe(false);
     expect(await care.audits.list()).toEqual([]);
+  });
+
+  it("C3: an acceptance in one flow never covers the other flow (both directions); each flow's next request needs its own decision", async () => {
+    const care = await careSetup();
+    const { history } = await higherFixture();
+    const fetcher = vi.fn<BrowserShellFetcher>(async (url, init) => ((JSON.parse(init.body as string) as { taskType: string }).taskType === "EXPLAIN_PATTERN" ? fakeRoute() : fakeCareRoute())(url, init));
+    const assistance = createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER });
+    // An accepted history request is in flight while the care request (no decision of its own) runs: the care request sends nothing.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const slowHistory = vi.fn<BrowserShellFetcher>(async (url, init) => (await held, fetcher(url, init)));
+    const concurrent = createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher: slowHistory, now: () => LATER });
+    const accepted = concurrent.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+    await vi.waitFor(() => expect(slowHistory).toHaveBeenCalledTimes(1));
+    expect(await concurrent.careSummary!.compose({ snapshotRef: care.snapshotRef, locale: "en-SG" }, new AbortController().signal)).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "MISSING_CONFIGURATION" });
+    release();
+    expect(await accepted).toMatchObject({ source: "AI" });
+    expect(slowHistory).toHaveBeenCalledTimes(1);
+    // The reverse: an accepted care request does not cover the next history request.
+    const care2 = await careSetup();
+    const reverse = createBrowserAiAssistance({ history, carePreparation: care2.carePreparation, audit: care2.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER });
+    expect((await reverse.careSummary!.compose({ snapshotRef: care2.snapshotRef, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).kind).toBe("REPLACED");
+    expect(await reverse.history.explain({ factId: FACT, locale: "en-SG" }, new AbortController().signal)).toMatchObject({ source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
+    expect(fetcher.mock.calls.map((call) => (JSON.parse(call[1].body as string) as { taskType: string }).taskType)).toEqual(["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"]);
+    expect((await care.audits.list()).map((row) => `${row.taskType}:${row.outcomeCode}`).sort()).toEqual(["DRAFT_CARE_PREPARATION_SUMMARY:REMOTE_USE_NOT_ACCEPTED", "EXPLAIN_PATTERN:ACCEPTED"]);
+    expect((await care2.audits.list()).map((row) => `${row.taskType}:${row.outcomeCode}`).sort()).toEqual(["DRAFT_CARE_PREPARATION_SUMMARY:ACCEPTED", "EXPLAIN_PATTERN:REMOTE_USE_NOT_ACCEPTED"]);
   });
 
   it("activated and accepted: one value-blind POST and the AI-assisted replacement preview (PREPARED; approval untouched)", async () => {
     const care = await careSetup();
     const fetcher = fakeCareRoute();
-    const remoteUse = createAiRemoteUseSession();
-    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, remoteUse, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER }).careSummary!;
-    wording.acceptDisclosure();
-    const outcome = await wording.compose({ snapshotRef: care.snapshotRef, locale: "en-SG" });
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER }).careSummary!;
+    const outcome = await wording.compose({ snapshotRef: care.snapshotRef, locale: "en-SG", disclosure: "ACCEPTED" });
     if (outcome.kind !== "REPLACED") throw new Error(JSON.stringify(outcome));
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0]![0]).toBe(AI_SHELL_ROUTE_PATH);
@@ -487,22 +629,21 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
   it("an explicit decline (the dialog's Cancel): nothing sent, no replacement, one REMOTE_USE_DECLINED audit row (C5) with no attempt", async () => {
     const care = await careSetup();
     const fetcher = fakeCareRoute();
-    const remoteUse = createAiRemoteUseSession();
-    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, remoteUse, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER }).careSummary!;
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER }).careSummary!;
     expect(await wording.compose({ snapshotRef: care.snapshotRef, locale: "en-SG", disclosure: "DECLINED" })).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "REQUEST_CANCELLED" });
     expect(fetcher).not.toHaveBeenCalled();
-    expect(remoteUse.accepted()).toBe(false);
     expect(await care.snapshots()).toBe(1);
     const rows = await care.audits.list();
     expect(rows.map((row) => [row.outcomeCode, row.attempts.count, row.providerModel, row.sourceRevisions.length])).toEqual([["REMOTE_USE_DECLINED", 0, null, 0]]);
   });
 
   // Packet 11C Addendum C (C5; owner decision (e) resolved: each explicit request writes one audit row, including zero-attempt ones).
-  it("a preview with nothing to phrase is not eligible: no disclosure, no hybrid call, no POST, and one NOT_ELIGIBLE audit row (C5)", async () => {
+  it("a preview with nothing to phrase is not eligible: no action, no disclosure, no hybrid call, no POST, and one NOT_ELIGIBLE audit row (C5)", async () => {
     const care = await careSetup({ questionsOnly: true });
     const fetcher = fakeCareRoute();
-    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, remoteUse: createAiRemoteUseSession(), manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER }).careSummary!;
-    expect(wording.available()).toBe(true);
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER }).careSummary!;
+    // Packet 11C Addendum C (C3): no request of this preview could be sent, so its AI action is not offered either.
+    expect(wording.available(care.payload)).toBe(false);
     expect(wording.disclosureRequired(care.payload)).toBe(false);
     // The eligibility probes are not requests: still no row.
     expect(await care.audits.list()).toEqual([]);
@@ -515,7 +656,7 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
   it("C5: a care disclosure closed as moot writes one DISCLOSURE_CLOSED_MOOT row for the request's locale; nothing sent", async () => {
     const care = await careSetup();
     const fetcher = fakeCareRoute();
-    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, remoteUse: createAiRemoteUseSession(), manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER }).careSummary!;
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER }).careSummary!;
     await wording.disclosureClosed({ locale: "zh-SG" });
     const rows = await care.audits.list();
     expect(rows.map((row) => [row.taskType, row.locale, row.outcomeCode, row.attempts.count, row.providerModel])).toEqual([["DRAFT_CARE_PREPARATION_SUMMARY", "zh-SG", "DISCLOSURE_CLOSED_MOOT", 0, null]]);
@@ -529,8 +670,8 @@ describe("browser history explainer: one audit row per explicit request (Packet 
     const log = audit();
     const fetcher = fakeRoute();
     const history: RecordedHistoryQueryPort = { load: vi.fn(), loadExplainablePattern: vi.fn(async () => ({ kind: "INELIGIBLE" as const, reason: "STALE_SOURCE" as const })) };
-    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteUse: createAiRemoteUseSession(), fetcher, now: () => NOW as Instant });
-    expect(await explainer.explain({ factId: FACT, locale: "zh-SG" })).toMatchObject({ kind: "UNAVAILABLE" });
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => NOW as Instant });
+    expect(await explainer.explain({ factId: FACT, locale: "zh-SG", disclosure: "ACCEPTED" })).toMatchObject({ kind: "UNAVAILABLE" });
     expect(log.rows).toHaveLength(1);
     expect(aiInvocationAuditRowSchema.parse(log.rows[0])).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "zh-SG", outcomeCode: "NOT_ELIGIBLE", providerModel: null, attempts: { count: 0 }, sourceRevisions: [], usageBasis: "NONE" });
     expect(fetcher).not.toHaveBeenCalled();
@@ -540,8 +681,8 @@ describe("browser history explainer: one audit row per explicit request (Packet 
     const { history } = await higherFixture();
     const log = audit();
     const fetcher = fakeRoute();
-    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteUse: createAiRemoteUseSession(), fetcher, now: () => NOW as Instant });
-    expect(explainer.disclosureRequired()).toBe(true);
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => NOW as Instant });
+    expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
     expect(log.rows).toHaveLength(0);
     await explainer.disclosureClosed({ locale: "en-SG" });
     expect(log.rows).toHaveLength(1);
@@ -553,7 +694,7 @@ describe("browser history explainer: one audit row per explicit request (Packet 
     const { history } = await higherFixture();
     const log = audit();
     const explainer = createBrowserHistoryExplainer({ history, audit: log.port });
-    explainer.disclosureRequired();
+    await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" });
     await history.loadExplainablePattern({ factId: FACT });
     expect(log.rows).toHaveLength(0);
     await explainer.explain({ factId: FACT, locale: "en-SG" });

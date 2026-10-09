@@ -9,7 +9,10 @@ export type AiDisclosureFlow = "PATTERN" | "CARE_SUMMARY";
 type Props = {
   messages: AppMessages;
   flow: AiDisclosureFlow;
-  /** The patient accepts remote use for this app session; the caller records it and then makes the request. */
+  /**
+   * The patient accepts remote use for the one request this dialog was shown for (Packet 11C Addendum C, C3: acceptance is per explicit
+   * request); the caller makes that request with the acceptance and remembers nothing.
+   */
   onConfirm: () => void;
   /** The safe action (also Escape): nothing is sent; the caller continues without AI. */
   onCancel: () => void;

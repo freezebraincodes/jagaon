@@ -469,10 +469,12 @@ describe("remote-use disclosure decided before the first attempt (Packet 11C B3)
   ])("%s: the deterministic composition, no provider call, and an audit row that records nothing sent", async (_label, decide) => {
     const run = gated([completed(VALID)], decide as Decide);
     const result = await run.service.execute(EN.request);
+    // Packet 11C Addendum C (C3, carried from the C5 review): the closed reason stays MISSING_CONFIGURATION (matrix codes unchanged); the
+    // audit row records the truthful audit-only REMOTE_USE_NOT_ACCEPTED (no acceptance existed for this request; nothing was sent).
     expect(result).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "REMOTE_NOT_ACCEPTED", reason: "MISSING_CONFIGURATION" });
     expect(run.calls).toHaveLength(0);
-    expectOneValidRow(run.rows, "MISSING_CONFIGURATION");
-    expect(run.rows[0]).toMatchObject(NOTHING_SENT);
+    expectOneValidRow(run.rows, "REMOTE_USE_NOT_ACCEPTED");
+    expect(run.rows[0]).toMatchObject({ ...NOTHING_SENT, usageBasis: "NONE" });
     // The same atoms as the AI path: a not-accepted request is the ordinary deterministic composition.
     const ai = await harness([completed(VALID)]).service.execute(EN.request);
     expect(atomMultiset((result as any).composition)).toEqual(atomMultiset((ai as any).composition));
@@ -504,6 +506,33 @@ describe("remote-use disclosure decided before the first attempt (Packet 11C B3)
     expect(callsWhenDecided).toBe(0);
     expect(run.calls).toHaveLength(2);
     expect(run.rows[0]).toMatchObject({ outcomeCode: "ACCEPTED", providerModel: { providerKey: "test", modelSnapshot: "test-model" }, attempts: { count: 2, structuralRepairUsed: true, timedOut: false } });
+  });
+
+  it("Packet 11C Addendum C (C3): every attempt of the request (the repair too) carries the request's own decision token, never a new one", async () => {
+    const tokens: Array<AbortSignal | undefined> = [];
+    const results = [completed(`${JSON.stringify(VALID)}}`), completed(VALID)];
+    const provider: AiShellProviderPort = {
+      providerModel: { providerKey: "test", modelSnapshot: "test-model" },
+      remoteUse: { decide: async () => "ACCEPTED" },
+      invoke: async (_input, _signal, decisionToken) => {
+        tokens.push(decisionToken);
+        return results.shift()!;
+      },
+    };
+    const controller = new AbortController();
+    expect(await harness([], { provider }).service.execute(EN.request, controller.signal)).toMatchObject({ source: "AI" });
+    expect(tokens).toEqual([controller.signal, controller.signal]);
+    // Without a caller signal the decision and every attempt share one service-made token (which nothing can accept).
+    const unsignalled: Array<AbortSignal | undefined> = [];
+    const decided: AbortSignal[] = [];
+    const again = [completed(VALID)];
+    const second: AiShellProviderPort = { ...provider, remoteUse: { decide: async (token) => (decided.push(token), "ACCEPTED") }, invoke: async (_input, _signal, token) => (unsignalled.push(token), again.shift()!) };
+    await harness([], { provider: second }).service.execute(EN.request);
+    expect(unsignalled).toEqual([decided[0]]);
+    // A provider without a disclosure (the server-side adapters) receives no token.
+    const plain: Array<number> = [];
+    await harness([], { provider: { providerModel: provider.providerModel, invoke: async (...args: unknown[]) => (plain.push(args.length), completed(VALID)) } }).service.execute(EN.request);
+    expect(plain).toEqual([2]);
   });
 
   it("is decided before any timer: a decision that takes longer than the overall budget never times the request out", async () => {

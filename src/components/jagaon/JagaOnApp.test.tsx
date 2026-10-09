@@ -1232,10 +1232,11 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
     rerender(<JagaOnApp {...props} />);
     await act(async () => undefined);
     expect(factory).toHaveBeenCalledTimes(1);
-    // Packet 11C B3: plus this app session's in-memory disclosure session (not yet accepted).
     // Packet 11C B4b: plus the runtime's care-preparation ports (the care-summary wording uses the same wiring).
-    expect(factory).toHaveBeenCalledWith({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit, remoteUse: expect.objectContaining({ disclosure: expect.any(Object) }) });
-    expect(factory.mock.calls[0]![0].remoteUse.accepted()).toBe(false);
+    // Packet 11C Addendum C, C3 (deliberate retarget): exactly the three runtime ports; the B3 app-session disclosure is gone (acceptance
+    // is per explicit request).
+    expect(factory).toHaveBeenCalledWith({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit });
+    expect(Object.keys(factory.mock.calls[0]![0]).sort()).toEqual(["audit", "carePreparation", "history"]);
     // Nothing is explained without the patient's explicit action (this runtime's history offers none).
     expect(explainer.explain).not.toHaveBeenCalled();
   });
@@ -1274,8 +1275,8 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
 });
 
 /**
- * Packet 11C Addendum B, Task B3: the disclosure in the wired app. One in-memory disclosure session per app session (per mount; never
- * persisted, so a reload asks again). Activated behaviour only through an injected factory that adds a test manifest and a fake route
+ * Packet 11C Addendum B, Task B3: the disclosure in the wired app. Packet 11C Addendum C, C3 (replaces the B3 once-per-app-session
+ * acceptance): an acceptance covers the one explicit request it was given for; every new request asks again; nothing is persisted. Activated behaviour only through an injected factory that adds a test manifest and a fake route
  * to the real browser wiring; the shipped app never shows the dialog.
  */
 describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
@@ -1388,7 +1389,7 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
     expect(app.fetcher).not.toHaveBeenCalled();
   });
 
-  it("accepted once per app session: navigation keeps the acceptance; a new app session (reload) asks again", async () => {
+  it("C3: accepted per explicit request: leaving and coming back is a new request that asks again; a reload asks again too", async () => {
     const en = getMessages("en-SG");
     const app = await activatedApp();
     const { unmount } = render(<JagaOnApp {...app.props} />);
@@ -1399,20 +1400,22 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
     expect(app.fetcher).toHaveBeenCalledTimes(1);
     expect(app.rows[0]).toMatchObject({ outcomeCode: "ACCEPTED", providerModel: { providerKey: "deepseek", modelSnapshot: "deepseek-flash" } });
 
-    // Leave and come back: the same session, no second disclosure.
+    // Leave and come back: a new explicit request, so the disclosure is shown again and nothing is sent before it is answered.
     fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navToday }));
     await act(async () => undefined);
     fireEvent.click(await toHistoryAction());
-    await act(async () => undefined);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const again = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    expect(app.fetcher).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(again).getByRole("button", { name: en.ai.pattern.confirm }));
     await waitFor(() => expect(app.fetcher).toHaveBeenCalledTimes(2));
 
-    // A reload is a new app session: nothing was persisted, so the disclosure is asked again before any POST.
+    // A reload: the disclosure is asked again before any POST (nothing is persisted).
     unmount();
     render(<JagaOnApp {...app.props} />);
     fireEvent.click(await toHistoryAction());
     expect(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).toBeInTheDocument();
     expect(app.fetcher).toHaveBeenCalledTimes(2);
+    expect(app.rows.map((row) => row.outcomeCode)).toEqual(["ACCEPTED", "ACCEPTED"]);
     expect(app.fetchSpy).not.toHaveBeenCalled();
   });
 });
@@ -1516,6 +1519,34 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("C3: activated (test manifest) with the SHIPPED all-PENDING records: no disclosure in either flow, no care AI action, nothing sent", async () => {
+    const en = getMessages("en-SG");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const care = await careRuntime();
+    const { history } = await higherFixture();
+    care.runtime.history = history;
+    const fetcher = fakeRoute();
+    // No request-class gate: the production default (the shipped records, every class PENDING).
+    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, fetcher, now: () => LATER as never });
+    render(<JagaOnApp runtimeFactory={async () => care.runtime} onboardingRepositoryFactory={completed()} printPortFactory={() => ({ print: vi.fn() })} aiAssistanceFactory={factory} />);
+    fireEvent.click(within(await screen.findByRole("navigation")).getByRole("button", { name: en.shared.navHistory }));
+    fireEvent.click(await screen.findByRole("button", { name: en.history.explanation.action }));
+    const panel = await screen.findByRole("region", { name: en.history.explanation.title });
+    await waitFor(() => expect(within(panel).getByRole("status")).not.toBeEmptyDOMElement());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navToday }));
+    await toCarePreview();
+    const approve = (await screen.findByRole("button", { name: en.careSummary.approveAction })) as HTMLButtonElement;
+    await waitFor(() => expect(approve.disabled).toBe(false));
+    expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect((await care.audits.list()).map((row) => `${row.taskType}:${row.outcomeCode}:${row.attempts.count}`)).toEqual(["EXPLAIN_PATTERN:REQUEST_CLASS_NOT_QUALIFIED:0"]);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("activated (test manifest, fake route): a declined disclosure sends nothing, keeps the preview and writes one REMOTE_USE_DECLINED row (C5)", async () => {
     const en = getMessages("en-SG");
     const fetchSpy = vi.fn();
@@ -1564,7 +1595,7 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("activated (test manifest, fake route): one session across both flows; the accepted replacement opens in place of the old preview", async () => {
+  it("activated (test manifest, fake route): C3: a history acceptance never covers the care request (it asks its own); the accepted replacement opens in place of the old preview", async () => {
     const en = getMessages("en-SG");
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
@@ -1575,19 +1606,21 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER as never });
     render(<JagaOnApp runtimeFactory={async () => care.runtime} onboardingRepositoryFactory={completed()} printPortFactory={() => ({ print: vi.fn() })} aiAssistanceFactory={factory} />);
 
-    // The disclosure is accepted once, in the history flow.
+    // The disclosure is accepted for one history request.
     fireEvent.click(within(await screen.findByRole("navigation")).getByRole("button", { name: en.shared.navHistory }));
     fireEvent.click(await screen.findByRole("button", { name: en.history.explanation.action }));
     fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.pattern.confirm }));
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navToday }));
 
-    // The care flow in the same app session does not ask again.
+    // Packet 11C Addendum C (C3): that acceptance never covers the care flow: its request shows its own disclosure first.
     const before = (await toCarePreview()).textContent;
     const action = (await screen.findByRole("button", { name: en.ai.careSummary.action })) as HTMLButtonElement;
     await waitFor(() => expect(action.disabled).toBe(false));
     fireEvent.click(action);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const careDialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(careDialog).getByRole("button", { name: en.ai.careSummary.confirm }));
     const region = await screen.findByRole("region", { name: en.ai.careSummary.resultTitle });
     expect(within(region).getByText(en.ai.careSummary.resultBody)).toBeInTheDocument();
     expect(fetcher).toHaveBeenCalledTimes(2);

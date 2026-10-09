@@ -36,6 +36,8 @@ export const AI_INVOCATION_OUTCOME_CODES_11A = Object.freeze(["ACCEPTED", ...AI_
  * - REMOTE_USE_DECLINED: the patient cancelled the remote-use disclosure (Cancel or Escape); nothing was sent.
  * - DISCLOSURE_CLOSED_MOOT: the disclosure closed without a decision because the request became moot (locale, period or view change,
  *   or the screen closed); nothing was sent.
+ * - REMOTE_USE_NOT_ACCEPTED (Packet 11C Addendum C, C3): the request reached the remote-use decision without an acceptance of its own
+ *   (acceptance is per explicit request: no decision was given for it, or its decision had already ended); nothing was sent.
  * - NOT_ELIGIBLE: the request could not be formed for its source (care preview not eligible, comparison no longer explainable).
  * - SOURCE_UNAVAILABLE: the local source could not be read for the request.
  * - REQUEST_CLASS_NOT_QUALIFIED (C1): the request's shape class is not qualified for remote wording.
@@ -45,6 +47,7 @@ export const AI_INVOCATION_OUTCOME_CODES_11A = Object.freeze(["ACCEPTED", ...AI_
 export const AI_AUDIT_ONLY_OUTCOME_CODES = Object.freeze([
   "REMOTE_USE_DECLINED",
   "DISCLOSURE_CLOSED_MOOT",
+  "REMOTE_USE_NOT_ACCEPTED",
   "NOT_ELIGIBLE",
   "SOURCE_UNAVAILABLE",
   "REQUEST_CLASS_NOT_QUALIFIED",
@@ -56,7 +59,7 @@ export const AI_AUDIT_ONLY_OUTCOME_CODES = Object.freeze([
 ] as const);
 export type AiAuditOnlyOutcomeCode = (typeof AI_AUDIT_ONLY_OUTCOME_CODES)[number];
 /** Audit-only outcomes decided before anything is sent: such a row never records an attempt. */
-export const AI_AUDIT_UNSENT_OUTCOME_CODES = Object.freeze(["REMOTE_USE_DECLINED", "DISCLOSURE_CLOSED_MOOT", "NOT_ELIGIBLE", "SOURCE_UNAVAILABLE"] as const satisfies readonly AiAuditOnlyOutcomeCode[]);
+export const AI_AUDIT_UNSENT_OUTCOME_CODES = Object.freeze(["REMOTE_USE_DECLINED", "DISCLOSURE_CLOSED_MOOT", "REMOTE_USE_NOT_ACCEPTED", "NOT_ELIGIBLE", "SOURCE_UNAVAILABLE"] as const satisfies readonly AiAuditOnlyOutcomeCode[]);
 
 /** The current (11c.2) outcome vocabulary: the legacy codes plus the audit-only codes. */
 export const AI_INVOCATION_OUTCOME_CODES = Object.freeze([...AI_INVOCATION_OUTCOME_CODES_11A, ...AI_AUDIT_ONLY_OUTCOME_CODES] as const);

@@ -8,6 +8,7 @@ import type { SupportedLocale } from "@/i18n/types";
 import type { Instant, RecordHead, RecordId } from "@/domain/shared";
 import { NOW, closeCarePreparationHarnesses, createCarePreparationHarness, ENABLED_CARE_MANIFEST, exact, fakeModelCareShells, rewriteAsLegacy9c1Snapshot, testIds } from "@/application/care-preparation/care-preparation-test-support";
 import type { CarePreparationCommandPort, CarePreparationQueryPort } from "@/application/care-preparation/care-preparation-contracts";
+import type { CareSummarySnapshotPayload } from "@/domain/care-preparation/care-summary-snapshot";
 import { printableCareSummary } from "@/application/care-preparation/care-summary-artifact";
 import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
 import { projectValidatedAiCareSummary } from "@/application/care-preparation/ai-care-summary-replacement";
@@ -17,7 +18,7 @@ import { AI_LANGUAGE_COPY } from "@/application/ai/language/ai-language-copy";
 import { shellPlanView } from "@/application/ai/language/shell-projector";
 import { createAiInvocationAuditRepository } from "@/application/ai/ai-audit-persistence";
 import { createBrowserAiAssistance } from "@/application/ai/browser-history-explainer";
-import { createAiRemoteUseSession, type BrowserShellFetcher } from "@/application/ai/browser-shell-client";
+import type { BrowserShellFetcher } from "@/application/ai/browser-shell-client";
 import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
 import type { PrintPort } from "../care-preparation/PrintPort";
 import { CareSummaryPreviewScreen, type CareSummaryAiWordingOutcome, type CareSummaryAiWordingPort } from "./CareSummaryPreviewScreen";
@@ -410,17 +411,15 @@ describe("Care-summary preview: an older-version preview must be prepared again 
  * NEW preview with the AI label and check notice; approval stays a separate click; nothing prints on its own. New presentation: human
  * acceptance pending. Activated behaviour only with a fake port or an injected test manifest and a fake route.
  */
-type Deferred = { input: { snapshotRef: { recordId: RecordId; expectedRevisionId: string; expectedRevisionNumber: number }; locale: string; disclosure?: "DECLINED" }; signal?: AbortSignal; resolve: (outcome: CareSummaryAiWordingOutcome) => void };
+type Deferred = { input: { snapshotRef: { recordId: RecordId; expectedRevisionId: string; expectedRevisionNumber: number }; locale: string; disclosure?: "ACCEPTED" | "DECLINED" }; signal?: AbortSignal; resolve: (outcome: CareSummaryAiWordingOutcome) => void };
 
+/** Packet 11C Addendum C (C3): per-request disclosure, so `required` never changes after an acceptance (there is no session). */
 function fakeWording(options: { available?: boolean; required?: boolean } = {}) {
-  let required = options.required ?? false;
+  const required = options.required ?? false;
   const calls: Deferred[] = [];
   const port = {
-    available: vi.fn(() => options.available ?? true),
-    disclosureRequired: vi.fn(() => required),
-    acceptDisclosure: vi.fn(() => {
-      required = false;
-    }),
+    available: vi.fn((_current: CareSummarySnapshotPayload) => options.available ?? true),
+    disclosureRequired: vi.fn((_current: CareSummarySnapshotPayload) => required),
     compose: vi.fn((input: Deferred["input"], signal?: AbortSignal) => new Promise<CareSummaryAiWordingOutcome>((resolve) => void calls.push({ input, signal, resolve }))),
     // Packet 11C Addendum C (C5): the moot disclosure's audit row.
     disclosureClosed: vi.fn(async (_input: { locale: SupportedLocale }) => undefined),
@@ -481,7 +480,7 @@ describe("Care-summary preview: AI wording action (Packet 11C B4b)", () => {
       for (const shippedPort of [false, true]) {
         const { h, recordId } = await prepared();
         const audit = { append: vi.fn(async () => undefined) };
-        const port = shippedPort ? createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands: h.service }, audit, remoteUse: createAiRemoteUseSession() }).careSummary : null;
+        const port = shippedPort ? createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands: h.service }, audit }).careSummary : null;
         const view = renderAi(h, recordId, port);
         // Before and after approval: no action, no dialog, no AI label; the ordinary preview flow is unchanged.
         await screen.findByRole("article");
@@ -549,7 +548,6 @@ describe("Care-summary preview: AI wording action (Packet 11C B4b)", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: en.ai.cancel }));
     await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
     expect(calls[0]!.input).toMatchObject({ snapshotRef: { recordId }, locale: "en-SG", disclosure: "DECLINED" });
-    expect(port.acceptDisclosure).not.toHaveBeenCalled();
     act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "REQUEST_CANCELLED" }));
     expect(await screen.findByText(en.ai.remoteNotAccepted)).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -564,9 +562,10 @@ describe("Care-summary preview: AI wording action (Packet 11C B4b)", () => {
     const before = (await screen.findByRole("article")).textContent;
     fireEvent.click(await aiAction());
     fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.careSummary.confirm }));
-    expect(port.acceptDisclosure).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
-    expect(calls[0]!.input.disclosure).toBeUndefined();
+    // Packet 11C Addendum C (C3): the acceptance travels with this one request, bound to its own signal.
+    expect(calls[0]!.input.disclosure).toBe("ACCEPTED");
+    expect(calls[0]!.signal).toBeInstanceOf(AbortSignal);
     expect(await screen.findByText(en.ai.careSummary.loading)).toBeTruthy();
     expect(screen.getByRole("article").textContent).toBe(before);
     expect((screen.getByRole("button", { name: en.careSummary.approveAction }) as HTMLButtonElement).disabled).toBe(true);
@@ -596,6 +595,44 @@ describe("Care-summary preview: AI wording action (Packet 11C B4b)", () => {
     expect(await screen.findByText(`${en.ai.unavailable} ${en.ai.careSummary.fallback}`)).toBeTruthy();
     // A closed, non-recoverable outcome offers no retry.
     expect(screen.queryByRole("button", { name: en.ai.retry })).toBeNull();
+  });
+
+  it("C3: each explicit request asks again; an accepted request's Retry is a new request with a new dialog and a new signal", async () => {
+    const { h, recordId } = await prepared();
+    const { port, calls } = fakeWording({ required: true });
+    renderAi(h, recordId, port);
+    fireEvent.click(await aiAction());
+    fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.careSummary.confirm }));
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+    expect(calls[0]!.input.disclosure).toBe("ACCEPTED");
+    act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "PROVIDER_TIMEOUT" }));
+    // Retry: the previous acceptance does not carry over; the dialog is shown again before anything is requested.
+    fireEvent.click(await screen.findByRole("button", { name: en.ai.retry }));
+    const again = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    expect(port.compose).toHaveBeenCalledTimes(1);
+    expect(port.disclosureRequired).toHaveBeenCalledTimes(2);
+    fireEvent.click(within(again).getByRole("button", { name: en.ai.careSummary.confirm }));
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(2));
+    expect(calls[1]!.input.disclosure).toBe("ACCEPTED");
+    expect(calls[1]!.signal).not.toBe(calls[0]!.signal);
+    act(() => calls[1]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "PROVIDER_TIMEOUT" }));
+    // Declining the next one sends that request with its decline only.
+    fireEvent.click(await screen.findByRole("button", { name: en.ai.retry }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.cancel }));
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(3));
+    expect(calls.map((call) => call.input.disclosure)).toEqual(["ACCEPTED", "ACCEPTED", "DECLINED"]);
+  });
+
+  it("C3: the AI action is hidden when this preview's own request could not be sent (its class not qualified); asked with the preview", async () => {
+    const { h, recordId } = await prepared();
+    const { port } = fakeWording({ available: false, required: true });
+    renderAi(h, recordId, port);
+    await approveWhenPreviewed(en.careSummary.approveAction);
+    expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(port.available).toHaveBeenCalled();
+    for (const call of port.available.mock.calls) expect(call[0]).toMatchObject({ locale: "en-SG", composition: { method: "DETERMINISTIC" } });
+    expect(port.compose).not.toHaveBeenCalled();
   });
 
   it("a preview that cannot be organised says so in plain words, with no disclosure and no retry", async () => {
@@ -733,7 +770,7 @@ describe("Care-summary preview: accepted AI wording (Packet 11C B4b; injected te
       const plan = shellPlanView(shellTaskRequestSchema.parse(JSON.parse(init.body as string)));
       return new Response(JSON.stringify({ kind: "CANDIDATE", candidate: shellCandidate(plan, fakeModelCareShells(plan)), retention: "CONFIRMED_NOT_STORED", usage: { inputTokens: 1, outputTokens: 1, costMicroUsd: 1 } }), { headers: { "content-type": "application/json" } });
     });
-    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands }, audit: audits, remoteUse: createAiRemoteUseSession(), manifest: ENABLED_CARE_MANIFEST, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER }).careSummary!;
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands }, audit: audits, manifest: ENABLED_CARE_MANIFEST, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER }).careSummary!;
     return { h, recordId, commands, audits, fetcher, wording };
   }
 
@@ -789,11 +826,12 @@ describe("Care-summary preview: accepted AI wording (Packet 11C B4b; injected te
         return ai.commands.replaceWithAiAssistedPreview(input);
       },
     };
-    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: ai.h.query, commands }, audit: ai.audits, remoteUse: createAiRemoteUseSession(), manifest: ENABLED_CARE_MANIFEST, requestClassGate: qualifiedTestRequestClassGate(), fetcher: ai.fetcher, now: () => LATER }).careSummary!;
-    wording.acceptDisclosure();
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: ai.h.query, commands }, audit: ai.audits, manifest: ENABLED_CARE_MANIFEST, requestClassGate: qualifiedTestRequestClassGate(), fetcher: ai.fetcher, now: () => LATER }).careSummary!;
     const onReplaced = vi.fn();
     renderAi(ai.h, ai.recordId, wording, { commands, onReplaced });
     fireEvent.click(await aiAction());
+    // Packet 11C Addendum C (C3): this request's own acceptance (no session).
+    fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.careSummary.confirm }));
     await waitFor(() => expect(gate.started).toBe(true));
     expect(ai.fetcher).toHaveBeenCalledTimes(1);
     expect((await ai.audits.list()).map((row) => row.outcomeCode)).toEqual(["ACCEPTED"]);

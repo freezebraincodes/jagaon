@@ -63,7 +63,6 @@ import { CarePreparationScreen, type CarePreparationSelection } from "./screens/
 import { CareSummaryPreviewScreen, type CareSummaryAiWordingPort } from "./screens/CareSummaryPreviewScreen";
 import { createBrowserPrintPort, type PrintPort } from "./care-preparation/PrintPort";
 import { createBrowserAiAssistance } from "@/application/ai/browser-history-explainer";
-import { createAiRemoteUseSession, type AiRemoteUseSession } from "@/application/ai/browser-shell-client";
 import type { AiInvocationAuditPort } from "@/application/ai/ai-provider-port";
 import type { RecordedHistoryQueryPort } from "@/application/history/recorded-history-contracts";
 import type { PatternExplainerPort } from "./history/PatternExplanationPanel";
@@ -123,14 +122,14 @@ type JagaOnAppProps = {
 };
 
 /**
- * Packet 11C B3: `remoteUse` is this app session's in-memory AI disclosure session (one per mount; never persisted). Packet 11C B4b:
- * `carePreparation` is the runtime's care-preparation port pair; `careSummary` is null when no care wording is wired.
+ * Packet 11C B4b: `carePreparation` is the runtime's care-preparation port pair; `careSummary` is null when no care wording is wired.
+ * Packet 11C Addendum C, C3 (deliberate change): no app-session disclosure is passed any more (the B3 session is gone):
+ * acceptance is per explicit request, carried by that request from the screen's dialog.
  */
 export type AiAssistanceFactory = (ports: {
   history: RecordedHistoryQueryPort;
   carePreparation: JagaOnRuntime["carePreparation"];
   audit: AiInvocationAuditPort;
-  remoteUse: AiRemoteUseSession;
 }) => { history: PatternExplainerPort; careSummary: CareSummaryAiWordingPort | null };
 
 /** Startup gate: onboarding until setup is completed or explicitly skipped. */
@@ -388,19 +387,15 @@ export function JagaOnApp({
    * explicit "Show how this comparison was worked out", and with the shipped manifest that is deterministic and local.
    */
   /**
-   * Packet 11C B3 (coordinator ruling: once per app session): one in-memory AI disclosure session for this app session, shared by every
-   * explainer built during it. It is not persisted, so a reload starts a new session that asks again. It accepts only through the
-   * disclosure dialog's primary action, and the dialog appears only before a remote call (never while NOT_ACTIVATED).
-   */
-  const [remoteUse] = useState(createAiRemoteUseSession);
-  /**
    * Packet 11C B4b: ONE AI wiring per opened runtime (stable identity): the history explainer and the care-summary wording share one
-   * hybrid service, browser shell client, this session's disclosure and the runtime's audit port. Building it reads, writes and sends
-   * nothing; with the shipped manifest the care wording is never available, so the preview never shows its action.
+   * hybrid service, browser shell client and the runtime's audit port. Building it reads, writes and sends nothing; with the shipped
+   * manifest the care wording is never available, so the preview never shows its action.
+   * Packet 11C Addendum C, C3 (replaces the B3 once-per-app-session acceptance): there is no app-level disclosure state. Each explicit
+   * request carries its own decision from the dialog its screen showed for it; nothing is accepted for later requests or the other flow.
    */
   const aiAssistance = useMemo(
-    () => (runtime ? aiAssistanceFactory({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit, remoteUse }) : null),
-    [runtime, aiAssistanceFactory, remoteUse],
+    () => (runtime ? aiAssistanceFactory({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit }) : null),
+    [runtime, aiAssistanceFactory],
   );
   const historyExplainer: PatternExplainerPort | null = aiAssistance?.history ?? null;
   const careSummaryWording: CareSummaryAiWordingPort | null = aiAssistance?.careSummary ?? null;

@@ -88,13 +88,16 @@ export type AiProviderPort = Readonly<{
 /**
  * "DECLINED" (Packet 11C B4a) is the patient's explicit Cancel of the disclosure for this request: like NOT_ACCEPTED nothing is sent, but
  * the request is audited as REMOTE_USE_DECLINED (Packet 11C Addendum C, C5: an audit-only code of ai-invocation-audit.11c.2; its closed
- * fallback reason stays REQUEST_CANCELLED); NOT_ACCEPTED (no acceptance exists, e.g. the interim fail-closed
- * path) stays MISSING_CONFIGURATION.
+ * fallback reason stays REQUEST_CANCELLED); NOT_ACCEPTED (no acceptance exists for this request, e.g. no decision was given for it, its
+ * decision already ended, or the interim fail-closed path) keeps the closed reason MISSING_CONFIGURATION and is audited as
+ * REMOTE_USE_NOT_ACCEPTED (Packet 11C Addendum C, C3: an audit-only code of ai-invocation-audit.11c.2).
  */
 export type AiRemoteUseDecision = "ACCEPTED" | "NOT_ACCEPTED" | "DECLINED";
 /**
  * The patient's remote-use disclosure (Packet 11C B2b interim rule; Task B3). It sees the request's signal so it can stop when the
  * request ends. Anything but an explicit "ACCEPTED" (a refusal, a decline, an error, an unknown answer, an abort) means nothing is sent.
+ * Packet 11C Addendum C, C3: the signal is the explicit request's own decision token; the browser's per-request decisions answer for
+ * that one request only (`createAiRemoteUseDecisions`).
  */
 export type AiRemoteUseDisclosure = Readonly<{ decide(signal: AbortSignal): Promise<AiRemoteUseDecision> }>;
 
@@ -108,7 +111,13 @@ export type AiShellProviderPort = Readonly<{
    * re-checks it before each send. The server-side adapters carry none.
    */
   remoteUse?: AiRemoteUseDisclosure;
-  invoke(input: ShellTaskRequest, signal: AbortSignal): Promise<ProviderInvocationResult>;
+  /**
+   * `signal` is the per-call signal (timeouts and cancellation). `decisionToken` (Packet 11C Addendum C, C3) is passed only to a provider
+   * with `remoteUse`: the explicit request's own decision token (the signal its remote-use decision was made with), identical for every
+   * attempt of that request, so the provider's per-send re-check reads THAT request's decision (the repair attempt included) and never
+   * prompts. It never reaches a request body. The server-side adapters ignore it.
+   */
+  invoke(input: ShellTaskRequest, signal: AbortSignal, decisionToken?: AbortSignal): Promise<ProviderInvocationResult>;
 }>;
 
 /** Accepts already-minimised audit metadata only, never the request or provider result. */

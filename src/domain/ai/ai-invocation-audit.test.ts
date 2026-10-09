@@ -54,6 +54,8 @@ describe("AI invocation audit row versions (Packet 11C Addendum C, C5)", () => {
     expect(AI_AUDIT_ONLY_OUTCOME_CODES).toEqual([
       "REMOTE_USE_DECLINED",
       "DISCLOSURE_CLOSED_MOOT",
+      // Packet 11C Addendum C, C3 (deliberate addition under 11c.2): a request that reached the remote decision with no acceptance of its own.
+      "REMOTE_USE_NOT_ACCEPTED",
       "NOT_ELIGIBLE",
       "SOURCE_UNAVAILABLE",
       "REQUEST_CLASS_NOT_QUALIFIED",
@@ -65,7 +67,7 @@ describe("AI invocation audit row versions (Packet 11C Addendum C, C5)", () => {
     ]);
     expect(AI_INVOCATION_OUTCOME_CODES).toEqual([...AI_INVOCATION_OUTCOME_CODES_11A, ...AI_AUDIT_ONLY_OUTCOME_CODES]);
     for (const code of AI_AUDIT_ONLY_OUTCOME_CODES) expect((AI_REASON_CODES as readonly string[]).includes(code), code).toBe(false);
-    expect(AI_AUDIT_UNSENT_OUTCOME_CODES).toEqual(["REMOTE_USE_DECLINED", "DISCLOSURE_CLOSED_MOOT", "NOT_ELIGIBLE", "SOURCE_UNAVAILABLE"]);
+    expect(AI_AUDIT_UNSENT_OUTCOME_CODES).toEqual(["REMOTE_USE_DECLINED", "DISCLOSURE_CLOSED_MOOT", "REMOTE_USE_NOT_ACCEPTED", "NOT_ELIGIBLE", "SOURCE_UNAVAILABLE"]);
   });
 
   it.each(AI_AUDIT_ONLY_OUTCOME_CODES.map((code) => [code]))("a current zero-attempt row may record %s; a legacy row never can", (code) => {
@@ -96,7 +98,7 @@ describe("AI invocation audit row versions (Packet 11C Addendum C, C5)", () => {
     expect(parse({ ...current(acceptedCareRow()), usageBasis: "ESTIMATED" }).success).toBe(false);
   });
 
-  it.each(["REMOTE_USE_DECLINED", "DISCLOSURE_CLOSED_MOOT", "NOT_ELIGIBLE", "SOURCE_UNAVAILABLE"])("%s is decided before anything is sent: a row with an attempt is refused", (code) => {
+  it.each(["REMOTE_USE_DECLINED", "DISCLOSURE_CLOSED_MOOT", "REMOTE_USE_NOT_ACCEPTED", "NOT_ELIGIBLE", "SOURCE_UNAVAILABLE"])("%s is decided before anything is sent: a row with an attempt is refused", (code) => {
     expect(parse(current({ ...acceptedCareRow(), outcomeCode: code, downstream: null }, "REPORTED")).success).toBe(false);
   });
 

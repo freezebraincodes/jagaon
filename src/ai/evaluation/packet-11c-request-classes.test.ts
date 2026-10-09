@@ -123,7 +123,10 @@ describe("Packet 11C C1 request-class definitions (generated, immutable, contrac
         expect(definition!.taskType).toBe("DRAFT_CARE_PREPARATION_SUMMARY");
       }
     }
-  });
+    // Packet 11C Addendum C, C3 fix round 1: an offline test-execution allowance only (12 fake-IndexedDB source-backed harnesses and 4
+    // care renders; about 2 s alone, it reached the 5 s default under parallel full-suite load). Not a production timeout; no assertion
+    // changed.
+  }, 30_000);
 
   it("the definitions module is plain data: it imports only domain types (no evaluation, prompt, provider or credential code)", () => {
     const source = readFileSync(DEFINITIONS_FILE, "utf8");

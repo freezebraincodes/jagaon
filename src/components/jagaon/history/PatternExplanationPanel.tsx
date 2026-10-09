@@ -38,17 +38,17 @@ export type PatternExplanationResult =
 
 export type PatternExplainerPort = {
   /**
-   * `disclosure: "DECLINED"` (Packet 11C B4a) marks a request the patient asked for after cancelling the AI disclosure: it is explained
-   * with the standard wording, nothing is sent, and it is audited as a cancelled request. Absent otherwise.
+   * `disclosure` (Packet 11C Addendum C, C3) is the patient's answer to the AI disclosure shown for THIS request, bound to the request's
+   * own signal: "ACCEPTED" (the dialog's primary action only) lets that one request use AI wording; "DECLINED" (B4a: Cancel or Escape)
+   * explains it with the standard wording, sends nothing and is audited as declined. Absent: no decision, so nothing is sent.
    */
-  explain(input: { factId: string; locale: SupportedLocale; disclosure?: "DECLINED" }, signal?: AbortSignal): Promise<PatternExplanationResult>;
+  explain(input: { factId: string; locale: SupportedLocale; disclosure?: "ACCEPTED" | "DECLINED" }, signal?: AbortSignal): Promise<PatternExplanationResult>;
   /**
-   * Packet 11C B3: true when the next explanation would use the remote route and this app session has not accepted the AI disclosure;
-   * the screen then shows the disclosure BEFORE calling `explain`. Absent or false: no disclosure (never while NOT_ACTIVATED).
+   * Packet 11C Addendum C (C3): true only when the request the patient is about to make for this comparison and locale could actually
+   * use the remote route (activated, online, its own class qualified); the screen then shows the disclosure BEFORE calling `explain`.
+   * Every request asks again (acceptance is per request). Absent or false: no disclosure (never while NOT_ACTIVATED).
    */
-  disclosureRequired?(): boolean;
-  /** Packet 11C B3: records this app session's acceptance (the disclosure's primary action only). */
-  acceptDisclosure?(): void;
+  disclosureRequired?(input: { factId: string; locale: SupportedLocale }): Promise<boolean>;
   /**
    * Packet 11C Addendum C (C5): the disclosure the screen showed for an explicit request closed without the patient's decision (view,
    * period or locale change, or the screen closed): that moot request's one audit row. Nothing is sent.

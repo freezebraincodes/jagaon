@@ -47,6 +47,19 @@ import { SHIPPED_REQUEST_CLASS_GATE, type AiRequestClassGate } from "./request-c
  * request composes deterministically in mode CLASS_NOT_QUALIFIED (closed reason TASK_DISABLED: remote use is not enabled for this
  * request) with no disclosure and nothing sent, audited with the audit-only REQUEST_CLASS_NOT_QUALIFIED (zero attempts). A gate that
  * throws is not qualified. The route's own class refusal (a provider FAILED carrying `refusal`) is audited with the same code.
+ * One root cause ("this request's class is not QUALIFIED"), two closed reasons, depending on where it is caught (C1 review carry):
+ *
+ *   | Where caught                                    | Mode / closed reason (result)         | Audit outcome                | Attempts / usage   |
+ *   |-------------------------------------------------|---------------------------------------|------------------------------|--------------------|
+ *   | Local gate here, before the disclosure          | CLASS_NOT_QUALIFIED / TASK_DISABLED   | REQUEST_CLASS_NOT_QUALIFIED  | 0 / none (NONE)    |
+ *   | Route refusal (403 REFUSED, before credentials) | REMOTE_AI / PROVIDER_REJECTED         | REQUEST_CLASS_NOT_QUALIFIED  | 1 / none, no repair|
+ *
+ * Both closed reasons are non-technical fallbacks of the same deterministic composition; the audit row carries the precise meaning.
+ * Packet 11C Addendum C, Task C3 (owner decision: disclosure acceptance is per explicit request; one permitted structural repair shares
+ * that request's decision; a new request needs a new decision): the disclosure is decided once, on the request's own decision token
+ * (its signal), and every attempt carries that token to the provider (`invoke`'s `decisionToken`), so the repair re-reads the same
+ * decision and never prompts. A request without its own acceptance is audited REMOTE_USE_NOT_ACCEPTED (closed reason unchanged:
+ * MISSING_CONFIGURATION).
  */
 export type AiLanguageMode = "REMOTE_AI" | "PRIVATE" | "OFFLINE" | "NOT_ACTIVATED" | "NO_PROVIDER" | "INELIGIBLE" | "CLASS_NOT_QUALIFIED" | "REMOTE_NOT_ACCEPTED";
 export type AiHybridExecutionResult =
@@ -83,7 +96,10 @@ export type AiUnsentRequestOutcome = (typeof AI_UNSENT_REQUEST_OUTCOMES)[number]
 export type AiUnsentRequest = Readonly<{ requestId: string; taskType: ShellTask; locale: AiLocale; requestedAt: Instant; outcome: AiUnsentRequestOutcome }>;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-async function invokeShells(request: AiTaskRequest, plan: SlotPlan, atoms: AtomTable, bundle: AiHybridRuntimeBundle, provider: AiShellProviderPort, shellRequest: ShellTaskRequest, attempts: Attempts, signal: AbortSignal | undefined): Promise<Outcome> {
+async function invokeShells(request: AiTaskRequest, plan: SlotPlan, atoms: AtomTable, bundle: AiHybridRuntimeBundle, provider: AiShellProviderPort, shellRequest: ShellTaskRequest, attempts: Attempts, signal: AbortSignal | undefined, decisionToken: AbortSignal | undefined): Promise<Outcome> {
+  // Packet 11C Addendum C (C3): every attempt of this request (the single repair included) carries the request's own decision token, so a
+  // provider with a disclosure re-reads THAT request's decision before each send; a provider without one gets no token.
+  const invoke = (input: ShellTaskRequest, s: AbortSignal) => (decisionToken ? provider.invoke(input, s, decisionToken) : provider.invoke(input, s));
   const fallback = (reason: AiReasonCode): Outcome => ({ kind: "DETERMINISTIC", reason });
   const budget = bundle.executionBudget;
   // Packet 11C Addendum C (C5): the pre-send upper bound of one call for this request, counted for every potentially billed attempt whose
@@ -94,7 +110,7 @@ async function invokeShells(request: AiTaskRequest, plan: SlotPlan, atoms: AtomT
   try {
     while (attempts.count < budget.maxAttempts) {
       attempts.count += 1;
-      const call = await callOnce((input: ShellTaskRequest, s: AbortSignal) => provider.invoke(input, s), shellRequest, budget.perCallTimeoutMs, overall.signal, signal);
+      const call = await callOnce(invoke, shellRequest, budget.perCallTimeoutMs, overall.signal, signal);
       if (call.kind === "CANCELLED") {
         addAttemptUsage(attempts, undefined, upperBound);
         return fallback("REQUEST_CANCELLED");
@@ -224,17 +240,21 @@ export function createAiHybridTaskService(dependencies: AiHybridTaskServiceDepen
       if (signal?.aborted) return finish("REMOTE_AI", { kind: "DETERMINISTIC", reason: "REQUEST_CANCELLED" });
       if (!admitted) return finish("CLASS_NOT_QUALIFIED", { kind: "DETERMINISTIC", reason: "TASK_DISABLED", audit: "REQUEST_CLASS_NOT_QUALIFIED" });
       // Packet 11C B3: the remote-use disclosure, decided before the first attempt and before any timer (attempts.count is still 0).
+      // Packet 11C Addendum C (C3): decided exactly once, on the request's own decision token (its signal; without one, a fresh token that
+      // nothing can have accepted); every attempt then carries that same token.
       const remoteUse = dependencies.provider.remoteUse;
-      if (remoteUse) {
-        const decided = await decideRemoteUse(remoteUse, signal ?? new AbortController().signal);
+      const decisionToken = remoteUse ? (signal ?? new AbortController().signal) : undefined;
+      if (remoteUse && decisionToken) {
+        const decided = await decideRemoteUse(remoteUse, decisionToken);
         if (signal?.aborted) return finish("REMOTE_AI", { kind: "DETERMINISTIC", reason: "REQUEST_CANCELLED" });
         // Packet 11C B4a (coordinator ruling), Addendum C (C5): the patient's explicit decline keeps the closed reason REQUEST_CANCELLED
-        // and is audited with the truthful audit-only REMOTE_USE_DECLINED; any other non-acceptance (no acceptance exists) stays
-        // MISSING_CONFIGURATION. Either way nothing is sent and the mode is REMOTE_NOT_ACCEPTED.
+        // and is audited with the truthful audit-only REMOTE_USE_DECLINED. Addendum C (C3, carried from the C5 review): any other
+        // non-acceptance (no acceptance exists for this request) keeps the closed reason MISSING_CONFIGURATION and is audited with the
+        // truthful audit-only REMOTE_USE_NOT_ACCEPTED. Either way nothing is sent and the mode is REMOTE_NOT_ACCEPTED.
         if (decided === "DECLINED") return finish("REMOTE_NOT_ACCEPTED", { kind: "DETERMINISTIC", reason: "REQUEST_CANCELLED", audit: "REMOTE_USE_DECLINED" });
-        if (decided !== "ACCEPTED") return finish("REMOTE_NOT_ACCEPTED", { kind: "DETERMINISTIC", reason: "MISSING_CONFIGURATION" });
+        if (decided !== "ACCEPTED") return finish("REMOTE_NOT_ACCEPTED", { kind: "DETERMINISTIC", reason: "MISSING_CONFIGURATION", audit: "REMOTE_USE_NOT_ACCEPTED" });
       }
-      return finish("REMOTE_AI", await invokeShells(request, planned.plan, planned.atoms, bundle, dependencies.provider, shellRequest, attempts, signal));
+      return finish("REMOTE_AI", await invokeShells(request, planned.plan, planned.atoms, bundle, dependencies.provider, shellRequest, attempts, signal, decisionToken));
     },
   });
 }

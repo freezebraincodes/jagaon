@@ -30,14 +30,18 @@ export type CareSummaryAiWordingOutcome =
 
 /**
  * Packet 11C B4b: the care-summary AI wording port (the app passes the care half of its one AI wiring; tests pass fakes).
- * `available()` is true only when the care task is remote-enabled and the device is online (never with the shipped manifest);
- * `disclosureRequired` is true only when a request could be sent and this app session has not accepted the disclosure.
+ * Packet 11C Addendum C, C3 (owner decision: disclosure acceptance is per explicit request):
+ * - `available(current)` is true only when a remote attempt could actually happen for THIS preview's request: the care task is
+ *   remote-enabled, the device is online and that preview's own request class is qualified (never with the shipped manifest or records);
+ *   otherwise the AI action is not shown.
+ * - `disclosureRequired(current)` is true whenever such a request could be sent: every explicit request (Retry included) asks again.
+ * - `compose`'s `disclosure` is the patient's answer to the dialog shown for THIS request ("ACCEPTED": the primary action only;
+ *   "DECLINED": Cancel or Escape, nothing sent); absent when no dialog was shown. It is bound to the request's own signal.
  */
 export type CareSummaryAiWordingPort = {
-  available(): boolean;
+  available(current: CareSummarySnapshotPayload): boolean;
   disclosureRequired(current: CareSummarySnapshotPayload): boolean;
-  acceptDisclosure(): void;
-  compose(input: { snapshotRef: ExpectedHead; locale: SupportedLocale; disclosure?: "DECLINED" }, signal?: AbortSignal): Promise<CareSummaryAiWordingOutcome>;
+  compose(input: { snapshotRef: ExpectedHead; locale: SupportedLocale; disclosure?: "ACCEPTED" | "DECLINED" }, signal?: AbortSignal): Promise<CareSummaryAiWordingOutcome>;
   /**
    * Packet 11C Addendum C (C5): the disclosure shown for an explicit request closed without the patient's decision (locale or preview
    * change, or the screen closed): that moot request's one audit row. Nothing is sent.
@@ -131,8 +135,8 @@ function outcomeText(messages: AppMessages, outcome: CareSummaryExportOutcome | 
  *
  * Packet 11C Addendum B, Task B4b (original Task 5, care part): the "Organise with AI" action, placed before the approval controls. It
  * is offered only when the AI wording is `available()` (care task remote-enabled, online; never with the shipped manifest) AND the
- * snapshot is the current, unapproved, current-template, DETERMINISTIC preview. The disclosure comes before any request (once per app
- * session; Cancel sends nothing). While a request runs the deterministic preview stays readable, approval waits and Cancel aborts. An
+ * snapshot is the current, unapproved, current-template, DETERMINISTIC preview. The disclosure comes before any request (Packet 11C
+ * Addendum C, C3: for every explicit request, Retry included; an acceptance covers that one request only; Cancel sends nothing). While a request runs the deterministic preview stays readable, approval waits and Cancel aborts. An
  * accepted replacement shows the NEW snapshot with the AI label and check notice (from the snapshot's own composition), recorded as
  * previewed by the ordinary flow; approval remains a separate click and nothing prints on its own. A changed source or head, a fallback,
  * an ineligible preview and a cancel each show one non-technical line; a late answer after a cancel, locale switch or unmount is
@@ -197,7 +201,8 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
     (ready.snapshotStatus === "PREPARED" || ready.snapshotStatus === "PREVIEWED") &&
     isCurrentCareSummaryTemplate(ready.payload) &&
     ready.payload.composition.method === "DETERMINISTIC";
-  const aiOffered = aiWording !== null && aiSnapshot && aiWording.available();
+  // Packet 11C Addendum C (C3, C1 carry): offered only when this preview's own request could be sent (its class qualified).
+  const aiOffered = aiWording !== null && aiSnapshot && aiWording.available(ready.payload);
   const aiLoading = aiPhase.kind === "LOADING";
   const disclosureKey = `${ready?.revisionId ?? ""}|${locale}`;
   // The dialog or the request belongs to the locale (and, for the dialog, the snapshot revision) it was opened in.
@@ -260,8 +265,13 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
     }
   }
 
-  /** One explicit request. `declined`: the patient cancelled the disclosure, so nothing may be sent (audited REMOTE_USE_DECLINED, C5). */
-  function runAiWording(declined: boolean) {
+  /**
+   * One explicit request. `decision` (Packet 11C Addendum C, C3): the patient's answer to the disclosure shown for THIS request, bound to
+   * its own signal: "ACCEPTED" lets this one request use AI wording; "DECLINED" means nothing may be sent (audited REMOTE_USE_DECLINED,
+   * C5); null when no disclosure was shown. Cancel, a locale switch, unmount or a newer request abort the signal and so end the decision.
+   */
+  function runAiWording(decision: "ACCEPTED" | "DECLINED" | null) {
+    const declined = decision === "DECLINED";
     if (!ready || !aiWording || unsettled.current > 0 || replacing) return;
     aiRequest.current?.controller.abort();
     const request = { controller: new AbortController() };
@@ -271,7 +281,7 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
     setAiPhase({ kind: "LOADING", locale });
     const snapshotRef: ExpectedHead = { recordId: ready.recordId, expectedRevisionId: ready.revisionId, expectedRevisionNumber: ready.revisionNumber };
     void aiWording
-      .compose({ snapshotRef, locale: ready.payload.locale, ...(declined ? { disclosure: "DECLINED" as const } : {}) }, request.controller.signal)
+      .compose({ snapshotRef, locale: ready.payload.locale, ...(decision ? { disclosure: decision } : {}) }, request.controller.signal)
       .catch((): CareSummaryAiWordingOutcome => ({ kind: "UNAVAILABLE" }))
       .then((outcome) => {
         // Settled (the catch above folds a failure into UNAVAILABLE), in the same update as the resulting state.
@@ -300,24 +310,25 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
       });
   }
 
+  // Packet 11C Addendum C (C3): every explicit request (the first action and every Retry) asks again; nothing is remembered.
   function startAiWording() {
     if (!ready || !aiWording || !aiOffered || aiBusy || unsettled.current > 0) return;
     if (aiWording.disclosureRequired(ready.payload)) setAiPhase({ kind: "DISCLOSURE", key: disclosureKey, locale: ready.payload.locale });
-    else runAiWording(false);
+    else runAiWording(null);
   }
 
+  // The dialog's primary action: accepts remote use for this one request only (it travels with the request).
   function acceptAiDisclosure() {
     if (aiPhase.kind !== "DISCLOSURE" || !aiWording) return;
-    aiWording.acceptDisclosure();
     // Answered, so never also moot (C5).
     decidedDisclosures.current.add(aiPhase);
-    runAiWording(false);
+    runAiWording("ACCEPTED");
   }
 
   function declineAiDisclosure() {
     if (aiPhase.kind !== "DISCLOSURE") return;
     decidedDisclosures.current.add(aiPhase);
-    runAiWording(true);
+    runAiWording("DECLINED");
   }
 
   function cancelAiWording() {

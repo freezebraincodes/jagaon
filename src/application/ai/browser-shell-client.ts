@@ -17,11 +17,13 @@ export type { AiRemoteUseDecision, AiRemoteUseDisclosure };
  * 2. Interim rule (owner approval 2026-10-08): remote use fails closed without an accepted disclosure. The injected disclosure is asked
  *    before EVERY send; anything but an explicit "ACCEPTED" (a refusal, an error, an unknown answer, an abort) ends the call with the
  *    closed `MISSING_CONFIGURATION` reason and nothing is sent. `INTERIM_FAIL_CLOSED_DISCLOSURE` never accepts and stays the default of
- *    any path without the session disclosure.
+ *    any path without the per-request decisions (C3).
  *    Task B3: the client also exposes its disclosure as the port's `remoteUse`, so the hybrid service decides it once per request BEFORE
- *    the first attempt and any timer (an honest audit row when nothing is sent); the check here stays as a second, per-send guard. The
- *    app's disclosure is `createAiRemoteUseSession()`: one in-memory acceptance per app session, given only by the patient's acceptance
- *    of the disclosure dialog, which the screen shows before it asks for any explanation; it then answers at once, without asking again.
+ *    the first attempt and any timer (an honest audit row when nothing is sent); the check here stays as a second, per-send guard.
+ *    Packet 11C Addendum C, Task C3: the app's disclosure is `createAiRemoteUseDecisions().disclosure`: an acceptance belongs to ONE
+ *    explicit request (its decision token, given only by the patient's acceptance of the dialog the screen shows for that request), and
+ *    the per-send guard reads that request's token (`invoke`'s `decisionToken`), so the repair never asks the patient again and a later request does
+ *    not inherit it. This replaces the B3 once-per-app-session acceptance.
  * 3. One same-origin POST of the strictly parsed request to the relative route path: JSON, `cache: "no-store"`, redirects refused, and
  *    the caller's AbortSignal (the hybrid service's per-call timeout and the user's cancellation abort the request).
  * 4. The answer is parsed strictly with the shared route contract and mapped to a provider result: CANDIDATE -> COMPLETED (validated
@@ -39,25 +41,60 @@ export type { AiRemoteUseDecision, AiRemoteUseDisclosure };
 /** D2: the route's fixed identity (Direct DeepSeek deepseek-flash), recorded in the local audit row only. */
 export const BROWSER_SHELL_CLIENT_PROVIDER_MODEL: Readonly<{ providerKey: string; modelSnapshot: string }> = Object.freeze({ providerKey: "deepseek", modelSnapshot: "deepseek-flash" });
 
-/** The interim fail-closed disclosure: remote use is never accepted. The default of any path without the session disclosure (B3). */
+/** The interim fail-closed disclosure: remote use is never accepted. The default of any path without the per-request decisions (C3). */
 export const INTERIM_FAIL_CLOSED_DISCLOSURE: AiRemoteUseDisclosure = Object.freeze({ decide: async (): Promise<AiRemoteUseDecision> => "NOT_ACCEPTED" });
 
-/**
- * Packet 11C Addendum B, Task B3 (coordinator ruling: once per app session). `disclosure` answers NOT_ACCEPTED until `accept()` is
- * called, then ACCEPTED for the rest of the session, immediately (it never waits, so it is never a wait inside the hybrid timers).
- * Only the disclosure dialog's primary action calls `accept()`. In memory only: nothing is persisted, so a reload is a new session.
- */
-export type AiRemoteUseSession = Readonly<{ disclosure: AiRemoteUseDisclosure; accepted(): boolean; accept(): void }>;
+/** The patient's answer to the disclosure shown for ONE explicit request (Packet 11C Addendum C, C3). */
+export type AiRemoteUseRequestDecision = "ACCEPTED" | "DECLINED";
 
-export function createAiRemoteUseSession(): AiRemoteUseSession {
-  let accepted = false;
-  return Object.freeze({
-    disclosure: Object.freeze({ decide: async (): Promise<AiRemoteUseDecision> => (accepted ? "ACCEPTED" : "NOT_ACCEPTED") }),
-    accepted: () => accepted,
-    accept: () => {
-      accepted = true;
+/**
+ * Packet 11C Addendum C, Task C3 (owner decision: "Disclosure acceptance is per explicit request; one permitted structural repair shares
+ * that request's decision. A new request needs a new decision."). Replaces the B3 once-per-app-session acceptance.
+ *
+ * - Token: a decision is bound to ONE explicit request's decision token, its AbortSignal, which the screen creates for the request the
+ *   patient's action started (a fresh token is made when a decision comes without a signal). The token's decision is what `disclosure`
+ *   answers for it: ACCEPTED, DECLINED, or NOT_ACCEPTED for anything else. It answers at once and never asks the patient (the screen asks the
+ *   patient BEFORE the request starts), so it is never a wait inside the hybrid timers.
+ * - Lifetime: `run(decision, signal, request)` binds the decision to the token for exactly that request's run. The hybrid service reads
+ *   it once before any attempt or timer; the client re-reads it (never asking again) before each send, the single structural repair
+ *   included. An acceptance ends when the request settles (also on a failure) and whenever its token aborts (a new click, Retry, locale,
+ *   period or view change, or unmount abort the screen's request), so it never covers a later request, a reused token, another token
+ *   or the other flow.
+ * - One decision per token: a second request on a token that already carried a decision never gets an acceptance (a live acceptance on a
+ *   reused token ends for both requests); a decline stays DECLINED for that token (B5: fails safe). Only the two exact decisions count.
+ * - In memory only: nothing is persisted or shared between instances.
+ */
+export type AiRemoteUseDecisions = Readonly<{
+  disclosure: AiRemoteUseDisclosure;
+  run<T>(decision: AiRemoteUseRequestDecision | undefined, signal: AbortSignal | undefined, request: (token: AbortSignal | undefined) => Promise<T>): Promise<T>;
+}>;
+
+export function createAiRemoteUseDecisions(): AiRemoteUseDecisions {
+  const decisions = new WeakMap<AbortSignal, AiRemoteUseRequestDecision | "ENDED">();
+  const disclosure: AiRemoteUseDisclosure = Object.freeze({
+    decide: async (token: AbortSignal): Promise<AiRemoteUseDecision> => {
+      const decision = decisions.get(token);
+      if (decision === "DECLINED") return "DECLINED";
+      return decision === "ACCEPTED" && !token.aborted ? "ACCEPTED" : "NOT_ACCEPTED";
     },
   });
+  async function run<T>(decision: AiRemoteUseRequestDecision | undefined, signal: AbortSignal | undefined, request: (token: AbortSignal | undefined) => Promise<T>): Promise<T> {
+    const given = decision === "ACCEPTED" || decision === "DECLINED" ? decision : undefined;
+    if (given === undefined) {
+      // A request without a decision never inherits one: a token whose acceptance is still live (reused) loses it.
+      if (signal && decisions.get(signal) === "ACCEPTED") decisions.set(signal, "ENDED");
+      return request(signal);
+    }
+    const token = signal ?? new AbortController().signal;
+    const previous = decisions.get(token);
+    decisions.set(token, given === "DECLINED" || previous === "DECLINED" ? "DECLINED" : previous === undefined ? "ACCEPTED" : "ENDED");
+    try {
+      return await request(token);
+    } finally {
+      if (decisions.get(token) === "ACCEPTED") decisions.set(token, "ENDED");
+    }
+  }
+  return Object.freeze({ disclosure, run });
 }
 
 export type BrowserShellFetcher = (input: string, init: RequestInit) => Promise<Response>;
@@ -100,13 +137,16 @@ export function createBrowserShellClient(options: { disclosure: AiRemoteUseDiscl
     providerModel: BROWSER_SHELL_CLIENT_PROVIDER_MODEL,
     // Task B3: decided by the hybrid service before the first attempt (and re-checked below before each send).
     remoteUse: options.disclosure,
-    async invoke(input: ShellTaskRequest, signal: AbortSignal): Promise<ProviderInvocationResult> {
+    async invoke(input: ShellTaskRequest, signal: AbortSignal, decisionToken?: AbortSignal): Promise<ProviderInvocationResult> {
       const parsed = shellTaskRequestSchema.safeParse(input);
       if (!parsed.success || !isApprovedShellTaskRequest(parsed.data)) return failed(REFUSED_REASON);
       const body = JSON.stringify(parsed.data);
       if (new TextEncoder().encode(body).byteLength > AI_SHELL_MAX_BODY_BYTES) return failed(REFUSED_REASON);
 
-      if ((await decideRemoteUse(options.disclosure, signal)) !== "ACCEPTED" || signal.aborted) return failed(NOT_ACCEPTED_REASON);
+      // Packet 11C Addendum C (C3): the per-send re-check reads the explicit request's own decision (its token, the same for the repair
+      // attempt), never a new question to the patient; without a token the per-call signal is asked, which no per-request decision covers.
+      const token = decisionToken ?? signal;
+      if ((await decideRemoteUse(options.disclosure, token)) !== "ACCEPTED" || signal.aborted || token.aborted) return failed(NOT_ACCEPTED_REASON);
 
       // Packet 11C Addendum C (C5): from the POST on, the route may have made a billed provider call. A route refusal (4xx) was decided
       // before any provider call (nothing billed); any other answer without a readable route usage counts this request's pre-send upper

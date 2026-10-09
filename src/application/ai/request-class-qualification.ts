@@ -97,8 +97,9 @@ export function requestClassQualification(identity: AiRequestClassIdentity, defi
 export type AiRequestClassAdmission = Readonly<{ admitted: true; classId: string }> | Readonly<{ admitted: false; classId: string | null; reason: AiRequestClassNotQualifiedReason | "REQUEST_UNREADABLE" }>;
 /**
  * Decides whether a projected value-blind request may be sent. `admit` never throws (an unreadable request is not admitted).
- * `anyAdmissible(task)` is a coarse check for the disclosure: false when no class of that task is QUALIFIED, so no request of the task
- * can be sent and there is nothing to disclose.
+ * `anyAdmissible(task)` is a coarse task-level check: false when no class of that task is QUALIFIED, so no request of the task can be
+ * sent. Packet 11C Addendum C (C3): the browser wiring no longer uses it for the disclosure; it admits each request with `admit` on that
+ * request's own projected class (history: the request built for that comparison and locale; care: that preview's request).
  */
 export type AiRequestClassGate = Readonly<{ admit(request: ShellTaskRequest): AiRequestClassAdmission; anyAdmissible(taskType: ShellTask): boolean }>;
 export type AiRequestClassRegistry = Readonly<{ definitions: readonly AiRequestClassDefinition[]; records: readonly unknown[] }>;

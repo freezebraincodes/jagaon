@@ -12,12 +12,12 @@ import {
   createAppointmentNoteSelectionRepository,
 } from "@/application/history/appointment-note-selection";
 import type { RecordedHistoryQueryPort, RecordedHistoryView } from "@/application/history/recorded-history-contracts";
-import { databases, dayBefore, FACT, higherFixture, local, NOW, TODAY } from "@/application/history/history-test-support";
+import { databases, dayBefore, FACT, higherFixture, local, NOW, reading, RECENT, REFERENCE, setup, TODAY } from "@/application/history/history-test-support";
 import { AI_ACTIVATION_MANIFEST } from "@/application/ai/ai-activation-manifest";
 import { createAiHybridTaskService, type AiHybridExecutionResult } from "@/application/ai/ai-hybrid-task-service";
 import { createPatternExplainer } from "@/application/ai/explain-pattern";
 import { createBrowserHistoryExplainer } from "@/application/ai/browser-history-explainer";
-import { createAiRemoteUseSession, type BrowserShellFetcher } from "@/application/ai/browser-shell-client";
+import type { BrowserShellFetcher } from "@/application/ai/browser-shell-client";
 import type { AiActivationManifest } from "@/application/ai/ai-activation-manifest";
 import { shellPlanView } from "@/application/ai/language/shell-projector";
 import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
@@ -344,6 +344,17 @@ async function realResults(history: RecordedHistoryQueryPort): Promise<Record<Ai
     out[locale] = result;
   }
   return out;
+}
+
+/** C3 fix round 1: two explainable comparisons (the higher before-breakfast series, and the same series before dinner). */
+async function twoComparisonFixture() {
+  const harness = await setup();
+  for (const [d, v] of [...REFERENCE, ...RECENT]) {
+    await reading(harness.journal, dayBefore(TODAY, d), "07:30", v);
+    await reading(harness.journal, dayBefore(TODAY, d), "18:30", v, "BEFORE_DINNER");
+  }
+  await harness.coordinator.processPending();
+  return harness;
 }
 
 const headlineOf = (explanation: Explained) => (explanation.composition.output.payload as { headline: { text: string } }).headline.text;
@@ -730,24 +741,37 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
       return new Response(JSON.stringify({ kind: "CANDIDATE", candidate, retention: "CONFIRMED_NOT_STORED", usage: { inputTokens: 1, outputTokens: 1, costMicroUsd: 1 } }), { headers: { "content-type": "application/json" } });
     });
   }
-  async function wired(manifest: AiActivationManifest = ENABLED, online: () => boolean = () => true) {
+  async function wired(manifest: AiActivationManifest = ENABLED, online: () => boolean = () => true, route: BrowserShellFetcher = fakeRoute()) {
     const { history } = await higherFixture();
     const rows: AiInvocationAuditRow[] = [];
-    const fetcher = fakeRoute();
-    const remoteUse = createAiRemoteUseSession();
-    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
-    const real = createBrowserHistoryExplainer({ history, audit: { append: async (row) => void rows.push(row) }, manifest, remoteUse, fetcher, online, requestClassGate: qualifiedTestRequestClassGate() });
+    const fetcher = vi.fn(route);
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING). C3: no session; every request
+    // carries its own decision.
+    const real = createBrowserHistoryExplainer({ history, audit: { append: async (row) => void rows.push(row) }, manifest, fetcher, online, requestClassGate: qualifiedTestRequestClassGate() });
     const explain = vi.fn(real.explain);
-    const explainer = { ...real, explain };
-    return { history, rows, fetcher, remoteUse, explainer, explain };
+    const disclosureRequired = vi.fn(real.disclosureRequired);
+    const explainer = { ...real, explain, disclosureRequired };
+    return { history, rows, fetcher, explainer, explain, disclosureRequired };
   }
   const dialogOf = (locale: AiLocale = "en-SG") => screen.getByRole("dialog", { name: getMessages(locale).ai.remoteTitle });
   const panelStatus = (locale: AiLocale = "en-SG") => within(screen.getByRole("region", { name: getMessages(locale).history.explanation.title })).getByRole("status");
+  /**
+   * Packet 11C Addendum C (C3): the action, then its per-request disclosure check (one local read), until the dialog or the panel shows.
+   */
+  async function askAction(locale: AiLocale = "en-SG") {
+    const action = await screen.findByRole("button", { name: getMessages(locale).history.explanation.action });
+    fireEvent.click(action);
+    await waitFor(() => expect(screen.queryByRole("dialog") ?? screen.queryByRole("region", { name: getMessages(locale).history.explanation.title })).not.toBeNull());
+    return action;
+  }
 
-  it("activated, not yet accepted: the action opens the disclosure first; nothing is explained, read for AI, audited or sent", async () => {
+  it("activated: the action opens the disclosure first, asked for THIS request; nothing is explained, audited or sent", async () => {
     const run = await wired();
     render(screenElement("en-SG", run.history, run.explainer));
-    const action = await openAction();
+    const action = await askAction();
+    // Packet 11C Addendum C (C3): the per-request check is asked with this comparison and locale (one local read, no row, no send).
+    expect(run.disclosureRequired).toHaveBeenCalledTimes(1);
+    expect(run.disclosureRequired).toHaveBeenCalledWith({ factId: FACT, locale: "en-SG" });
     const dialog = dialogOf();
     expect(dialog).toHaveAccessibleDescription(`${en.ai.remoteBody} ${en.ai.remoteLimit}`);
     expect(within(dialog).getByRole("button", { name: en.ai.cancel })).toHaveFocus();
@@ -765,7 +789,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
   ])("%s: the deterministic explanation opens with nothing sent and an audit row that records no attempt; the next action asks again", async (_label, cancel) => {
     const run = await wired();
     render(screenElement("en-SG", run.history, run.explainer));
-    const action = await openAction();
+    const action = await askAction();
     act(() => cancel());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(action).toHaveAttribute("aria-expanded", "true");
@@ -779,7 +803,6 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     expect(run.explain).toHaveBeenCalledTimes(1);
     expect(run.explain.mock.calls[0]![0]).toEqual({ factId: FACT, locale: "en-SG", disclosure: "DECLINED" });
     expect(run.fetcher).not.toHaveBeenCalled();
-    expect(run.remoteUse.accepted()).toBe(false);
     expect(run.rows).toHaveLength(1);
     // Packet 11C Addendum C (C5): an explicit decline is audited with the truthful REMOTE_USE_DECLINED (REQUEST_CANCELLED under the B4a
     // interim ruling); nothing was sent.
@@ -787,35 +810,172 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
 
     // Not accepted, so the next explicit action asks again.
     fireEvent.click(action);
-    await openAction();
+    await askAction();
     expect(dialogOf()).toBeInTheDocument();
     expect(run.explain).toHaveBeenCalledTimes(1);
   });
 
-  it("accepted: the AI explanation from one POST; the rest of the session does not ask again", async () => {
+  it("C3: accepted: the AI explanation from one POST with that request's own acceptance; the next request asks again (two requests, two dialogs)", async () => {
     const run = await wired();
     render(screenElement("en-SG", run.history, run.explainer));
-    const action = await openAction();
+    const action = await askAction();
     act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.pattern.confirm })));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(run.remoteUse.accepted()).toBe(true);
     const panel = screen.getByRole("region", { name: en.history.explanation.title });
     expect(within(panel).getByRole("heading", { level: 3 })).toHaveFocus();
     await waitFor(() => expect(within(panel).getByText(en.history.explanation.aiLabel)).toBeInTheDocument());
     expect(run.fetcher).toHaveBeenCalledTimes(1);
+    expect(run.explain.mock.calls[0]![0]).toEqual({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" });
+    expect(run.explain.mock.calls[0]![1]).toBeInstanceOf(AbortSignal);
     expect(run.rows[0]).toMatchObject({ outcomeCode: "ACCEPTED", providerModel: { providerKey: "deepseek", modelSnapshot: "deepseek-flash" }, attempts: { count: 1 } });
 
+    // Close and ask again: a new explicit request, so the dialog is shown again and nothing is sent until it is answered.
     fireEvent.click(action);
-    await openAction();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await askAction();
+    expect(dialogOf()).toBeInTheDocument();
+    expect(run.explain).toHaveBeenCalledTimes(1);
+    expect(run.fetcher).toHaveBeenCalledTimes(1);
+    act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.pattern.confirm })));
     await waitFor(() => expect(run.fetcher).toHaveBeenCalledTimes(2));
     expect(run.explain).toHaveBeenCalledTimes(2);
+    // Each request has its own signal (its own decision token).
+    expect(run.explain.mock.calls[1]![1]).not.toBe(run.explain.mock.calls[0]![1]);
+    expect(run.disclosureRequired).toHaveBeenCalledTimes(2);
   });
 
-  it("NOT_ACTIVATED (shipped manifest): the disclosure never appears, even with a session that has not accepted", async () => {
+  it("C3: a repairable structural rejection under one acceptance: one dialog, repaired once (two POSTs), one audit row", async () => {
+    const answer = fakeRoute();
+    let posts = 0;
+    const route: BrowserShellFetcher = async (url, init) => {
+      posts += 1;
+      if (posts === 1) return new Response(JSON.stringify({ kind: "STRUCTURALLY_REJECTED", reason: "SCHEMA_INVALID", repairable: true, retention: "CONFIRMED_NOT_STORED", usage: { inputTokens: 1, outputTokens: 1, costMicroUsd: 1 } }), { headers: { "content-type": "application/json" } });
+      return answer(url, init);
+    };
+    const run = await wired(ENABLED, () => true, route);
+    render(screenElement("en-SG", run.history, run.explainer));
+    await askAction();
+    act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.pattern.confirm })));
+    const panel = screen.getByRole("region", { name: en.history.explanation.title });
+    await waitFor(() => expect(within(panel).getByText(en.history.explanation.aiLabel)).toBeInTheDocument());
+    expect(run.fetcher).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(run.disclosureRequired).toHaveBeenCalledTimes(1);
+    expect(run.rows).toHaveLength(1);
+    expect(run.rows[0]).toMatchObject({ outcomeCode: "ACCEPTED", attempts: { count: 2, structuralRepairUsed: true } });
+  });
+
+  it("C3: a check still in flight is superseded by a locale switch or a newer action: no dialog or panel appears by itself", async () => {
+    const run = await wired();
+    let answer!: (value: boolean) => void;
+    const disclosureRequired = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+    const explainer = { ...run.explainer, disclosureRequired };
+    const { rerender } = render(screenElement("en-SG", run.history, explainer));
+    fireEvent.click(await screen.findByRole("button", { name: en.history.explanation.action }));
+    await waitFor(() => expect(disclosureRequired).toHaveBeenCalledTimes(1));
+    rerender(screenElement("zh-SG", run.history, explainer));
+    await act(async () => answer(true));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: zh.history.explanation.title })).not.toBeInTheDocument();
+    // A newer action supersedes the older one's check (only the latest answer counts).
+    fireEvent.click(await screen.findByRole("button", { name: zh.history.explanation.action }));
+    await waitFor(() => expect(disclosureRequired).toHaveBeenCalledTimes(2));
+    const first = answer;
+    fireEvent.click(screen.getByRole("button", { name: zh.history.explanation.action }));
+    await waitFor(() => expect(disclosureRequired).toHaveBeenCalledTimes(3));
+    await act(async () => first(true));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await act(async () => answer(false));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: zh.history.explanation.title })).toBeInTheDocument();
+    // C3 fix round 1: each of the three clicks is one explicit request with exactly one row. The two superseded checks answered "a
+    // disclosure is needed", so each closed without the patient's decision (DISCLOSURE_CLOSED_MOOT, in its own locale); the third opened
+    // without a decision of its own (REMOTE_USE_NOT_ACCEPTED). Nothing was sent.
+    await waitFor(() => expect(run.rows).toHaveLength(3));
+    expect(run.rows.map((row) => `${row.locale}:${row.outcomeCode}:${row.attempts.count}`).sort()).toEqual(["en-SG:DISCLOSURE_CLOSED_MOOT:0", "zh-SG:DISCLOSURE_CLOSED_MOOT:0", "zh-SG:REMOTE_USE_NOT_ACCEPTED:0"]);
+    expect(run.explain.mock.calls.filter((call) => call[1]?.aborted !== true).map((call) => call[0])).toEqual([{ factId: FACT, locale: "zh-SG" }]);
+    expect(run.fetcher).not.toHaveBeenCalled();
+  });
+
+  it("C3 fix round 1: a superseded check whose answer is 'not needed' is one REQUEST_CANCELLED row (period change, screen closed); nothing sent", async () => {
+    const run = await wired();
+    let answer!: (value: boolean) => void;
+    const disclosureRequired = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+    const explainer = { ...run.explainer, disclosureRequired };
+    const { unmount } = render(screenElement("en-SG", run.history, explainer));
+    fireEvent.click(await screen.findByRole("button", { name: en.history.explanation.action }));
+    await waitFor(() => expect(disclosureRequired).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("radio", { name: en.history.periodLastWeek }));
+    await act(async () => answer(false));
+    await waitFor(() => expect(run.rows).toHaveLength(1));
+    expect(run.rows[0]).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcomeCode: "REQUEST_CANCELLED", providerModel: null, attempts: { count: 0 }, usageBasis: "NONE" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: en.history.explanation.title })).not.toBeInTheDocument();
+
+    // Back to this week, ask again, then close the screen while the check is in flight.
+    fireEvent.click(screen.getByRole("radio", { name: en.history.periodThisWeek }));
+    fireEvent.click(await screen.findByRole("button", { name: en.history.explanation.action }));
+    await waitFor(() => expect(disclosureRequired).toHaveBeenCalledTimes(2));
+    unmount();
+    await act(async () => answer(false));
+    await waitFor(() => expect(run.rows).toHaveLength(2));
+    expect(run.rows.map((row) => row.outcomeCode)).toEqual(["REQUEST_CANCELLED", "REQUEST_CANCELLED"]);
+    await act(async () => undefined);
+    expect(run.rows).toHaveLength(2);
+    expect(run.fetcher).not.toHaveBeenCalled();
+  });
+
+  it("C3 fix round 1: a click on another comparison ends the open request at once (aborted before the new check settles); it never sends", async () => {
+    const two = await twoComparisonFixture();
+    const rows: AiInvocationAuditRow[] = [];
+    const fetcher = vi.fn(fakeRoute());
+    // The explainer's own reads of comparison A can be held, so A's accepted request is still before its send when B is clicked.
+    let holdA: Promise<void> | null = null;
+    let releaseA!: () => void;
+    const explainerHistory: RecordedHistoryQueryPort = {
+      load: (request) => two.history.load(request),
+      loadExplainablePattern: async (request) => {
+        if (holdA && request.factId === FACT) await holdA;
+        return two.history.loadExplainablePattern(request);
+      },
+    };
+    const real = createBrowserHistoryExplainer({ history: explainerHistory, audit: { append: async (row) => void rows.push(row) }, manifest: ENABLED, fetcher, requestClassGate: qualifiedTestRequestClassGate() });
+    const explain = vi.fn(real.explain);
+    let answerB!: (value: boolean) => void;
+    const disclosureRequired = vi.fn((input: { factId: string; locale: AiLocale }) => (input.factId === FACT ? real.disclosureRequired(input) : new Promise<boolean>((resolve) => (answerB = resolve))));
+    const explainer = { ...real, explain, disclosureRequired };
+    render(screenElement("en-SG", two.history, explainer));
+    const actions = await screen.findAllByRole("button", { name: en.history.explanation.action });
+    expect(actions).toHaveLength(2);
+    // A: asked, accepted; its request is held before its send.
+    fireEvent.click(actions[0]!);
+    const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    holdA = new Promise((resolve) => (releaseA = resolve));
+    act(() => fireEvent.click(within(dialog).getByRole("button", { name: en.ai.pattern.confirm })));
+    await waitFor(() => expect(explain).toHaveBeenCalledTimes(1));
+    const signalA = explain.mock.calls[0]![1]!;
+    expect(explain.mock.calls[0]![0]).toEqual({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" });
+    expect(signalA.aborted).toBe(false);
+    // B clicked: A is aborted at once, while B's check is still in flight.
+    fireEvent.click(screen.getAllByRole("button", { name: en.history.explanation.action })[1]!);
+    await act(async () => undefined);
+    expect(disclosureRequired).toHaveBeenCalledTimes(2);
+    expect(signalA.aborted).toBe(true);
+    expect(screen.queryByRole("region", { name: en.history.explanation.title })).not.toBeInTheDocument();
+    // A's held read resumes: its request ends cancelled with nothing sent.
+    await act(async () => releaseA());
+    await waitFor(() => expect(rows.map((row) => row.outcomeCode)).toContain("REQUEST_CANCELLED"));
+    expect(fetcher).not.toHaveBeenCalled();
+    // B's check settles ("needed"): B shows its own dialog; A never sends.
+    await act(async () => answerB(true));
+    expect(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).toBeInTheDocument();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(rows.map((row) => `${row.outcomeCode}:${row.attempts.count}`)).toEqual(["REQUEST_CANCELLED:0"]);
+  });
+
+  it("NOT_ACTIVATED (shipped manifest): the disclosure never appears", async () => {
     const run = await wired(AI_ACTIVATION_MANIFEST);
     render(screenElement("en-SG", run.history, run.explainer));
-    await openAction();
+    await askAction();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(panelStatus()).not.toBeEmptyDOMElement());
     expect(run.explain).toHaveBeenCalledTimes(1);
@@ -826,7 +986,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
   it("zh-SG: the disclosure shows the zh copy", async () => {
     const run = await wired();
     render(screenElement("zh-SG", run.history, run.explainer));
-    await openAction("zh-SG");
+    await askAction("zh-SG");
     const dialog = dialogOf("zh-SG");
     expect(dialog).toHaveAccessibleDescription(`${zh.ai.remoteBody} ${zh.ai.remoteLimit}`);
     expect(within(dialog).getAllByRole("button").map((button) => button.textContent)).toEqual([zh.ai.pattern.confirm, zh.ai.cancel]);
@@ -835,7 +995,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
   it("a locale or period change while the disclosure is open closes it: nothing is explained or sent; it does not come back; C5: one DISCLOSURE_CLOSED_MOOT row each", async () => {
     const run = await wired();
     const { rerender } = render(screenElement("en-SG", run.history, run.explainer));
-    await openAction();
+    await askAction();
     expect(dialogOf()).toBeInTheDocument();
     expect(run.rows).toHaveLength(0);
     rerender(screenElement("zh-SG", run.history, run.explainer));
@@ -849,7 +1009,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     await waitFor(() => expect(run.rows).toHaveLength(1));
     expect(run.rows[0]).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcomeCode: "DISCLOSURE_CLOSED_MOOT", providerModel: null, attempts: { count: 0 }, usageBasis: "NONE" });
 
-    await openAction();
+    await askAction();
     expect(dialogOf()).toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: en.history.periodLastWeek }));
     await act(async () => undefined);
@@ -865,7 +1025,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
   it("C5: closing the screen while the disclosure is open writes one DISCLOSURE_CLOSED_MOOT row; a decided disclosure writes none on close", async () => {
     const run = await wired();
     const { unmount } = render(screenElement("en-SG", run.history, run.explainer));
-    await openAction();
+    await askAction();
     expect(dialogOf()).toBeInTheDocument();
     unmount();
     await waitFor(() => expect(run.rows).toHaveLength(1));
@@ -873,7 +1033,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
 
     const decided = await wired();
     const second = render(screenElement("en-SG", decided.history, decided.explainer));
-    await openAction();
+    await askAction();
     act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.cancel })));
     await waitFor(() => expect(decided.rows).toHaveLength(1));
     second.unmount();
@@ -885,7 +1045,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
   it("C5 under StrictMode (development double effects): one explicit request still writes exactly one row", async () => {
     const run = await wired();
     render(<StrictMode>{screenElement("en-SG", run.history, run.explainer)}</StrictMode>);
-    await openAction();
+    await askAction();
     act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.cancel })));
     await waitFor(() => expect(panelStatus()).not.toBeEmptyDOMElement());
     await act(async () => undefined);
@@ -896,7 +1056,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     cleanup();
     const second = await wired();
     const view = render(<StrictMode>{screenElement("en-SG", second.history, second.explainer)}</StrictMode>);
-    await openAction();
+    await askAction();
     await act(async () => undefined);
     expect(dialogOf()).toBeInTheDocument();
     expect(second.rows).toHaveLength(0);
@@ -904,10 +1064,10 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     await waitFor(() => expect(second.rows.map((row) => row.outcomeCode)).toEqual(["DISCLOSURE_CLOSED_MOOT"]));
   });
 
-  it("activated + accepted session + open AI panel: a locale switch closes the panel with no POST and no audit row; only a new action explains again", async () => {
+  it("activated + accepted request + open AI panel: a locale switch closes the panel with no POST and no audit row; only a new, newly accepted action explains again", async () => {
     const run = await wired();
     const { rerender } = render(screenElement("en-SG", run.history, run.explainer));
-    await openAction();
+    await askAction();
     act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.pattern.confirm })));
     const panel = screen.getByRole("region", { name: en.history.explanation.title });
     await waitFor(() => expect(within(panel).getByText(en.history.explanation.aiLabel)).toBeInTheDocument());
@@ -925,17 +1085,21 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     expect(run.rows).toHaveLength(1);
     expect(screen.getByRole("button", { name: zh.history.explanation.action })).toHaveAttribute("aria-expanded", "false");
 
-    // A new explicit action in the new locale: the session already accepted, so it explains (one more POST) in zh-SG.
-    await openAction("zh-SG");
+    // Packet 11C Addendum C (C3): the locale switch ended that request's decision. A new explicit action in the new locale is a new
+    // request: the dialog is shown again (zh-SG) and only its own acceptance sends (one more POST).
+    await askAction("zh-SG");
+    expect(dialogOf("zh-SG")).toBeInTheDocument();
+    expect(run.fetcher).toHaveBeenCalledTimes(1);
+    act(() => fireEvent.click(within(dialogOf("zh-SG")).getByRole("button", { name: zh.ai.pattern.confirm })));
     await waitFor(() => expect(run.fetcher).toHaveBeenCalledTimes(2));
-    expect(run.explain.mock.calls[1]![0]).toEqual({ factId: FACT, locale: "zh-SG" });
+    expect(run.explain.mock.calls[1]![0]).toEqual({ factId: FACT, locale: "zh-SG", disclosure: "ACCEPTED" });
   });
 
   it("activated but offline: the disclosure is not shown (nothing would be sent); the explanation is deterministic", async () => {
     const run = await wired(ENABLED, () => false);
-    expect(run.explainer.disclosureRequired()).toBe(false);
+    expect(await run.explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
     render(screenElement("en-SG", run.history, run.explainer));
-    await openAction();
+    await askAction();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(panelStatus()).not.toBeEmptyDOMElement());
     expect(run.fetcher).not.toHaveBeenCalled();
@@ -943,7 +1107,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     expect(screen.queryByText(en.ai.remoteNotAccepted)).not.toBeInTheDocument();
   });
 
-  it("an explainer without the disclosure methods (no session) never shows the dialog", async () => {
+  it("an explainer without the per-request disclosure check never shows the dialog (and its request carries no acceptance)", async () => {
     const run = await wired();
     render(screenElement("en-SG", run.history, { explain: run.explain }));
     await openAction();
