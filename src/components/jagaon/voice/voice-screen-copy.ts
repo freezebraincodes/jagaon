@@ -97,7 +97,7 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       declined: "Voice was not turned on. You can type your entry instead.",
       doneSaved: "Done. Saved items stay in your records.",
     },
-    review: { notUnderstoodHeading: "Not understood", notUnderstoodBody: "These words were not filled in. You can type them yourself." },
+    review: { notUnderstoodHeading: "Not captured", notUnderstoodBody: "JagaOn did not save these words or work out what they mean." },
     redirect: { healthBody: "JagaOn can record what you report, but cannot assess whether a reading is dangerous or recommend treatment. Please check with your care team." },
     remote: {
       offer: "Ask DeepSeek to help read what you said",
@@ -174,7 +174,7 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       declined: "没有开启语音。您可以改为手动输入。",
       doneSaved: "已完成。已保存的内容会保留在您的记录中。",
     },
-    review: { notUnderstoodHeading: "没有听懂的部分", notUnderstoodBody: "这些内容没有被填写。您可以自己输入。" },
+    review: { notUnderstoodHeading: "未记录的内容", notUnderstoodBody: "JagaOn 没有保存这些话，也没有解读它们的意思。" },
     redirect: { healthBody: "JagaOn 可以记录您报告的内容，但无法评估读数是否危险，也无法建议治疗。请向您的医护团队确认。" },
     remote: {
       offer: "请 DeepSeek 帮忙理解您说的话",

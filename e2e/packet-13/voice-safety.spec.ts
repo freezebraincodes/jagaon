@@ -45,6 +45,7 @@ for (const locale of LOCALES) {
       const copy = pending(locale).card;
       await speak(page, m, SCRIPTS[locale].unsupported);
       await expect(page.getByText(pending(locale).review.notUnderstoodHeading)).toBeVisible();
+      await expect(page.getByText(pending(locale).review.notUnderstoodBody)).toBeVisible();
       const card = page.getByRole("article").first();
       await expect(card.getByText(copy.needsEdit)).toBeVisible();
       await expect(card.getByRole("button", { name: copy.save })).toBeDisabled();

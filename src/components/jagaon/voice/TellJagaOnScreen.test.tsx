@@ -188,6 +188,39 @@ describe("Tell JagaOn screen", () => {
     expect(screen.getByText("“我昨天下午有点头晕”")).toBeInTheDocument();
   });
 
+  // Finding V-2 Option 0 (owner-approved 2026-10-10): words JagaOn cannot capture are listed exactly as said under "Not captured",
+  // never saved or interpreted; the reading-specific guidance stays on the affected reading card, and the save gate is unchanged.
+  for (const [locale, withReading, wordsOnly, span] of [
+    ["en-SG", "My sugar was 6.8 mmol, I felt dizzy", "I felt dizzy", "I felt dizzy"],
+    ["zh-SG", "血糖六点八毫摩尔，我昨天下午有点头晕", "我昨天下午有点头晕", "我昨天下午有点头晕"],
+  ] as const) {
+    it(`${locale}: V-2 next to a reading: "Not captured" lists the words; the reading card keeps its own typing guidance and cannot be saved in one tap`, async () => {
+      const context = setup({ locale, text: withReading });
+      await speakAndStop(context);
+      const heading = await screen.findByRole("heading", { name: context.pending.review.notUnderstoodHeading });
+      const section = heading.closest("section") as HTMLElement;
+      expect(context.pending.review.notUnderstoodHeading).toBe(locale === "en-SG" ? "Not captured" : "未记录的内容");
+      expect(within(section).getByText(context.pending.review.notUnderstoodBody)).toBeInTheDocument();
+      expect(within(section).getByText(`“${span}”`)).toBeInTheDocument();
+      expect(section).not.toHaveTextContent(context.pending.card.needsEdit);
+      const card = screen.getAllByRole("article")[0]!;
+      expect(within(card).getByText(context.pending.card.needsEdit)).toBeInTheDocument();
+      expect(within(card).getByRole("button", { name: context.pending.card.save })).toBeDisabled();
+      expect(context.onSaveFacts).not.toHaveBeenCalled();
+    });
+
+    it(`${locale}: V-2 words alone: they are shown as not captured with no reading guidance, and nothing is saved`, async () => {
+      const context = setup({ locale, text: wordsOnly });
+      await speakAndStop(context);
+      expect(await screen.findByText(`“${span}”`)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: context.pending.review.notUnderstoodHeading })).toBeInTheDocument();
+      expect(screen.getByText(context.pending.review.notUnderstoodBody)).toBeInTheDocument();
+      expect(screen.queryAllByRole("article")).toHaveLength(0);
+      expect(screen.queryByText(context.pending.card.needsEdit)).toBeNull();
+      expect(context.onSaveFacts).not.toHaveBeenCalled();
+    });
+  }
+
   for (const [locale, text] of [["en-SG", "How many tablets should I take?"], ["zh-SG", "我应该吃几片药？"]] as const) {
     it(`${locale}: a dose question shows only the fixed redirect; nothing is saved or sent onward`, async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch");
