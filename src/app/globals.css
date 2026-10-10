@@ -5746,3 +5746,157 @@ button.summary-tile:hover:not(:disabled) {
   flex-direction: column;
   min-width: 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* Tell JagaOn (voice)                                                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Spacing only, scoped to the voice screen and its dialogs. It reuses the shared conventions: .button-row (wrapping row, 0.75rem gap),
+ * .button-stack (stacked wide actions, 0.625rem gap), the card gap, and the bordered .history-fact-select row for choices. Button
+ * groups wrap on narrow screens, and every gap leaves room for the 3 px focus outline.
+ */
+.voice-listening,
+.voice-review,
+.voice-redirect-only,
+.voice-ended {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.voice-section-label + .voice-transcript,
+.voice-section-label + .voice-live-text {
+  margin-top: -0.625rem;
+}
+
+.voice-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.voice-redirect {
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.voice-fact-body,
+.voice-reported-amount {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.voice-fact-body > .btn {
+  align-self: flex-start;
+  margin-block: 0.25rem;
+}
+
+.voice-fact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+}
+
+.voice-fact-actions > .btn {
+  flex: 1 1 auto;
+}
+
+.voice-fact-status:empty {
+  /* Stays rendered (it is a live region); only the card gap above it is taken back while it is empty. */
+  margin-top: -0.875rem;
+}
+
+.voice-fact-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.voice-not-understood {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Radio and checkbox choices: one bordered, comfortably tall row each, stacked with a gap. */
+.voice-status-question,
+.voice-clarification-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  min-width: 0;
+}
+
+.voice-status-question > legend {
+  margin-bottom: 0.625rem;
+}
+
+.voice-remember {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.voice-screen .choice-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 3.5rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.voice-screen .choice-row > input {
+  flex: 0 0 auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.voice-screen .choice-row:has(> input:checked) {
+  border-color: var(--ink);
+}
+
+/* Words JagaOn remembers. */
+.voice-remembered-terms > summary {
+  min-height: var(--tap);
+  padding-block: 0.625rem;
+  cursor: pointer;
+}
+
+.voice-remembered-terms > * + * {
+  margin-top: 0.75rem;
+}
+
+.voice-remembered-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.voice-remembered-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.voice-remembered-list > li > span {
+  flex: 1 1 100%;
+  overflow-wrap: anywhere;
+}
+
+.voice-remembered-list > li > .btn {
+  flex: 1 1 auto;
+}
+
+.voice-remembered-terms > .voice-remembered-status:empty {
+  margin-top: 0;
+}
