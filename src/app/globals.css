@@ -5900,3 +5900,15 @@ button.summary-tile:hover:not(:disabled) {
 .voice-remembered-terms > .voice-remembered-status:empty {
   margin-top: 0;
 }
+
+/*
+ * Tell JagaOn: selected-choice highlight in the medicine chooser (owner request 2026-10-10). Separate from the spacing block above.
+ * The checked medicine row, and the "Remember that…" row while it is checked, take the app's existing selected-choice tint (the same
+ * token as `.choice-input:checked + .choice-face`). It follows the native checked state only (not hover or focus); text stays dark,
+ * and the radio/checkbox, the selected border and the focus outline are unchanged.
+ */
+.voice-clarification-options .choice-row:has(> input:checked),
+.voice-remember .choice-row:has(> input:checked) {
+  background-color: var(--terracotta-tint);
+  color: var(--ink);
+}
