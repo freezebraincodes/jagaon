@@ -5776,6 +5776,14 @@ button.summary-tile:hover:not(:disabled) {
   gap: 0.625rem;
 }
 
+/* N-1 manual-entry chooser (owner-approved 2026-10-11): a small gap between its heading and the first button, on every screen that
+   shows it. The buttons keep the .voice-actions spacing above. */
+.voice-manual {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .voice-redirect {
   flex-direction: column;
   gap: 0.5rem;

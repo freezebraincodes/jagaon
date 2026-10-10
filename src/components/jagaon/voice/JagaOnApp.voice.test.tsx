@@ -3,16 +3,16 @@
 // transcriber is the scripted fake injected through the app's test seam (never a production default).
 import Dexie from "dexie";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrowserJournalRuntime, type BrowserJournalRuntimeOptions } from "@/application/journal/browser-journal-runtime";
 import { createDemoOnboardingRepository, createMemoryOnboardingStorage, DEMO_ONBOARDING_STORAGE_KEY } from "@/application/onboarding/demo-onboarding-repository";
 import { createPreparedOnboardingState } from "@/application/onboarding/prepared-onboarding-fixture";
 import { createPopulatedDataset, installFakeIndexedDb, openRaw, PACKET10_NOW } from "@/application/storage/packet10-test-support";
-import { createFakeVoiceTranscriber } from "@/application/voice/fake-voice-transcriber";
+import { createFakeVoiceTranscriber, type FakeVoiceTranscriberScript } from "@/application/voice/fake-voice-transcriber";
 import { getMessages } from "@/i18n/get-messages";
 import { JagaOnApp } from "../JagaOnApp";
 import { createVoiceJournalSave } from "./voice-journal-save";
-import { VOICE_SCREEN_PENDING_COPY } from "./voice-screen-copy";
+import { VOICE_SCREEN_PENDING_COPY, voiceScreenCopy } from "./voice-screen-copy";
 
 installFakeIndexedDb();
 const TIMEOUT = 240_000;
@@ -132,6 +132,209 @@ describe("Tell JagaOn wired in the app (production saving connected)", () => {
       expect(added.find((row) => row.recordType === "MEDICATION_EVENT")!.revision.payload.amountTaken).toEqual({ kind: "KNOWN", amount: { value: "10", unit: "UNIT" } });
       database.close();
       wired.close();
+    },
+    TIMEOUT,
+  );
+});
+
+/**
+ * Finding N-1 (owner-approved 2026-10-10): a card opens its own existing entry screen; every screen-level fallback offers a chooser
+ * (Record a reading / Record a meal / Medication schedule) that opens that existing flow directly and BLANK; Back to Today is a
+ * separate exit. Checked through the real app and runtime, in EN and ZH, for every affected state: no record is written by navigation,
+ * the transcriber is not loaded again, and nothing is fetched. Case 11: the blank reading form still refuses 60.
+ */
+describe.each(["en-SG", "zh-SG"] as const)("Tell JagaOn manual-entry chooser (N-1) %s", (locale) => {
+  const m = getMessages(locale);
+  const copy = voiceScreenCopy(m, locale);
+  const say =
+    locale === "en-SG"
+      ? { outOfRange: "My sugar was 60 mmol", dose: "How many tablets should I take?", reading: "My sugar was 6.8 mmol" }
+      : { outOfRange: "血糖60毫摩尔", dose: "我应该吃几片药？", reading: "血糖六点八毫摩尔" };
+
+  async function mountApp() {
+    const { name, runtime } = await createPopulatedDataset();
+    names.push(name);
+    runtime.close();
+    const database = await openRaw(name);
+    const revisions = async () => ((await database.table("recordRevisions").toArray()) as Row[]).map((row) => row.revisionId).sort();
+    const control = { script: { segmentsOnStart: [] } as FakeVoiceTranscriberScript, available: true, loads: 0 };
+    render(
+      <JagaOnApp
+        runtimeFactory={(_name?: string, options?: BrowserJournalRuntimeOptions) => createBrowserJournalRuntime(name, { ...options, now: () => PACKET10_NOW })}
+        onboardingRepositoryFactory={() =>
+          createDemoOnboardingRepository(createMemoryOnboardingStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(createPreparedOnboardingState(locale, PACKET10_NOW)) }))
+        }
+        appointmentNoteStorageFactory={() => createMemoryOnboardingStorage({})}
+        voiceTranscriberLoader={async () => {
+          control.loads += 1;
+          return createFakeVoiceTranscriber(control.script);
+        }}
+        voiceAvailabilityProbe={async () => control.available}
+      />,
+    );
+    return { database, revisions, control };
+  }
+  type App = Awaited<ReturnType<typeof mountApp>>;
+
+  const onToday = async () => {
+    const entry = await screen.findByRole("button", { name: m.voice.entry }, { timeout: 30_000 });
+    expect(screen.getByRole("button", { name: m.today.recordReading })).toBeInTheDocument();
+    return entry;
+  };
+  // Test navigation only (not under test): Back until the bottom navigation shows, then the Today tab.
+  const homeViaTabs = async () => {
+    for (let step = 0; step < 4 && screen.queryByRole("navigation") === null; step += 1) {
+      fireEvent.click(document.querySelector(".screen-back-button") as HTMLButtonElement);
+      await act(async () => Promise.resolve());
+    }
+    fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: m.shared.navToday }));
+    await onToday();
+  };
+  const openVoice = async (app: App, script: FakeVoiceTranscriberScript, available = true) => {
+    app.control.script = script;
+    app.control.available = available;
+    const entry = await onToday();
+    await waitFor(() => expect(entry).not.toBeDisabled(), { timeout: 30_000 });
+    fireEvent.click(entry);
+    if (!available) return;
+    fireEvent.change(await screen.findByLabelText(m.aiAccess.passcodeLabel), { target: { value: "TEST-ONLY-voice-passcode" } });
+  };
+  const accept = () => fireEvent.click(screen.getByRole("button", { name: m.voice.disclosure.accept }));
+  const stopWhenListening = async () => {
+    await waitFor(() => expect(screen.getByRole("button", { name: m.voice.state.stop })).not.toBeDisabled(), { timeout: 30_000 });
+    await act(async () => Promise.resolve());
+    fireEvent.click(screen.getByRole("button", { name: m.voice.state.stop }));
+  };
+  const speak = async (app: App, text: string) => {
+    await openVoice(app, { segmentsOnStart: [{ kind: "FINAL", segmentId: "s1", text }] });
+    accept();
+    await stopWhenListening();
+  };
+
+  /** Each affected state: how to reach it, and the status or text that proves it was reached. */
+  const STATES: ReadonlyArray<readonly [string, (app: App) => Promise<void>, string]> = [
+    ["review (case 11)", async (app) => speak(app, say.outOfRange), copy.card.outOfRange],
+    ["redirect-only", async (app) => speak(app, say.dose), m.voice.redirect.transcribedNote],
+    ["voice unavailable", async (app) => openVoice(app, { segmentsOnStart: [] }, false), copy.state.unavailable],
+    ["provider failure", async (app) => { await openVoice(app, { start: { kind: "FAILED", reason: "PROVIDER_FAILURE" } }); accept(); }, copy.state.unavailable],
+    ["permission denied", async (app) => { await openVoice(app, { start: { kind: "FAILED", reason: "PERMISSION_DENIED" } }); accept(); }, copy.state.permissionDenied],
+    ["unsupported browser", async (app) => { await openVoice(app, { start: { kind: "FAILED", reason: "UNSUPPORTED_BROWSER" } }); accept(); }, copy.state.unsupported],
+    ["passcode refused", async (app) => { await openVoice(app, { start: { kind: "FAILED", reason: "CREDENTIAL_REFUSED", credentialRefusal: "ACCESS_DENIED" } }); accept(); }, copy.state.accessDenied],
+    ["declined", async (app) => { await openVoice(app, { segmentsOnStart: [] }); fireEvent.click(screen.getByRole("button", { name: m.voice.disclosure.decline })); }, copy.state.declined],
+    [
+      "cancelled",
+      async (app) => {
+        await openVoice(app, { segmentsOnStart: [] });
+        accept();
+        await waitFor(() => expect(screen.getByRole("button", { name: m.voice.state.stop })).not.toBeDisabled(), { timeout: 30_000 });
+        fireEvent.click(screen.getByRole("button", { name: m.voice.state.cancel }));
+      },
+      copy.state.cancelled,
+    ],
+    ["timed out", async (app) => { await openVoice(app, { start: { kind: "STARTED", maxSessionSeconds: 1 } }); accept(); }, copy.state.timedOut],
+    ["nothing understood", async (app) => { await openVoice(app, { segmentsOnStart: [] }); accept(); await stopWhenListening(); }, copy.review.nothingFound],
+  ];
+  const DESTINATIONS: ReadonlyArray<readonly [string, string]> = [
+    [copy.review.manualReading, m.today.recordReading],
+    [copy.review.manualMeal, m.meal.screenTitle],
+    [copy.review.manualMedicine, m.schedule.title],
+  ];
+
+  it(
+    "every affected state offers the chooser; each choice opens its existing flow blank and Back to Today exits; nothing is saved, reloaded or fetched",
+    async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const app = await mountApp();
+      const before = await app.revisions();
+      for (const [state, reach, proof] of STATES) {
+        for (const [label, heading] of [...DESTINATIONS, [copy.review.backToToday, null] as const]) {
+          await reach(app);
+          expect(await screen.findByText(proof, {}, { timeout: 30_000 }), state).toBeInTheDocument();
+          const chooser = screen.getByRole("region", { name: copy.review.manualHeading });
+          expect(within(chooser).getByRole("heading", { level: 2 }), state).toHaveTextContent(locale === "en-SG" ? "Type another entry" : "输入其他内容");
+          const loads = app.control.loads;
+          if (heading === null) {
+            // Back to Today is a separate exit, outside the chooser.
+            expect(within(chooser).queryByRole("button", { name: copy.review.backToToday })).toBeNull();
+            fireEvent.click(screen.getByRole("button", { name: copy.review.backToToday }));
+            await onToday();
+          } else {
+            fireEvent.click(within(chooser).getByRole("button", { name: label }));
+            expect(await screen.findByRole("heading", { level: 1, name: heading }), `${state} → ${label}`).toBeInTheDocument();
+            if (heading === m.today.recordReading) {
+              expect((screen.getByRole("textbox", { name: new RegExp(`^${m.glucose.valueLabel}`) }) as HTMLInputElement).value).toBe("");
+            }
+            if (heading === m.schedule.title) {
+              // Medication schedule keeps the person's existing medicines (it is not cleared).
+              expect(await screen.findAllByText(/Nocturin pen \(demo\)/, {}, { timeout: 30_000 })).not.toHaveLength(0);
+            }
+            await homeViaTabs();
+          }
+          expect(app.control.loads, `${state}: no voice restart`).toBe(loads);
+        }
+      }
+      expect(await app.revisions()).toEqual(before);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+      app.database.close();
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "case 11: the card opens a blank reading form, and the existing validation refuses 60; nothing is saved",
+    async () => {
+      const app = await mountApp();
+      const before = await app.revisions();
+      await speak(app, say.outOfRange);
+      const [card] = (await screen.findAllByRole("article", {}, { timeout: 30_000 })) as HTMLElement[];
+      fireEvent.click(within(card!).getByRole("button", { name: copy.card.manualGlucose }));
+      expect(await screen.findByRole("heading", { level: 1, name: m.today.recordReading })).toBeInTheDocument();
+      const value = screen.getByRole("textbox", { name: new RegExp(`^${m.glucose.valueLabel}`) }) as HTMLInputElement;
+      expect(value.value).toBe("");
+      fireEvent.change(value, { target: { value: "60" } });
+      fireEvent.click(screen.getByRole("button", { name: m.glucose.saveAction }));
+      expect(await screen.findByText(m.glucose.invalidDecimal)).toBeInTheDocument();
+      expect(await app.revisions()).toEqual(before);
+      // The other cards keep their own destinations.
+      await homeViaTabs();
+      await speak(app, locale === "en-SG" ? "I had chicken rice for lunch and I injected my dark pen" : "我午饭吃了鸡饭，然后打了黑色的笔");
+      let cards = (await screen.findAllByRole("article", {}, { timeout: 30_000 })) as HTMLElement[];
+      fireEvent.click(within(cards[0]!).getByRole("button", { name: copy.card.manualMeal }));
+      expect(await screen.findByRole("heading", { level: 1, name: m.meal.screenTitle })).toBeInTheDocument();
+      await homeViaTabs();
+      await speak(app, locale === "en-SG" ? "I had chicken rice for lunch and I injected my dark pen" : "我午饭吃了鸡饭，然后打了黑色的笔");
+      cards = (await screen.findAllByRole("article", {}, { timeout: 30_000 })) as HTMLElement[];
+      fireEvent.click(within(cards[1]!).getByRole("button", { name: copy.card.manualMedicine }));
+      expect(await screen.findByRole("heading", { level: 1, name: m.schedule.title })).toBeInTheDocument();
+      expect(await app.revisions()).toEqual(before);
+      app.database.close();
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "done-saved keeps the saved confirmation and the same chooser heading, and navigating never saves again",
+    async () => {
+      const app = await mountApp();
+      const before = await app.revisions();
+      await speak(app, say.reading);
+      const [card] = (await screen.findAllByRole("article", {}, { timeout: 30_000 })) as HTMLElement[];
+      fireEvent.click(within(card!).getByRole("button", { name: copy.card.save }));
+      await waitFor(() => expect(within(card!).getByText(copy.card.saved)).toBeInTheDocument(), { timeout: 30_000 });
+      const saved = await app.revisions();
+      expect(saved.length).toBe(before.length + 1);
+      fireEvent.click(screen.getByRole("button", { name: copy.review.discard }));
+      expect(await screen.findByText(copy.state.doneSaved)).toBeInTheDocument();
+      // The owner's single chooser heading (2026-10-11), the same on every screen that shows the chooser.
+      expect(copy.review.manualHeading).toBe(locale === "en-SG" ? "Type another entry" : "输入其他内容");
+      const chooser = screen.getByRole("region", { name: copy.review.manualHeading });
+      fireEvent.click(within(chooser).getByRole("button", { name: copy.review.manualReading }));
+      expect(await screen.findByRole("heading", { level: 1, name: m.today.recordReading })).toBeInTheDocument();
+      expect((screen.getByRole("textbox", { name: new RegExp(`^${m.glucose.valueLabel}`) }) as HTMLInputElement).value).toBe("");
+      await homeViaTabs();
+      expect(await app.revisions()).toEqual(saved);
+      app.database.close();
     },
     TIMEOUT,
   );

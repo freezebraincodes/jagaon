@@ -53,7 +53,7 @@ export type VoiceTerminologyPort = Readonly<{
 
 export type VoiceSaveOutcome = Readonly<{ kind: "SAVED" }> | Readonly<{ kind: "NOT_SAVED" }>;
 export type VoiceRemoteExtraction = (transcript: string, language: VoiceLanguage, signal: AbortSignal) => Promise<Readonly<{ kind: "CANDIDATES"; candidates: readonly VoiceCandidate[] }> | Readonly<{ kind: "UNAVAILABLE" | "WITHHELD" | "DECLINED" }>>;
-export type VoiceManualEntryKind = "GLUCOSE" | "MEAL" | "MEDICATION" | "ANY";
+export type VoiceManualEntryKind = "GLUCOSE" | "MEAL" | "MEDICATION";
 
 export type TellJagaOnScreenProps = Readonly<{
   messages: AppMessages;
@@ -331,9 +331,31 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
               }[phase.reason]
             : "";
 
-  const manual = (kind: VoiceManualEntryKind = "ANY") => (
-    <button type="button" className="btn btn-secondary btn-wide" onClick={() => onManualEntry(kind)}>
-      {copy.review.typeInstead}
+  // Finding N-1: the screen-level manual-entry chooser. Each button opens its existing entry flow blank (nothing from the transcript is
+  // carried over and nothing is saved); it never restarts voice or contacts a provider. The type is the person's choice, never guessed.
+  const chooserId = `${passcodeId}-manual`;
+  const chooser = (
+    <section className="voice-manual" aria-labelledby={chooserId}>
+      <h2 id={chooserId} className="voice-section-label">
+        {copy.review.manualHeading}
+      </h2>
+      <div className="voice-actions">
+        <button type="button" className="btn btn-secondary btn-wide" onClick={() => onManualEntry("GLUCOSE")}>
+          {copy.review.manualReading}
+        </button>
+        <button type="button" className="btn btn-secondary btn-wide" onClick={() => onManualEntry("MEAL")}>
+          {copy.review.manualMeal}
+        </button>
+        <button type="button" className="btn btn-secondary btn-wide" onClick={() => onManualEntry("MEDICATION")}>
+          {copy.review.manualMedicine}
+        </button>
+      </div>
+    </section>
+  );
+  // A separate exit, not a manual-entry action.
+  const backToToday = (
+    <button type="button" className="btn btn-ghost btn-wide" onClick={onClose}>
+      {copy.review.backToToday}
     </button>
   );
 
@@ -429,11 +451,12 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
               <p>{copy.review.notUnderstoodBody}</p>
             </section>
           ) : null}
+          {chooser}
           <div className="voice-actions">
-            {manual()}
             <button type="button" className="btn btn-outline btn-wide" onClick={discard}>
               {copy.review.discard}
             </button>
+            {backToToday}
           </div>
         </section>
       ) : null}
@@ -446,27 +469,26 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
             <p>{redirectBody(phase.category)}</p>
             <p>{copy.redirect.transcribedNote}</p>
           </div>
+          {chooser}
           <div className="voice-actions">
-            {manual()}
             <button type="button" className="btn btn-outline btn-wide" onClick={discard}>
               {copy.review.discard}
             </button>
+            {backToToday}
           </div>
         </section>
       ) : null}
 
       {phase.kind === "ENDED" ? (
         <section className="voice-ended">
+          {chooser}
           <div className="voice-actions">
-            {manual()}
             {voiceAvailable && phase.reason !== "UNAVAILABLE" && phase.reason !== "UNSUPPORTED" ? (
               <button type="button" className="btn btn-outline btn-wide" onClick={restart}>
                 {copy.title}
               </button>
             ) : null}
-            <button type="button" className="btn btn-ghost btn-wide" onClick={onClose}>
-              {copy.close}
-            </button>
+            {backToToday}
           </div>
         </section>
       ) : null}

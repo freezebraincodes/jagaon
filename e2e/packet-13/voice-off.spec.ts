@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { LOCALES, PRODUCTION_URL, VIEWPORTS, startPreparedProfile } from "./support";
+import { LOCALES, PRODUCTION_URL, VIEWPORTS, pending, startPreparedProfile } from "./support";
 
 /**
  * Voice off, on the PRODUCTION build with no voice environment (clean copy): "Tell JagaOn" stays visible; opening it explains at once
@@ -44,8 +44,9 @@ for (const locale of LOCALES) {
       expect(await page.evaluate(() => (window as unknown as { __p13: { getUserMedia: number } }).__p13.getUserMedia)).toBe(0);
       expect(tencent).toEqual([]);
       await expect(page.getByRole("article")).toHaveCount(0);
-      await page.getByRole("button", { name: m.voice.disclosure.decline }).click();
-      await expect(page.getByRole("button", { name: m.today.recordReading })).toBeVisible();
+      // Finding N-1: the chooser opens the existing reading entry directly; Back to Today is a separate exit.
+      await page.getByRole("region", { name: pending(locale).review.manualHeading }).getByRole("button", { name: m.today.recordReading }).click();
+      await expect(page.getByRole("heading", { level: 1, name: m.today.recordReading })).toBeVisible();
     });
   });
 }

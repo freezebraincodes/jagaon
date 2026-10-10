@@ -136,7 +136,7 @@ describe("Tell JagaOn screen", () => {
     const card = (await screen.findAllByRole("article"))[0]!;
     expect(within(card).getByText(context.pending.card.otherPerson)).toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: context.pending.card.save })).toBeNull();
-    fireEvent.click(within(card).getByRole("button", { name: context.messages.voice.disclosure.decline }));
+    fireEvent.click(within(card).getByRole("button", { name: context.pending.card.manualGlucose }));
     expect(context.onManualEntry).toHaveBeenCalledWith("GLUCOSE");
     expect(context.onSaveFacts).not.toHaveBeenCalled();
   });
@@ -175,8 +175,9 @@ describe("Tell JagaOn screen", () => {
       fireEvent.change(screen.getByLabelText(context.messages.aiAccess.passcodeLabel), { target: { value: PASSCODE } });
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.accept }));
       expect(await screen.findByText(text)).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
-      expect(context.onManualEntry).toHaveBeenCalledWith("ANY");
+      fireEvent.click(screen.getByRole("button", { name: context.pending.review.backToToday }));
+      expect(context.onClose).toHaveBeenCalledTimes(1);
+      expect(context.onManualEntry).not.toHaveBeenCalled();
       cleanup();
     }
   });
@@ -325,7 +326,7 @@ describe("Tell JagaOn screen", () => {
     const skippedCard = (await screen.findAllByRole("article"))[0]!;
     expect(within(skippedCard).getByText(skipped.pending.card.amountReported("10 units"))).toBeInTheDocument();
     expect(within(skippedCard).getByText(skipped.pending.card.amountNotSaved)).toBeInTheDocument();
-    fireEvent.click(within(skippedCard).getByRole("button", { name: skipped.messages.voice.disclosure.decline }));
+    fireEvent.click(within(skippedCard).getByRole("button", { name: skipped.pending.card.manualMedicine }));
     expect(skipped.onManualEntry).toHaveBeenCalledWith("MEDICATION");
   });
 
@@ -347,7 +348,7 @@ describe("Tell JagaOn screen", () => {
       fireEvent.change(input, { target: { value: "6.0" } });
       fireEvent.click(within(card).getByRole("button", { name: context.pending.card.save }));
       await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledWith({ kind: "GLUCOSE", valueText: "6.0", unit: "MMOL_PER_L", unitSource: "PERSON" }));
-      fireEvent.click(within(card).getByRole("button", { name: context.messages.voice.disclosure.decline }));
+      fireEvent.click(within(card).getByRole("button", { name: context.pending.card.manualGlucose }));
       expect(context.onManualEntry).toHaveBeenCalledWith("GLUCOSE");
     });
   }
@@ -463,8 +464,9 @@ describe("Tell JagaOn screen", () => {
     const context = setup({ voiceAvailable: false });
     expect(screen.getByText(context.messages.voice.state.unavailable)).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
-    expect(context.onManualEntry).toHaveBeenCalledWith("ANY");
+    fireEvent.click(screen.getByRole("button", { name: context.pending.review.backToToday }));
+    expect(context.onClose).toHaveBeenCalledTimes(1);
+      expect(context.onManualEntry).not.toHaveBeenCalled();
     expect(context.loadTranscriber).not.toHaveBeenCalled();
     expect(context.fake.calls).toEqual([]);
   });
@@ -482,7 +484,7 @@ describe("Tell JagaOn screen", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
     expect(context.loadTranscriber).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: context.messages.voice.disclosure.decline })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: context.pending.review.backToToday })).toBeInTheDocument();
   });
 
   it("unmount while listening cancels the session and releases the microphone", async () => {
@@ -506,8 +508,9 @@ describe("Tell JagaOn screen", () => {
         expect(context.loadTranscriber).not.toHaveBeenCalled();
         expect(context.fake.calls).toEqual([]);
         expect(checkAvailability).toHaveBeenCalledTimes(1);
-        fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
-        expect(context.onManualEntry).toHaveBeenCalledWith("ANY");
+        fireEvent.click(screen.getByRole("button", { name: context.pending.review.backToToday }));
+        expect(context.onClose).toHaveBeenCalledTimes(1);
+      expect(context.onManualEntry).not.toHaveBeenCalled();
         cleanup();
       }
     });

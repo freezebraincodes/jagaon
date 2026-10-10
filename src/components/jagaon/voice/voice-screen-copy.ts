@@ -12,7 +12,17 @@ export type VoiceScreenCopy = Readonly<{
   close: string;
   disclosure: AppMessages["voice"]["disclosure"];
   state: AppMessages["voice"]["state"] & Readonly<{ starting: string; accessDenied: string; checking: string; declined: string; doneSaved: string }>;
-  review: AppMessages["voice"]["review"] & Readonly<{ notUnderstoodHeading: string; notUnderstoodBody: string; typeInstead: string }>;
+  review: AppMessages["voice"]["review"] &
+    Readonly<{
+      notUnderstoodHeading: string;
+      notUnderstoodBody: string;
+      backToToday: string;
+      /** Finding N-1 (owner-approved 2026-10-10): the screen-level manual-entry chooser; each label is its destination's own title. */
+      manualHeading: string;
+      manualReading: string;
+      manualMeal: string;
+      manualMedicine: string;
+    }>;
   redirect: AppMessages["voice"]["redirect"] & Readonly<{ healthBody: string }>;
   /** voice-copy.13s.2 `voice.remoteExtraction.*` (the disclosure wording is the coordinator's; human acceptance pending). */
   remote: Readonly<{ offer: string; title: string; disclosure: string; accept: string; decline: string; checking: string; keptLocal: string }>;
@@ -39,6 +49,10 @@ export type VoiceScreenCopy = Readonly<{
     glucose: string;
     meal: string;
     medicine: string;
+    /** Finding N-1 (owner-approved 2026-10-10): each card's manual-entry button names its destination. */
+    manualGlucose: string;
+    manualMeal: string;
+    manualMedicine: string;
     save: string;
     leaveOut: string;
     saved: string;
@@ -81,7 +95,7 @@ export type VoiceScreenCopy = Readonly<{
 type PendingCopy = Omit<VoiceScreenCopy, "title" | "passcodeLabel" | "close" | "disclosure" | "state" | "review" | "redirect" | "remote" | "terms"> &
   Readonly<{
     state: Readonly<{ starting: string; accessDenied: string; checking: string; declined: string; doneSaved: string }>;
-    review: Readonly<{ notUnderstoodHeading: string; notUnderstoodBody: string }>;
+    review: Readonly<{ notUnderstoodHeading: string; notUnderstoodBody: string; backToToday: string; manualHeading: string }>;
     redirect: Readonly<{ healthBody: string }>;
     remote: VoiceScreenCopy["remote"];
     terms: VoiceScreenCopy["terms"];
@@ -97,7 +111,14 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       declined: "Voice was not turned on. You can type your entry instead.",
       doneSaved: "Done. Saved items stay in your records.",
     },
-    review: { notUnderstoodHeading: "Not captured", notUnderstoodBody: "JagaOn did not save these words or work out what they mean." },
+    review: {
+      notUnderstoodHeading: "Not captured",
+      notUnderstoodBody: "JagaOn did not save these words or work out what they mean.",
+      // Finding N-1 (owner-approved 2026-10-10): a manual-entry chooser, and Back to Today as a separate exit. One chooser heading on
+      // every screen that shows it (owner's decision, 2026-10-11).
+      backToToday: "Back to Today",
+      manualHeading: "Type another entry",
+    },
     redirect: { healthBody: "JagaOn can record what you report, but cannot assess whether a reading is dangerous or recommend treatment. Please check with your care team." },
     remote: {
       offer: "Ask DeepSeek to help read what you said",
@@ -130,6 +151,9 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       glucose: "Glucose reading",
       meal: "Meal",
       medicine: "Medicine",
+      manualGlucose: "Type the reading yourself",
+      manualMeal: "Type the meal yourself",
+      manualMedicine: "Record it in Medication schedule",
       save: "Save this",
       leaveOut: "Leave out",
       saved: "Saved.",
@@ -174,7 +198,13 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       declined: "没有开启语音。您可以改为手动输入。",
       doneSaved: "已完成。已保存的内容会保留在您的记录中。",
     },
-    review: { notUnderstoodHeading: "未记录的内容", notUnderstoodBody: "JagaOn 没有保存这些话，也没有解读它们的意思。" },
+    review: {
+      notUnderstoodHeading: "未记录的内容",
+      notUnderstoodBody: "JagaOn 没有保存这些话，也没有解读它们的意思。",
+      // Finding N-1 (owner-approved 2026-10-10): see the EN rows.
+      backToToday: "返回“今天”",
+      manualHeading: "输入其他内容",
+    },
     redirect: { healthBody: "JagaOn 可以记录您报告的内容，但无法评估读数是否危险，也无法建议治疗。请向您的医护团队确认。" },
     remote: {
       offer: "请 DeepSeek 帮忙理解您说的话",
@@ -207,6 +237,9 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       glucose: "血糖读数",
       meal: "饮食",
       medicine: "药物",
+      manualGlucose: "自己输入读数",
+      manualMeal: "自己输入餐食",
+      manualMedicine: "在“用药时间表”中记录",
       save: "保存这一项",
       leaveOut: "不保存",
       saved: "已保存。",
@@ -253,7 +286,8 @@ export function voiceScreenCopy(messages: AppMessages, locale: SupportedLocale):
     close: messages.shared.close,
     disclosure: messages.voice.disclosure,
     state: { ...messages.voice.state, ...pending.state },
-    review: { ...messages.voice.review, ...pending.review, typeInstead: messages.voice.disclosure.decline },
+    // Finding N-1: the chooser's labels are the destinations' own titles, so a label always matches the screen it opens.
+    review: { ...messages.voice.review, ...pending.review, manualReading: messages.today.recordReading, manualMeal: messages.meal.screenTitle, manualMedicine: messages.schedule.title },
     redirect: { ...messages.voice.redirect, ...pending.redirect },
     remote: pending.remote,
     terms: pending.terms,

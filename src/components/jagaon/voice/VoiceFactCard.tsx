@@ -263,8 +263,9 @@ export function VoiceFactCard({ candidate, index, copy, language, medicines, onD
             {copy.card.leaveOut}
           </button>
         ) : null}
+        {/* Finding N-1: the card's manual-entry button names its destination (blank entry; nothing is carried over). */}
         <button type="button" className="btn btn-ghost" onClick={onManualEntry}>
-          {copy.review.typeInstead}
+          {candidate.kind === "GLUCOSE_READING" ? copy.card.manualGlucose : candidate.kind === "MEAL_NOTE" ? copy.card.manualMeal : copy.card.manualMedicine}
         </button>
       </div>
       <p role="status" className="voice-fact-status">

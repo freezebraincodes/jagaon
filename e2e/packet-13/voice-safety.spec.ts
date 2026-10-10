@@ -17,7 +17,7 @@ for (const locale of LOCALES) {
       // A spoken unsupported unit is never relabelled: not understood, manual entry offered.
       await speak(page, m, SCRIPTS[locale].otherUnit);
       await expect(page.getByRole("article")).toHaveCount(0);
-      await expect(page.getByRole("button", { name: m.voice.disclosure.decline }).first()).toBeVisible();
+      await expect(page.getByRole("button", { name: pending(locale).review.backToToday })).toBeVisible();
     });
 
     for (const key of ["negated", "comparison"] as const) {
@@ -74,7 +74,7 @@ for (const locale of LOCALES) {
       await card.getByLabel(copy.valueLabel).fill("60");
       await card.getByRole("button", { name: copy.save }).click();
       await expect(card.getByRole("status")).toHaveText(copy.outOfRange);
-      await card.getByRole("button", { name: m.voice.disclosure.decline }).click();
+      await card.getByRole("button", { name: pending(locale).card.manualGlucose }).click();
       await expect(page.getByRole("heading", { level: 1, name: m.today.recordReading })).toBeVisible();
     });
 
@@ -114,15 +114,17 @@ for (const locale of LOCALES) {
         const m = await startPreparedProfile(page, HARNESS_URL, locale);
         await startVoice(page, m, { fail });
         await expect(page.getByRole("status").filter({ hasText: m.voice.state[text] })).toBeVisible();
-        await page.getByRole("button", { name: m.voice.disclosure.decline }).click();
-        await expect(page.getByRole("button", { name: m.today.recordReading })).toBeVisible();
+        // Finding N-1: the chooser opens the existing reading entry directly; Back to Today is a separate exit.
+        await expect(page.getByRole("button", { name: pending(locale).review.backToToday })).toBeVisible();
+        await page.getByRole("region", { name: pending(locale).review.manualHeading }).getByRole("button", { name: m.today.recordReading }).click();
+        await expect(page.getByRole("heading", { level: 1, name: m.today.recordReading })).toBeVisible();
       });
     }
 
     test("manual fallback from a card opens the existing glucose entry", async ({ page }) => {
       const m = await startPreparedProfile(page, HARNESS_URL, locale);
       await speak(page, m, SCRIPTS[locale].negated);
-      await page.getByRole("article").first().getByRole("button", { name: m.voice.disclosure.decline }).click();
+      await page.getByRole("article").first().getByRole("button", { name: pending(locale).card.manualGlucose }).click();
       await expect(page.getByRole("heading", { level: 1, name: m.today.recordReading })).toBeVisible();
     });
   });

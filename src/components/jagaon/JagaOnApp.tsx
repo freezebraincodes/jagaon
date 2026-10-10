@@ -974,8 +974,10 @@ export function JagaOnApp({
             // Integration gate lifted 2026-10-09 after the extractor re-reviews and the targeted confirmation: one confirmed fact goes to
             // the existing journal command; the Today refresh never decides the save outcome (review I-3).
             onSaveFacts={saveFact ? createVoiceSaveWithRefresh(saveFact, refreshToday) : async () => ({ kind: "NOT_SAVED" as const })}
-            onManualEntry={(kind) => (kind === "GLUCOSE" ? navigate("LOG_GLUCOSE") : kind === "MEAL" ? navigate("LOG_MEAL") : kind === "MEDICATION" ? navigate("MEDICATION_SCHEDULE") : goBack())}
-            onClose={goBack}
+            // Finding N-1: a card or the chooser opens that existing entry screen blank (no parameters, nothing carried over); Back to Today
+            // is a separate exit to the Today tab.
+            onManualEntry={(kind) => navigate(kind === "GLUCOSE" ? "LOG_GLUCOSE" : kind === "MEAL" ? "LOG_MEAL" : "MEDICATION_SCHEDULE")}
+            onClose={() => switchTab("TODAY")}
           />
         );
       }
