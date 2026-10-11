@@ -1,8 +1,9 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { VoiceFactDecision } from "@/application/voice/voice-review-contract";
-import { glucoseValueInRange, type VoiceFactCandidate, type VoiceLanguage } from "@/domain/voice/voice-contracts";
+import { glucoseHedgeMarked, glucoseNeedsConfirmation, type VoiceFactCandidate, type VoiceLanguage } from "@/domain/voice/voice-contracts";
+import { formatMmolEntry, isMmolEntryTyping } from "@/domain/voice/glucose-entry-format";
 import { isRememberableTerminologyPhrase } from "@/domain/terminology/patient-terminology";
 import { normaliseVoicePhrase } from "@/domain/voice/voice-candidate-extractor";
 import { MedicineClarificationDialog, type VoiceMedicineOption } from "./MedicineClarificationDialog";
@@ -19,13 +20,18 @@ import type { VoiceScreenCopy } from "./voice-screen-copy";
  * - Another person's fact: never saved here; manual entry only.
  * - Medicine: an unresolved description opens the clarification dialog (pick or leave out; "remember" is a separate choice); an
  *   unclear status asks; a PLANNED dose is not an event (Edit to record it otherwise).
- * - 13s.3: a glucose value outside 0 < value ≤ 50 mmol/L is never offered for a one-tap save; the card says so plainly (OUT_OF_RANGE)
- *   and offers Edit (an empty field) and manual entry. The review's own OUT_OF_RANGE refusal (for example a typed value) shows the same.
+ * - CR-11 (owner decisions 2026-10-11, design v3.1; replaces the 13s.3 OUT_OF_RANGE refusal): a glucose value above 50 mmol/L, or
+ *   zero, opens the confirmation panel INSIDE this card: the formatted value and unit as its heading ("60.0 mmol/L"), the approved
+ *   verification copy, and Save as shown / Edit reading / Cancel (nothing preselected; focus moves to the heading when the person
+ *   opens it). The panel is a per-reading LATCH: once triggered, every later save of this reading (also an edit to 45) goes through
+ *   it. Cancel writes nothing and returns the card to its unsaved state. An unstated unit outside the app-default window needs the
+ *   explicit "Yes, mmol/L" inside the panel. Values are always shown formatted to one decimal ("60" → "60.0"); the edit field
+ *   refuses more than one decimal digit (typing or paste), never trimming or rounding. No warning, advice or "verified" wording.
  * - 13s.3: a reported amount is shown exactly as kept, with a plain line saying whether it will be stored (only on a TAKEN event saved
  *   through the review, never through an edit).
  * The authoritative check is the review contract (the screen builds a decision; `onDecide` returns the outcome).
  */
-export type VoiceFactOutcome = "SAVED" | "NOT_SAVED" | "REJECTED" | "OUT_OF_RANGE";
+export type VoiceFactOutcome = "SAVED" | "NOT_SAVED" | "REJECTED";
 
 type Props = {
   candidate: VoiceFactCandidate;
@@ -46,7 +52,6 @@ const EDIT_ONLY = ["NEGATION", "UNCERTAINTY", "CORRECTION", "MULTIPLE_NUMBERS"] 
 const SLOTS = ["BREAKFAST", "LUNCH", "DINNER", "SUPPER"] as const;
 type Slot = (typeof SLOTS)[number];
 type EventStatus = "TAKEN" | "SKIPPED" | "UNKNOWN";
-const VALUE = /^(?:0|[1-9]\d?)(?:\.\d{1,2})?$/;
 
 export function VoiceFactCard({ candidate, index, copy, language, medicines, onDecide, onRemember, onManualEntry, onInteract, amountSaveSupported }: Props) {
   const ids = useId();
@@ -67,7 +72,41 @@ export function VoiceFactCard({ candidate, index, copy, language, medicines, onD
   const otherPerson = candidate.ambiguity.includes("OTHER_PERSON");
   const needsEdit = candidate.ambiguity.some((reason) => (EDIT_ONLY as readonly string[]).includes(reason)) || (candidate.kind === "MEDICATION_OCCURRENCE" && candidate.status === "PLANNED");
   const done = outcome === "SAVED" || outcome === "LEFT_OUT";
-  const outOfRange = candidate.kind === "GLUCOSE_READING" && !glucoseValueInRange(candidate.valueText);
+  // CR-11: the proposal is shown formatted (one decimal) and, above 50 or at zero, starts with the confirmation panel open (the latch).
+  const proposalShown = candidate.kind === "GLUCOSE_READING" && !needsEdit && !otherPerson;
+  const proposedValue = candidate.kind === "GLUCOSE_READING" ? (formatMmolEntry(candidate.valueText) ?? candidate.valueText) : "";
+  // Round 5 (revised B): a hedged proposal ("about 7.8", "~7", 七点八左右) always starts with the confirmation panel open too (latched).
+  const triggeredAtStart = proposalShown && (glucoseNeedsConfirmation(proposedValue) || glucoseHedgeMarked(candidate.sourcePhrase));
+  const [latched, setLatched] = useState(triggeredAtStart);
+  const [confirming, setConfirming] = useState(triggeredAtStart);
+  /** The edited value awaiting confirmation (formatted), or null when the panel confirms the proposal itself. */
+  const [confirmEdit, setConfirmEdit] = useState<string | null>(null);
+  const [formatRefused, setFormatRefused] = useState(false);
+  const [rawEdit, setRawEdit] = useState<string | null>(null);
+  const panelHeading = useRef<HTMLHeadingElement>(null);
+  const focusPanel = useRef(false);
+  useEffect(() => {
+    if (confirming && focusPanel.current) {
+      focusPanel.current = false;
+      panelHeading.current?.focus();
+    }
+  }, [confirming]);
+  // CR-11 fix round 1 (I-2): where focus goes after the panel closes, so it never falls back to the page body.
+  const cardHeading = useRef<HTMLHeadingElement>(null);
+  const valueInput = useRef<HTMLInputElement>(null);
+  const saveButton = useRef<HTMLButtonElement>(null);
+  const statusLine = useRef<HTMLParagraphElement>(null);
+  const focusAfter = useRef<"EDIT" | "CANCEL" | "SAVED" | null>(null);
+  useEffect(() => {
+    const target = focusAfter.current;
+    if (target === null) return;
+    if (target === "EDIT" && editing) valueInput.current?.focus();
+    else if (target === "CANCEL" && !confirming) (saveButton.current && !saveButton.current.disabled ? saveButton.current : cardHeading.current)?.focus();
+    else if (target === "SAVED" && outcome !== null) {
+      if (outcome === "SAVED") statusLine.current?.focus();
+    } else return;
+    focusAfter.current = null;
+  }, [editing, confirming, outcome]);
   const heading = candidate.kind === "GLUCOSE_READING" ? copy.card.glucose : candidate.kind === "MEAL_NOTE" ? copy.card.meal : copy.card.medicine;
 
   async function decide(decision: VoiceFactDecision) {
@@ -83,7 +122,10 @@ export function VoiceFactCard({ candidate, index, copy, language, medicines, onD
   }
 
   function editDecision(): VoiceFactDecision | null {
-    if (candidate.kind === "GLUCOSE_READING") return VALUE.test(editValue.trim()) ? { candidateIndex: index, action: "SAVE", edit: { kind: "GLUCOSE_READING", valueText: editValue.trim(), unit: "MMOL_PER_L" } } : null;
+    if (candidate.kind === "GLUCOSE_READING") {
+      const formatted = formatMmolEntry(editValue);
+      return formatted === null ? null : { candidateIndex: index, action: "SAVE", edit: { kind: "GLUCOSE_READING", valueText: formatted, unit: "MMOL_PER_L" } };
+    }
     if (candidate.kind === "MEAL_NOTE") return editSlot !== "" || editItems.trim() !== "" ? { candidateIndex: index, action: "SAVE", edit: { kind: "MEAL_NOTE", slot: editSlot === "" ? null : editSlot, itemText: editItems.trim() === "" ? null : editItems.trim().slice(0, 120) } } : null;
     const medicine = medicines.find((option) => option.medication.recordId === editMedicine);
     return medicine && editStatus !== "" ? { candidateIndex: index, action: "SAVE", edit: { kind: "MEDICATION_OCCURRENCE", medication: medicine.medication, status: editStatus } } : null;
@@ -99,7 +141,95 @@ export function VoiceFactCard({ candidate, index, copy, language, medicines, onD
     return { candidateIndex: index, action: "SAVE", ...(Object.keys(answers).length > 0 ? { answers } : {}) };
   }
 
-  const decision = editing ? editDecision() : !needsEdit && !otherPerson && !outOfRange ? directDecision() : null;
+  const decision = editing ? editDecision() : !needsEdit && !otherPerson ? directDecision() : null;
+
+  /** CR-11: open the confirmation panel (by the person's action, so focus moves to its heading). */
+  function openPanel(editedValue: string | null) {
+    focusPanel.current = true;
+    setLatched(true);
+    setConfirmEdit(editedValue);
+    setEditing(false);
+    setConfirming(true);
+  }
+
+  /** The card's own Save: a latched or triggering glucose reading goes to the confirmation panel instead of saving. */
+  function save() {
+    if (!decision) return;
+    if (candidate.kind === "GLUCOSE_READING") {
+      const value = editing ? formatMmolEntry(editValue) : proposedValue;
+      if (value !== null && (latched || glucoseNeedsConfirmation(value))) return openPanel(editing ? value : null);
+    }
+    void decide(decision);
+  }
+
+  /** Save as shown: the decision for exactly what the panel shows, with the explicit confirmation. */
+  const confirmedDecision: VoiceFactDecision | null =
+    candidate.kind !== "GLUCOSE_READING"
+      ? null
+      : confirmEdit !== null
+        ? { candidateIndex: index, action: "SAVE", edit: { kind: "GLUCOSE_READING", valueText: confirmEdit, unit: "MMOL_PER_L" }, confirmed: true }
+        : (() => {
+            const direct = !needsEdit && !otherPerson ? directDecision() : null;
+            return direct && direct.action === "SAVE" ? { ...direct, confirmed: true as const } : null;
+          })();
+
+  function editReading() {
+    focusAfter.current = "EDIT";
+    setConfirming(false);
+    setEditing(true);
+    if (confirmEdit === null) setEditValue("");
+  }
+
+  function cancelConfirmation() {
+    focusAfter.current = "CANCEL";
+    setConfirming(false);
+    setConfirmEdit(null);
+    setEditing(false);
+  }
+
+  function changeEditValue(next: string) {
+    setRawEdit(null);
+    if (!isMmolEntryTyping(next)) {
+      setFormatRefused(true);
+      return;
+    }
+    setFormatRefused(false);
+    setEditValue(next);
+  }
+
+  /** Completion formatting on leaving the field ("9" → "9.0"); returning to the field restores what was typed. */
+  function completeEditValue() {
+    const formatted = formatMmolEntry(editValue);
+    if (formatted !== null && formatted !== editValue) {
+      setRawEdit(editValue);
+      setEditValue(formatted);
+    }
+  }
+
+  function resumeEditValue() {
+    if (rawEdit !== null) {
+      setEditValue(rawEdit);
+      setRawEdit(null);
+    }
+  }
+
+  const unitBlock =
+    candidate.kind === "GLUCOSE_READING" ? (
+      <>
+        {candidate.unitSource === "SPOKEN" ? <p>{copy.card.unitSpoken}</p> : null}
+        {candidate.unitSource === "APP_DEFAULT" ? <p>{copy.card.unitAppDefault}</p> : null}
+        {candidate.unit === "UNSTATED" ? (
+          <>
+            <p>{copy.review.unitUnstated}</p>
+            <label className="choice-row">
+              <input type="checkbox" checked={unitTicked} disabled={done} onChange={(event) => setUnitTicked(event.target.checked)} />
+              <span>{copy.card.confirmUnit}</span>
+            </label>
+          </>
+        ) : null}
+      </>
+    ) : null;
+  const panelOpen = candidate.kind === "GLUCOSE_READING" && confirming && !done && !otherPerson;
   // 13s.3: an edit's intent carries no amount, so only the reviewed TAKEN occurrence (as said, or "not sure" answered Taken) stores it.
   const takenWithAmount =
     amountSaveSupported &&
@@ -111,27 +241,41 @@ export function VoiceFactCard({ candidate, index, copy, language, medicines, onD
 
   return (
     <article className="card voice-fact-card" aria-labelledby={`${ids}-heading`} onClickCapture={onInteract} onChangeCapture={onInteract}>
-      <h3 id={`${ids}-heading`} className="voice-fact-heading">
+      <h3 id={`${ids}-heading`} ref={cardHeading} tabIndex={-1} className="voice-fact-heading">
         {heading}
       </h3>
       <p className="voice-fact-phrase">“{candidate.sourcePhrase}”</p>
 
-      {candidate.kind === "GLUCOSE_READING" && !editing ? (
+      {candidate.kind === "GLUCOSE_READING" && !editing && !panelOpen && (proposalShown || confirmEdit !== null) ? (
         <div className="voice-fact-body">
-          {outOfRange && !needsEdit && !otherPerson ? <p className="voice-fact-warning">{copy.card.outOfRange}</p> : null}
-          {!needsEdit && !otherPerson && !outOfRange ? <p className="voice-fact-value">{candidate.valueText}</p> : null}
-          {!needsEdit && !otherPerson && !outOfRange && candidate.unitSource === "SPOKEN" ? <p>{copy.card.unitSpoken}</p> : null}
-          {!needsEdit && !otherPerson && !outOfRange && candidate.unitSource === "APP_DEFAULT" ? <p>{copy.card.unitAppDefault}</p> : null}
-          {!needsEdit && !otherPerson && !outOfRange && candidate.unit === "UNSTATED" ? (
-            <>
-              <p>{copy.review.unitUnstated}</p>
-              <label className="choice-row">
-                <input type="checkbox" checked={unitTicked} disabled={done} onChange={(event) => setUnitTicked(event.target.checked)} />
-                <span>{copy.card.confirmUnit}</span>
-              </label>
-            </>
-          ) : null}
+          <p className="voice-fact-value">{confirmEdit ?? proposedValue}</p>
+          {confirmEdit === null ? unitBlock : <p>{copy.card.unitText}</p>}
         </div>
+      ) : null}
+
+      {panelOpen ? (
+        <section className="voice-confirm" aria-labelledby={`${ids}-confirm-heading`} data-voice-confirm="">
+          <h4 id={`${ids}-confirm-heading`} ref={panelHeading} tabIndex={-1} className="voice-confirm-value">
+            {`${confirmEdit ?? proposedValue} ${copy.card.unitText}`}
+          </h4>
+          {confirmEdit === null ? unitBlock : null}
+          <p>{copy.card.confirmBody}</p>
+          <div className="voice-confirm-actions">
+            <button type="button" className="btn btn-primary" disabled={confirmedDecision === null || busy || done} aria-busy={busy || undefined} onClick={() => {
+                if (!confirmedDecision) return;
+                focusAfter.current = "SAVED";
+                void decide(confirmedDecision);
+              }}>
+              {copy.card.saveAsShown}
+            </button>
+            <button type="button" className="btn btn-outline" disabled={busy} onClick={editReading}>
+              {copy.card.editReading}
+            </button>
+            <button type="button" className="btn btn-ghost" disabled={busy} onClick={cancelConfirmation}>
+              {copy.card.cancel}
+            </button>
+          </div>
+        </section>
       ) : null}
 
       {candidate.kind === "MEAL_NOTE" && !editing && !needsEdit && !otherPerson ? (
@@ -177,7 +321,7 @@ export function VoiceFactCard({ candidate, index, copy, language, medicines, onD
       ) : null}
 
       {otherPerson ? <p className="voice-fact-warning">{copy.card.otherPerson}</p> : null}
-      {needsEdit && !otherPerson && !editing && candidate.ambiguity.some((reason) => (EDIT_ONLY as readonly string[]).includes(reason)) ? <p className="voice-fact-warning">{copy.card.needsEdit}</p> : null}
+      {needsEdit && !otherPerson && !editing && !panelOpen && confirmEdit === null && candidate.ambiguity.some((reason) => (EDIT_ONLY as readonly string[]).includes(reason)) ? <p className="voice-fact-warning">{copy.card.needsEdit}</p> : null}
 
       {editing ? (
         <div className="voice-fact-edit">
@@ -186,10 +330,27 @@ export function VoiceFactCard({ candidate, index, copy, language, medicines, onD
               <label className="field-label" htmlFor={`${ids}-value`}>
                 {copy.card.valueLabel}
               </label>
-              <input id={`${ids}-value`} className="input" inputMode="decimal" autoComplete="off" value={editValue} onChange={(event) => setEditValue(event.target.value)} aria-describedby={`${ids}-value-hint`} />
+              <input
+                id={`${ids}-value`}
+                ref={valueInput}
+                className="input"
+                inputMode="decimal"
+                autoComplete="off"
+                value={editValue}
+                onChange={(event) => changeEditValue(event.target.value)}
+                onBlur={completeEditValue}
+                onFocus={resumeEditValue}
+                aria-invalid={formatRefused || undefined}
+                aria-describedby={`${ids}-value-hint${formatRefused ? ` ${ids}-value-error` : ""}`}
+              />
               <p id={`${ids}-value-hint`} className="field-hint">
                 {copy.card.enterValueYourself}
               </p>
+              {formatRefused ? (
+                <p id={`${ids}-value-error`} className="field-error" role="alert">
+                  {copy.card.valueFormatRefused}
+                </p>
+              ) : null}
             </div>
           ) : null}
           {candidate.kind === "MEAL_NOTE" ? (
@@ -248,12 +409,12 @@ export function VoiceFactCard({ candidate, index, copy, language, medicines, onD
       ) : null}
 
       <div className="voice-fact-actions">
-        {!otherPerson ? (
-          <button type="button" className="btn btn-primary" disabled={decision === null || busy || done} aria-busy={busy || undefined} onClick={() => decision && void decide(decision)}>
+        {!otherPerson && !panelOpen ? (
+          <button ref={saveButton} type="button" className="btn btn-primary" disabled={(decision === null && !(latched && !editing && proposalShown)) || busy || done} aria-busy={busy || undefined} onClick={() => (latched && !editing && proposalShown ? openPanel(null) : save())}>
             {copy.card.save}
           </button>
         ) : null}
-        {!otherPerson && !editing && !done ? (
+        {!otherPerson && !editing && !done && !panelOpen ? (
           <button type="button" className="btn btn-outline" onClick={() => setEditing(true)}>
             {copy.card.edit}
           </button>
@@ -268,8 +429,8 @@ export function VoiceFactCard({ candidate, index, copy, language, medicines, onD
           {candidate.kind === "GLUCOSE_READING" ? copy.card.manualGlucose : candidate.kind === "MEAL_NOTE" ? copy.card.manualMeal : copy.card.manualMedicine}
         </button>
       </div>
-      <p role="status" className="voice-fact-status">
-        {outcome === "SAVED" ? copy.card.saved : outcome === "OUT_OF_RANGE" ? copy.card.outOfRange : outcome === "NOT_SAVED" || outcome === "REJECTED" ? copy.card.notSaved : ""}
+      <p role="status" ref={statusLine} tabIndex={-1} className="voice-fact-status">
+        {outcome === "SAVED" ? copy.card.saved : outcome === "NOT_SAVED" || outcome === "REJECTED" ? copy.card.notSaved : ""}
       </p>
 
       {asking && candidate.kind === "MEDICATION_OCCURRENCE" ? (

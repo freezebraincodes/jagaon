@@ -12,13 +12,20 @@ function ports() {
 }
 
 describe("voice intent → existing journal command (Q13-6)", () => {
-  it("glucose: mmol/L, method and context unspecified, time unknown; the manual range check is kept (review M5)", async () => {
+  // CR-11 (owner decisions 2026-10-11): replaces the review M5 "0 < value <= 50" pin. The save path validates the shared new-entry
+  // format again and stores the value formatted to one decimal; there is no 50 limit (the review contract requires "Save as shown").
+  it("glucose: mmol/L, method and context unspecified, time unknown; the format is checked again and stored with one decimal (CR-11)", async () => {
     const p = ports();
     const save = createVoiceJournalSave(p);
     expect(await save({ kind: "GLUCOSE", valueText: "6.8", unit: "MMOL_PER_L", unitSource: "SPOKEN" })).toEqual({ kind: "SAVED" });
     expect(p.commands.recordGlucose).toHaveBeenCalledWith({ payload: { measurement: { enteredValue: "6.8", enteredUnit: "MMOL_L", normalization: null }, measurementMethod: "UNKNOWN", context: { kind: "UNSPECIFIED" } }, temporal: { kind: "POINT", occurrence: { kind: "UNKNOWN" } }, recordedAt: NOW });
-    for (const valueText of ["0", "0.0", "51", "99"]) expect(await save({ kind: "GLUCOSE", valueText, unit: "MMOL_PER_L", unitSource: "PERSON" }), valueText).toEqual({ kind: "NOT_SAVED" });
-    expect(p.commands.recordGlucose).toHaveBeenCalledTimes(1);
+    for (const [valueText, stored] of [["0", "0.0"], ["0.0", "0.0"], ["9", "9.0"], ["51", "51.0"], ["60", "60.0"], ["99", "99.0"], ["100", "100.0"], ["999.5", "999.5"], ["1234.5", "1234.5"]] as const) {
+      expect(await save({ kind: "GLUCOSE", valueText, unit: "MMOL_PER_L", unitSource: "PERSON" }), valueText).toEqual({ kind: "SAVED" });
+      expect((vi.mocked(p.commands.recordGlucose).mock.calls.at(-1)![0] as { payload: { measurement: { enteredValue: string } } }).payload.measurement.enteredValue, valueText).toBe(stored);
+    }
+    const before = vi.mocked(p.commands.recordGlucose).mock.calls.length;
+    for (const valueText of ["9.25", "60.00", "6.80", "-5", "1e3", "abc", "060", "12345", ""]) expect(await save({ kind: "GLUCOSE", valueText, unit: "MMOL_PER_L", unitSource: "PERSON" }), valueText).toEqual({ kind: "NOT_SAVED" });
+    expect(p.commands.recordGlucose).toHaveBeenCalledTimes(before);
   });
 
   it("meal: the slot only when said, the food words exactly as said, nothing inferred", async () => {

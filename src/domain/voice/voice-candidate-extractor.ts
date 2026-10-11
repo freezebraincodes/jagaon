@@ -6,7 +6,9 @@ import {
   VOICE_SOURCE_PHRASE_MAX_CODE_POINTS,
   VOICE_TRANSCRIPT_MAX_CODE_POINTS,
   codePointLength,
-  glucoseValueInRange,
+  glucoseHedgeMarked,
+  glucoseValueInAppDefaultWindow,
+  isMmolEntryValue,
   voiceRedirectMessageKey,
   type VoiceRedirectCategory,
   type VoiceReportedAmount,
@@ -45,8 +47,8 @@ import {
  * Glucose readings (review C1, C2, I1, I2):
  * - a number is a reading only when it follows a glucose cue within the window in the same sentence, with no other measurement named
  *   in between (weight, cholesterol, ketones, insulin ...). A unit or a number alone never makes a reading;
- * - numbers: one or two digits (no leading zero) with at most two decimals, English zero–twenty with "point" and digit words,
- *   Chinese 零–二十 with 点 and digit characters, and digits with 点 ("6点8"). A number next to a split or partial decimal or a
+ * - numbers (13s.4): one to four digits (no leading zero) with at most one decimal, English zero–twenty and the tens 21–99 with
+ *   "point" and one digit word, Chinese 零–九十九 with 点 and one digit character, and digits with 点 ("6点8"). A number next to a split or partial decimal or a
  *   magnitude word (". 2", ".8", "point eight", "dot", 点儿, hundred, 百 ...) is unsupported: no value, still counted;
  * - unit MMOL_PER_L only when spoken (never "mmol/mol"); else UNSTATED;
  * - negation, uncertainty (comparatives, targets, past times), corrections and other people are flagged from the WHOLE transcript,
@@ -68,12 +70,22 @@ import {
  *   usually, average, last week, on Monday, 控制在, 大约, 约 ...) add UNCERTAINTY, so they are never UNDERSTOOD or APP_DEFAULT.
  * - I1: more negations (hardly, nope, I doubt it, false); a clause holding a meal or medicine and then a glucose cue is split at the
  *   cue, and a meal or medicine takes its qualifiers from its sentence without the glucose clauses.
- * - I2/#2: the app-default unit only inside VOICE_GLUCOSE_MMOL_PER_L_RANGE (0 < value ≤ 50); a spoken mg/dL is never reinterpreted.
+ * - I2/#2: the app-default unit only inside the app-default window (0 < value ≤ 50; 13s.4: VOICE_GLUCOSE_APP_DEFAULT_WINDOW); a spoken
+ *   mg/dL is never reinterpreted.
  * - I3: a planned meal adds UNCERTAINTY; 吃 with a count, colour or pill classifier and no food is not a meal.
  * - M2: lost, bought, broken, left, ran out, relayed instructions (doctor said, 医生说) are not occurrences.
  * - #4/M4: a REPORTED amount ("I injected 10 units", 十个单位) is kept exactly as spoken in `reportedAmount`; any other number said in
  *   a medicine clause adds UNCERTAINTY instead of being dropped; meal items never carry the slot or time words.
  * - #3: the redirect carries its category (DOSE_TREATMENT or HEALTH_QUESTION) and the matching fixed copy key.
+ *
+ * 13s.4 (CR-11, owner decisions R-1, R-5, 2026-10-11; design v3.1 §3):
+ * - digits: the shared new-entry format (1–4 integer digits, no leading zero except "0", at most ONE decimal digit); "60.00", "9.25",
+ *   "060" and "12345" are unsupported (no value, still counted), never rounded or truncated;
+ * - spoken tens 21–99, never partial: English "sixty", "sixty five", "sixty-five", "sixty point five"; Chinese 六十, 六十五, 六十点五.
+ *   Hundreds ("one hundred twenty", "a hundred and twenty", 一百二十), approximations ("sixty something", "-odd", "-ish", 六十多,
+ *   六十几, 六十来), digit by digit ("six zero", 六零) and more than one spoken decimal ("six point two five", 六点二五) give no value;
+ * - the app-default unit only inside the app-default window (0 < value ≤ 50); a value outside it keeps UNIT_UNSTATED, so the person
+ *   must confirm the unit explicitly ("Yes, mmol/L"). 50 is never a save limit.
  *
  * 13s.3 round 4 (third re-review; interface and exports unchanged):
  * - C1 structural backstop (owner requirement 5): when ANY part of the transcript is not understood (an UNSUPPORTED_SPAN), every
@@ -199,7 +211,7 @@ function compile(language: VoiceLanguage, vocabulary: VoiceVocabulary): Patterns
   }
   return Object.freeze({
     cue: new RegExp(plainAlternation(vocabulary.glucoseCues), "g"),
-    token: new RegExp(`[${DIGITS}]{1,2}点[${DIGITS}]{1,2}(?![${DIGITS}])|[${DIGITS}]+(?:[.,:．：][${DIGITS}]+)*|[${ZH_INTEGER_CHARS}]+(?:点[${ZH_INTEGER_CHARS}]*)?`, "g"),
+    token: new RegExp(`(?<![${DIGITS}])[${DIGITS}]+点[${DIGITS}]+(?![${DIGITS}])|[${DIGITS}]+(?:[.,:．：][${DIGITS}]+)*|[${ZH_INTEGER_CHARS}]+(?:点[${ZH_INTEGER_CHARS}]*)?`, "g"),
     unit: new RegExp(`^\\s*(?:${plainAlternation(vocabulary.mmolUnits)})(?!\\s*\\/\\s*mol)`, "i"),
     notReading: new RegExp(`^\\s*(?:${plainAlternation(vocabulary.notReadingFollowers)})`, "i"),
     otherMeasure: words(vocabulary.otherMeasureCues, ""),
@@ -228,11 +240,14 @@ const PATTERNS: Readonly<Record<VoiceLanguage, Patterns>> = Object.freeze({ en: 
 type NumberToken = Readonly<{ start: number; end: number; valueText: string | null; unitEnd: number | null }>;
 
 const toAsciiDigits = (text: string) => text.replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0)).replace(/．/g, ".");
-const STRICT_DIGITS = /^(?:0|[1-9]\d?)(?:\.\d{1,2})?$/;
-/** Review C1: split or partial decimals and magnitude words around a number make it unsupported. */
-const EN_SPLIT_BEFORE = /(?:[.．]|[0-9０-９]\s*[.．]\s*|(?<![A-Za-z])(?:point|dot|hundred(?:\s+and)?|thousand)\s+)$/i;
+/**
+ * Review C1: split or partial decimals and magnitude words around a number make it unsupported. 13s.4 (CR-11, owner R-7): so does a
+ * sign directly before it ("-5", "minus five", 负五, 零下五): a negative value is never read as positive. Fix round 1 (m-1): the minus
+ * sign (−), en dash (–), em dash (—), non-breaking hyphen (‑) and figure dash (‒) count as the same sign.
+ */
+const EN_SPLIT_BEFORE = /(?:[.．]|[0-9０-９]\s*[.．]\s*|(?<![A-Za-z])(?:point|dot|hundred(?:\s+and)?|thousand)\s+|(?<![A-Za-z])(?:minus|negative)\s+)$/i;
 const EN_SPLIT_AFTER = /^\s*(?:[.．]\s*[0-9０-９]|(?:point|dot|hundred|thousand)(?![A-Za-z]))/i;
-const ZH_SPLIT_BEFORE = /(?:点儿?|[.．]|[百千万]|[0-9０-９]\s*[.．]\s*)\s*$/;
+const ZH_SPLIT_BEFORE = /(?:点儿?|[.．]|[百千万]|[0-9０-９]\s*[.．]\s*|负|零下)\s*$/;
 const ZH_SPLIT_AFTER = /^\s*(?:儿?点|[.．]\s*[0-9０-９零〇一二两三四五六七八九]|[百千万])/;
 
 function follower(text: string, end: number, patterns: Patterns): { kind: "UNIT"; unitEnd: number } | { kind: "NOT_READING" } | { kind: "NONE" } {
@@ -243,20 +258,182 @@ function follower(text: string, end: number, patterns: Patterns): { kind: "UNIT"
   return { kind: "NONE" };
 }
 
+/**
+ * CR-11 fix round 3 (owner ruling 4, 2026-10-11; extended in rounds 3b, 4 and 5): a sign before the number gives no value, never the
+ * number without its sign. Round 5 (owner-approved 2026-10-11): a sign is any dash punctuation (Unicode \p{Pd}) or a minus/plus math
+ * form (+ ＋ ﹢ ⁺ − ∓ ± ⊖ ⊕ ➖ ➕ ⁻ ˗ ﹣ －, with an optional emoji selector or keycap mark) directly before the number, attached
+ * ("-5", "+6") or separated only by spaces, opening brackets or quotes ( ( （ [ ［ { 「 " ' “ ‘ ) and invisible joiners (soft hyphen,
+ * zero-width space, ZWNJ, ZWJ, word joiner): "sugar was - 5", "sugar -(5)", 血糖-（5）. It is a range, unchanged, when a number comes right
+ * before the sign ("7 - 8", "七–八"). The approximation symbols ~ ≈ ～ ∼ are not signs. Accepted consequence:
+ * a pause dash right before the number ("sugar - 6.8") also gives no value.
+ */
+/** Round 6 (A2): invisible characters as a class: format characters (\p{Cf}: soft hyphen, ZWSP, ZWNJ, ZWJ, LRM, RLM, word joiner, U+2061–U+2064, U+180E ...) plus CGJ (U+034F). */
+const INVISIBLE = "\\p{Cf}\\u00AD\\u034F\\u180E\\u200B-\\u200F\\u2060-\\u2064";
+/** Round 6 (A2): opening brackets and quotes as classes (\p{Ps}, \p{Pi}) plus the quotes Unicode files elsewhere (" ' ‚ „ « ‹). */
+const OPENERS = "\\p{Ps}\\p{Pi}\"'‚„«‹";
+/** Round 6 (A4): closing brackets and quotes (\p{Pe}, \p{Pf}, " ') stripped before the range test ("(7)-(8)", "7.8]-[8"). */
+const CLOSERS = "\\p{Pe}\\p{Pf}\"'";
+/**
+ * Round 6: the sign characters. Dash punctuation (\p{Pd}, which includes the wave dashes 〜 and 〰) and the minus/plus math forms
+ * (round 6 A3: ₋ ⁒), plus the owner's rejected input marks (owner decisions 2026-10-11, "Do not accept these signs/symbols on input"):
+ * full-width and look-alike equals or approximation marks ＝ ﹦ ≒ ≃ ≅ ∽ ⁓ ≑ ∾ and dash look-alikes ー ｰ ─ ━ ⎯ ﹍ Ⲻ; round 8 (owner decision
+ * 2026-10-11): the plain "=" too, consistent with "＝" (no longer a hedge). Before a number each
+ * gives no value (never a value, never a hedge); a number right before it is still a range.
+ */
+const MINUS_PLUS_CHARS = "\\p{Pd}+＋﹢⁺−∓±⊖⊕➖➕⁻˗﹣－₋⁒ーｰ─━⎯﹍Ⲻ";
+/** Round 8: the rejected equals/approximation marks (glucose only; a medicine amount is checked for minus/plus signs only). */
+const REJECTED_MARK_CHARS = "=＝﹦≒≃≅∽⁓≑∾";
+const SIGN_CHARS = `${MINUS_PLUS_CHARS}${REJECTED_MARK_CHARS}`;
+/**
+ * Round 5 (owner decision 2026-10-11, revised B): hedges dropped so only the number is extracted, then ALWAYS confirmed (see
+ * `glucoseHedgeMarked`): EN about / around / approximately / roughly and the symbols ~ ≈ ～ ∼ directly before the number; ZH 大约 / 大概 /
+ * 差不多 and the symbols before it, 左右 after it. Any other hedge (maybe, I think, nearly, 可能 ...) keeps its uncertainty. Round 8 (owner
+ * decision 2026-10-11): "=" is no longer a hedge; it is a rejected mark (see SIGN_CHARS), consistent with "＝".
+ */
+const HEDGE_BEFORE: Readonly<Record<VoiceLanguage, RegExp>> = Object.freeze({
+  en: /(?:(?<![A-Za-z])(?:about|around|approximately|roughly)\s*(?:[~≈～∼]\s*)?|[~≈～∼]\s*)$/i,
+  zh: /(?:(?:大约|大概|差不多)\s*(?:[~≈～∼]\s*)?|[~≈～∼]\s*)$/,
+});
+const ZH_HEDGE_AFTER = /^\s*左右/;
+const SIGN_BEFORE = new RegExp(`[${SIGN_CHARS}][\\uFE0F\\u20E3]*[\\s${INVISIBLE}${OPENERS}]*$`, "u");
+const MINUS_PLUS_BEFORE = new RegExp(`[${MINUS_PLUS_CHARS}][\\uFE0F\\u20E3]*[\\s${INVISIBLE}${OPENERS}]*$`, "u");
+/**
+ * Round 7 (D1): how far before a number the sign check looks (code units, both languages). Wide enough that padding (spaces, invisible
+ * characters, brackets, repeated hedges) cannot push a sign out of view, and capped so the scan stays bounded.
+ */
+const SIGN_LOOKBACK = 64;
+const TRAILING_FILLER = new RegExp(`[\\s${INVISIBLE}${OPENERS}]+$`, "u");
+const TRAILING_CLOSERS = new RegExp(`[\\s${INVISIBLE}${CLOSERS}]+$`, "u");
+/** Round 9 (A2): the rejected equals marks, stripped only to SEE a sign before a medicine amount ("-=2 units", 负=2个单位). */
+const TRAILING_EQUALS = new RegExp(`[\\s${REJECTED_MARK_CHARS}]+$`, "u");
+/** Round 9 (A1): the sign words, tested on the stripped text (medicine; a glucose reading has its own split rule for them). */
+const SIGN_WORD_END: Readonly<Record<VoiceLanguage, RegExp>> = Object.freeze({ en: /(?<![A-Za-z])(?:minus|negative)$/i, zh: /(?:负|零下)$/ });
+/**
+ * Round 9 (D): the raw text the sign check reads before a number. It is bounded (twice the transcript limit in code units) and
+ * collapsed first, so padding can never push a sign out of the capped SIGN_LOOKBACK view.
+ */
+const RAW_LOOKBACK = VOICE_TRANSCRIPT_MAX_CODE_POINTS * 2;
+const PADDING_CHARS = `\\s${INVISIBLE}${OPENERS}${CLOSERS}~≈～∼`;
+const HEDGE_WORDS: Readonly<Record<VoiceLanguage, string>> = Object.freeze({ en: "(?<![A-Za-z])(?:about|around|approximately|roughly)(?![A-Za-z])", zh: "大约|大概|差不多" });
+/**
+ * Round 9 addendum (owner decisions 2026-10-11, final): punctuation and filler words between a sign and the number never hide the sign
+ * ("sugar -, 7", "I took - like 2 units", 血糖-嗯7). Punctuation: , ; : . … ， ； ： 。 、. Fillers: EN um, uh, er, erm, ah, like, well,
+ * maybe; ZH 嗯, 呃, 啊, 那个, 就是.
+ */
+const SIGN_PUNCTUATION = ",;:.…，；：。、";
+const FILLER_WORDS: Readonly<Record<VoiceLanguage, string>> = Object.freeze({ en: "(?<![A-Za-z])(?:um|uh|erm|er|ah|like|well|maybe)(?![A-Za-z])", zh: "嗯|呃|啊|那个|就是" });
+const TRAILING_PUNCTUATION_FILLER: Readonly<Record<VoiceLanguage, RegExp>> = Object.freeze({
+  en: new RegExp(`(?:[\\s${INVISIBLE}${SIGN_PUNCTUATION}]|${FILLER_WORDS.en})+$`, "iu"),
+  zh: new RegExp(`(?:[\\s${INVISIBLE}${SIGN_PUNCTUATION}]|${FILLER_WORDS.zh})+$`, "u"),
+});
+/** Runs of only spaces, invisible characters and brackets collapse to a space; a run holding anything else (a hedge, punctuation, a filler, an equals mark) collapses to "," so it can never join a range ("7, -8" stays signed). */
+// Round 10 (F1): openers are not plain padding here, so "7 (-8" never reads as the range "7 -8" (a run holding an opener collapses to ",").
+const PLAIN_PADDING = new RegExp(`^[\\s${INVISIBLE}${CLOSERS}]+$`, "u");
+const paddingRun = (language: VoiceLanguage, equals: boolean) => new RegExp(`(?:[${PADDING_CHARS}${SIGN_PUNCTUATION}${equals ? REJECTED_MARK_CHARS : ""}]|${HEDGE_WORDS[language]}|${FILLER_WORDS[language]})+`, "giu");
+const PADDING_RUN: Readonly<Record<VoiceLanguage, Readonly<{ plain: RegExp; equals: RegExp }>>> = Object.freeze({
+  en: Object.freeze({ plain: paddingRun("en", false), equals: paddingRun("en", true) }),
+  zh: Object.freeze({ plain: paddingRun("zh", false), equals: paddingRun("zh", true) }),
+});
+
+/**
+ * Round 9: what the sign check considers. A glucose reading: every sign character including the rejected equals marks (they are
+ * signs there). A medicine amount: minus/plus signs only, the equals marks stripped to see a sign behind them (A2), the sign words on
+ * the stripped text (A1), and a range only when its lower bound is not itself signed (A3).
+ */
+type SignCheck = Readonly<{ sign: RegExp; equals: boolean; words: boolean; lowerBound: boolean }>;
+const GLUCOSE_SIGN: SignCheck = Object.freeze({ sign: SIGN_BEFORE, equals: false, words: false, lowerBound: false });
+// Round 9 addendum (owner, final): an equals mark directly before a medicine amount is not accepted either, so the medicine check now uses
+// the full sign class (the equals marks included) instead of stripping them.
+const MEDICINE_SIGN: SignCheck = Object.freeze({ sign: SIGN_BEFORE, equals: false, words: true, lowerBound: true });
+
+/** The start of the number that ends `prior` (a digit run, a Chinese numeral run or an English number word), or -1. */
+function trailingNumberStart(prior: string, language: VoiceLanguage, vocabulary: VoiceVocabulary): number {
+  const digits = /[0-9０-９]+(?:[.．][0-9０-９]+)?$/.exec(prior);
+  if (digits) return digits.index;
+  if (language === "zh") return /[零〇一二两三四五六七八九十百千万]+$/.exec(prior)?.index ?? -1;
+  const word = /([A-Za-z]+)$/.exec(prior);
+  const lower = word?.[1]?.toLowerCase();
+  return word && lower !== undefined && (vocabulary.integerWords.includes(lower) || vocabulary.tensWords.includes(lower) || vocabulary.digitWords.includes(lower)) ? word.index : -1;
+}
+
+function signedNumber(before: string, language: VoiceLanguage, vocabulary: VoiceVocabulary, check: SignCheck = GLUCOSE_SIGN, depth = 0): boolean {
+  // Round 9 (D): padding runs (spaces, invisible characters, brackets, quotes, hedges and, for a medicine amount, the equals marks) are
+  // collapsed to one space first, so the capped view always reaches the sign.
+  const collapsed = before.slice(Math.max(0, before.length - RAW_LOOKBACK)).replace(check.equals ? PADDING_RUN[language].equals : PADDING_RUN[language].plain, (run) => (PLAIN_PADDING.test(run) ? " " : ","));
+  // Round 6 (A1): a hedge between the sign and the number ("sugar -~7", "- about 7", "-(about 7)", 血糖-大约7) never hides the sign:
+  // trailing hedges, hedge symbols, spaces, opening brackets, quotes and invisible characters are stripped, repeatedly, first.
+  let rest = collapsed.slice(Math.max(0, collapsed.length - SIGN_LOOKBACK));
+  for (let previous = ""; previous !== rest; ) {
+    previous = rest;
+    rest = rest.replace(TRAILING_FILLER, "").replace(HEDGE_BEFORE[language], "").replace(TRAILING_PUNCTUATION_FILLER[language], "");
+    if (check.equals) rest = rest.replace(TRAILING_EQUALS, "");
+  }
+  if (check.words && SIGN_WORD_END[language].test(rest)) return true;
+  const sign = check.sign.exec(rest);
+  if (!sign) return false;
+  const prior = rest.slice(0, sign.index).replace(TRAILING_CLOSERS, "");
+  const lower = trailingNumberStart(prior, language, vocabulary);
+  if (lower < 0) return true;
+  // A number right before the sign makes a range ("8 - 10 units", "七–八"); round 9 (A3): for a medicine amount only when that lower
+  // bound is not itself signed ("-2-3 units" is never "3 units").
+  return check.lowerBound && depth < 3 && signedNumber(prior.slice(0, lower), language, vocabulary, check, depth + 1);
+}
+
+/**
+ * Round 8: a sign before a medicine amount, with the sign words (minus, negative, 负, 零下). Round 9: the sign words are tested on the
+ * stripped text (A1); round 9 addendum (owner, final): the equals marks count too ("I took = 2 units" keeps no amount).
+ */
+function negativeBefore(before: string, language: VoiceLanguage, vocabulary: VoiceVocabulary): boolean {
+  return signedNumber(before, language, vocabulary, MEDICINE_SIGN);
+}
+
+/** 13s.4 (R-5): an approximation word right after a spoken number ("sixty something", "sixty-odd", "60 ish"): the number has no value. */
+function approximate(after: string, vocabulary: VoiceVocabulary): boolean {
+  if (vocabulary.approximationFollowers.length === 0) return false;
+  return new RegExp(`^[\\s-]*(?:${vocabulary.approximationFollowers.map(escape).join("|")})(?![A-Za-z])`, "i").test(after);
+}
+
+/**
+ * 13s.4 (R-5): an English number-word run as a value, or null: zero–twenty; a tens word (twenty … ninety) alone or with one of one–nine
+ * (21–99); each optionally followed by "point" and exactly ONE digit word. Anything else (digit by digit, "six point two five",
+ * "sixty five five") is null: never partial.
+ */
+function englishWordValue(words: readonly string[], vocabulary: VoiceVocabulary): string | null {
+  let integer: number;
+  let next = 1;
+  const tens = vocabulary.tensWords.indexOf(words[0]!);
+  if (tens >= 0) {
+    integer = (tens + 2) * 10;
+    const ones = words.length > 1 ? vocabulary.integerWords.indexOf(words[1]!) : -1;
+    if (ones >= 1 && ones <= 9) {
+      integer += ones;
+      next = 2;
+    }
+  } else {
+    integer = vocabulary.integerWords.indexOf(words[0]!);
+    if (integer < 0) return null;
+  }
+  if (words.length === next) return String(integer);
+  if (words.length !== next + 2 || words[next] !== vocabulary.decimalMarker) return null;
+  const decimal = vocabulary.digitWords.indexOf(words[next + 1]!);
+  return decimal >= 0 ? `${integer}.${decimal}` : null;
+}
+
 function digitToken(raw: string): { kind: "TIME" } | { kind: "VALUE"; valueText: string } | { kind: "UNSUPPORTED" } {
   if (/[:：]/.test(raw)) return { kind: "TIME" };
   const ascii = toAsciiDigits(raw);
-  return STRICT_DIGITS.test(ascii) ? { kind: "VALUE", valueText: ascii } : { kind: "UNSUPPORTED" };
+  return isMmolEntryValue(ascii) ? { kind: "VALUE", valueText: ascii } : { kind: "UNSUPPORTED" };
 }
 
 function englishNumbers(text: string, patterns: Patterns, vocabulary: VoiceVocabulary): NumberToken[] {
   const tokens = [...text.matchAll(patterns.token)].map((match) => ({ start: match.index, end: match.index + match[0].length, raw: match[0], lower: match[0].toLowerCase() }));
   const isDigits = (raw: string) => /^[0-9０-９]/.test(raw);
-  const numeric = (lower: string, raw: string) => isDigits(raw) || vocabulary.integerWords.includes(lower) || vocabulary.digitWords.includes(lower) || lower === vocabulary.decimalMarker;
+  const isNumberWord = (lower: string) => vocabulary.integerWords.includes(lower) || vocabulary.tensWords.includes(lower);
+  const numeric = (lower: string, raw: string) => isDigits(raw) || isNumberWord(lower) || vocabulary.digitWords.includes(lower) || lower === vocabulary.decimalMarker;
   const numbers: NumberToken[] = [];
   for (let index = 0; index < tokens.length; index += 1) {
     const first = tokens[index]!;
-    if (!isDigits(first.raw) && !vocabulary.integerWords.includes(first.lower)) continue;
+    if (!isDigits(first.raw) && !isNumberWord(first.lower)) continue;
     const previous = tokens[index - 1];
     if (first.lower === "one" && previous && /^\s+$/.test(text.slice(previous.end, first.start)) && EN_PRONOUN_ONE_PREFIXES.includes(previous.lower)) continue;
     let last = index;
@@ -268,33 +445,33 @@ function englishNumbers(text: string, patterns: Patterns, vocabulary: VoiceVocab
     const next = follower(text, end, patterns);
     if (next.kind === "NOT_READING") continue;
     let valueText: string | null = null;
-    const split = EN_SPLIT_BEFORE.test(text.slice(Math.max(0, start - 24), start)) || EN_SPLIT_AFTER.test(text.slice(end, end + 24));
+    const split = EN_SPLIT_BEFORE.test(text.slice(Math.max(0, start - 24), start)) || EN_SPLIT_AFTER.test(text.slice(end, end + 24)) || approximate(text.slice(end, end + 24), vocabulary) || signedNumber(text.slice(Math.max(0, start - RAW_LOOKBACK), start), "en", vocabulary);
     if (run.length === 1 && isDigits(run[0]!.raw)) {
       // Cr2: a digit touching a letter is part of a word ("HbA1c", "7ish"), never a number, unless a unit follows ("6.8mmol").
       if (/[A-Za-z]/.test(text[start - 1] ?? "") || (/[A-Za-z]/.test(text[end] ?? "") && next.kind !== "UNIT")) continue;
       const parsed = digitToken(run[0]!.raw);
       if (parsed.kind === "TIME") continue;
       valueText = parsed.kind === "VALUE" ? parsed.valueText : null;
-    } else if (vocabulary.integerWords.includes(run[0]!.lower)) {
-      const integer = vocabulary.integerWords.indexOf(run[0]!.lower);
-      const decimals = run.slice(2).map((token) => vocabulary.digitWords.indexOf(token.lower));
-      if (run.length === 1) valueText = String(integer);
-      else if (run[1]!.lower === vocabulary.decimalMarker && decimals.length >= 1 && decimals.length <= 2 && decimals.every((digit) => digit >= 0)) valueText = `${integer}.${decimals.join("")}`;
+    } else if (isNumberWord(run[0]!.lower)) {
+      valueText = englishWordValue(run.map((token) => token.lower), vocabulary);
     }
     numbers.push({ start, end, valueText: split ? null : valueText, unitEnd: next.kind === "UNIT" ? next.unitEnd : null });
   }
   return numbers;
 }
 
-const ZH_INTEGER = /^(二十|十[一二三四五六七八九]?|[零〇一二两三四五六七八九])$/;
-const ZH_DECIMALS = /^[零〇一二三四五六七八九]{1,2}$/;
+/** 13s.4 (R-5): 零–九, 十–十九, and X十 / X十Y for X 二–九 and Y 一–九 (二十 … 九十九). Never 百, 千 or 万. */
+const ZH_INTEGER = /^(?:[二三四五六七八九]十[一二三四五六七八九]?|十[一二三四五六七八九]?|[零〇一二两三四五六七八九])$/;
+/** Spoken decimal digits after 点 (a time such as 八点十分 holds 十 and is never a reading); only ONE digit gives a value (13s.4). */
+const ZH_DECIMAL_DIGITS = /^[零〇一二三四五六七八九]+$/;
 const ZH_DIGIT_VALUE: Readonly<Record<string, number>> = Object.freeze({ 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 });
 const HAN = /\p{Script=Han}/u;
 
 function chineseInteger(word: string): number {
-  if (word === "二十") return 20;
-  if (word.startsWith("十")) return 10 + (word.length > 1 ? ZH_DIGIT_VALUE[word[1]!]! : 0);
-  return ZH_DIGIT_VALUE[word]!;
+  const tens = word.indexOf("十");
+  if (tens < 0) return ZH_DIGIT_VALUE[word]!;
+  const multiplier = tens === 0 ? 1 : ZH_DIGIT_VALUE[word[0]!]!;
+  return multiplier * 10 + (word.length > tens + 1 ? ZH_DIGIT_VALUE[word[tens + 1]!]! : 0);
 }
 
 function chineseNumbers(text: string, patterns: Patterns): NumberToken[] {
@@ -307,15 +484,17 @@ function chineseNumbers(text: string, patterns: Patterns): NumberToken[] {
     const nextChar = text[end];
     const next = follower(text, end, patterns);
     if (next.kind === "NOT_READING") continue;
-    if (next.kind === "NONE" && nextChar !== undefined && HAN.test(nextChar) && !ZH_READING_PARTICLES.includes(nextChar) && !ZH_SPLIT_AFTER.test(text.slice(end))) continue;
-    const split = ZH_SPLIT_BEFORE.test(text.slice(Math.max(0, start - 8), start)) || ZH_SPLIT_AFTER.test(text.slice(end, end + 8));
+    // Round 5 (revised B): 左右 right after the number is a hedge the reading drops ("七点八左右" → 7.8), not another word.
+    if (next.kind === "NONE" && nextChar !== undefined && HAN.test(nextChar) && !ZH_READING_PARTICLES.includes(nextChar) && !ZH_SPLIT_AFTER.test(text.slice(end)) && !ZH_HEDGE_AFTER.test(text.slice(end))) continue;
+    const split = ZH_SPLIT_BEFORE.test(text.slice(Math.max(0, start - 8), start)) || ZH_SPLIT_AFTER.test(text.slice(end, end + 8)) || signedNumber(text.slice(Math.max(0, start - RAW_LOOKBACK), start), "zh", voiceVocabulary("zh"));
     let valueText: string | null = null;
     if (/^[0-9０-９]/.test(raw)) {
       // Cr2: digits touching a Latin letter belong to a word ("A1c"), unless a unit follows.
       if (/[A-Za-z]/.test(text[start - 1] ?? "") || (/[A-Za-z]/.test(text[end] ?? "") && next.kind !== "UNIT")) continue;
       if (raw.includes("点")) {
         const [integer, decimals] = toAsciiDigits(raw).split("点") as [string, string];
-        valueText = /^(?:0|[1-9]\d?)$/.test(integer) && /^\d{1,2}$/.test(decimals) ? `${integer}.${decimals}` : null;
+        const joined = `${integer}.${decimals}`;
+        valueText = isMmolEntryValue(joined) ? joined : null;
       } else {
         const parsed = digitToken(raw);
         if (parsed.kind === "TIME") continue;
@@ -324,8 +503,9 @@ function chineseNumbers(text: string, patterns: Patterns): NumberToken[] {
     } else {
       const [integer, decimals] = raw.split("点") as [string, string | undefined];
       // 八点, 一点, 八点十分: a time or "a little", never a reading.
-      if (decimals !== undefined && !ZH_DECIMALS.test(decimals)) continue;
-      if (ZH_INTEGER.test(integer)) valueText = decimals === undefined ? String(chineseInteger(integer)) : `${chineseInteger(integer)}.${[...decimals].map((digit) => ZH_DIGIT_VALUE[digit]).join("")}`;
+      if (decimals !== undefined && !ZH_DECIMAL_DIGITS.test(decimals)) continue;
+      // 13s.4: more than one spoken decimal digit (六点二五) gives no value (never rounded); the number is still counted.
+      if (ZH_INTEGER.test(integer) && (decimals === undefined || [...decimals].length === 1)) valueText = decimals === undefined ? String(chineseInteger(integer)) : `${chineseInteger(integer)}.${ZH_DIGIT_VALUE[decimals]}`;
     }
     numbers.push({ start, end, valueText: split ? null : valueText, unitEnd: next.kind === "UNIT" ? next.unitEnd : null });
   }
@@ -336,6 +516,27 @@ function chineseNumbers(text: string, patterns: Patterns): NumberToken[] {
 // Sentences and clauses
 // ---------------------------------------------------------------------------------------------------------------------------------
 const isDigitChar = (char: string | undefined) => char !== undefined && /[0-9０-９]/.test(char);
+
+/** Owner clarification: bracketed glucose numbers are not readings. Preserve offsets and all original words for provenance and qualifiers. */
+function bracketedRanges(text: string): Range[] {
+  const ranges: Range[] = [];
+  let depth = 0;
+  let start = 0;
+  let offset = 0;
+  for (const char of text) {
+    if (/\p{Ps}/u.test(char)) {
+      if (depth === 0) start = offset;
+      depth += 1;
+    } else if (/\p{Pe}/u.test(char) && depth > 0) {
+      depth -= 1;
+      if (depth === 0) ranges.push({ start, end: offset + char.length });
+    }
+    offset += char.length;
+  }
+  // An unfinished bracket must not expose its number as a plain reading.
+  if (depth > 0) ranges.push({ start, end: text.length });
+  return ranges;
+}
 
 /** Sentence boundaries: ! ? ; their full-width forms, line breaks, and a period not followed (after spaces) by a digit. */
 function sentenceBoundaries(text: string): number[] {
@@ -550,7 +751,7 @@ function onlyAllowedWords(segment: string, language: VoiceLanguage, vocabulary: 
   let rest = segment.toLowerCase().replace(/[’]/g, "'");
   const phrases = [...qualifierPhrases(vocabulary), ...allowed].filter((phrase) => phrase.includes(" ")).sort((left, right) => right.length - left.length);
   for (const phrase of phrases) rest = rest.replace(new RegExp(`(?<![a-z])${escape(phrase).replace(/ /g, "\\s+")}(?![a-z])`, "g"), " ");
-  const single = new Set([...allowed, ...qualifierPhrases(vocabulary), ...vocabulary.integerWords, ...vocabulary.digitWords, vocabulary.decimalMarker].filter((word) => !word.includes(" ")));
+  const single = new Set([...allowed, ...qualifierPhrases(vocabulary), ...vocabulary.integerWords, ...vocabulary.tensWords, ...vocabulary.digitWords, vocabulary.decimalMarker].filter((word) => !word.includes(" ")));
   // A contracted negation ("wasn't", "cannot") is a qualifier word too (it flags NEGATION).
   const accepted = (word: string) => single.has(word) || single.has(word.replace(/'s$/, "")) || single.has(word.replace(/'/g, "")) || /n't$/.test(word);
   return (rest.match(/[a-z][a-z']*/g) ?? []).every(accepted);
@@ -575,9 +776,15 @@ function chineseAmount(raw: string): string | null {
 }
 
 /** Owner #4: the amount the person reported in this occurrence clause, exactly as spoken (decimal value, spoken unit words), or null. */
-function reportedAmount(clause: string, language: VoiceLanguage, patterns: Patterns, vocabulary: VoiceVocabulary): VoiceReportedAmount | null {
+function reportedAmount(clause: string, language: VoiceLanguage, patterns: Patterns, vocabulary: VoiceVocabulary, textBefore = ""): VoiceReportedAmount | null {
   const match = patterns.amount.exec(clause);
   if (!match) return null;
+  // CR-11 round 8 (owner decision 2026-10-11): a signed amount ("I took -2 units", 我打了负二个单位, "about -2 units", "-(2) units") is never
+  // a positive reported amount: the same sign detection as a glucose reading (sign class, spaces, brackets, quotes, invisible characters,
+  // repeated hedge stripping, the capped look-back; a number right before the sign is a range) plus the sign words. No amount is kept;
+  // the number then counts as an unreported number (the occurrence needs the person's edit, as for any other number said).
+  // Round 9 addendum: the look-back reads the transcript before the clause too ("I took -; 2 units": the sign is in the previous clause).
+  if (negativeBefore((textBefore + clause.slice(0, match.index)).slice(-RAW_LOOKBACK), language, vocabulary)) return null;
   const raw = match[1]!;
   let valueText: string | null;
   if (/^[0-9]/.test(raw)) valueText = /^\d{1,4}(?:\.\d{1,2})?$/.test(raw) ? raw : null;
@@ -679,7 +886,7 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
       if (found.ref.kind === "UNRESOLVED") reasons.add("MEDICINE_UNRESOLVED");
       if (status === "UNKNOWN") reasons.add("STATUS_UNCLEAR");
       // Owner #4: an amount the person reported for this occurrence, exactly as spoken (never advice).
-      const amount = reportedAmount(clause, language, patterns, vocabulary);
+      const amount = reportedAmount(clause, language, patterns, vocabulary, text.slice(Math.max(0, range.start - RAW_LOOKBACK), range.start));
       // M4: a number said in the clause that is not the reported amount ("I took 2 metformin") is never silently ignored: the fact
       // then needs the person's explicit edit.
       const amountMatch = amount ? patterns.amount.exec(clause) : null;
@@ -718,8 +925,13 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
   let qualifierScope = text;
   for (const range of factRanges) qualifierScope = qualifierScope.slice(0, range.start) + " ".repeat(range.end - range.start) + qualifierScope.slice(range.end);
   for (const range of scopeOptions.exclude) qualifierScope = qualifierScope.slice(0, range.start) + qualifierScope.slice(range.start, range.end).replace(/[0-9０-９]/g, " ") + qualifierScope.slice(range.end);
-  const cues: Cue[] = [...text.matchAll(patterns.cue)].map((match) => ({ start: match.index, end: match.index + match[0].length }));
-  const numbers = language === "en" ? englishNumbers(text, patterns, vocabulary) : chineseNumbers(text, patterns);
+  const bracketed = bracketedRanges(text);
+  // Mask only the glucose parser's view, not the transcript or its qualifiers. Commas preserve offsets and prevent
+  // token joining, cues, and range lower bounds inside brackets from creating an outside positive reading.
+  let glucoseText = text;
+  for (const range of bracketed) glucoseText = glucoseText.slice(0, range.start) + ",".repeat(range.end - range.start) + glucoseText.slice(range.end);
+  const cues: Cue[] = [...glucoseText.matchAll(patterns.cue)].map((match) => ({ start: match.index, end: match.index + match[0].length }));
+  const numbers = language === "en" ? englishNumbers(glucoseText, patterns, vocabulary) : chineseNumbers(glucoseText, patterns);
   const clauseAt = (offset: number) => allClauses.find((range) => range.start <= offset && offset < range.end) ?? null;
   const readings = numbers
     .map((number) => {
@@ -741,9 +953,16 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
   const glucoseDrafts: GlucoseDraft[] = [];
   for (const { number, windowCues, anchor } of readings) {
     if (number.valueText === null) continue;
-    const end = number.unitEnd ?? number.end;
     const start = Math.min(...windowCues.map((cue) => cue.start));
-    const glucoseScope = qualifierScope.slice(0, start) + text.slice(start, end) + qualifierScope.slice(end);
+    // Round 5 (revised B): a hedge directly before (or 左右 directly after) the number is dropped from the qualifiers; the reading keeps
+    // it in its phrase so the review always confirms it.
+    const hedgeAfter = language === "zh" ? ZH_HEDGE_AFTER.exec(text.slice(number.unitEnd ?? number.end)) : null;
+    const end = (number.unitEnd ?? number.end) + (hedgeAfter ? hedgeAfter[0].length : 0);
+    const hedgeBefore = HEDGE_BEFORE[language].exec(text.slice(Math.max(start, number.start - 24), number.start));
+    let glucoseScope = qualifierScope.slice(0, start) + text.slice(start, end) + qualifierScope.slice(end);
+    const blank = (from: number, to: number) => (glucoseScope = glucoseScope.slice(0, from) + " ".repeat(to - from) + glucoseScope.slice(to));
+    if (hedgeBefore) blank(number.start - hedgeBefore[0].length, number.start);
+    if (hedgeAfter) blank(end - hedgeAfter[0].length, end);
     const reasons = new Set<VoiceAmbiguityReason>();
     if (number.unitEnd === null) reasons.add("UNIT_UNSTATED");
     if (patterns.negation.test(glucoseScope)) reasons.add("NEGATION");
@@ -786,9 +1005,10 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
   for (const draft of glucoseDrafts) {
     const { reasons } = draft;
     if (unsupported.length > 0) reasons.add("UNCERTAINTY");
-    // Owner default-unit boundary (#2): the app's entry unit only for an otherwise unambiguous reading inside the plausible mmol/L range
-    // (review I2: "sugar 72" stays UNIT_UNSTATED); it never clears another reason.
-    const appDefault = !draft.spoken && reasons.size === 1 && reasons.has("UNIT_UNSTATED") && unsupported.length === 0 && options.glucoseEntryUnit === "MMOL_PER_L" && glucoseValueInRange(draft.valueText);
+    // Owner default-unit boundary (#2): the app's entry unit only for an otherwise unambiguous reading inside the app-default window
+    // (review I2: "sugar 72" stays UNIT_UNSTATED; 13s.4: the person then confirms the unit explicitly); it never clears another reason.
+    // Round 5 (revised B): a hedged reading never gets the app-default unit; the person confirms the unit ("Yes, mmol/L").
+    const appDefault = !draft.spoken && !glucoseHedgeMarked(text.slice(draft.start, draft.end)) && reasons.size === 1 && reasons.has("UNIT_UNSTATED") && unsupported.length === 0 && options.glucoseEntryUnit === "MMOL_PER_L" && glucoseValueInAppDefaultWindow(draft.valueText);
     if (appDefault) reasons.delete("UNIT_UNSTATED");
     const ambiguity = ordered(reasons);
     const unit = draft.spoken || appDefault ? "MMOL_PER_L" : "UNSTATED";

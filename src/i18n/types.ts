@@ -132,6 +132,16 @@ export type GlucoseMessages = {
   timeNowHint: string;
   storedAs: (context: string, when: string) => string;
   moreDetails: string;
+  /**
+   * CR-11 (owner decisions 2026-10-11, design v3.1; R-3): the manual number-and-unit confirmation step. `confirmBody` is sentences 1–2
+   * of the approved verification copy, verbatim; the control labels are the approved EN labels and the R-3 ZH labels.
+   */
+  confirmBody: string;
+  saveAsShown: string;
+  editReading: string;
+  cancelConfirm: string;
+  /** CR-11: typed or pasted text that is not digits with at most one decimal digit is refused (never trimmed). Wording owner-approved 2026-10-11. */
+  formatRefused: string;
 };
 
 export type ReadingTimeMessages = {

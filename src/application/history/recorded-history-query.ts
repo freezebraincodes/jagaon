@@ -13,7 +13,7 @@ import {
   loadIntelligenceSnapshot,
   type IntelligenceSnapshot,
 } from "@/application/intelligence/intelligence-snapshot";
-import { canonicalDecimal, compareRational, decimal, instantMs, localDateOf } from "@/application/intelligence/metrics";
+import { compareRational, decimal, instantMs, localDateOf } from "@/application/intelligence/metrics";
 import { evaluateComparableSlotTrend } from "@/patterns/comparable-slot-trend-evaluator";
 import type { ResolvedGlucoseReading } from "@/patterns/pattern-evaluator-contracts";
 import { projectExplainablePattern } from "./explainable-pattern-view";
@@ -74,10 +74,15 @@ function positionStart(date: string, position: HistoryDisplayPosition): number {
   return Date.parse(`${date}T${position === "MORNING" ? "00" : "12"}:00:00Z`) - HOME_OFFSET_MINUTES * 60_000;
 }
 
-function canonicalValue(payload: GlucoseReadingPayload): string | null {
+/**
+ * CR-11 (owner decision R-4, 2026-10-11): the reading's mmol/L value exactly as STORED, never canonicalised, so the History list and
+ * explanation facts keep the precision the person entered ("6.80" stays "6.80", "60.0" stays "60.0", "0.0" stays "0.0"; nothing is
+ * rounded or rewritten). Ordering and the chart stay numeric (6.80 = 6.8) through `decimal`.
+ */
+function storedMmolValue(payload: GlucoseReadingPayload): string | null {
   const measurement = payload.measurement;
-  if (measurement.normalization?.canonicalUnit === "MMOL_L") return canonicalDecimal(decimal(measurement.normalization.canonicalValue));
-  return measurement.enteredUnit === "MMOL_L" ? canonicalDecimal(decimal(measurement.enteredValue)) : null;
+  if (measurement.normalization?.canonicalUnit === "MMOL_L") return measurement.normalization.canonicalValue;
+  return measurement.enteredUnit === "MMOL_L" ? measurement.enteredValue : null;
 }
 
 function readingPoint(reading: ResolvedGlucoseReading): { instant: string; offset: number } | null {
@@ -235,14 +240,14 @@ export function createRecordedHistoryQuery(database: JagaOnDatabase, dependencie
           if (positionStart(date, position) > instantMs(now)) continue;
           included += 1;
           const here = readings.filter((entry) => entry.display.date === date && entry.display.position === position);
-          const valued = here.filter((entry) => canonicalValue(entry.reading.payload) !== null);
+          const valued = here.filter((entry) => storedMmolValue(entry.reading.payload) !== null);
           if (here.length > 0 && valued.length > 0) {
             recorded += 1;
             chart.push({
               date,
               position,
               state: "RECORDED",
-              valueMmolL: canonicalValue(valued.at(-1)!.reading.payload) as never,
+              valueMmolL: storedMmolValue(valued.at(-1)!.reading.payload) as never,
               readingCount: here.length,
             });
           } else {
@@ -252,7 +257,7 @@ export function createRecordedHistoryQuery(database: JagaOnDatabase, dependencie
         if (included > 0) stamps.push({ date, recordedPositions: recorded, complete: included === 2 && recorded === 2 });
       }
 
-      const values = readings.map((entry) => canonicalValue(entry.reading.payload)).filter((value): value is string => value !== null);
+      const values = readings.map((entry) => storedMmolValue(entry.reading.payload)).filter((value): value is string => value !== null);
       const sortedValues = [...values].sort((a, b) => compareRational(decimal(a), decimal(b)));
       const slotCounts = HISTORY_LABELLED_SLOTS.map((slot) => ({
         slot,

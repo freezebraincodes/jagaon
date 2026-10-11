@@ -110,10 +110,21 @@ describe("P13X review IMPORTANT 2 and minors", () => {
     expect(await extract(client(null, { calls: 0 }, '{"kind":"REFUSED","kind":"REFUSED","reason":"EXTRACTION_DISABLED","notSentToProvider":true}'), transcript)).toEqual({ kind: "FALLBACK", reason: "RESPONSE_INVALID", detail: null, sent: true });
   });
 
-  it("the mapper emits the canonical value, never the raw '06.80'", () => {
-    const transcript = "Sugar 06.80 mmol";
-    const mapped = mapToVoiceCandidates({ facts: [{ kind: "GLUCOSE_READING", sourceSpan: span(transcript, transcript), value: "06.80", unit: "MMOL_PER_L", status: null, negated: false, uncertain: false, unresolvedPhrase: null }], unsupportedSpans: [] }, transcript, "en-SG");
-    expect(mapped).toMatchObject({ kind: "MAPPED", candidates: [{ kind: "GLUCOSE_READING", valueText: "6.80" }] });
+  it("the mapper emits the canonical value, never the raw '06.8'", () => {
+    const transcript = "Sugar 06.8 mmol";
+    const mapped = mapToVoiceCandidates({ facts: [{ kind: "GLUCOSE_READING", sourceSpan: span(transcript, transcript), value: "06.8", unit: "MMOL_PER_L", status: null, negated: false, uncertain: false, unresolvedPhrase: null }], unsupportedSpans: [] }, transcript, "en-SG");
+    expect(mapped).toMatchObject({ kind: "MAPPED", candidates: [{ kind: "GLUCOSE_READING", valueText: "6.8" }] });
+  });
+
+  it("CR-11 (R-6): the mapper uses the voice slice's new-entry format: two decimals are never shortened; no ceiling at 99", () => {
+    const map = (transcript: string, value: string) =>
+      mapToVoiceCandidates({ facts: [{ kind: "GLUCOSE_READING", sourceSpan: span(transcript, transcript), value, unit: "MMOL_PER_L", status: null, negated: false, uncertain: false, unresolvedPhrase: null }], unsupportedSpans: [] }, transcript, "en-SG");
+    for (const [transcript, value] of [["Sugar 06.80 mmol", "06.80"], ["Sugar 9.25 mmol", "9.25"], ["Sugar 60.00 mmol", "60.00"]] as const) {
+      expect(map(transcript, value), value).toMatchObject({ kind: "MAPPED", candidates: [{ kind: "UNSUPPORTED_SPAN" }], downgraded: 1 });
+    }
+    for (const [transcript, value] of [["Sugar 60 mmol", "60"], ["Sugar 120 mmol", "120"], ["Sugar 1234.5 mmol", "1234.5"]] as const) {
+      expect(map(transcript, value), value).toMatchObject({ kind: "MAPPED", candidates: [{ kind: "GLUCOSE_READING", valueText: value }] });
+    }
   });
 });
 

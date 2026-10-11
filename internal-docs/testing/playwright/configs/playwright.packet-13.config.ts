@@ -1,4 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import path from "node:path";
+
+const ROOT = path.resolve(__dirname, "../../../..");
 
 /**
  * Packet 13 voice browser evidence (technical evidence, not owner approval; presentation human acceptance pending). Two targets, each
@@ -10,9 +13,10 @@ import { defineConfig, devices } from "@playwright/test";
  * TRTC or DeepSeek call. Production saving is connected; no flag is needed.
  */
 export default defineConfig({
-  testDir: "e2e/packet-13",
+  testDir: path.join(ROOT, "e2e/packet-13"),
+  tsconfig: path.join(ROOT, "tsconfig.json"),
   testMatch: /\.spec\.ts$/,
-  outputDir: "test-results/playwright-packet-13",
+  outputDir: path.join(ROOT, "test-results/playwright-packet-13"),
   timeout: 150_000,
   expect: { timeout: 20_000 },
   fullyParallel: false,
@@ -21,8 +25,8 @@ export default defineConfig({
   reporter: [["list"]],
   use: { trace: "off", screenshot: "off", video: "off" },
   webServer: [
-    { command: "npx next start -p 3321", url: "http://localhost:3321", reuseExistingServer: false, timeout: 120_000 },
-    { command: "npx next start e2e/packet-13/harness -p 3322", url: "http://localhost:3322", reuseExistingServer: false, timeout: 120_000 },
+    { cwd: ROOT, command: "npx next start -p 3321", url: "http://localhost:3321", reuseExistingServer: false, timeout: 120_000 },
+    { cwd: ROOT, command: "npx next start e2e/packet-13/harness -p 3322", url: "http://localhost:3322", reuseExistingServer: false, timeout: 120_000 },
   ],
   projects: [
     { name: "isolation", testMatch: /isolation\.spec\.ts$/ },

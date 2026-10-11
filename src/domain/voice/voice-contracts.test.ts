@@ -3,13 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   VOICE_CONTRACT_VERSION,
   VOICE_EXTRACTOR_VERSION,
-  VOICE_GLUCOSE_MMOL_PER_L_RANGE,
+  VOICE_GLUCOSE_APP_DEFAULT_WINDOW,
   VOICE_REDIRECT_HEALTH_MESSAGE_KEY,
   VOICE_REDIRECT_MESSAGE_KEY,
   VOICE_REDIRECT_TRANSCRIBED_NOTE_KEY,
   VOICE_VOCABULARY_VERSION,
   candidateMatchesTranscript,
-  glucoseValueInRange,
+  glucoseHedgeMarked,
+  glucoseNeedsConfirmation,
+  glucoseValueInAppDefaultWindow,
   voiceAnalysisSchema,
   voiceCandidateSchema,
   voiceRedirectMessageKey,
@@ -26,9 +28,9 @@ const unresolved = Object.freeze({ kind: "MEDICATION_OCCURRENCE", ...origin, sta
 const mapped = Object.freeze({ ...unresolved, medicineRef: { kind: "MAPPED", phrase: "dark pen", medication: MED, via: "TERMINOLOGY" }, state: "UNDERSTOOD", ambiguity: [] });
 const unsupported = Object.freeze({ kind: "UNSUPPORTED_SPAN", ...origin, span: { start: 0, end: 11 }, sourcePhrase: "I was dizzy" });
 
-describe("voice candidate union (voice-contract.13s.3)", () => {
-  it("is version 13s.3", () => {
-    expect([VOICE_CONTRACT_VERSION, VOICE_EXTRACTOR_VERSION, VOICE_VOCABULARY_VERSION]).toEqual(["voice-contract.13s.3", "voice-extractor.13s.3", "voice-vocabulary.13s.3"]);
+describe("voice candidate union (voice-contract.13s.4)", () => {
+  it("is version 13s.4 (CR-11)", () => {
+    expect([VOICE_CONTRACT_VERSION, VOICE_EXTRACTOR_VERSION, VOICE_VOCABULARY_VERSION]).toEqual(["voice-contract.13s.4", "voice-extractor.13s.4", "voice-vocabulary.13s.4"]);
   });
 
   it("accepts each kind", () => {
@@ -48,15 +50,37 @@ describe("voice candidate union (voice-contract.13s.3)", () => {
     expect(voiceCandidateSchema.safeParse({ ...glucose, unitSource: "GUESSED" }).success).toBe(false);
   });
 
-  it("owner #2: the app default unit (mmol/L) only applies inside 0 < value <= 50; a spoken value outside stays as spoken", () => {
-    expect(VOICE_GLUCOSE_MMOL_PER_L_RANGE).toEqual({ exclusiveMinimum: 0, maximum: 50 });
-    expect(["0.1", "6.8", "50", "50.00"].map(glucoseValueInRange)).toEqual([true, true, true, true]);
-    expect(["0", "0.0", "50.01", "50.1", "72", "99", "", "x"].map(glucoseValueInRange)).toEqual([false, false, false, false, false, false, false, false]);
+  it("owner #2 / CR-11: the app default unit (mmol/L) only applies inside 0 < value <= 50; a spoken value outside stays as spoken", () => {
+    expect(VOICE_GLUCOSE_APP_DEFAULT_WINDOW).toEqual({ exclusiveMinimum: 0, maximum: 50 });
+    expect(["0.1", "6.8", "50", "50.0"].map(glucoseValueInAppDefaultWindow)).toEqual([true, true, true, true]);
+    // CR-11: "50.00" is no longer a valid entry (at most one decimal), so it is outside the window too.
+    expect(["0", "0.0", "50.01", "50.00", "50.1", "72", "99", "", "x"].map(glucoseValueInAppDefaultWindow)).toEqual([false, false, false, false, false, false, false, false, false]);
     for (const valueText of ["0", "50.1", "72"]) {
       expect(voiceCandidateSchema.safeParse({ ...glucose, valueText, unitSource: "APP_DEFAULT" }).success, valueText).toBe(false);
       expect(voiceCandidateSchema.safeParse({ ...ambiguousGlucose, valueText }).success, valueText).toBe(true);
     }
     expect(voiceCandidateSchema.safeParse({ ...glucose, valueText: "50", unitSource: "APP_DEFAULT" }).success).toBe(true);
+  });
+
+  it("CR-11 (AC-11, AC-12): valueText is 1–4 integer digits with at most one decimal; no ceiling at 50 or 99; never two decimals", () => {
+    for (const valueText of ["0", "6.8", "60", "99", "100", "999.5", "1234.5", "9999.9"]) expect(voiceCandidateSchema.safeParse({ ...glucose, valueText }).success, valueText).toBe(true);
+    for (const valueText of ["9.25", "60.00", "6.80", "12345", "-5", "1e3", "abc", "060", "", ".5", "6.", " 6.8"]) expect(voiceCandidateSchema.safeParse({ ...glucose, valueText }).success, valueText).toBe(false);
+  });
+
+  it("CR-11 round 5 (revised B): a hedged phrase never carries the app-default unit", () => {
+    for (const sourcePhrase of ["sugar ~6.8", "sugar about 6.8", "血糖6.8左右", "sugar ≈ 6.8"]) {
+      const candidate = { ...glucose, unitSource: "APP_DEFAULT", sourcePhrase, span: { start: 0, end: [...sourcePhrase].length } };
+      expect(voiceCandidateSchema.safeParse(candidate).success, sourcePhrase).toBe(false);
+      expect(voiceCandidateSchema.safeParse({ ...candidate, unitSource: "SPOKEN" }).success, sourcePhrase).toBe(true);
+    }
+    expect(["sugar about 7", "sugar ~7", "血糖大约七", "血糖七左右", "sugar ≈ 7", "sugar ∼7", "sugar ～7", "sugar roughly 7", "sugar approximately 7", "sugar around 7"].map(glucoseHedgeMarked)).toEqual(Array(10).fill(true));
+    // Round 8 (owner decision 2026-10-11): "=" and "＝" are not hedges (before a number they give no value).
+    expect(["sugar 7", "sugar maybe 7", "sugar approx 7", "血糖可能七", "sugar 7 or so", "sugar roundabout 7", "sugar = 7", "血糖=7", "血糖＝7"].map(glucoseHedgeMarked)).toEqual(Array(9).fill(false));
+  });
+
+  it("CR-11: above 50 mmol/L or zero needs explicit confirmation (a trigger, never a limit)", () => {
+    expect(["60", "60.0", "50.1", "100", "1234.5", "0", "0.0"].map(glucoseNeedsConfirmation)).toEqual([true, true, true, true, true, true, true]);
+    expect(["0.1", "6.8", "50", "50.0", "9.25", "-5", "x"].map(glucoseNeedsConfirmation)).toEqual([false, false, false, false, false, false, false]);
   });
 
   it("owner #4: a medicine occurrence carries a reported amount only as spoken words, or null; never a dose instruction", () => {
@@ -94,7 +118,8 @@ describe("voice candidate union (voice-contract.13s.3)", () => {
     expect(voiceCandidateSchema.safeParse({ ...glucose, unit: "UNSTATED" }).success).toBe(false);
     expect(voiceCandidateSchema.safeParse({ ...ambiguousGlucose, ambiguity: ["NEGATION", "UNIT_UNSTATED"] }).success).toBe(false);
     expect(voiceCandidateSchema.safeParse({ ...glucose, span: { start: 0, end: 9 } }).success).toBe(false);
-    expect(voiceCandidateSchema.safeParse({ ...glucose, valueText: "120" }).success).toBe(false);
+    // CR-11: "120" is a valid value now (no hidden ceiling); five integer digits are not.
+    expect(voiceCandidateSchema.safeParse({ ...glucose, valueText: "12345" }).success).toBe(false);
     expect(voiceCandidateSchema.safeParse({ ...glucose, producerVersion: "voice-vocabulary.learned" }).success).toBe(false);
     expect(voiceCandidateSchema.safeParse({ ...glucose, source: "MODEL" }).success).toBe(false);
     expect(voiceCandidateSchema.safeParse({ ...mapped, medicineRef: { ...mapped.medicineRef, medication: { ...MED, recordType: "PRESCRIPTION_VERSION" } } }).success).toBe(false);

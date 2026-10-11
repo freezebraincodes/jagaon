@@ -23,7 +23,7 @@
  *   - `fail`: a closed start failure (PERMISSION_DENIED, UNSUPPORTED_BROWSER, PROVIDER_FAILURE, CREDENTIAL_REFUSED+ACCESS_DENIED).
  *
  * How to build and run (ONLY in a clean copy without `.env*`)
- *   npx next build && npx next build e2e/packet-13/harness && npx playwright test -c playwright.packet-13.config.ts
+ *   npx next build && npx next build e2e/packet-13/harness && npx playwright test -c internal-docs/testing/playwright/configs/playwright.packet-13.config.ts
  * Data is synthetic only: the prepared demo profile and the runtime's synthetic seed.
  * ============================================================================================================================
  */

@@ -4,6 +4,14 @@
  * On-screen number pad (frame 02). Every key is a real button that edits the
  * same value as the text input, so typing, the device keyboard and the pad
  * all stay in sync; nothing here interprets the number.
+ *
+ * CR-11: the screen may pass `accept` (the same validator as typing and paste);
+ * a key that would make the value unacceptable (a second ".", a second digit
+ * after it, a leading zero, too many digits) changes nothing and calls
+ * `onRefused`, so the screen can say so. `appendBase` is the text a new key is
+ * appended to when the field shows a completion-formatted value ("9" shown as
+ * "9.0"), so formatting never disrupts editing; Delete removes the last shown
+ * character.
  */
 type NumericKeypadProps = {
   label: string;
@@ -13,6 +21,11 @@ type NumericKeypadProps = {
   onChange: (value: string) => void;
   /** Maximum characters the field accepts. */
   maxLength?: number;
+  /** CR-11: whether the value after a key press is acceptable (else nothing changes and `onRefused` is called). */
+  accept?: (next: string) => boolean;
+  onRefused?: () => void;
+  /** CR-11: the text new keys are appended to (what was typed before completion formatting); defaults to `value`. */
+  appendBase?: string;
 };
 
 const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
@@ -24,11 +37,16 @@ export function NumericKeypad({
   value,
   onChange,
   maxLength = 5,
+  accept,
+  onRefused,
+  appendBase,
 }: NumericKeypadProps) {
   function press(key: string) {
-    if (key === "." && value.includes(".")) return;
-    if (value.length >= maxLength) return;
-    onChange(key === "." && value === "" ? "0." : value + key);
+    const base = appendBase ?? value;
+    if (key === "." && base.includes(".")) return onRefused?.();
+    const next = key === "." && base === "" ? "0." : base + key;
+    if (next.length > maxLength || (accept && !accept(next))) return onRefused?.();
+    onChange(next);
   }
 
   return (

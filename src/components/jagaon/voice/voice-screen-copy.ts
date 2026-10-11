@@ -26,6 +26,11 @@ export type VoiceScreenCopy = Readonly<{
   redirect: AppMessages["voice"]["redirect"] & Readonly<{ healthBody: string }>;
   /** voice-copy.13s.2 `voice.remoteExtraction.*` (the disclosure wording is the coordinator's; human acceptance pending). */
   remote: Readonly<{ offer: string; title: string; disclosure: string; accept: string; decline: string; checking: string; keptLocal: string }>;
+  /** Web Speech (VOICE_WEB_SPEECH_COPY; owner-approved wording 2026-10-11). */
+  webSpeech: WebSpeechCopy;
+  /** W-6a: the listening-limit notice, for both providers (EN owner-approved 2026-10-11; ZH draft). */
+  /** `notShown`: text was captured but nothing was understood and no transcript is displayed (round 6). */
+  limit: Readonly<{ captured: string; empty: string; notShown: string }>;
   /** Terminology review Critical #1: the minimal "Words JagaOn remembers" section (list, change, forget). Human acceptance pending. */
   terms: Readonly<{
     heading: string;
@@ -86,19 +91,65 @@ export type VoiceScreenCopy = Readonly<{
     /** 13s.3: a TAKEN event whose reported amount the save path stores. */
     amountWillBeSaved: string;
     amountNotSaved: string;
-    /** 13s.3 review rejection OUT_OF_RANGE (a glucose value outside 0 < value ≤ 50 mmol/L): plain wording, manual path. */
-    outOfRange: string;
+    /**
+     * CR-11 (owner decisions 2026-10-11, design v3.1; replaces the 13s.3 OUT_OF_RANGE wording): the confirmation panel inside the card.
+     * `confirmBody` is the owner-approved verification copy, verbatim (all three sentences on the voice card). The control labels are
+     * the approved EN labels and the R-3 ZH labels. `unitText` is the unit shown beside the formatted value ("60.0 mmol/L").
+     */
+    confirmBody: string;
+    saveAsShown: string;
+    editReading: string;
+    cancel: string;
+    unitText: string;
+    /** CR-11: a typed or pasted value with more than one decimal digit (or anything but digits and one point) is refused, never trimmed. Wording owner-approved 2026-10-11. */
+    valueFormatRefused: string;
     noMedicines: string;
   }>;
 }>;
 
-type PendingCopy = Omit<VoiceScreenCopy, "title" | "passcodeLabel" | "close" | "disclosure" | "state" | "review" | "redirect" | "remote" | "terms"> &
+/**
+ * Web Speech (owner-approved scope 2026-10-11). Owner-approved wording, 2026-10-11 (consent version B, early-end notices, health/dose
+ * question note). English only: the Chinese UI never
+ * offers Web Speech (no ZH speech support in this scope), so these rows have no ZH version; the ZH screen keeps the existing rows.
+ * The consent replaces the Tencent disclosure text only for a Web Speech session (its buttons reuse the existing disclosure labels).
+ */
+export type WebSpeechCopy = Readonly<{
+  /** The consent shown before every Web Speech start. */
+  consentTitle: string;
+  consentBody: readonly string[];
+  /** After a browser-initiated end (not the person's Stop), when what was captured is shown below. */
+  earlyEnd: string;
+  /** After a browser-initiated end before anything was captured. */
+  earlyEndEmpty: string;
+  /** After a browser-initiated end when text was captured but nothing was understood and no transcript is displayed (round 6). */
+  earlyEndNotShown: string;
+  /** The redirect screen's note in a Web Speech session (the existing note names Tencent Cloud). */
+  transcribedNote: string;
+}>;
+
+export const VOICE_WEB_SPEECH_COPY: Readonly<{ "en-SG": WebSpeechCopy }> = Object.freeze({
+  // Owner-approved wording, 2026-10-11 (verbatim).
+  "en-SG": Object.freeze({
+    consentTitle: "Use your browser's speech recognition?",
+    consentBody: Object.freeze([
+      "Tell JagaOn will use your browser's built-in speech recognition. While you speak, your browser sends the audio to its speech service to turn it into text (in Chrome, this is Google's speech service), which handles it under its own terms. JagaOn does not receive or keep the recording; it receives only the text, which stays on this device for you to check. Nothing is saved until you review it and choose Save.",
+      "Your browser may stop listening on its own, for example after a pause. JagaOn will not restart it.",
+    ]),
+    earlyEnd: "The browser stopped listening. Check what was captured below. Nothing has been saved.",
+    earlyEndEmpty: "The browser stopped listening before anything was captured. Nothing has been saved. You can try again or type your entry.",
+    earlyEndNotShown: "The browser stopped listening. Nothing has been saved. You can try again or type your entry.",
+    transcribedNote: "Your speech was turned into text by your browser's speech service (Google, in Chrome). JagaOn did not forward this question to another AI service or save it as an entry.",
+  }),
+});
+
+type PendingCopy = Omit<VoiceScreenCopy, "title" | "passcodeLabel" | "close" | "disclosure" | "state" | "review" | "redirect" | "remote" | "terms" | "webSpeech" | "limit"> &
   Readonly<{
     state: Readonly<{ starting: string; accessDenied: string; checking: string; declined: string; doneSaved: string }>;
     review: Readonly<{ notUnderstoodHeading: string; notUnderstoodBody: string; backToToday: string; manualHeading: string }>;
     redirect: Readonly<{ healthBody: string }>;
     remote: VoiceScreenCopy["remote"];
     terms: VoiceScreenCopy["terms"];
+    limit: VoiceScreenCopy["limit"];
   }>;
 
 /** voice-copy.13s.2 (screen-local; human acceptance pending; catalogue migration deferred by coordinator ruling). */
@@ -120,6 +171,13 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       manualHeading: "Type another entry",
     },
     redirect: { healthBody: "JagaOn can record what you report, but cannot assess whether a reading is dangerous or recommend treatment. Please check with your care team." },
+    // W-6a: owner-approved wording, 2026-10-11 (verbatim).
+    limit: {
+      captured: "Listening stopped at the 60-second limit. Check what was captured below. Nothing has been saved.",
+      empty: "Listening stopped at the 60-second limit. Nothing was captured, and nothing has been saved.",
+      // Round 6: owner-approved wording, 2026-10-11 (verbatim).
+      notShown: "Listening stopped at the 60-second limit. Nothing has been saved.",
+    },
     remote: {
       offer: "Ask DeepSeek to help read what you said",
       title: "Send what you said to DeepSeek?",
@@ -163,7 +221,8 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       otherPerson: "This seems to be about someone else, so it cannot be saved in your records.",
       unitSpoken: "mmol/L (you said it)",
       unitAppDefault: "Unit is the app default (mmol/L)",
-      confirmUnit: "The unit is mmol/L",
+      // CR-11 (design v3.1 §2): the explicit unit answer.
+      confirmUnit: "Yes, mmol/L",
       valueLabel: "Reading (mmol/L)",
       enterValueYourself: "Type the reading yourself.",
       slotLabel: "Meal",
@@ -186,7 +245,12 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       amountReported: (amount) => `You said: ${amount}. This is what you said, not a recommendation.`,
       amountWillBeSaved: "This amount will be saved with this entry, as you said it.",
       amountNotSaved: "This amount will not be saved.",
-      outOfRange: "This number cannot be saved as a reading in mmol/L. Nothing was saved. You can type the reading yourself.",
+      confirmBody: "Please check the number and unit against your meter or sensor display. This reading has not been saved. You can type the reading yourself.",
+      saveAsShown: "Save as shown",
+      editReading: "Edit reading",
+      cancel: "Cancel",
+      unitText: "mmol/L",
+      valueFormatRefused: "Use digits only, with at most one digit after the decimal point. Nothing was changed.",
       noMedicines: "There are no medicines in your list to choose from.",
     },
   },
@@ -206,6 +270,13 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       manualHeading: "输入其他内容",
     },
     redirect: { healthBody: "JagaOn 可以记录您报告的内容，但无法评估读数是否危险，也无法建议治疗。请向您的医护团队确认。" },
+    // W-6a: ZH for the TRTC limit notice only (the screen copy requires both locales). Draft, pending owner review.
+    limit: {
+      captured: "已在 60 秒上限时停止聆听。请检查下面记录的内容。尚未保存任何内容。",
+      empty: "已在 60 秒上限时停止聆听。没有记录到任何内容，也没有保存任何内容。",
+      // Round 6: draft, pending owner review (Chinese acceptance deferred).
+      notShown: "已在 60 秒上限时停止聆听。尚未保存任何内容。",
+    },
     remote: {
       offer: "请 DeepSeek 帮忙理解您说的话",
       title: "要把您说的话发送给 DeepSeek 吗？",
@@ -249,7 +320,7 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       otherPerson: "这似乎是关于其他人的，因此不能保存在您的记录中。",
       unitSpoken: "mmol/L（您说的）",
       unitAppDefault: "单位为应用默认值（mmol/L）",
-      confirmUnit: "单位是 mmol/L",
+      confirmUnit: "是，mmol/L",
       valueLabel: "读数（mmol/L）",
       enterValueYourself: "请自己输入读数。",
       slotLabel: "餐次",
@@ -272,7 +343,12 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       amountReported: (amount) => `您说：${amount}。这是您说的内容，不是建议。`,
       amountWillBeSaved: "这个剂量会按您说的随此记录保存。",
       amountNotSaved: "这个剂量不会被保存。",
-      outOfRange: "这个数字不能作为 mmol/L 读数保存。没有保存任何内容。您可以自己输入读数。",
+      confirmBody: "请核对这里的数字和单位是否与您的血糖仪或传感器显示一致。这项读数尚未保存。您可以自己输入读数。",
+      saveAsShown: "按显示内容保存",
+      editReading: "修改读数",
+      cancel: "取消",
+      unitText: "mmol/L",
+      valueFormatRefused: "请只输入数字，小数点后最多一位。内容没有改变。",
       noMedicines: "您的药物清单中没有可选择的药物。",
     },
   },
@@ -290,6 +366,9 @@ export function voiceScreenCopy(messages: AppMessages, locale: SupportedLocale):
     review: { ...messages.voice.review, ...pending.review, manualReading: messages.today.recordReading, manualMeal: messages.meal.screenTitle, manualMedicine: messages.schedule.title },
     redirect: { ...messages.voice.redirect, ...pending.redirect },
     remote: pending.remote,
+    limit: pending.limit,
+    // English only (see VOICE_WEB_SPEECH_COPY): the ZH screen never reaches a Web Speech session.
+    webSpeech: VOICE_WEB_SPEECH_COPY["en-SG"],
     terms: pending.terms,
     card: pending.card,
   });

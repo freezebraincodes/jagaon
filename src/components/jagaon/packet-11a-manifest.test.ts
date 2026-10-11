@@ -421,6 +421,11 @@ const EXISTING_NETWORK_MODULES = [
   "src/voice/trtc/trtc-credential-client.ts",
 ];
 const ENVIRONMENT_READ = /process\.env|import\.meta\.env/;
+const DEV_SETTINGS_FLAG = "src/components/jagaon/dev-settings-flag.ts";
+/** Owner-approved Tencent build-time exclusion (2026-10-11): the one read of the inlined, non-secret build constant. */
+const BUILD_EXCLUSIONS = "src/config/build-exclusions.ts";
+/** The exact environment name each allowed browser-graph module may read (and nothing else). */
+const BROWSER_ENV_READS: Readonly<Record<string, string>> = { [DEV_SETTINGS_FLAG]: "process.env.NEXT_PUBLIC_JAGAON_DEV_SETTINGS", [BUILD_EXCLUSIONS]: "process.env.JAGAON_TRTC_EXCLUDED" };
 const PROVIDER_KEY_NAME = /KIE_API_KEY|DEEPSEEK_API_KEY|ONEMAP_ACCESS_TOKEN|TRTC_SDK_SECRET_KEY/;
 
 describe("Packet 11C Checkpoint 2 guards", () => {
@@ -446,7 +451,10 @@ describe("Packet 11C Checkpoint 2 guards", () => {
     // route reads no environment and names no key. The shell route reads its credential only through readDeepSeekToken (catalogue).
     // Packet 13 slice (P13S, S7; owner decisions 3 and 4): plus the voice UserSig route, whose only server-only configuration module names
     // the TRTC signing secret (read last, after every refusal; never returned).
-    expect(SOURCES.filter((file) => ENVIRONMENT_READ.test(strip(readFileSync(join(ROOT, file), "utf8"))))).toEqual(["src/app/api/ai/shell/route.ts", "src/app/api/ai/transcript/route.ts", "src/app/api/onemap/search/route.ts", "src/app/api/voice/usersig/route.ts"]);
+    // Web Speech (owner-approved scope 2026-10-11, deliberate additions): the passcode-only voice access route, and the ONE browser-side
+    // read of the public, non-secret build-time developer-settings flag (exactly `process.env.NEXT_PUBLIC_JAGAON_DEV_SETTINGS`).
+    expect(SOURCES.filter((file) => ENVIRONMENT_READ.test(strip(readFileSync(join(ROOT, file), "utf8"))))).toEqual(["src/app/api/ai/shell/route.ts", "src/app/api/ai/transcript/route.ts", "src/app/api/onemap/search/route.ts", "src/app/api/voice/access/route.ts", "src/app/api/voice/usersig/route.ts", DEV_SETTINGS_FLAG, BUILD_EXCLUSIONS].sort());
+    for (const [file, read] of Object.entries(BROWSER_ENV_READS)) expect(strip(readFileSync(join(ROOT, file), "utf8")).match(/process\.env\.[A-Z_]+/g), file).toEqual([read]);
     expect(SOURCES.filter((file) => PROVIDER_KEY_NAME.test(readFileSync(join(ROOT, file), "utf8")))).toEqual([
       "src/ai/deepseek/deepseek-catalogue.ts",
       "src/ai/kie/kie-route-config.ts",
@@ -454,7 +462,10 @@ describe("Packet 11C Checkpoint 2 guards", () => {
       "src/app/api/voice/usersig/voice-usersig-config.ts",
     ]);
     for (const file of CLIENT_GRAPH) {
-      expect(readFileSync(join(ROOT, file), "utf8"), file).not.toMatch(/process\.env|import\.meta\.env|KIE_API_KEY|DEEPSEEK_API_KEY|ONEMAP_ACCESS_TOKEN|NEXT_PUBLIC_|\bBearer\b|api\.kie|deepseek\.com|readKieToken|readDeepSeekToken|TRTC_SDK_SECRET_KEY|tls-sig-api-v2/);
+      // The developer-settings flag module may name only its own public flag (checked exactly above).
+      const allowed = BROWSER_ENV_READS[file];
+      const text = allowed ? readFileSync(join(ROOT, file), "utf8").replaceAll(allowed, "").replace(/NEXT_PUBLIC_JAGAON_DEV_SETTINGS/g, "") : readFileSync(join(ROOT, file), "utf8");
+      expect(text, file).not.toMatch(/process\.env|import\.meta\.env|KIE_API_KEY|DEEPSEEK_API_KEY|ONEMAP_ACCESS_TOKEN|NEXT_PUBLIC_|\bBearer\b|api\.kie|deepseek\.com|readKieToken|readDeepSeekToken|TRTC_SDK_SECRET_KEY|tls-sig-api-v2/);
     }
     expect(CLIENT_GRAPH.filter((file) => file.startsWith("src/ai/") || file.startsWith("src/app/api/"))).toEqual([]);
   });
@@ -550,7 +561,10 @@ describe("Packet 11C B2b browser boundary", () => {
     expect(CLIENT_GRAPH.filter((file) => file.startsWith("src/ai/") || file.startsWith("src/app/api/"))).toEqual([]);
     expect(CLIENT_GRAPH).not.toContain("src/application/ai/ai-task-service.ts");
     for (const file of CLIENT_GRAPH) {
-      expect(strip(source(file)), file).not.toMatch(/\/api\/ai\/task|createAiTaskService|readKieToken|readDeepSeekToken|create\w*ResponsesProvider|process\.env|import\.meta\.env/);
+      // Web Speech (deliberate): the developer-settings flag module reads only its own public flag (checked exactly above).
+      const allowed = BROWSER_ENV_READS[file];
+      const code = allowed ? strip(source(file)).replace(allowed, "") : strip(source(file));
+      expect(code, file).not.toMatch(/\/api\/ai\/task|createAiTaskService|readKieToken|readDeepSeekToken|create\w*ResponsesProvider|process\.env|import\.meta\.env/);
       expect(importsOf(file).filter((specifier) => specifier.startsWith("@/ai/") || specifier.startsWith("@/app/") || /ai-task-service$/.test(specifier)), file).toEqual([]);
     }
   });

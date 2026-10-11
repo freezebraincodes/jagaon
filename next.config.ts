@@ -32,7 +32,32 @@ const contentSecurityPolicy = [
   "frame-ancestors 'none'",
 ].join("; ");
 
+/**
+ * Owner-approved Tencent build-time exclusion (2026-10-11). `JAGAON_BUILD_EXCLUDE_TRTC=1` when running `next build` (Turbopack in this
+ * Next 16 setup; the webpack alias below covers `next build --webpack`):
+ * - the TRTC Web SDK root and its RealtimeTranscriber plugin are aliased to local stubs, so no Tencent SDK code is bundled;
+ * - `JAGAON_TRTC_EXCLUDED` is inlined as "1" into every bundle (src/config/build-exclusions.ts), so the server never enables TRTC and
+ *   the client never loads or offers it, whatever the run-time settings say.
+ * Without the switch the build is unchanged (no alias; the constant is "0"). This is not a licence clearance.
+ */
+const excludeTrtc = process.env.JAGAON_BUILD_EXCLUDE_TRTC === "1";
+const TRTC_ALIASES = Object.freeze({
+  "trtc-sdk-v5": "./src/voice/trtc/excluded/trtc-sdk-stub.ts",
+  "trtc-sdk-v5/plugins/realtime-transcriber": "./src/voice/trtc/excluded/realtime-transcriber-stub.ts",
+});
+
 const nextConfig: NextConfig = {
+  env: { JAGAON_TRTC_EXCLUDED: excludeTrtc ? "1" : "0" },
+  ...(excludeTrtc
+    ? {
+        turbopack: { resolveAlias: { ...TRTC_ALIASES } },
+        webpack: (config: { resolve?: { alias?: Record<string, unknown> } }) => {
+          const absolute = Object.fromEntries(Object.entries(TRTC_ALIASES).map(([name, target]) => [`${name}$`, `${process.cwd()}/${target.slice(2)}`]));
+          config.resolve = { ...config.resolve, alias: { ...(config.resolve?.alias ?? {}), ...absolute } };
+          return config;
+        },
+      }
+    : {}),
   async headers() {
     return [
       {

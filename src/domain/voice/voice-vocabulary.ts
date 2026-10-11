@@ -13,14 +13,24 @@
  *   cue and its number (else the clause is not a reading: Cr2).
  * - English matching is case-insensitive and whole-word; Chinese matching is by substring.
  * - TRTC's number and punctuation formatting is unverified until a live run.
+ *
+ * 13s.4 (CR-11, owner decision R-5, 2026-10-11): spoken TENS 21–99 for glucose readings, never partial. English adds the tens words
+ * (`tensWords`: twenty … ninety) with "<tens> <one–nine>" / "<tens>-<one–nine>" compounds; Chinese X十 / X十Y (二–九, 一–九) is parsed by
+ * the extractor. Approximation followers (`approximationFollowers`: "sixty something", "-odd", "-ish"; Chinese 多/几/来 already make it
+ * not a number) make the WHOLE number unsupported. Spoken hundreds stay unsupported (out of scope). `integerWords` is unchanged, so the
+ * medicine, amount and redirect rules that read it are unchanged.
  */
-export const VOICE_VOCABULARY_VERSION = "voice-vocabulary.13s.3";
+export const VOICE_VOCABULARY_VERSION = "voice-vocabulary.13s.4";
 
 export type VoiceVocabulary = Readonly<{
   glucoseCues: readonly string[];
   /** The only units that make a reading's unit stated (mmol/L); never followed by "/mol" (HbA1c). */
   mmolUnits: readonly string[];
   integerWords: readonly string[];
+  /** 13s.4 (R-5): the tens words twenty … ninety, in order (value = (index + 2) × 10); glucose readings only. Empty for Chinese. */
+  tensWords: readonly string[];
+  /** 13s.4 (R-5): a word right after a spoken number that makes it approximate ("sixty something", "sixty-odd"): never a value. */
+  approximationFollowers: readonly string[];
   digitWords: readonly string[];
   decimalMarker: string;
   /** A number followed by one of these is a time, a count or another unit, never a reading. */
@@ -94,6 +104,8 @@ export const VOICE_VOCABULARY_EN: VoiceVocabulary = Object.freeze({
     "mmol/l", "millimoles", "millimole", "mmol",
   ]),
   integerWords: Object.freeze([...EN_INTEGERS]),
+  tensWords: Object.freeze(["twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]),
+  approximationFollowers: Object.freeze(["something", "odd", "ish"]),
   digitWords: Object.freeze([...EN_DIGITS]),
   decimalMarker: "point",
   notReadingFollowers: Object.freeze([
@@ -224,6 +236,10 @@ export const VOICE_VOCABULARY_ZH: VoiceVocabulary = Object.freeze({
   glucoseCues: Object.freeze(["血糖"]),
   mmolUnits: Object.freeze(["毫摩尔每升", "毫摩尔", "mmol/l", "mmol"]),
   integerWords: Object.freeze(["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]),
+  tensWords: Object.freeze([]),
+  // 13s.4: Chinese approximations (六十多, 六十几, 六十来) need no list: a number followed by any other Chinese character is not a number
+  // at all (the extractor's existing follower rule), so the whole phrase stays not captured.
+  approximationFollowers: Object.freeze([]),
   digitWords: Object.freeze(["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"]),
   decimalMarker: "点",
   notReadingFollowers: Object.freeze(["毫克", "mg/dl", "mg", "kg", "%", "mmol/mol"]),

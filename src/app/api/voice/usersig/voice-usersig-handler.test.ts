@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { voiceUserSigResponseSchema } from "@/voice/trtc/trtc-usersig-contract";
-import { VOICE_USERSIG_ENV, parseVoiceUserSigConfig } from "./voice-usersig-config";
+import { VOICE_PROVIDERS_ENV, VOICE_USERSIG_ENV, parseVoiceUserSigConfig } from "./voice-usersig-config";
 import { createVoiceUserSigHandler, type VoiceUserSigHandlerOptions, type VoiceUserSigSigner } from "./voice-usersig-handler";
 import { InMemoryDailyMinuteLedger, type VoiceMinuteLedger } from "./voice-minute-ledger";
 import { TEST_VOICE_ENVIRONMENT, TEST_VOICE_PASSCODE, TEST_VOICE_SECRET, testVoiceHeaders } from "./voice-usersig-test-support";
@@ -234,8 +234,9 @@ describe("POST /api/voice/usersig handler", () => {
       return { status: response.status, body: JSON.parse(await response.text()) as unknown };
     };
     const on = harness();
-    expect(await answer(on, probe())).toEqual({ status: 200, body: { available: true } });
-    expect(await answer(on, probe({}))).toEqual({ status: 200, body: { available: true } });
+    // Web Speech (deliberate change, 2026-10-11): an available answer also lists the enabled providers (unset → TRTC only).
+    expect(await answer(on, probe())).toEqual({ status: 200, body: { available: true, providers: ["TRTC"] } });
+    expect(await answer(on, probe({}))).toEqual({ status: 200, body: { available: true, providers: ["TRTC"] } });
     expect(on.events.filter((event) => event === `env:${VOICE_USERSIG_ENV.secretKey}` || event.startsWith("reserve") || event === "sign")).toEqual([]);
     expect(on.events).not.toContain(`env:${VOICE_USERSIG_ENV.demoPasscode}x`);
     expect(on.signer).not.toHaveBeenCalled();
@@ -250,5 +251,53 @@ describe("POST /api/voice/usersig handler", () => {
     expect(await answer(rated, probe())).toEqual({ status: 429, body: { available: false } });
     // The probe does not use the credential window: a POST is still issued.
     expect((await rated.handle(post())).status).toBe(200);
+  });
+
+  // Web Speech (owner-approved scope 2026-10-11).
+  it("Web Speech: the probe lists only the enabled providers in order (no credential); the TRTC POST refuses VOICE_DISABLED without TRTC values", async () => {
+    const probe = new Request(URL_, { method: "GET", headers: { "Sec-Fetch-Site": "same-origin" } });
+    const json = async (response: Response) => JSON.parse(await response.text()) as unknown;
+    expect(await json(await harness({ env: { [VOICE_PROVIDERS_ENV]: "webspeech,trtc" } }).handle(probe.clone()))).toEqual({ available: true, providers: ["WEB_SPEECH", "TRTC"] });
+    expect(await json(await harness({ env: { [VOICE_PROVIDERS_ENV]: "trtc,webspeech" } }).handle(probe.clone()))).toEqual({ available: true, providers: ["TRTC", "WEB_SPEECH"] });
+    expect(await json(await harness({ env: { [VOICE_PROVIDERS_ENV]: "bogus" } }).handle(probe.clone()))).toEqual({ available: false });
+    expect(await json(await harness({ env: { [VOICE_PROVIDERS_ENV]: "webspeech", [VOICE_USERSIG_ENV.voiceCloud]: "off" } }).handle(probe.clone()))).toEqual({ available: false });
+
+    // Web Speech alone: no TTL, minutes, app id or secret configured, the probe is available, the credential POST refuses.
+    const webOnly = { [VOICE_PROVIDERS_ENV]: "webspeech", [VOICE_USERSIG_ENV.userSigTtlSeconds]: undefined, [VOICE_USERSIG_ENV.dailyMinutesLimit]: undefined, [VOICE_USERSIG_ENV.sdkAppId]: undefined, [VOICE_USERSIG_ENV.secretKey]: undefined };
+    const web = harness({ env: webOnly });
+    const probeBody = await json(await web.handle(probe.clone()));
+    expect(probeBody).toEqual({ available: true, providers: ["WEB_SPEECH"] });
+    expect(JSON.stringify(probeBody)).not.toMatch(/sdkAppId|userSig|passcode|secret|1400000001/i);
+    const refusedPost = await web.handle(post());
+    expect(refusedPost.status).toBe(403);
+    expect(await body(refusedPost)).toEqual({ kind: "REFUSED", reason: "VOICE_DISABLED" });
+    expect(web.events.filter((event) => event.startsWith("reserve") || event === "sign" || event === `env:${VOICE_USERSIG_ENV.secretKey}`)).toEqual([]);
+    expect(web.signer).not.toHaveBeenCalled();
+    // Even with every TRTC value present, Web Speech alone issues no Tencent credential.
+    const webWithTrtcValues = harness({ env: { [VOICE_PROVIDERS_ENV]: "webspeech" } });
+    expect(await body(await webWithTrtcValues.handle(post()))).toEqual({ kind: "REFUSED", reason: "VOICE_DISABLED" });
+    expect(webWithTrtcValues.signer).not.toHaveBeenCalled();
+    // Both enabled: the credential is issued exactly as before.
+    const both = harness({ env: { [VOICE_PROVIDERS_ENV]: "webspeech,trtc" } });
+    expect(await body(await both.handle(post()))).toMatchObject({ kind: "ISSUED" });
+  });
+
+  // Owner-approved Tencent build-time exclusion (2026-10-11).
+  it("an excluded build: the probe never lists TRTC and the credential POST refuses VOICE_DISABLED, even when run-time settings enable TRTC", async () => {
+    const probe = () => new Request(URL_, { method: "GET", headers: { "Sec-Fetch-Site": "same-origin" } });
+    const json = async (response: Response) => JSON.parse(await response.text()) as unknown;
+    const excluded = harness({ env: { [VOICE_PROVIDERS_ENV]: "trtc,webspeech" }, build: { trtcExcludedAtBuild: true } });
+    expect(await json(await excluded.handle(probe()))).toEqual({ available: true, providers: ["WEB_SPEECH"] });
+    const refusedPost = await excluded.handle(post());
+    expect(refusedPost.status).toBe(403);
+    expect(await body(refusedPost)).toEqual({ kind: "REFUSED", reason: "VOICE_DISABLED" });
+    expect(excluded.events.filter((event) => event.startsWith("reserve") || event === "sign" || event === `env:${VOICE_USERSIG_ENV.secretKey}`)).toEqual([]);
+    expect(excluded.signer).not.toHaveBeenCalled();
+    // Only TRTC enabled at run time: nothing is available in an excluded build.
+    const trtcOnly = harness({ env: { [VOICE_PROVIDERS_ENV]: "trtc" }, build: { trtcExcludedAtBuild: true } });
+    expect(await json(await trtcOnly.handle(probe()))).toEqual({ available: false });
+    expect(await body(await trtcOnly.handle(post()))).toEqual({ kind: "REFUSED", reason: "VOICE_DISABLED" });
+    // A normal build is unchanged.
+    expect(await body(await harness({ env: { [VOICE_PROVIDERS_ENV]: "trtc,webspeech" } }).handle(post()))).toMatchObject({ kind: "ISSUED" });
   });
 });

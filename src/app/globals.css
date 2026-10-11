@@ -3905,6 +3905,11 @@ button.summary-tile:hover:not(:disabled) {
   background: var(--ink);
 }
 
+/* CR-11 (AC-20z): a recorded 0.0 is drawn as a thin solid line, never as an empty (not-recorded) outline. */
+.history-bar--zero {
+  min-height: 3px;
+}
+
 .history-bar--missing {
   height: 16%;
   border: 2px dashed var(--dash);
@@ -5809,6 +5814,37 @@ button.summary-tile:hover:not(:disabled) {
 }
 
 .voice-fact-actions > .btn {
+  flex: 1 1 auto;
+}
+
+/* CR-11: the number-and-unit confirmation panel inside a voice card and on manual glucose entry (neutral; no warning colour). */
+.voice-confirm,
+.glucose-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.875rem 1rem;
+  border: 2px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card-2);
+}
+
+.voice-confirm-value,
+.glucose-confirm-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.voice-confirm-actions,
+.glucose-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.voice-confirm-actions > .btn,
+.glucose-confirm-actions > .btn {
   flex: 1 1 auto;
 }
 

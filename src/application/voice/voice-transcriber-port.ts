@@ -21,6 +21,9 @@ import type { VoiceDisclosureGrant } from "./voice-cloud-disclosure";
  *   `robotId` (not opaque: the TRTC default embeds the session's room and user ids) and `taskId` or null; START_UNRESOLVED means a
  *   provider start request was sent but its outcome is unknown (`robotId: null`). NOT_STARTED means only that no provider start
  *   request was sent, or that it definitively failed (rejected before any request reached the provider).
+ * - Web Speech (draft, pending owner approval): NOT_APPLICABLE means the provider has no remote task to stop (the browser's own speech
+ *   recognition); it is never CONFIRMED or UNCONFIRMED. `onProviderEnded` (optional) reports that the PROVIDER ended a STARTED session
+ *   on its own (not our stop or cancel, and not a failure); the caller ends the session keeping its finals and never restarts it.
  */
 export const VOICE_START_FAILURE_REASONS = [
   "PERMISSION_DENIED",
@@ -49,7 +52,8 @@ export type VoiceProviderStop =
   | Readonly<{ kind: "CONFIRMED" }>
   | Readonly<{ kind: "UNCONFIRMED"; reason: Exclude<VoiceProviderStopUnconfirmedReason, "START_UNRESOLVED">; robotId: string; taskId: string | null }>
   | Readonly<{ kind: "UNCONFIRMED"; reason: "START_UNRESOLVED"; robotId: null; taskId: string | null }>
-  | Readonly<{ kind: "NOT_STARTED" }>;
+  | Readonly<{ kind: "NOT_STARTED" }>
+  | Readonly<{ kind: "NOT_APPLICABLE" }>;
 
 export type VoiceReleaseReport = Readonly<{ microphoneReleased: boolean; providerStop: VoiceProviderStop }>;
 
@@ -63,6 +67,8 @@ export type VoiceStartRequest = Readonly<{
   grant: VoiceDisclosureGrant;
   onSegment: (segment: VoiceSegment) => void;
   onFailure: (reason: VoiceSessionFailureReason) => void;
+  /** Optional: the provider ended a STARTED session by itself (e.g. the browser stopped listening). Never sent after our stop/cancel. */
+  onProviderEnded?: () => void;
   signal: AbortSignal;
 }>;
 

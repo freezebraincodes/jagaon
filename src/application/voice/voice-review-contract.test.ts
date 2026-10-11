@@ -100,17 +100,66 @@ describe("voice review → save intents (multi-fact, review C3)", () => {
     });
   });
 
-  it("review I2 (13s.3): a glucose value outside 0 < value <= 50 mmol/L is refused, from the transcript or from an edit", () => {
-    const outOfRange = { kind: "NO_INTENT", reason: "NO_CONFIRMATION", rejected: [{ candidateIndex: 0, reason: "OUT_OF_RANGE" }] };
-    for (const text of ["sugar 99 mmol", "sugar 0 mmol"]) expect(review(text, [save(0)]), text).toEqual(outOfRange);
-    for (const text of ["sugar 72", "sugar 50.1"]) expect(review(text, [save(0, { answers: { unit: "MMOL_PER_L" } })]), text).toEqual(outOfRange);
-    expect(review("血糖72", [save(0, { answers: { unit: "MMOL_PER_L" } })], "zh")).toEqual(outOfRange);
-    for (const valueText of ["72", "0", "50.1"]) {
-      expect(review("Sugar 6.8 mmol", [save(0, { edit: { kind: "GLUCOSE_READING", valueText, unit: "MMOL_PER_L" } })]), valueText).toEqual(outOfRange);
+  // CR-11 (owner decisions 2026-10-11; replaces the 13s.3 review I2 OUT_OF_RANGE refusal, whose old expectations this updates).
+  it("CR-11 (AC-1, AC-2, AC-7, AC-11): above 50 mmol/L or zero saves only with the explicit confirmation, formatted to one decimal", () => {
+    const required = { kind: "NO_INTENT", reason: "NO_CONFIRMATION", rejected: [{ candidateIndex: 0, reason: "CONFIRMATION_REQUIRED" }] };
+    const saved = (valueText: string, unitSource: "SPOKEN" | "PERSON") => ({ kind: "INTENTS", intents: [{ candidateIndex: 0, intent: { kind: "GLUCOSE", valueText, unit: "MMOL_PER_L", unitSource } }], rejected: [] });
+    for (const [text, language, valueText] of [
+      ["My sugar was 60 mmol", "en", "60.0"],
+      ["My sugar was sixty mmol", "en", "60.0"],
+      ["sugar 99 mmol", "en", "99.0"],
+      ["sugar 0 mmol", "en", "0.0"],
+      ["sugar zero mmol", "en", "0.0"],
+      ["sugar 100 mmol", "en", "100.0"],
+      ["sugar 999.5 mmol", "en", "999.5"],
+      ["sugar 1234.5 mmol", "en", "1234.5"],
+      ["血糖60毫摩尔", "zh", "60.0"],
+      ["血糖六十毫摩尔", "zh", "60.0"],
+      ["血糖零毫摩尔", "zh", "0.0"],
+    ] as const) {
+      expect(review(text, [save(0)], language), text).toEqual(required);
+      expect(review(text, [save(0, { confirmed: true })], language), text).toEqual(saved(valueText, "SPOKEN"));
     }
-    const saved = (valueText: string) => ({ kind: "INTENTS", intents: [{ candidateIndex: 0, intent: { kind: "GLUCOSE", valueText, unit: "MMOL_PER_L", unitSource: "PERSON" } }], rejected: [] });
-    expect(review("sugar 50", [save(0, { answers: { unit: "MMOL_PER_L" } })])).toEqual(saved("50"));
-    expect(review("sugar 0.1", [save(0, { answers: { unit: "MMOL_PER_L" } })])).toEqual(saved("0.1"));
+    // An unstated unit outside the app-default window needs BOTH the explicit unit answer and the confirmation (never guessed).
+    for (const [text, language] of [["sugar 72", "en"], ["My sugar was sixty", "en"], ["血糖72", "zh"], ["血糖六十", "zh"]] as const) {
+      expect(review(text, [save(0, { confirmed: true })], language, {}, { ...OPTIONS, glucoseEntryUnit: "MMOL_PER_L" }), text).toMatchObject({ rejected: [{ reason: "UNIT_NOT_ANSWERED" }] });
+      expect(review(text, [save(0, { answers: { unit: "MMOL_PER_L" } })], language, {}, { ...OPTIONS, glucoseEntryUnit: "MMOL_PER_L" }), text).toEqual(required);
+      expect(review(text, [save(0, { answers: { unit: "MMOL_PER_L" }, confirmed: true })], language, {}, { ...OPTIONS, glucoseEntryUnit: "MMOL_PER_L" }), text).toMatchObject({ kind: "INTENTS", intents: [{ intent: { unitSource: "PERSON" } }] });
+    }
+    // An edit above 50 (or zero) needs the confirmation too; a confirmed edit to 45 (the card's latch) saves formatted.
+    for (const [valueText, stored] of [["72", "72.0"], ["0", "0.0"], ["50.1", "50.1"]] as const) {
+      const edit = { kind: "GLUCOSE_READING" as const, valueText, unit: "MMOL_PER_L" as const };
+      expect(review("Sugar 6.8 mmol", [save(0, { edit })]), valueText).toEqual(required);
+      expect(review("Sugar 6.8 mmol", [save(0, { edit, confirmed: true })]), valueText).toEqual(saved(stored, "PERSON"));
+    }
+    expect(review("My sugar was 60 mmol", [save(0, { edit: { kind: "GLUCOSE_READING", valueText: "45", unit: "MMOL_PER_L" }, confirmed: true })])).toEqual(saved("45.0", "PERSON"));
+    // At or below 50 nothing changes: one Save, formatted ("50" → "50.0").
+    expect(review("sugar 50", [save(0, { answers: { unit: "MMOL_PER_L" } })])).toEqual(saved("50.0", "PERSON"));
+    expect(review("sugar 0.1", [save(0, { answers: { unit: "MMOL_PER_L" } })])).toEqual(saved("0.1", "PERSON"));
+  });
+
+  it("CR-11 round 5 (revised B): a hedged proposal (about, ~, 大约, 左右 ...) needs Save as shown whatever its value; the unit is never defaulted", () => {
+    const required = { kind: "NO_INTENT", reason: "NO_CONFIRMATION", rejected: [{ candidateIndex: 0, reason: "CONFIRMATION_REQUIRED" }] };
+    const withDefault = { ...OPTIONS, glucoseEntryUnit: "MMOL_PER_L" as const };
+    for (const [text, language, valueText] of [["My sugar was about 7.8 mmol", "en", "7.8"], ["sugar ~7 mmol", "en", "7.0"], ["sugar ≈9.2 mmol", "en", "9.2"], ["sugar ～60 mmol", "en", "60.0"], ["血糖大约七点八毫摩尔", "zh", "7.8"], ["血糖七点八毫摩尔左右", "zh", "7.8"], ["血糖～7毫摩尔", "zh", "7.0"]] as const) {
+      expect(review(text, [save(0)], language, {}, withDefault), text).toEqual(required);
+      expect(review(text, [save(0, { confirmed: true })], language, {}, withDefault), text).toEqual({ kind: "INTENTS", intents: [{ candidateIndex: 0, intent: { kind: "GLUCOSE", valueText, unit: "MMOL_PER_L", unitSource: "SPOKEN" } }], rejected: [] });
+    }
+    for (const [text, language] of [["sugar about 7", "en"], ["sugar ~7", "en"], ["血糖大约七", "zh"], ["血糖七左右", "zh"]] as const) {
+      expect(review(text, [save(0, { confirmed: true })], language, {}, withDefault), text).toMatchObject({ rejected: [{ reason: "UNIT_NOT_ANSWERED" }] });
+      expect(review(text, [save(0, { answers: { unit: "MMOL_PER_L" } })], language, {}, withDefault), text).toEqual(required);
+      expect(review(text, [save(0, { answers: { unit: "MMOL_PER_L" }, confirmed: true })], language, {}, withDefault), text).toMatchObject({ kind: "INTENTS", intents: [{ intent: { valueText: "7.0", unitSource: "PERSON" } }] });
+    }
+    // Unchanged: an unhedged reading inside the window is one Save with the app default.
+    expect(review("blood sugar 9.2", [save(0)], "en", {}, withDefault)).toMatchObject({ kind: "INTENTS", intents: [{ intent: { valueText: "9.2", unitSource: "APP_DEFAULT" } }] });
+  });
+
+  it("CR-11 (AC-10, AC-12): an edit with more than one decimal, a sign, an exponent or a leading zero is refused as malformed (never rounded)", () => {
+    for (const valueText of ["9.25", "60.00", "6.80", "-5", "1e3", "abc", "060", "12345"]) {
+      expect(review("Sugar 6.8 mmol", [save(0, { edit: { kind: "GLUCOSE_READING", valueText, unit: "MMOL_PER_L" }, confirmed: true })]), valueText).toEqual({ kind: "NO_INTENT", reason: "INVALID_DECISIONS" });
+    }
+    for (const valueText of ["60", "6.8", "9.2"]) expect(voiceSaveIntentSchema.safeParse({ kind: "GLUCOSE", valueText, unit: "MMOL_PER_L", unitSource: "PERSON" }).success, valueText).toBe(valueText === "6.8" || valueText === "9.2");
+    expect(voiceSaveIntentSchema.safeParse({ kind: "GLUCOSE", valueText: "9.25", unit: "MMOL_PER_L", unitSource: "PERSON" }).success).toBe(false);
   });
 
   it("round 4 (C1): a reading next to anything not understood, or another person named anywhere, is never one tap", () => {
@@ -134,7 +183,7 @@ describe("voice review → save intents (multi-fact, review C3)", () => {
   });
 
   it("a redirect notice does not block separated facts; a full redirect, over-long, cancelled or stale review yields nothing", () => {
-    expect(review("sugar 15 mmol, how many units now", [save(0)])).toMatchObject({ kind: "INTENTS", intents: [{ intent: { kind: "GLUCOSE", valueText: "15" } }] });
+    expect(review("sugar 15 mmol, how many units now", [save(0)])).toMatchObject({ kind: "INTENTS", intents: [{ intent: { kind: "GLUCOSE", valueText: "15.0" } }] });
     expect(review("How many tablets should I take?", [])).toEqual({ kind: "NO_INTENT", reason: "REDIRECTED" });
     expect(review(`sugar 6.8 mmol ${"a".repeat(1300)}`, [save(0)])).toEqual({ kind: "NO_INTENT", reason: "TRANSCRIPT_TOO_LONG" });
     for (const state of ["CANCELLED", "TIMED_OUT", "FAILED", "LISTENING", "STOPPING"] as const) expect(review("Sugar 6.8 mmol", [save(0)], "en", { currentSession: { sessionToken: 3, state } }), state).toEqual({ kind: "NO_INTENT", reason: "SESSION_NOT_COMPLETED" });

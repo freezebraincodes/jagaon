@@ -10,7 +10,7 @@ import {
   type VoiceUserSigRefusalReason,
   type VoiceUserSigResponse,
 } from "@/voice/trtc/trtc-usersig-contract";
-import { parseVoiceUserSigConfig, readTrtcSecretKey, voiceAccessGranted, voiceOriginAllowed, voiceProbeSiteAllowed, type VoiceUserSigConfig } from "./voice-usersig-config";
+import { parseVoiceUserSigConfig, readTrtcSecretKey, type VoiceConfigBuildOptions, voiceAccessGranted, voiceOriginAllowed, voiceProbeSiteAllowed, type VoiceUserSigConfig } from "./voice-usersig-config";
 import { InMemoryDailyMinuteLedger, voiceSessionMinutes, type VoiceMinuteLedger, type VoiceMinuteReservation } from "./voice-minute-ledger";
 
 /**
@@ -33,6 +33,12 @@ import { InMemoryDailyMinuteLedger, voiceSessionMinutes, type VoiceMinuteLedger,
  * answers `{ available }` only: true exactly when the switch is on and the configuration is fully valid (the same parse as step 2). It
  * reads no passcode and no secret, reserves nothing and signs nothing; a request the browser marks cross-site gets false
  * (voiceProbeSiteAllowed); it has its own per-instance window with the same limit as step 5 (429, false). Any other method is 405.
+ *
+ * Web Speech (owner-approved scope 2026-10-11; draft, pending owner review): when voice is available the probe also lists the enabled
+ * providers, `{ available: true, providers: ["TRTC" | "WEB_SPEECH", ...] }` in the deployment's order (no credential, no other value);
+ * when it is not, the answer stays `{ available: false }`. Step 2 refuses VOICE_DISABLED when `trtc` is not an enabled provider, so a
+ * Web Speech-only deployment issues no Tencent credential and needs no TRTC value. The Web Speech passcode check is its own route
+ * (`/api/voice/access`), which reuses the throttle and bucket helpers exported below.
  */
 export const VOICE_USERSIG_RATE_LIMIT = Object.freeze({ maxRequests: 10, windowMs: 60_000 });
 
@@ -57,10 +63,12 @@ export type VoiceUserSigHandlerOptions = Readonly<{
   rateLimit?: Readonly<{ maxRequests: number; windowMs: number }>;
   passcodeThrottle?: Readonly<{ maxFailures: number; windowMs: number; maxBuckets: number }>;
   ledger?: VoiceMinuteLedger;
+  /** Tencent build-time exclusion: default the inlined build constant (tests inject it). */
+  build?: VoiceConfigBuildOptions;
 }>;
 
 /** The throttle bucket: the validated Vercel platform client address when trusted, else the shared bucket. */
-function clientBucket(config: Extract<VoiceUserSigConfig, { voiceEnabled: true }>, headers: Headers): string {
+export function clientBucket(config: Extract<VoiceUserSigConfig, { voiceEnabled: true }>, headers: Headers): string {
   if (!config.trustVercelClientIp) return SHARED_BUCKET;
   const address = headers.get("x-real-ip");
   return address !== null && address.length <= 45 && isIP(address) !== 0 ? `ip:${address}` : SHARED_BUCKET;
@@ -72,8 +80,26 @@ function reply(body: VoiceUserSigResponse | VoiceAvailabilityResponse, status: n
 const invalid = (status: number) => reply({ kind: "FAILED", reason: "PAYLOAD_INVALID" }, status);
 const refused = (reason: VoiceUserSigRefusalReason, status = 403) => reply({ kind: "REFUSED", reason }, status);
 
+/**
+ * Owner decision #1's failed-passcode throttle (semantics above), one instance per handler: `blocked` before the passcode is compared,
+ * `recordFailure` after a wrong one. Shared by the credential route and the Web Speech access route (each its own instance).
+ */
+export function createPasscodeThrottle(throttle: Readonly<{ maxFailures: number; windowMs: number; maxBuckets: number }>) {
+  const failures = new Map<string, number[]>();
+  const recentFailures = (bucket: string, at: number): number[] => (failures.get(bucket) ?? []).filter((time) => time > at - throttle.windowMs);
+  return Object.freeze({
+    blocked: (bucket: string, at: number): boolean => recentFailures(bucket, at).length >= throttle.maxFailures,
+    recordFailure(bucket: string, at: number): void {
+      const recent = [...recentFailures(bucket, at), at].slice(-throttle.maxFailures);
+      failures.delete(bucket);
+      failures.set(bucket, recent);
+      while (failures.size > throttle.maxBuckets) failures.delete(failures.keys().next().value as string);
+    },
+  });
+}
+
 /** Reads at most `limit` bytes of UTF-8; null when the body is longer or not valid UTF-8. */
-async function readLimited(body: ReadableStream<Uint8Array> | null, limit: number): Promise<string | null> {
+export async function readLimited(body: ReadableStream<Uint8Array> | null, limit: number): Promise<string | null> {
   if (body === null) return "";
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
@@ -107,17 +133,9 @@ export function createVoiceUserSigHandler(options: VoiceUserSigHandlerOptions): 
   const now = options.now ?? (() => new Date());
   const random = options.random ?? ((byteLength: number) => new Uint8Array(randomBytes(byteLength)));
   const limit = options.rateLimit ?? VOICE_USERSIG_RATE_LIMIT;
-  const throttle = options.passcodeThrottle ?? VOICE_PASSCODE_THROTTLE;
+  const throttle = createPasscodeThrottle(options.passcodeThrottle ?? VOICE_PASSCODE_THROTTLE);
   const admitted: number[] = [];
   const probed: number[] = [];
-  const failures = new Map<string, number[]>();
-  const recentFailures = (bucket: string, at: number): number[] => (failures.get(bucket) ?? []).filter((time) => time > at - throttle.windowMs);
-  const recordFailure = (bucket: string, at: number): void => {
-    const recent = [...recentFailures(bucket, at), at].slice(-throttle.maxFailures);
-    failures.delete(bucket);
-    failures.set(bucket, recent);
-    while (failures.size > throttle.maxBuckets) failures.delete(failures.keys().next().value as string);
-  };
   // Parsed once, when the first request passes the request checks (the deployment environment does not change while an instance runs).
   let config: VoiceUserSigConfig | null = null;
   let instanceLedger: VoiceMinuteLedger | null = null;
@@ -139,7 +157,8 @@ export function createVoiceUserSigHandler(options: VoiceUserSigHandlerOptions): 
       if (probed.length >= limit.maxRequests) return reply({ available: false }, 429);
       probed.push(at);
       if (!voiceProbeSiteAllowed(request.headers)) return reply({ available: false }, 200);
-      return reply({ available: (config ??= parseVoiceUserSigConfig(options.environment)).voiceEnabled }, 200);
+      const parsed = (config ??= parseVoiceUserSigConfig(options.environment, options.build));
+      return reply(parsed.voiceEnabled ? { available: true, providers: [...parsed.providers] } : { available: false }, 200);
     }
     // 1. Request checks.
     if (request.method !== "POST") return invalid(405);
@@ -162,14 +181,14 @@ export function createVoiceUserSigHandler(options: VoiceUserSigHandlerOptions): 
     if (!voiceUserSigRequestSchema.safeParse(value).success) return invalid(400);
 
     // 2-4. Switch and configuration, origin, passcode.
-    const deployment = (config ??= parseVoiceUserSigConfig(options.environment));
-    if (!deployment.voiceEnabled) return refused("VOICE_DISABLED");
+    const deployment = (config ??= parseVoiceUserSigConfig(options.environment, options.build));
+    if (!deployment.voiceEnabled || !deployment.trtcEnabled) return refused("VOICE_DISABLED");
     if (!voiceOriginAllowed(deployment, request.headers)) return refused("ORIGIN_REJECTED");
     const at = now().getTime();
     const bucket = clientBucket(deployment, request.headers);
-    if (recentFailures(bucket, at).length >= throttle.maxFailures) return refused("RATE_LIMITED", 429);
+    if (throttle.blocked(bucket, at)) return refused("RATE_LIMITED", 429);
     if (!voiceAccessGranted(deployment, request.headers)) {
-      recordFailure(bucket, at);
+      throttle.recordFailure(bucket, at);
       return refused("ACCESS_DENIED");
     }
 

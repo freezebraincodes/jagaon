@@ -20,6 +20,8 @@ const UNIT = "mmol/L";
  * zero bar. There is no target band, threshold line, risk zone, forecast or
  * annotation. The visual chart is hidden from assistive technology and the
  * table below carries every position, value and missing position.
+ * CR-11 (AC-20z): a recorded 0.0 keeps a thin solid bar (drawn, never mistaken
+ * for a not-recorded outline) and its stored text in the table.
  */
 export function HistoryReadingsChart({ messages, locale, period, chart, headingId }: Props) {
   const msg = messages.history;
@@ -62,7 +64,8 @@ export function HistoryReadingsChart({ messages, locale, period, chart, headingI
                   position.state === "RECORDED" ? (
                     <span
                       key={position.position}
-                      className="history-bar history-bar--recorded"
+                      className={`history-bar history-bar--recorded${Number(position.valueMmolL) === 0 ? " history-bar--zero" : ""}`}
+                      data-value={position.valueMmolL}
                       style={{ height: `${(Number(position.valueMmolL) / axisMax) * 100}%` }}
                     />
                   ) : (

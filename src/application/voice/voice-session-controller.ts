@@ -29,6 +29,14 @@ import {
  * - `providerStop` carries the adapter's provider-stop outcome (validated; null before a release, or when no readable outcome was
  *   reported). A FAILED start carries its own release's outcome when the adapter reports it, else null (unknown, never NOT_STARTED by
  *   assumption). It changes no state, text or timer.
+ * - Web Speech (draft, pending owner approval): `onProviderEnded` from the adapter while LISTENING ends the session like a Stop (the
+ *   finals are kept, the release is awaited) and the COMPLETED snapshot says `endedBy: "PROVIDER"`, so the screen can say the browser
+ *   stopped listening. Nothing restarts. `endedBy` is null for every other ending. NOT_APPLICABLE is a readable provider stop.
+ * - W-6a (owner decision 2026-10-11): reaching the session limit (the smaller of `maxSessionSeconds` and the server's maximum) stops
+ *   capture exactly like the person's Stop: the adapter's bounded final flush runs, finals arriving until the release resolves count,
+ *   the unfinished interim text is dropped, and the session ends COMPLETED with `endedBy: "LIMIT"` so the transcript goes to the normal
+ *   review. Nothing is saved automatically. The limit path no longer produces TIMED_OUT (the state stays in the type for callers); the
+ *   start timeout, Cancel and failure paths are unchanged.
  */
 export type VoiceSessionState = "IDLE" | "STARTING" | "LISTENING" | "STOPPING" | "COMPLETED" | "CANCELLED" | "TIMED_OUT" | "FAILED";
 type TerminalState = "COMPLETED" | "CANCELLED" | "TIMED_OUT" | "FAILED";
@@ -45,6 +53,10 @@ export type VoiceSessionSnapshot = Readonly<{
   microphoneReleased: boolean | null;
   /** The adapter's provider-stop outcome for the last session (null while none ended, or when the report was unreadable). */
   providerStop: VoiceProviderStop | null;
+  /** "PROVIDER" when the last session was COMPLETED because the provider ended it by itself; null otherwise. */
+  endedBy: "PROVIDER" | "LIMIT" | null;
+  /** The effective session limit in seconds (the smaller of the client and server limits) once LISTENING; null before. */
+  limitSeconds: number | null;
 }>;
 
 export type VoiceTimers = Readonly<{
@@ -88,7 +100,7 @@ type ReleaseOutcome = Readonly<{ microphoneReleased: boolean; providerStop: Voic
 function providerStopOf(value: unknown): VoiceProviderStop | null {
   if (typeof value !== "object" || value === null) return null;
   const { kind, reason, robotId, taskId } = value as Record<string, unknown>;
-  if (kind === "CONFIRMED" || kind === "NOT_STARTED") return Object.freeze({ kind });
+  if (kind === "CONFIRMED" || kind === "NOT_STARTED" || kind === "NOT_APPLICABLE") return Object.freeze({ kind });
   if (kind !== "UNCONFIRMED" || (taskId !== null && typeof taskId !== "string")) return null;
   if (reason === "START_UNRESOLVED") return robotId === null ? Object.freeze({ kind, reason, robotId, taskId }) : null;
   const known = VOICE_PROVIDER_STOP_UNCONFIRMED_REASONS.find((candidate) => candidate === reason);
@@ -123,6 +135,9 @@ export function createVoiceSessionController(options: VoiceSessionControllerOpti
   let credentialRefusal: VoiceCredentialRefusal | null = null;
   let microphoneReleased: boolean | null = null;
   let providerStop: VoiceProviderStop | null = null;
+  let endedBy: "PROVIDER" | "LIMIT" | null = null;
+  let endReason: "PROVIDER" | "LIMIT" | null = null;
+  let limitSeconds: number | null = null;
   let accepting = false;
   let handle: VoiceSessionHandle | null = null;
   let abort: AbortController | null = null;
@@ -135,7 +150,7 @@ export function createVoiceSessionController(options: VoiceSessionControllerOpti
   const join = (parts: Iterable<string>) => [...parts].map((part) => part.trim()).filter((part) => part.length > 0).join(separator());
 
   function snapshot(): VoiceSessionSnapshot {
-    return Object.freeze({ state, sessionToken: token, language, liveText: join([...finals.values(), ...interims.values()]), failureReason, credentialRefusal, microphoneReleased, providerStop });
+    return Object.freeze({ state, sessionToken: token, language, liveText: join([...finals.values(), ...interims.values()]), failureReason, credentialRefusal, microphoneReleased, providerStop, endedBy, limitSeconds });
   }
 
   function emit(): void {
@@ -167,6 +182,7 @@ export function createVoiceSessionController(options: VoiceSessionControllerOpti
     finals.clear();
     microphoneReleased = report.microphoneReleased;
     providerStop = report.providerStop;
+    endedBy = endKind === "COMPLETED" ? endReason : null;
     state = endKind;
     handle = null;
     abort = null;
@@ -227,6 +243,12 @@ export function createVoiceSessionController(options: VoiceSessionControllerOpti
     void requestEnd(session, "FAILED", VOICE_SESSION_FAILURE_REASONS.includes(reason) ? reason : "PROVIDER_FAILURE");
   }
 
+  function onProviderEnded(session: number): void {
+    if (session !== token || state !== "LISTENING") return;
+    endReason = "PROVIDER";
+    void requestEnd(session, "COMPLETED");
+  }
+
   async function start(request: Readonly<{ language: VoiceLanguage; grant: VoiceDisclosureGrant }>): Promise<VoiceStartOutcome> {
     if (state === "STARTING" || state === "LISTENING" || state === "STOPPING") return { kind: "REFUSED", reason: "SESSION_ACTIVE" };
     const grant = request?.grant;
@@ -242,6 +264,9 @@ export function createVoiceSessionController(options: VoiceSessionControllerOpti
     credentialRefusal = null;
     microphoneReleased = null;
     providerStop = null;
+    endedBy = null;
+    endReason = null;
+    limitSeconds = null;
     endKind = null;
     ending = null;
     accepting = true;
@@ -255,7 +280,7 @@ export function createVoiceSessionController(options: VoiceSessionControllerOpti
 
     let result: VoiceStartResult;
     try {
-      result = await transcriber.start({ language: request.language, grant, onSegment: (segment) => onSegment(session, segment), onFailure: (reason) => onFailure(session, reason), signal: controller.signal });
+      result = await transcriber.start({ language: request.language, grant, onSegment: (segment) => onSegment(session, segment), onFailure: (reason) => onFailure(session, reason), onProviderEnded: () => onProviderEnded(session), signal: controller.signal });
     } catch {
       result = { kind: "FAILED", reason: "PROVIDER_FAILURE" };
     }
@@ -279,9 +304,12 @@ export function createVoiceSessionController(options: VoiceSessionControllerOpti
     startTimer = null;
     handle = started.session;
     state = "LISTENING";
-    const limitSeconds = Math.min(options.maxSessionSeconds, started.maxSessionSeconds);
+    limitSeconds = Math.min(options.maxSessionSeconds, started.maxSessionSeconds);
     sessionTimer = timers.setTimeout(() => {
-      if (session === token && state === "LISTENING") void requestEnd(session, "TIMED_OUT");
+      // W-6a: the limit stops like the person's Stop (bounded final flush, finals kept for review, never saved automatically).
+      if (session !== token || state !== "LISTENING") return;
+      endReason = "LIMIT";
+      void requestEnd(session, "COMPLETED");
     }, limitSeconds * 1_000);
     emit();
     return { kind: "RAN" };

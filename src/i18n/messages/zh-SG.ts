@@ -195,6 +195,12 @@ export const zhSGMessages: AppMessages = {
     timeNowHint: "现在的时间——如果更早，请点按“更改时间”",
     storedAs: (context, when) => `将记入记录本：${context} · ${when}`,
     moreDetails: "更多详情（选填）",
+    // CR-11 (owner decisions 2026-10-11, R-3): approved verification copy sentences 1–2 and the approved ZH control labels.
+    confirmBody: "请核对这里的数字和单位是否与您的血糖仪或传感器显示一致。这项读数尚未保存。",
+    saveAsShown: "按显示内容保存",
+    editReading: "修改读数",
+    cancelConfirm: "取消",
+    formatRefused: "请只输入数字，小数点后最多一位。内容没有改变。",
   },
   readingTime: {
     title: "更改读数时间",

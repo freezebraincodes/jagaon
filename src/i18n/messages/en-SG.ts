@@ -196,6 +196,12 @@ export const enSGMessages: AppMessages = {
     timeNowHint: "Time now — tap Edit time if it was earlier",
     storedAs: (context, when) => `Goes in your booklet as ${context} · ${when}`,
     moreDetails: "More details (optional)",
+    // CR-11 (owner decisions 2026-10-11): sentences 1–2 of the approved verification copy and the approved control labels.
+    confirmBody: "Please check the number and unit against your meter or sensor display. This reading has not been saved.",
+    saveAsShown: "Save as shown",
+    editReading: "Edit reading",
+    cancelConfirm: "Cancel",
+    formatRefused: "Use digits only, with at most one digit after the decimal point. Nothing was changed.",
   },
   readingTime: {
     title: "Change reading time",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { type AppMessages, type SupportedLocale } from "@/i18n/types";
 import { Banner, ToggleGroup } from "../primitives/Card";
 import type { DeleteAllPort } from "../data/data-ports";
@@ -26,6 +26,11 @@ export type SettingsScreenProps = {
   goBack?: () => void;
   /** Packet 11C Addendum C (C2): the "Keep wording on this device" setting; absent renders no toggle. */
   keepWording?: KeepWordingSetting;
+  /**
+   * Web Speech (owner-approved scope 2026-10-11): the developer-only System settings section, passed only when the build-time
+   * developer-settings flag is on; absent renders nothing.
+   */
+  systemSettings?: ReactNode;
 };
 
 /**
@@ -50,6 +55,7 @@ export function SettingsScreen({
   deleteAll,
   onDatasetDeleted,
   keepWording,
+  systemSettings,
 }: SettingsScreenProps) {
   const msg = messages.settings;
   const more = messages.more;
@@ -224,6 +230,8 @@ export function SettingsScreen({
           </span>
         </li>
       </ul>
+
+      {systemSettings ?? null}
     </section>
   );
 }

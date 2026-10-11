@@ -49,6 +49,18 @@ describe("fake voice transcriber (tests and harness only)", () => {
     expect(await failing.start({ language: "en", grant: grant(), onSegment: () => undefined, onFailure: () => undefined, signal: new AbortController().signal })).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILURE", providerStop: { kind: "UNCONFIRMED", reason: "START_UNRESOLVED", robotId: null, taskId: null } });
   });
 
+  it("Web Speech: reports a provider end (method and script option) and can release with NOT_APPLICABLE", async () => {
+    const ended: string[] = [];
+    const fake = createFakeVoiceTranscriber({ providerStop: { kind: "NOT_APPLICABLE" }, providerEndsAfterSegments: true, segmentsOnStart: [{ kind: "FINAL", segmentId: "1", text: "Sugar 7" }] });
+    const result = await fake.start({ language: "en", grant: grant(), onSegment: (segment) => ended.push(`segment:${segment.text}`), onFailure: () => undefined, onProviderEnded: () => ended.push("ended"), signal: new AbortController().signal });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(ended).toEqual(["segment:Sugar 7", "ended"]);
+    fake.providerEnd();
+    expect(ended).toEqual(["segment:Sugar 7", "ended", "ended"]);
+    if (result.kind !== "STARTED") throw new Error("expected STARTED");
+    expect(await result.session.stop()).toEqual({ microphoneReleased: true, providerStop: { kind: "NOT_APPLICABLE" } });
+  });
+
   it("has no microphone, network, provider or storage access", () => {
     const source = readFileSync(join(process.cwd(), "src/application/voice/fake-voice-transcriber.ts"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     expect(source).not.toMatch(/navigator|getUserMedia|\bfetch\b|trtc|localStorage|indexedDB|console\./i);

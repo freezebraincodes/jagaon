@@ -185,7 +185,9 @@ describe("glucose entry", () => {
     expect(commands.recordGlucose).not.toHaveBeenCalled();
   });
 
-  it.each(["", "abc", "0", "0.0", "6.8.1", "-4", "6,8", "75", "6.123"])(
+  // CR-11 (owner decisions 2026-10-11): "0", "0.0" and "75" are no longer refused (they go through the confirmation step; see the
+  // CR-11 describe below). Malformed text is refused while typing (the field keeps its last valid text) and again on Save.
+  it.each(["", "abc", "6.8.1", "-4", "6,8", "6.123"])(
     "rejects invalid glucose input %j without calling the service",
     async (value) => {
       const { commands } = renderGlucose();
@@ -215,16 +217,22 @@ describe("glucose entry", () => {
     expect(glucoseValueInput()).toHaveValue("6.8");
     fireEvent.click(within(keypad).getByRole("button", { name: en.glucose.deleteDigit }));
     fireEvent.click(within(keypad).getByRole("button", { name: "9" }));
-    // A second decimal point is ignored rather than producing an invalid value.
+    // A second decimal point is refused (CR-11: with a message) rather than producing an invalid value.
     fireEvent.click(within(keypad).getByRole("button", { name: en.glucose.decimalPoint }));
     expect(glucoseValueInput()).toHaveValue("6.9");
+    expect(screen.getByText(en.glucose.formatRefused)).toBeInTheDocument();
     expect(within(keypad).getAllByRole("button")).toHaveLength(12);
   });
 
+  // CR-11 (owner R-4 formatting rule): this pinned a manual "6.80" save. Two decimals are now refused for NEW entries, so the typed
+  // value is "6.8" (stored "6.8"); historical "6.80" records are covered by the History/Today/care/export precision tests.
   it("maps the exact typed value, method, note and Singapore occurrence time", async () => {
     const { commands } = renderGlucose();
     chooseContext(en.glucose.contextBeforeLunch);
     fireEvent.change(glucoseValueInput(), { target: { value: "6.80" } });
+    expect(glucoseValueInput()).toHaveValue("");
+    expect(screen.getByText(en.glucose.formatRefused)).toBeInTheDocument();
+    fireEvent.change(glucoseValueInput(), { target: { value: "6.8" } });
     fireEvent.change(screen.getByLabelText(en.glucose.methodLabel), {
       target: { value: "CGM" },
     });
@@ -237,7 +245,7 @@ describe("glucose entry", () => {
     await waitFor(() => expect(commands.recordGlucose).toHaveBeenCalledTimes(1));
     const input = vi.mocked(commands.recordGlucose).mock.calls[0]![0];
     expect(input.payload).toEqual({
-      measurement: { enteredValue: "6.80", enteredUnit: "MMOL_L", normalization: null },
+      measurement: { enteredValue: "6.8", enteredUnit: "MMOL_L", normalization: null },
       measurementMethod: "CGM",
       context: { kind: "PATIENT_SELECTED_SLOT", slot: "BEFORE_LUNCH" },
       patientNote: { text: "After my walk", language: "en-SG" },
@@ -415,6 +423,299 @@ const [nocturin, veltora] = fixture.recordedPrescriptions as [
   (typeof fixture.recordedPrescriptions)[number],
   (typeof fixture.recordedPrescriptions)[number],
 ];
+
+// ---------------------------------------------------------------------------
+// CR-11: number-and-unit confirmation instead of a maximum (design v3.1; EN and ZH)
+// ---------------------------------------------------------------------------
+
+describe.each(["en-SG", "zh-SG"] as const)("CR-11 manual glucose confirmation (%s)", (locale) => {
+  const m = getMessages(locale);
+  const valueInput = () => screen.getByLabelText(new RegExp(m.glucose.valueLabel)) as HTMLInputElement;
+  const keypad = () => screen.getByRole("group", { name: m.glucose.keypadLabel });
+  const press = (...keys: string[]) => {
+    for (const key of keys) fireEvent.click(within(keypad()).getByRole("button", { name: key === "." ? m.glucose.decimalPoint : key }));
+  };
+  const start = (value: string, commands = serviceWith()) => {
+    const view = renderGlucose(commands, locale);
+    fireEvent.click(screen.getByRole("radio", { name: m.glucose.contextBedtime }));
+    fireEvent.change(valueInput(), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: m.glucose.saveAction }));
+    return view;
+  };
+  const panel = () => screen.getByRole("region", { name: new RegExp(`${m.glucose.unit}$`) });
+  const stored = (commands: JournalCommandService) => vi.mocked(commands.recordGlucose).mock.calls.map(([input]) => input.payload.measurement.enteredValue);
+
+  it("AC-1 / AC-2: 60 opens the confirmation with \"60.0 mmol/L\", sentences 1–2 and the three controls; Save as shown stores 60.0 once", async () => {
+    const { commands, container } = start("60");
+    const region = panel();
+    expect(within(region).getByRole("heading", { name: `60.0 ${m.glucose.unit}` })).toHaveFocus();
+    expect(within(region).getByText(m.glucose.confirmBody)).toBeInTheDocument();
+    expect(within(region).getAllByRole("button").map((button) => button.textContent)).toEqual([m.glucose.saveAsShown, m.glucose.editReading, m.glucose.cancelConfirm]);
+    expect(valueInput()).toHaveValue("60.0");
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: m.glucose.saveAction })).not.toBeInTheDocument();
+    expectNoProhibitedWording(container, [m.glucose.noInterpretation]);
+    expect(container.textContent).not.toMatch(/verified|核实无误|已验证/i);
+    fireEvent.click(within(region).getByRole("button", { name: m.glucose.saveAsShown }));
+    expect(await screen.findByText(m.glucose.saved)).toBeInTheDocument();
+    expect(stored(commands)).toEqual(["60.0"]);
+    expect(vi.mocked(commands.recordGlucose).mock.calls[0]![0].payload.measurement).toEqual({ enteredValue: "60.0", enteredUnit: "MMOL_L", normalization: null });
+    expect(screen.queryByText(m.glucose.confirmBody)).not.toBeInTheDocument();
+  });
+
+  it("AC-3: the latch: Edit reading to 45 still returns to the confirmation; saved as 45.0", async () => {
+    const { commands } = start("60");
+    fireEvent.click(within(panel()).getByRole("button", { name: m.glucose.editReading }));
+    expect(valueInput()).toHaveFocus();
+    expect(screen.queryByText(m.glucose.confirmBody)).not.toBeInTheDocument();
+    fireEvent.change(valueInput(), { target: { value: "45" } });
+    fireEvent.click(screen.getByRole("button", { name: m.glucose.saveAction }));
+    expect(within(panel()).getByRole("heading", { name: `45.0 ${m.glucose.unit}` })).toBeInTheDocument();
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+    fireEvent.click(within(panel()).getByRole("button", { name: m.glucose.saveAsShown }));
+    await screen.findByText(m.glucose.saved);
+    expect(stored(commands)).toEqual(["45.0"]);
+  });
+
+  it("AC-4 / AC-5: Cancel writes nothing and keeps the value; Save again re-enters the confirmation; nothing saves before Save as shown", async () => {
+    const { commands } = start("60");
+    fireEvent.click(within(panel()).getByRole("button", { name: m.glucose.cancelConfirm }));
+    // Fix round 3 (ruling 7): Cancel returns focus to the field, which shows what was typed ("60"; the ".0" was added automatically).
+    expect(valueInput()).toHaveFocus();
+    expect(valueInput()).toHaveValue("60");
+    fireEvent.blur(valueInput());
+    expect(valueInput()).toHaveValue("60.0");
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: m.glucose.saveAction }));
+    expect(panel()).toBeInTheDocument();
+    fireEvent.click(within(panel()).getByRole("button", { name: m.glucose.cancelConfirm }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+    expect(screen.queryByText(m.glucose.saved)).not.toBeInTheDocument();
+  });
+
+  it("AC-6: a double press on Save as shown gives exactly one write", async () => {
+    let release: (result: JournalCommitResult) => void = () => undefined;
+    const recordGlucose = vi.fn().mockImplementation(() => new Promise<JournalCommitResult>((resolve) => (release = resolve)));
+    const { commands } = start("60", serviceWith({ recordGlucose }));
+    const saveAsShown = within(panel()).getByRole("button", { name: m.glucose.saveAsShown });
+    fireEvent.click(saveAsShown);
+    fireEvent.click(saveAsShown);
+    release(committed);
+    await screen.findByText(m.glucose.saved);
+    expect(commands.recordGlucose).toHaveBeenCalledTimes(1);
+  });
+
+  it("AC-7: zero shows \"0.0 mmol/L\" in the confirmation and saves only after Save as shown", async () => {
+    for (const typed of ["0", "0.0"]) {
+      const { commands, unmount } = start(typed);
+      expect(within(panel()).getByRole("heading", { name: `0.0 ${m.glucose.unit}` })).toBeInTheDocument();
+      expect(commands.recordGlucose).not.toHaveBeenCalled();
+      fireEvent.click(within(panel()).getByRole("button", { name: m.glucose.saveAsShown }));
+      await screen.findByText(m.glucose.saved);
+      expect(stored(commands), typed).toEqual(["0.0"]);
+      unmount();
+    }
+  });
+
+  it("AC-8: completion formats to one decimal (0 → 0.0, 9 → 9.0, 9.2 → 9.2, 60 → 60.0); no forced .0 while typing", async () => {
+    for (const [typed, expected] of [["9", "9.0"], ["9.2", "9.2"], ["9.", "9.0"], ["50", "50.0"]] as const) {
+      const { commands, unmount } = start(typed);
+      await screen.findByText(m.glucose.saved);
+      expect(stored(commands), typed).toEqual([expected]);
+      unmount();
+    }
+    renderGlucose(serviceWith(), locale);
+    press("9");
+    expect(valueInput()).toHaveValue("9");
+    press(".");
+    expect(valueInput()).toHaveValue("9.");
+    press("2");
+    expect(valueInput()).toHaveValue("9.2");
+    fireEvent.change(valueInput(), { target: { value: "9" } });
+    fireEvent.blur(valueInput());
+    expect(valueInput()).toHaveValue("9.0");
+    fireEvent.focus(valueInput());
+    expect(valueInput()).toHaveValue("9");
+    fireEvent.blur(valueInput());
+    expect(valueInput()).toHaveValue("9.0");
+    // A keypad tap after completion formatting continues from what was typed, never from the added ".0".
+    press("2");
+    expect(valueInput()).toHaveValue("92");
+  });
+
+  it("AC-9 / AC-10: one separator and one fractional digit, by keypad, typing and paste; refused with a message, never trimmed or rounded", async () => {
+    const commands = serviceWith();
+    renderGlucose(commands, locale);
+    press("9", ".", "2", "5");
+    expect(valueInput()).toHaveValue("9.2");
+    expect(screen.getByText(m.glucose.formatRefused)).toBeInTheDocument();
+    press(".");
+    expect(valueInput()).toHaveValue("9.2");
+    for (const pasted of ["9.25", "60.00", "6..5"]) {
+      fireEvent.change(valueInput(), { target: { value: pasted } });
+      expect(valueInput(), pasted).toHaveValue("9.2");
+      expect(screen.getByText(m.glucose.formatRefused)).toBeInTheDocument();
+    }
+    fireEvent.change(valueInput(), { target: { value: "" } });
+    expect(screen.queryByText(m.glucose.formatRefused)).not.toBeInTheDocument();
+    fireEvent.change(valueInput(), { target: { value: "9.25" } });
+    expect(valueInput()).toHaveValue("");
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toMatch(/9\.3|9\.2(?!5)/);
+  });
+
+  it("AC-11: no hidden ceiling: 100, 999.5 and 1234.5 confirm and save formatted", async () => {
+    for (const [typed, expected] of [["100", "100.0"], ["999.5", "999.5"], ["1234.5", "1234.5"]] as const) {
+      const { commands, unmount } = start(typed);
+      expect(within(panel()).getByRole("heading", { name: `${expected} ${m.glucose.unit}` })).toBeInTheDocument();
+      fireEvent.click(within(panel()).getByRole("button", { name: m.glucose.saveAsShown }));
+      await screen.findByText(m.glucose.saved);
+      expect(stored(commands), typed).toEqual([expected]);
+      unmount();
+    }
+  });
+
+  it("AC-12: the technical bound: -5, 1e3, abc, 060 and five integer digits are refused while typing; nothing is saved", async () => {
+    const commands = serviceWith();
+    renderGlucose(commands, locale);
+    for (const typed of ["-5", "1e3", "abc", "060", "12345", "1234.56"]) {
+      fireEvent.change(valueInput(), { target: { value: typed } });
+      expect(valueInput().value, typed).not.toBe(typed);
+      expect(screen.getByText(m.glucose.formatRefused)).toBeInTheDocument();
+    }
+    // Fix round 1 (I-1): no maxlength, so a browser never truncates a paste before the validator sees it.
+    expect(valueInput()).not.toHaveAttribute("maxlength");
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+  });
+
+  it("I-1: a 7+ character paste (\"1234.56\", or \"4.56\" after a typed \"123\") is refused with the message and leaves the field unchanged", () => {
+    const commands = serviceWith();
+    renderGlucose(commands, locale);
+    expect(valueInput()).not.toHaveAttribute("maxlength");
+    fireEvent.change(valueInput(), { target: { value: "1234.56" } });
+    expect(valueInput()).toHaveValue("");
+    expect(screen.getByText(m.glucose.formatRefused)).toBeInTheDocument();
+    fireEvent.change(valueInput(), { target: { value: "123" } });
+    expect(screen.queryByText(m.glucose.formatRefused)).not.toBeInTheDocument();
+    fireEvent.change(valueInput(), { target: { value: "1234.56" } });
+    expect(valueInput()).toHaveValue("123");
+    expect(screen.getByText(m.glucose.formatRefused)).toBeInTheDocument();
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+  });
+
+  it("I-3 (M10): editing the value while the confirmation is open closes it; Save as shown never saves the stale 60; re-confirmation shows 70.0", async () => {
+    const { commands } = start("60");
+    expect(within(panel()).getByRole("heading", { name: `60.0 ${m.glucose.unit}` })).toBeInTheDocument();
+    fireEvent.change(valueInput(), { target: { value: "70" } });
+    expect(screen.queryByRole("region", { name: new RegExp(`${m.glucose.unit}$`) })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: m.glucose.saveAsShown })).not.toBeInTheDocument();
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: m.glucose.saveAction }));
+    expect(within(panel()).getByRole("heading", { name: `70.0 ${m.glucose.unit}` })).toBeInTheDocument();
+    fireEvent.click(within(panel()).getByRole("button", { name: m.glucose.saveAsShown }));
+    await screen.findByText(m.glucose.saved);
+    expect(stored(commands)).toEqual(["70.0"]);
+  });
+
+  it("round 3 (ruling 7): after an automatic \".0\" the keypad continues the typed number (9 → 9.0 → keypad 5 → 95; saved only after confirming 95.0)", async () => {
+    const commands = serviceWith();
+    renderGlucose(commands, locale);
+    fireEvent.click(screen.getByRole("radio", { name: m.glucose.contextBedtime }));
+    fireEvent.change(valueInput(), { target: { value: "9" } });
+    fireEvent.blur(valueInput());
+    expect(valueInput()).toHaveValue("9.0");
+    press("5");
+    expect(valueInput()).toHaveValue("95");
+    expect(screen.queryByText(m.glucose.formatRefused)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: m.glucose.saveAction }));
+    expect(within(panel()).getByRole("heading", { name: `95.0 ${m.glucose.unit}` })).toBeInTheDocument();
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+    fireEvent.click(within(panel()).getByRole("button", { name: m.glucose.saveAsShown }));
+    await screen.findByText(m.glucose.saved);
+    expect(stored(commands)).toEqual(["95.0"]);
+  });
+
+  it("round 3 (ruling 7): an explicitly entered decimal is never removed: 9.0 + 5 and 9.2 + 5 are refused; 9. + 5 gives 9.5", () => {
+    renderGlucose(serviceWith(), locale);
+    for (const [explicit, after, refused] of [["9.0", "9.0", true], ["9.2", "9.2", true], ["9.", "9.5", false]] as const) {
+      fireEvent.change(valueInput(), { target: { value: "" } });
+      fireEvent.change(valueInput(), { target: { value: explicit } });
+      fireEvent.blur(valueInput());
+      fireEvent.focus(valueInput());
+      press("5");
+      expect(valueInput(), explicit).toHaveValue(after);
+      if (refused) expect(screen.getByText(m.glucose.formatRefused), explicit).toBeInTheDocument();
+      else expect(screen.queryByText(m.glucose.formatRefused), explicit).not.toBeInTheDocument();
+    }
+  });
+
+  it("round 3 (ruling 7): a keypad edit makes an open confirmation stale: it closes and the updated value must be confirmed (continuing after the automatic .0)", async () => {
+    const { commands } = start("60");
+    expect(within(panel()).getByRole("heading", { name: `60.0 ${m.glucose.unit}` })).toBeInTheDocument();
+    press("5");
+    expect(screen.queryByRole("region", { name: new RegExp(`${m.glucose.unit}$`) })).not.toBeInTheDocument();
+    expect(valueInput()).toHaveValue("605");
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: m.glucose.saveAction }));
+    expect(within(panel()).getByRole("heading", { name: `605.0 ${m.glucose.unit}` })).toBeInTheDocument();
+    fireEvent.click(within(panel()).getByRole("button", { name: m.glucose.saveAsShown }));
+    await screen.findByText(m.glucose.saved);
+    expect(stored(commands)).toEqual(["605.0"]);
+  });
+
+  it("round 4 (I-1): typing 60 then clicking Save (the field blurs first) still lets the keypad continue: 5 → 605, the stale panel closes, 605.0 must be confirmed", async () => {
+    const commands = serviceWith();
+    renderGlucose(commands, locale);
+    fireEvent.click(screen.getByRole("radio", { name: m.glucose.contextBedtime }));
+    const save = screen.getByRole("button", { name: m.glucose.saveAction });
+    fireEvent.focus(valueInput());
+    fireEvent.change(valueInput(), { target: { value: "60" } });
+    // A real click on Save: the field loses focus to the Save button first (completion formatting), then the form submits.
+    fireEvent.blur(valueInput(), { relatedTarget: save });
+    expect(valueInput()).toHaveValue("60.0");
+    fireEvent.click(save);
+    expect(within(panel()).getByRole("heading", { name: `60.0 ${m.glucose.unit}` })).toBeInTheDocument();
+    press("5");
+    expect(valueInput()).toHaveValue("605");
+    expect(screen.queryByText(m.glucose.formatRefused)).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: new RegExp(`${m.glucose.unit}$`) })).not.toBeInTheDocument();
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: m.glucose.saveAction }));
+    expect(within(panel()).getByRole("heading", { name: `605.0 ${m.glucose.unit}` })).toBeInTheDocument();
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+    fireEvent.click(within(panel()).getByRole("button", { name: m.glucose.saveAsShown }));
+    await screen.findByText(m.glucose.saved);
+    expect(stored(commands)).toEqual(["605.0"]);
+  });
+
+  it("round 4 (m-2): an explicitly typed decimal is never dropped at Save time: 60.5, Save, keypad 5 is refused and the value stays 60.5", () => {
+    const { commands } = start("60.5");
+    expect(within(panel()).getByRole("heading", { name: `60.5 ${m.glucose.unit}` })).toBeInTheDocument();
+    press("5");
+    expect(valueInput()).toHaveValue("60.5");
+    expect(screen.getByText(m.glucose.formatRefused)).toBeInTheDocument();
+    expect(within(panel()).getByRole("heading", { name: `60.5 ${m.glucose.unit}` })).toBeInTheDocument();
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+  });
+
+  it("round 3 (ruling 7): keypad Delete on an open confirmation also closes it; saving again asks for the shown value", async () => {
+    const { commands } = start("60");
+    fireEvent.click(within(keypad()).getByRole("button", { name: m.glucose.deleteDigit }));
+    expect(screen.queryByRole("region", { name: new RegExp(`${m.glucose.unit}$`) })).not.toBeInTheDocument();
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: m.glucose.saveAction }));
+    expect(within(panel()).getByRole("heading", { name: new RegExp(`^\\d+\\.\\d ${m.glucose.unit}$`) })).toBeInTheDocument();
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+  });
+
+  it("at or below 50 (and above zero) one Save stores the formatted value with no confirmation step", async () => {
+    const { commands } = start("50");
+    await screen.findByText(m.glucose.saved);
+    expect(screen.queryByText(m.glucose.confirmBody)).not.toBeInTheDocument();
+    expect(stored(commands)).toEqual(["50.0"]);
+  });
+});
 
 describe("insulin entry", () => {
   it("records insulin through the command service", async () => {

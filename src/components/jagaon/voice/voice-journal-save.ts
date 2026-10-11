@@ -1,13 +1,16 @@
 import type { JournalCommandService, JournalCommitResult, RecordMedicationEventInput } from "@/application/journal/journal-contracts";
 import type { VoiceSaveIntent } from "@/application/voice/voice-review-contract";
 import type { DecimalString } from "@/domain/health-records/measurement";
+import { formatMmolEntry, isFormattedMmolEntry } from "@/domain/voice/glucose-entry-format";
 import type { Instant } from "@/domain/shared/time";
 import type { VoiceSaveOutcome } from "./TellJagaOnScreen";
 
 /**
  * Packet 13 (P13S; Q13-6): one explicitly confirmed voice fact → the EXISTING journal command, with the existing validation unchanged.
- * - GLUCOSE → `recordGlucose`: mmol/L, the same plausible range as manual entry (0 < value ≤ 50; review M5), method UNKNOWN, context
- *   UNSPECIFIED (the person did not pick one), occurrence time UNKNOWN (never inferred).
+ * - GLUCOSE → `recordGlucose`: mmol/L, method UNKNOWN, context UNSPECIFIED (the person did not pick one), occurrence time UNKNOWN (never
+ *   inferred). CR-11 (2026-10-11): the value is validated again with the same new-entry format as manual entry (1–4 integer digits, at
+ *   most one decimal; never rounded) and stored formatted to exactly one decimal ("60.0", "0.0"). There is no 50 mmol/L limit: the
+ *   review contract has already required the explicit "Save as shown" above 50 or at zero.
  * - MEAL → `recordMeal`: intake MEAL, the standard slot only when said, the food words exactly as said (item kind UNKNOWN: food or drink
  *   is not inferred), occasion UNKNOWN, occurrence time UNKNOWN.
  * - MEDICATION_EVENT → `recordMedicationEvent`: TAKEN, SKIPPED → MISSED, UNKNOWN → UNSURE, each for the confirmed canonical
@@ -42,7 +45,6 @@ export function reportedAmountTaken(amount: Readonly<{ valueText: string; unitTe
 }
 
 const UNKNOWN_POINT = Object.freeze({ kind: "POINT" as const, occurrence: Object.freeze({ kind: "UNKNOWN" as const }) });
-const GLUCOSE_VALUE = /^(?:0|[1-9]\d?)(?:\.\d{1,2})?$/;
 
 export function createVoiceJournalSave(ports: VoiceJournalSavePorts): (intent: VoiceSaveIntent) => Promise<VoiceSaveOutcome> {
   return async function save(intent: VoiceSaveIntent): Promise<VoiceSaveOutcome> {
@@ -50,10 +52,10 @@ export function createVoiceJournalSave(ports: VoiceJournalSavePorts): (intent: V
     try {
       const recordedAt = ports.now();
       if (intent.kind === "GLUCOSE") {
-        const value = Number(intent.valueText);
-        if (!GLUCOSE_VALUE.test(intent.valueText) || !(value > 0 && value <= 50)) return { kind: "NOT_SAVED" };
+        const enteredValue = formatMmolEntry(intent.valueText);
+        if (enteredValue === null || !isFormattedMmolEntry(enteredValue)) return { kind: "NOT_SAVED" };
         result = await ports.commands.recordGlucose({
-          payload: { measurement: { enteredValue: intent.valueText as DecimalString, enteredUnit: "MMOL_L", normalization: null }, measurementMethod: "UNKNOWN", context: { kind: "UNSPECIFIED" } },
+          payload: { measurement: { enteredValue: enteredValue as DecimalString, enteredUnit: "MMOL_L", normalization: null }, measurementMethod: "UNKNOWN", context: { kind: "UNSPECIFIED" } },
           temporal: UNKNOWN_POINT,
           recordedAt,
         });

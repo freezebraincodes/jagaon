@@ -50,5 +50,26 @@ export type VoiceUserSigResponse = z.infer<typeof voiceUserSigResponseSchema>;
  * Review I-5 (owner: when voice is off, explain it and offer manual input before anything else): `GET /api/voice/usersig` answers only
  * whether voice is available — the switch is on and the configuration is valid. No passcode, no secret read, nothing else revealed.
  */
-export const voiceAvailabilityResponseSchema = z.object({ available: z.boolean() }).strict();
+export const VOICE_PROBE_PROVIDERS = ["TRTC", "WEB_SPEECH"] as const;
+/**
+ * Web Speech (owner-approved scope 2026-10-11; draft): when available, the probe also lists the deployment-enabled providers in the
+ * deployment's order (`providers`, ids only). An answer without `providers` (voice off) enables nothing.
+ */
+export const voiceAvailabilityResponseSchema = z
+  .object({ available: z.boolean(), providers: z.array(z.enum(VOICE_PROBE_PROVIDERS)).min(1).max(VOICE_PROBE_PROVIDERS.length).optional() })
+  .strict();
 export type VoiceAvailabilityResponse = z.infer<typeof voiceAvailabilityResponseSchema>;
+
+/**
+ * Web Speech (owner-approved scope 2026-10-11, coordinator ruling W-3; draft): `POST /api/voice/access`, the demo-passcode check before a
+ * Web Speech session. Request exactly as the credential route (`{}`, JSON, the passcode header, same size cap). GRANTED carries only the
+ * server's maximum session length: no credential, no identifier, and no provider is contacted. REFUSED reuses the credential route's
+ * closed reasons (never MINUTES_EXHAUSTED: Web Speech reserves no minutes).
+ */
+export const VOICE_ACCESS_ROUTE_PATH = "/api/voice/access";
+export const voiceAccessResponseSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("GRANTED"), maxSessionSeconds: z.number().int().min(10).max(900) }).strict(),
+  z.object({ kind: z.literal("REFUSED"), reason: z.enum(VOICE_USERSIG_REFUSAL_REASONS) }).strict(),
+  z.object({ kind: z.literal("FAILED"), reason: z.literal("PAYLOAD_INVALID") }).strict(),
+]);
+export type VoiceAccessResponse = z.infer<typeof voiceAccessResponseSchema>;

@@ -31,7 +31,19 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-/internal-docs/
+# Internal documentation/evidence stays private. Preserve only the four
+# existing release-runner configs in Git at their owner-requested location.
+/internal-docs/*
+!/internal-docs/testing/
+/internal-docs/testing/*
+!/internal-docs/testing/playwright/
+/internal-docs/testing/playwright/*
+!/internal-docs/testing/playwright/configs/
+/internal-docs/testing/playwright/configs/*
+!/internal-docs/testing/playwright/configs/playwright.config.ts
+!/internal-docs/testing/playwright/configs/playwright.packet-11c.config.ts
+!/internal-docs/testing/playwright/configs/playwright.packet-12.config.ts
+!/internal-docs/testing/playwright/configs/playwright.packet-13.config.ts
 .superpowers/
 .claude/
 docs/

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { VOICE_USERSIG_ENV, parseVoiceUserSigConfig, readTrtcSecretKey, voiceAccessGranted, voiceOriginAllowed } from "./voice-usersig-config";
+import { VOICE_PROVIDERS_ENV, VOICE_USERSIG_ENV, parseVoiceProviders, parseVoiceUserSigConfig, readTrtcSecretKey, voiceAccessGranted, voiceOriginAllowed } from "./voice-usersig-config";
 import { TEST_VOICE_ENVIRONMENT, TEST_VOICE_PASSCODE, TEST_VOICE_SECRET, testVoiceHeaders } from "./voice-usersig-test-support";
 
 const without = (name: string) => Object.fromEntries(Object.entries(TEST_VOICE_ENVIRONMENT).filter(([key]) => key !== name));
@@ -63,6 +63,43 @@ describe("voice UserSig deployment configuration", () => {
     }
   });
 
+  // Web Speech (owner-approved scope 2026-10-11): JAGAON_VOICE_PROVIDERS.
+  it("parses the provider list: unset → TRTC; trtc, webspeech or both in order; anything else → voice off", () => {
+    expect(VOICE_PROVIDERS_ENV).toBe("JAGAON_VOICE_PROVIDERS");
+    expect(parseVoiceProviders(undefined)).toEqual(["TRTC"]);
+    expect(parseVoiceProviders("trtc")).toEqual(["TRTC"]);
+    expect(parseVoiceProviders("webspeech")).toEqual(["WEB_SPEECH"]);
+    expect(parseVoiceProviders("webspeech,trtc")).toEqual(["WEB_SPEECH", "TRTC"]);
+    expect(parseVoiceProviders(" trtc , webspeech ")).toEqual(["TRTC", "WEB_SPEECH"]);
+    expect(parseVoiceProviders("trtc,trtc")).toEqual(["TRTC"]);
+    for (const value of ["", " ", ",", "trtc,", "TRTC", "WebSpeech", "web-speech", "google", "trtc,fake", "simulated"]) expect(parseVoiceProviders(value), value).toBeNull();
+    expect(parseVoiceUserSigConfig(TEST_VOICE_ENVIRONMENT)).toMatchObject({ voiceEnabled: true, providers: ["TRTC"], trtcEnabled: true });
+    for (const value of ["", "TRTC", "trtc,google"]) expect(parseVoiceUserSigConfig({ ...TEST_VOICE_ENVIRONMENT, [VOICE_PROVIDERS_ENV]: value }), value).toEqual({ voiceEnabled: false });
+    // The master switch still rules every provider.
+    expect(parseVoiceUserSigConfig({ ...TEST_VOICE_ENVIRONMENT, [VOICE_PROVIDERS_ENV]: "webspeech", [VOICE_USERSIG_ENV.voiceCloud]: "off" })).toEqual({ voiceEnabled: false });
+  });
+
+  it("Web Speech alone needs no TRTC value (none is read); TRTC enabled still requires all of them", () => {
+    const trtcNames = [VOICE_USERSIG_ENV.userSigTtlSeconds, VOICE_USERSIG_ENV.dailyMinutesLimit, VOICE_USERSIG_ENV.sdkAppId, VOICE_USERSIG_ENV.secretKey];
+    const webOnly: Record<string, string | undefined> = { ...Object.fromEntries(Object.entries(TEST_VOICE_ENVIRONMENT).filter(([key]) => !trtcNames.includes(key as never))), [VOICE_PROVIDERS_ENV]: "webspeech" };
+    const reads: string[] = [];
+    const config = parseVoiceUserSigConfig(new Proxy(webOnly, { get: (target, name) => (reads.push(String(name)), target[name as string]) }));
+    expect(config).toMatchObject({ voiceEnabled: true, providers: ["WEB_SPEECH"], trtcEnabled: false, maxSessionSeconds: 90, allowedOrigins: ["http://localhost"] });
+    expect(config).not.toHaveProperty("sdkAppId");
+    for (const name of trtcNames) expect(reads, name).not.toContain(name);
+    // Invalid TRTC values are irrelevant with Web Speech alone.
+    expect(parseVoiceUserSigConfig({ ...webOnly, [VOICE_USERSIG_ENV.sdkAppId]: "abc" })).toMatchObject({ voiceEnabled: true, trtcEnabled: false });
+    // The shared values stay required.
+    for (const name of [VOICE_USERSIG_ENV.allowedOrigins, VOICE_USERSIG_ENV.demoPasscode, VOICE_USERSIG_ENV.maxSessionSeconds]) {
+      expect(parseVoiceUserSigConfig(Object.fromEntries(Object.entries(webOnly).filter(([key]) => key !== name))), name).toEqual({ voiceEnabled: false });
+    }
+    // Both enabled: a missing TRTC value means voice off for every provider (misconfiguration).
+    for (const name of [VOICE_USERSIG_ENV.userSigTtlSeconds, VOICE_USERSIG_ENV.dailyMinutesLimit, VOICE_USERSIG_ENV.sdkAppId]) {
+      expect(parseVoiceUserSigConfig({ ...without(name), [VOICE_PROVIDERS_ENV]: "webspeech,trtc" }), name).toEqual({ voiceEnabled: false });
+    }
+    expect(parseVoiceUserSigConfig({ ...TEST_VOICE_ENVIRONMENT, [VOICE_PROVIDERS_ENV]: "webspeech,trtc" })).toMatchObject({ voiceEnabled: true, providers: ["WEB_SPEECH", "TRTC"], trtcEnabled: true, sdkAppId: 1400000001 });
+  });
+
   it("checks origin (with Sec-Fetch-Site) and the passcode", () => {
     const config = parseVoiceUserSigConfig(TEST_VOICE_ENVIRONMENT);
     expect(voiceOriginAllowed(config, new Headers(testVoiceHeaders()))).toBe(true);
@@ -73,5 +110,21 @@ describe("voice UserSig deployment configuration", () => {
     expect(voiceAccessGranted(config, new Headers(testVoiceHeaders(null)))).toBe(false);
     expect(voiceAccessGranted(config, new Headers(testVoiceHeaders("x".repeat(1025))))).toBe(false);
     expect(voiceAccessGranted({ voiceEnabled: false }, new Headers(testVoiceHeaders()))).toBe(false);
+  });
+
+  // Owner-approved Tencent build-time exclusion (2026-10-11).
+  it("an excluded build (JAGAON_BUILD_EXCLUDE_TRTC=1) never enables TRTC, whatever the run-time list says; no TRTC value is read", () => {
+    const excluded = { trtcExcludedAtBuild: true } as const;
+    const reads: string[] = [];
+    const both = new Proxy({ ...TEST_VOICE_ENVIRONMENT, [VOICE_PROVIDERS_ENV]: "trtc,webspeech" } as Record<string, string | undefined>, { get: (target, name) => (reads.push(String(name)), target[name as string]) });
+    expect(parseVoiceUserSigConfig(both, excluded)).toMatchObject({ voiceEnabled: true, providers: ["WEB_SPEECH"], trtcEnabled: false });
+    for (const name of [VOICE_USERSIG_ENV.userSigTtlSeconds, VOICE_USERSIG_ENV.dailyMinutesLimit, VOICE_USERSIG_ENV.sdkAppId, VOICE_USERSIG_ENV.secretKey]) expect(reads, name).not.toContain(name);
+    // Only TRTC listed, or unset (= TRTC): nothing remains, so voice is off.
+    expect(parseVoiceUserSigConfig({ ...TEST_VOICE_ENVIRONMENT, [VOICE_PROVIDERS_ENV]: "trtc" }, excluded)).toEqual({ voiceEnabled: false });
+    expect(parseVoiceUserSigConfig(TEST_VOICE_ENVIRONMENT, excluded)).toEqual({ voiceEnabled: false });
+    expect(parseVoiceUserSigConfig({ ...TEST_VOICE_ENVIRONMENT, [VOICE_PROVIDERS_ENV]: "webspeech" }, excluded)).toMatchObject({ providers: ["WEB_SPEECH"], trtcEnabled: false });
+    // A normal build is unchanged (the default, and an explicit false).
+    expect(parseVoiceUserSigConfig({ ...TEST_VOICE_ENVIRONMENT, [VOICE_PROVIDERS_ENV]: "trtc,webspeech" })).toMatchObject({ providers: ["TRTC", "WEB_SPEECH"], trtcEnabled: true });
+    expect(parseVoiceUserSigConfig({ ...TEST_VOICE_ENVIRONMENT, [VOICE_PROVIDERS_ENV]: "trtc,webspeech" }, { trtcExcludedAtBuild: false })).toMatchObject({ providers: ["TRTC", "WEB_SPEECH"], trtcEnabled: true });
   });
 });

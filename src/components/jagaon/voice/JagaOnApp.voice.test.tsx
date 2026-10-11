@@ -30,7 +30,7 @@ type Row = { recordType: string; revisionId: string; revision: { payload: Record
  * The app wiring with production saving connected (the owner's integration gate is lifted): each fact confirmed on its own card is
  * saved through the existing journal commands, exactly once, and the screen shows "Saved." from the save result. Remembering a term is a
  * separate decision that creates no journal event and is reused after a remount. Test 2 exercises the save function the app builds
- * directly against the real runtime (including the manual range refusal).
+ * directly against the real runtime (CR-11: the save path's own format check; no 50 mmol/L limit; values stored with one decimal).
  */
 describe("Tell JagaOn wired in the app (production saving connected)", () => {
   it(
@@ -126,9 +126,13 @@ describe("Tell JagaOn wired in the app (production saving connected)", () => {
       expect(await save({ kind: "GLUCOSE", valueText: "6.8", unit: "MMOL_PER_L", unitSource: "SPOKEN" })).toEqual({ kind: "SAVED" });
       expect(await save({ kind: "MEAL", slot: "LUNCH", itemText: "chicken rice" })).toEqual({ kind: "SAVED" });
       expect(await save({ kind: "MEDICATION_EVENT", medication: medicine!.medication, status: "TAKEN", reportedAmount: { valueText: "10", unitText: "units" } } as never)).toEqual({ kind: "SAVED" });
-      expect(await save({ kind: "GLUCOSE", valueText: "99", unit: "MMOL_PER_L", unitSource: "PERSON" })).toEqual({ kind: "NOT_SAVED" });
+      // CR-11: no hidden ceiling (the review contract has already required "Save as shown"); malformed values are still refused here.
+      expect(await save({ kind: "GLUCOSE", valueText: "99.0", unit: "MMOL_PER_L", unitSource: "PERSON" })).toEqual({ kind: "SAVED" });
+      expect(await save({ kind: "GLUCOSE", valueText: "0.0", unit: "MMOL_PER_L", unitSource: "SPOKEN" })).toEqual({ kind: "SAVED" });
+      for (const valueText of ["9.25", "60.00", "-5", "1e3", "060", "12345"]) expect(await save({ kind: "GLUCOSE", valueText, unit: "MMOL_PER_L", unitSource: "PERSON" }), valueText).toEqual({ kind: "NOT_SAVED" });
       const added = ((await database.table("recordRevisions").toArray()) as Row[]).filter((row) => !before.has(row.revisionId));
-      expect(added.map((row) => row.recordType).sort()).toEqual(["GLUCOSE_READING", "INTAKE_EVENT", "MEDICATION_EVENT"]);
+      expect(added.map((row) => row.recordType).sort()).toEqual(["GLUCOSE_READING", "GLUCOSE_READING", "GLUCOSE_READING", "INTAKE_EVENT", "MEDICATION_EVENT"]);
+      expect(added.filter((row) => row.recordType === "GLUCOSE_READING").map((row) => (row.revision.payload.measurement as { enteredValue: string }).enteredValue).sort()).toEqual(["0.0", "6.8", "99.0"]);
       expect(added.find((row) => row.recordType === "MEDICATION_EVENT")!.revision.payload.amountTaken).toEqual({ kind: "KNOWN", amount: { value: "10", unit: "UNIT" } });
       database.close();
       wired.close();
@@ -141,15 +145,15 @@ describe("Tell JagaOn wired in the app (production saving connected)", () => {
  * Finding N-1 (owner-approved 2026-10-10): a card opens its own existing entry screen; every screen-level fallback offers a chooser
  * (Record a reading / Record a meal / Medication schedule) that opens that existing flow directly and BLANK; Back to Today is a
  * separate exit. Checked through the real app and runtime, in EN and ZH, for every affected state: no record is written by navigation,
- * the transcriber is not loaded again, and nothing is fetched. Case 11: the blank reading form still refuses 60.
+ * the transcriber is not loaded again, and nothing is fetched. Case 11 (CR-11): the blank reading form asks for confirmation of 60.
  */
 describe.each(["en-SG", "zh-SG"] as const)("Tell JagaOn manual-entry chooser (N-1) %s", (locale) => {
   const m = getMessages(locale);
   const copy = voiceScreenCopy(m, locale);
   const say =
     locale === "en-SG"
-      ? { outOfRange: "My sugar was 60 mmol", dose: "How many tablets should I take?", reading: "My sugar was 6.8 mmol" }
-      : { outOfRange: "血糖60毫摩尔", dose: "我应该吃几片药？", reading: "血糖六点八毫摩尔" };
+      ? { case11: "My sugar was 60 mmol", dose: "How many tablets should I take?", reading: "My sugar was 6.8 mmol" }
+      : { case11: "血糖60毫摩尔", dose: "我应该吃几片药？", reading: "血糖六点八毫摩尔" };
 
   async function mountApp() {
     const { name, runtime } = await createPopulatedDataset();
@@ -213,7 +217,7 @@ describe.each(["en-SG", "zh-SG"] as const)("Tell JagaOn manual-entry chooser (N-
 
   /** Each affected state: how to reach it, and the status or text that proves it was reached. */
   const STATES: ReadonlyArray<readonly [string, (app: App) => Promise<void>, string]> = [
-    ["review (case 11)", async (app) => speak(app, say.outOfRange), copy.card.outOfRange],
+    ["review (case 11)", async (app) => speak(app, say.case11), copy.card.confirmBody],
     ["redirect-only", async (app) => speak(app, say.dose), m.voice.redirect.transcribedNote],
     ["voice unavailable", async (app) => openVoice(app, { segmentsOnStart: [] }, false), copy.state.unavailable],
     ["provider failure", async (app) => { await openVoice(app, { start: { kind: "FAILED", reason: "PROVIDER_FAILURE" } }); accept(); }, copy.state.unavailable],
@@ -231,7 +235,9 @@ describe.each(["en-SG", "zh-SG"] as const)("Tell JagaOn manual-entry chooser (N-
       },
       copy.state.cancelled,
     ],
-    ["timed out", async (app) => { await openVoice(app, { start: { kind: "STARTED", maxSessionSeconds: 1 } }); accept(); }, copy.state.timedOut],
+    // W-6a (deliberate change): the listening limit stops like Stop. Round 4: a 1 s server limit is not the 60 s limit, so the plain stop
+    // path applies (no "60-second" notice); nothing was captured, so the nothing-understood state.
+    ["listening limit below 60 s, nothing captured", async (app) => { await openVoice(app, { start: { kind: "STARTED", maxSessionSeconds: 1 } }); accept(); }, copy.review.nothingFound],
     ["nothing understood", async (app) => { await openVoice(app, { segmentsOnStart: [] }); accept(); await stopWhenListening(); }, copy.review.nothingFound],
   ];
   const DESTINATIONS: ReadonlyArray<readonly [string, string]> = [
@@ -282,19 +288,22 @@ describe.each(["en-SG", "zh-SG"] as const)("Tell JagaOn manual-entry chooser (N-
   );
 
   it(
-    "case 11: the card opens a blank reading form, and the existing validation refuses 60; nothing is saved",
+    "case 11 (CR-11): the card opens a blank reading form; 60 there asks for confirmation and Cancel saves nothing",
     async () => {
       const app = await mountApp();
       const before = await app.revisions();
-      await speak(app, say.outOfRange);
+      await speak(app, say.case11);
       const [card] = (await screen.findAllByRole("article", {}, { timeout: 30_000 })) as HTMLElement[];
       fireEvent.click(within(card!).getByRole("button", { name: copy.card.manualGlucose }));
       expect(await screen.findByRole("heading", { level: 1, name: m.today.recordReading })).toBeInTheDocument();
       const value = screen.getByRole("textbox", { name: new RegExp(`^${m.glucose.valueLabel}`) }) as HTMLInputElement;
       expect(value.value).toBe("");
       fireEvent.change(value, { target: { value: "60" } });
+      fireEvent.click(screen.getByRole("radio", { name: m.glucose.contextBedtime }));
       fireEvent.click(screen.getByRole("button", { name: m.glucose.saveAction }));
-      expect(await screen.findByText(m.glucose.invalidDecimal)).toBeInTheDocument();
+      expect(await screen.findByText(m.glucose.confirmBody)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: `60.0 ${m.glucose.unit}` })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: m.glucose.cancelConfirm }));
       expect(await app.revisions()).toEqual(before);
       // The other cards keep their own destinations.
       await homeViaTabs();

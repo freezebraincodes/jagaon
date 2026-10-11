@@ -47,6 +47,8 @@ const VOICE_SOURCES = [...DOMAIN_APPLICATION, ...PROVIDER, ...SERVER, "src/types
 const NETWORK = /(?<![.\w$])fetch\b(?!\s*:)|(?:globalThis|window|self)\s*\.\s*fetch\b|XMLHttpRequest|WebSocket|EventSource|sendBeacon/;
 const SIGNER = "src/app/api/voice/usersig/voice-usersig-signer.ts";
 const ROUTE = "src/app/api/voice/usersig/route.ts";
+/** Web Speech (owner-approved scope 2026-10-11, W-3): the passcode-only access route, the voice stream's second environment read. */
+const ACCESS_ROUTE = "src/app/api/voice/access/route.ts";
 const CREDENTIAL_CLIENT = "src/voice/trtc/trtc-credential-client.ts";
 const CONFIG = "src/app/api/voice/usersig/voice-usersig-config.ts";
 
@@ -130,7 +132,12 @@ describe("voice import boundary", () => {
     for (const file of VOICE_SOURCES) {
       const raw = read(file);
       const code = strip(raw);
-      if (file !== ROUTE) expect(code, file).not.toMatch(/process\.env|import\.meta\.env|NEXT_PUBLIC_|\bBearer\b/);
+      if (file !== ROUTE && file !== ACCESS_ROUTE) expect(code, file).not.toMatch(/process\.env|import\.meta\.env|NEXT_PUBLIC_|\bBearer\b/);
+      if (file === ACCESS_ROUTE) {
+        expect(code.match(/process\.env/g), file).toHaveLength(1);
+        expect(code, file).toMatch(/createVoiceAccessHandler\(\{ environment: process\.env \}\)/);
+        expect(code, file).not.toMatch(/NEXT_PUBLIC_|import\.meta\.env|signer|TRTC_/);
+      }
       if (file !== CONFIG) expect(raw, file).not.toMatch(/TRTC_SDK_SECRET_KEY/);
       if (file === CREDENTIAL_CLIENT) expect(code.match(/\bfetch\s*\(/g), file).toHaveLength(1);
       else expect(code, file).not.toMatch(NETWORK);

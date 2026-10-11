@@ -28,7 +28,10 @@ import { FoodGeneralInfoScreen } from "./screens/FoodGeneralInfoScreen";
 import { MoreScreen } from "./screens/MoreScreen";
 import { HelpScreen } from "./screens/HelpScreen";
 import { TellJagaOnScreen } from "./voice/TellJagaOnScreen";
-import { checkTrtcVoiceAvailability, loadTrtcTranscriber } from "./voice/load-trtc-transcriber";
+import { browserWebSpeechSupported, checkVoiceProviderAnswer, checkVoiceProviders, VOICE_PROVIDER_LOADERS, type VoiceTranscriberLoader } from "./voice/voice-provider-wiring";
+import { VoiceProviderSettingsSection } from "./voice/VoiceProviderSettingsSection";
+import { DEV_SETTINGS_ENABLED } from "./dev-settings-flag";
+import { readVoiceProviderPreference, resolveVoiceProvider as resolveVoiceProviderChoice, writeVoiceProviderPreference, type VoiceProviderId, type VoiceProviderProbeAnswer, type VoiceProviderResolution } from "@/application/voice/voice-provider-selection";
 import { createVoiceJournalSave, createVoiceSaveWithRefresh } from "./voice/voice-journal-save";
 import type { VoiceTranscriberPort } from "@/application/voice/voice-transcriber-port";
 import {
@@ -126,15 +129,29 @@ type JagaOnAppProps = {
    */
   aiAssistanceFactory?: AiAssistanceFactory;
   /**
-   * Packet 13 slice: loads the voice transcriber after the voice-cloud disclosure was accepted. Default: the TRTC adapter by dynamic
-   * import. Injected in tests and the isolated e2e harness (a scripted fake there; never a production default).
+   * Packet 13 slice: loads the voice transcriber after the voice-cloud disclosure was accepted. Injected in tests and the isolated e2e
+   * harness (a scripted fake there; never a production default). Web Speech: when this or `voiceAvailabilityProbe` is injected, the
+   * screen runs the single-provider (TRTC-labelled) path as before; otherwise the production provider choice below applies.
    */
   voiceTranscriberLoader?: (accessPasscode: () => string | null) => Promise<VoiceTranscriberPort>;
   /**
-   * Review I-5: the credential-free voice availability probe, called when Tell JagaOn opens (before its disclosure). Default: one
-   * same-origin GET to the voice route (fails closed). Injected in tests and the isolated e2e harness.
+   * Review I-5: the credential-free voice availability probe, called when Tell JagaOn opens (before its disclosure). Injected in tests
+   * and the isolated e2e harness (see `voiceTranscriberLoader`).
    */
   voiceAvailabilityProbe?: () => Promise<boolean>;
+  /**
+   * Web Speech (owner-approved scope 2026-10-11; draft): the production provider choice. The deployment-enabled providers (default: the
+   * credential-free probe), one loader per provider (default: TRTC and Web Speech by dynamic import), the browser's speech-recognition
+   * support (default: feature detection), the build-time developer-settings flag (default: `DEV_SETTINGS_ENABLED`, dev-settings-flag.ts) and
+   * the per-browser storage of the developer's choice (default: the browser storage port). Injected in tests.
+   */
+  voiceProvidersProbe?: () => Promise<readonly VoiceProviderId[]>;
+  /** Round 6: the panel's probe telling a failed check apart (default: the production answer check, or `voiceProvidersProbe` when injected). */
+  voiceProviderAnswerProbe?: () => Promise<VoiceProviderProbeAnswer>;
+  voiceProviderLoaders?: Readonly<Partial<Record<VoiceProviderId, VoiceTranscriberLoader>>>;
+  webSpeechSupported?: () => boolean;
+  devSettingsEnabled?: boolean;
+  voicePreferenceStorageFactory?: () => DemoOnboardingStoragePort;
 };
 
 /**
@@ -192,8 +209,14 @@ export function JagaOnApp({
   deleteAllPortFactory = browserDeleteAllPort,
   restorePortFactory = browserRestorePort,
   aiAssistanceFactory = createBrowserAiAssistance,
-  voiceTranscriberLoader = loadTrtcTranscriber,
-  voiceAvailabilityProbe = checkTrtcVoiceAvailability,
+  voiceTranscriberLoader,
+  voiceAvailabilityProbe,
+  voiceProvidersProbe: injectedProvidersProbe,
+  voiceProviderAnswerProbe,
+  voiceProviderLoaders = VOICE_PROVIDER_LOADERS,
+  webSpeechSupported = browserWebSpeechSupported,
+  devSettingsEnabled = DEV_SETTINGS_ENABLED,
+  voicePreferenceStorageFactory = createBrowserOnboardingStorage,
 }: JagaOnAppProps = {}) {
   const printPort = useMemo(() => printPortFactory(), [printPortFactory]);
   const appointmentNotes = useMemo<AppointmentNoteSelectionRepository>(
@@ -212,6 +235,77 @@ export function JagaOnApp({
   const messages = useMemo<AppMessages>(
     () => getMessages(locale),
     [locale],
+  );
+
+  const voiceProvidersProbe = injectedProvidersProbe ?? checkVoiceProviders;
+  const panelProbe = voiceProviderAnswerProbe ?? injectedProvidersProbe ?? checkVoiceProviderAnswer;
+  /**
+   * Web Speech (owner-approved scope 2026-10-11; draft): the voice provider choice. The developer's stored choice (read once on mount,
+   * applied only while the developer-settings flag is on), the session activity that locks the selector, and the resolver the Tell
+   * JagaOn screen calls at idle (on open and on every restart). The resolver never starts anything; a session's provider is fixed by
+   * the screen. Changing the choice only remembers it (no microphone, no session, no fallback).
+   */
+  const voicePreferenceStorage = useMemo(() => {
+    let port: DemoOnboardingStoragePort | null = null;
+    return () => {
+      try {
+        return (port ??= voicePreferenceStorageFactory());
+      } catch {
+        return null;
+      }
+    };
+  }, [voicePreferenceStorageFactory]);
+  const [voicePreference, setVoicePreference] = useState<VoiceProviderId | null>(null);
+  const voicePreferenceRef = useRef<VoiceProviderId | null>(null);
+  const [voiceSessionActive, setVoiceSessionActive] = useState(false);
+  useEffect(() => {
+    if (!devSettingsEnabled) return;
+    let current = true;
+    // Read once after mount (browser storage is not available while rendering on the server).
+    void Promise.resolve().then(() => {
+      if (!current) return;
+      const stored = readVoiceProviderPreference(voicePreferenceStorage);
+      voicePreferenceRef.current = stored;
+      setVoicePreference(stored);
+    });
+    return () => {
+      current = false;
+    };
+  }, [devSettingsEnabled, voicePreferenceStorage]);
+  const selectVoiceProvider = useCallback(
+    (provider: VoiceProviderId) => {
+      if (!devSettingsEnabled || voiceSessionActive) return;
+      voicePreferenceRef.current = provider;
+      setVoicePreference(provider);
+      // Remembered in this browser when storage allows; in this tab's memory either way. Nothing else happens.
+      writeVoiceProviderPreference(voicePreferenceStorage, provider);
+    },
+    [devSettingsEnabled, voiceSessionActive, voicePreferenceStorage],
+  );
+  const legacyVoice = voiceTranscriberLoader !== undefined || voiceAvailabilityProbe !== undefined;
+  const voiceLanguage = locale === "zh-SG" ? "zh" : "en";
+  const resolveVoiceProvider = useCallback(async (): Promise<VoiceProviderResolution> => {
+    const enabled = await voiceProvidersProbe();
+    let supported = false;
+    try {
+      supported = webSpeechSupported() === true;
+    } catch {
+      supported = false;
+    }
+    const resolution = resolveVoiceProviderChoice({ enabled: Array.isArray(enabled) ? enabled : [], webSpeechSupported: supported, language: voiceLanguage }, { devSettingsEnabled, stored: voicePreferenceRef.current });
+    // No loader for the resolved provider: unavailable (never another provider).
+    return resolution.kind === "AVAILABLE" && !voiceProviderLoaders[resolution.provider] ? { kind: "UNAVAILABLE" } : resolution;
+  }, [voiceProvidersProbe, webSpeechSupported, voiceLanguage, devSettingsEnabled, voiceProviderLoaders]);
+  const loadProviderTranscriber = useCallback(
+    (accessPasscode: () => string | null, provider: VoiceProviderId): Promise<VoiceTranscriberPort> => {
+      const load = voiceProviderLoaders[provider];
+      return load ? load(accessPasscode) : Promise.reject(new Error("VOICE_PROVIDER_UNAVAILABLE"));
+    },
+    [voiceProviderLoaders],
+  );
+  const loadLegacyTranscriber = useCallback(
+    (accessPasscode: () => string | null): Promise<VoiceTranscriberPort> => (voiceTranscriberLoader ?? VOICE_PROVIDER_LOADERS.TRTC)(accessPasscode),
+    [voiceTranscriberLoader],
   );
 
   const [stack, setStack] = useState<NavigationEntry[]>([
@@ -851,6 +945,11 @@ export function JagaOnApp({
             deleteAll={deleteAllPort}
             onDatasetDeleted={noop}
             keepWording={{ value: runtime ? keepWordingOnDevice : null, change: changeKeepWordingOnDevice }}
+            systemSettings={
+              devSettingsEnabled ? (
+                <VoiceProviderSettingsSection locale={locale} probe={panelProbe} webSpeechSupported={webSpeechSupported} stored={voicePreference} onSelect={selectVoiceProvider} busy={voiceSessionActive} />
+              ) : undefined
+            }
           />
         );
       case "MY_MEDICINES":
@@ -963,8 +1062,11 @@ export function JagaOnApp({
             messages={messages}
             locale={locale}
             voiceAvailable={voice !== undefined}
-            checkAvailability={voiceAvailabilityProbe}
-            loadTranscriber={voiceTranscriberLoader}
+            // Web Speech: the production provider choice, or the injected single-provider path (tests, harness).
+            checkAvailability={legacyVoice ? (voiceAvailabilityProbe ?? (async () => (await voiceProvidersProbe()).includes("TRTC"))) : undefined}
+            resolveProvider={legacyVoice ? undefined : resolveVoiceProvider}
+            loadTranscriber={legacyVoice ? loadLegacyTranscriber : loadProviderTranscriber}
+            onSessionActivity={setVoiceSessionActive}
             terminology={voice?.terminology ?? UNAVAILABLE_TERMINOLOGY}
             glucoseEntryUnit="MMOL_PER_L"
             reportedAmountSaved

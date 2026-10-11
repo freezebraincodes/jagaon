@@ -138,17 +138,64 @@ describe("voice session controller", () => {
     expect(controller.takeTranscript()).toBeNull();
   });
 
-  it("the session limit times out: release, no transcript, TIMED_OUT", async () => {
-    const { fake, controller, clock, states } = setup();
+  // W-6a (owner decision 2026-10-11, deliberate change): the limit stops like Stop; it no longer ends TIMED_OUT with the text cleared.
+  it("the session limit stops like Stop: bounded flush, finals (incl. a late final) kept for review, interim dropped, COMPLETED endedBy LIMIT", async () => {
+    const { fake, controller, clock, states } = setup({ release: "MANUAL", providerStop: { kind: "NOT_APPLICABLE" } });
     await controller.start({ language: "en", grant: grant() });
     fake.emit({ kind: "FINAL", segmentId: "s1", text: "Sugar 7" });
+    fake.emit({ kind: "INTERIM", segmentId: "s2", text: "and chick" });
     clock.fire(60_000);
+    expect(controller.snapshot()).toMatchObject({ state: "STOPPING", endedBy: null });
+    expect(fake.calls).toEqual(["start:en", "stop"]);
+    // A final flushed before the release still counts; an unfinished interim does not.
+    fake.emit({ kind: "FINAL", segmentId: "s3", text: "mmol" });
+    fake.emit({ kind: "INTERIM", segmentId: "s4", text: "and rice" });
+    fake.completeRelease();
     await flush();
-    expect(controller.snapshot()).toMatchObject({ state: "TIMED_OUT", microphoneReleased: true, liveText: "" });
-    expect(fake.calls).toEqual(["start:en", "cancel", "release"]);
-    expect(states).toEqual(["STARTING", "LISTENING", "STOPPING", "TIMED_OUT"]);
-    fake.emit({ kind: "FINAL", segmentId: "s2", text: "late" });
-    expect(controller.takeTranscript()).toBeNull();
+    expect(controller.snapshot()).toMatchObject({ state: "COMPLETED", endedBy: "LIMIT", microphoneReleased: true, providerStop: { kind: "NOT_APPLICABLE" }, liveText: "" });
+    expect(states).toEqual(["STARTING", "LISTENING", "STOPPING", "COMPLETED"]);
+    expect(clock.pendingDelays()).toEqual([]);
+    fake.emit({ kind: "FINAL", segmentId: "s5", text: "late" });
+    expect(controller.takeTranscript()).toBe("Sugar 7 mmol");
+    // Nothing restarts; the next session starts clean only on an explicit start.
+    expect(fake.calls).toEqual(["start:en", "stop", "release"]);
+    await controller.start({ language: "en", grant: grant() });
+    expect(controller.snapshot()).toMatchObject({ state: "LISTENING", endedBy: null });
+  });
+
+  it("the limit with nothing final captured completes with an empty transcript; a Cancel during the limit flush still wins", async () => {
+    const empty = setup();
+    await empty.controller.start({ language: "en", grant: grant() });
+    empty.fake.emit({ kind: "INTERIM", segmentId: "s1", text: "unfinished" });
+    empty.clock.fire(60_000);
+    await flush();
+    expect(empty.controller.snapshot()).toMatchObject({ state: "COMPLETED", endedBy: "LIMIT" });
+    expect(empty.controller.takeTranscript()).toBe("");
+    const raced = setup({ release: "MANUAL" });
+    await raced.controller.start({ language: "en", grant: grant() });
+    raced.fake.emit({ kind: "FINAL", segmentId: "s1", text: "Sugar 7" });
+    raced.clock.fire(60_000);
+    const cancel = raced.controller.cancel();
+    raced.fake.completeRelease();
+    expect(await cancel).toMatchObject({ state: "CANCELLED", endedBy: null });
+    expect(raced.controller.takeTranscript()).toBeNull();
+  });
+
+  it("TRTC-style release at the limit (fake transcriber): stop (not cancel), the provider-stop outcome is carried, finals kept", async () => {
+    for (const providerStop of [{ kind: "CONFIRMED" }, { kind: "UNCONFIRMED", reason: "NO_ROBOT_LEFT_EVENT", robotId: "robot-1", taskId: "task-1" }] as const) {
+      const { fake, controller, clock } = setup({ providerStop, release: "MANUAL" }, 120);
+      await controller.start({ language: "en", grant: grant() });
+      // The fake server maximum is 60 s; the smaller limit applies.
+      expect(clock.pendingDelays()).toEqual([60_000]);
+      fake.emit({ kind: "FINAL", segmentId: "s1", text: "My sugar was 6.8 mmol" });
+      clock.fire(60_000);
+      expect(controller.snapshot().state).toBe("STOPPING");
+      fake.completeRelease();
+      await flush();
+      expect(controller.snapshot(), providerStop.kind).toMatchObject({ state: "COMPLETED", endedBy: "LIMIT", microphoneReleased: true, providerStop });
+      expect(fake.calls).toEqual(["start:en", "stop", "release"]);
+      expect(controller.takeTranscript()).toBe("My sugar was 6.8 mmol");
+    }
   });
 
   it("the start timeout aborts the start; a late STARTED is cancelled and released before FAILED", async () => {
@@ -330,6 +377,86 @@ describe("voice session controller", () => {
     const controller = createVoiceSessionController({ transcriber: { start: async () => ({ kind: "STARTED", session: rejecting, maxSessionSeconds: 60 }) } as unknown as VoiceTranscriberPort, timers: manualTimers().timers, startTimeoutMs: 15_000, maxSessionSeconds: 90 });
     await controller.start({ language: "en", grant: grant() });
     expect(await controller.cancel()).toMatchObject({ state: "CANCELLED", microphoneReleased: false, providerStop: null });
+  });
+
+  // Web Speech (owner-approved scope 2026-10-11): the provider-ended path and the NOT_APPLICABLE provider stop.
+  it("a provider end while LISTENING completes the session keeping the finals, after the release, with endedBy PROVIDER; nothing restarts", async () => {
+    const { fake, controller, states, clock } = setup({ release: "MANUAL", providerStop: { kind: "NOT_APPLICABLE" } });
+    await controller.start({ language: "en", grant: grant() });
+    fake.emit({ kind: "FINAL", segmentId: "s1", text: "My sugar was 6.8 mmol" });
+    fake.emit({ kind: "INTERIM", segmentId: "s2", text: "and" });
+    fake.providerEnd();
+    expect(controller.snapshot()).toMatchObject({ state: "STOPPING", endedBy: null });
+    // Finals until the release resolves still count (as with Stop).
+    fake.emit({ kind: "FINAL", segmentId: "s2", text: "and chicken rice" });
+    fake.providerEnd();
+    fake.completeRelease();
+    await flush();
+    expect(controller.snapshot()).toMatchObject({ state: "COMPLETED", endedBy: "PROVIDER", microphoneReleased: true, providerStop: { kind: "NOT_APPLICABLE" }, liveText: "" });
+    expect(controller.takeTranscript()).toBe("My sugar was 6.8 mmol and chicken rice");
+    expect(states).toEqual(["STARTING", "LISTENING", "STOPPING", "COMPLETED"]);
+    // One release (a stop, never a cancel), no second start, no timer left.
+    expect(fake.calls).toEqual(["start:en", "stop", "release"]);
+    expect(clock.pendingDelays()).toEqual([]);
+    // The next session starts clean (endedBy reset) and only by an explicit start.
+    await controller.start({ language: "en", grant: grant() });
+    expect(controller.snapshot()).toMatchObject({ state: "LISTENING", endedBy: null });
+  });
+
+  it("a provider end is ignored outside LISTENING, for a stale session, and after the person's own Stop or Cancel", async () => {
+    const starting = setup({ start: { kind: "MANUAL" } });
+    void starting.controller.start({ language: "en", grant: grant() });
+    starting.fake.providerEnd();
+    expect(starting.controller.snapshot().state).toBe("STARTING");
+
+    const stopped = setup({ release: "MANUAL" });
+    await stopped.controller.start({ language: "en", grant: grant() });
+    stopped.fake.emit({ kind: "FINAL", segmentId: "s1", text: "Sugar 7" });
+    const stopping = stopped.controller.stop();
+    stopped.fake.providerEnd();
+    stopped.fake.completeRelease();
+    expect(await stopping).toMatchObject({ state: "COMPLETED", endedBy: null });
+
+    const cancelled = setup({ release: "MANUAL" });
+    await cancelled.controller.start({ language: "en", grant: grant() });
+    const cancelling = cancelled.controller.cancel();
+    cancelled.fake.providerEnd();
+    cancelled.fake.completeRelease();
+    expect(await cancelling).toMatchObject({ state: "CANCELLED", endedBy: null });
+
+    // A provider end, then the person's Cancel before the release: the cancel wins, nothing kept, endedBy null.
+    const raced = setup({ release: "MANUAL" });
+    await raced.controller.start({ language: "en", grant: grant() });
+    raced.fake.emit({ kind: "FINAL", segmentId: "s1", text: "Sugar 7" });
+    raced.fake.providerEnd();
+    const cancel = raced.controller.cancel();
+    raced.fake.completeRelease();
+    expect(await cancel).toMatchObject({ state: "CANCELLED", endedBy: null });
+    expect(raced.controller.takeTranscript()).toBeNull();
+
+    // A stale session's provider end does not touch the current one.
+    const requests: Array<{ onProviderEnded?: () => void }> = [];
+    const session = { stop: async () => ({ microphoneReleased: true, providerStop: { kind: "NOT_APPLICABLE" } }), cancel: async () => ({ microphoneReleased: true, providerStop: { kind: "NOT_APPLICABLE" } }) };
+    const stale = createVoiceSessionController({ transcriber: { start: async (request: { onProviderEnded?: () => void }) => (requests.push(request), { kind: "STARTED", session, maxSessionSeconds: 60 }) } as unknown as VoiceTranscriberPort, timers: manualTimers().timers, startTimeoutMs: 15_000, maxSessionSeconds: 90 });
+    await stale.start({ language: "en", grant: grant() });
+    await stale.stop();
+    await stale.start({ language: "en", grant: grant() });
+    requests[0]!.onProviderEnded?.();
+    await flush();
+    expect(stale.snapshot()).toMatchObject({ state: "LISTENING", endedBy: null });
+    requests[1]!.onProviderEnded?.();
+    await flush();
+    expect(stale.snapshot()).toMatchObject({ state: "COMPLETED", endedBy: "PROVIDER" });
+  });
+
+  it("accepts the NOT_APPLICABLE provider stop on release and on a FAILED start", async () => {
+    const notApplicable = { kind: "NOT_APPLICABLE" } as const;
+    const ok = setup({ providerStop: notApplicable });
+    await ok.controller.start({ language: "en", grant: grant() });
+    expect(await ok.controller.cancel()).toMatchObject({ state: "CANCELLED", providerStop: notApplicable, endedBy: null });
+    const failed = setup({ start: { kind: "FAILED", reason: "UNSUPPORTED_BROWSER", providerStop: notApplicable } });
+    await failed.controller.start({ language: "en", grant: grant() });
+    expect(failed.controller.snapshot()).toMatchObject({ state: "FAILED", failureReason: "UNSUPPORTED_BROWSER", providerStop: notApplicable, endedBy: null });
   });
 
   it("persists nothing and logs nothing", async () => {

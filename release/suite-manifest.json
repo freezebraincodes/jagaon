@@ -140,8 +140,10 @@
             "src/application/transcript-extraction/voice-remote-extraction-adapter.test.ts",
             "src/application/voice/fake-voice-transcriber.test.ts",
             "src/application/voice/voice-cloud-disclosure.test.ts",
+            "src/application/voice/voice-provider-selection.test.ts",
             "src/application/voice/voice-session-controller.test.ts",
             "src/components/jagaon/voice/voice-journal-save.test.ts",
+            "src/components/jagaon/voice/voice-provider-wiring.test.ts",
             "src/components/jagaon/voice/voice-remote-merge.test.ts",
             "src/components/jagaon/voice/voice-screen-copy.test.ts",
             "src/config/release-profile.test.ts",
@@ -197,8 +199,10 @@
             "src/domain/shared/typed-revision-ref.test.ts",
             "src/domain/shared/validation.test.ts",
             "src/domain/transcript-extraction/transcript-extraction-validator.test.ts",
+            "src/domain/voice/glucose-entry-format.test.ts",
             "src/domain/voice/voice-advice-redirect.test.ts",
             "src/domain/voice/voice-candidate-extractor.test.ts",
+            "src/domain/voice/voice-bracket-exclusion.test.ts",
             "src/domain/voice/voice-extractor-cases.test.ts",
             "src/domain/voice/voice-remote-extraction-gate.test.ts",
             "src/inquiry/inquiry-engine.test.ts",
@@ -208,8 +212,10 @@
             "src/safety/decimal-comparison.test.ts",
             "src/safety/healthhub-hypoglycaemia-demo.test.ts",
             "src/safety/index.test.ts",
+            "src/voice/trtc/excluded/trtc-sdk-stub.test.ts",
             "src/voice/trtc/trtc-credential-client.test.ts",
             "src/voice/trtc/trtc-transcriber-adapter.test.ts",
+            "src/voice/web-speech/web-speech-transcriber-adapter.test.ts",
             "tests/release/evidence.test.ts",
             "tests/release/release-core.test.ts",
             "tests/release/run-suite.test.ts",
@@ -288,6 +294,7 @@
             "src/components/jagaon/primitives/TimeWheel.test.tsx",
             "src/components/jagaon/screens/CarePreparationScreen.test.tsx",
             "src/components/jagaon/screens/CareSummaryPreviewScreen.test.tsx",
+            "src/components/jagaon/screens/GlucoseConfirmationDownstream.test.tsx",
             "src/components/jagaon/screens/JournalEntryScreens.test.tsx",
             "src/components/jagaon/screens/MedicationInformationScreen.test.tsx",
             "src/components/jagaon/screens/MedicationScheduleScreen.test.tsx",
@@ -301,8 +308,11 @@
             "src/components/jagaon/screens/TimeWheelScreens.test.tsx",
             "src/components/jagaon/screens/TodayScreen.test.tsx",
             "src/components/jagaon/voice/JagaOnApp.voice.test.tsx",
+            "src/components/jagaon/voice/JagaOnApp.webspeech.test.tsx",
             "src/components/jagaon/voice/TellJagaOnScreen.journal.test.tsx",
             "src/components/jagaon/voice/TellJagaOnScreen.test.tsx",
+            "src/components/jagaon/voice/TellJagaOnScreen.webspeech.test.tsx",
+            "src/components/jagaon/voice/VoiceProviderSettingsSection.test.tsx",
             "src/storage/app-preference-row.test.ts",
             "src/storage/authoritative-command-transaction.test.ts",
             "src/storage/bootstrap-locale-repository.test.ts",
@@ -348,7 +358,7 @@
       "groups": [
         {
           "runner": "playwright",
-          "config": "playwright.config.ts",
+          "config": "internal-docs/testing/playwright/configs/playwright.config.ts",
           "files": [
             "e2e/packet-10/cross-browser.spec.ts",
             "e2e/packet-10/data-backup.spec.ts"
@@ -356,7 +366,7 @@
         },
         {
           "runner": "playwright",
-          "config": "playwright.packet-11c.config.ts",
+          "config": "internal-docs/testing/playwright/configs/playwright.packet-11c.config.ts",
           "files": [
             "e2e/packet-11c/harness-care.spec.ts",
             "e2e/packet-11c/harness-history.spec.ts",
@@ -366,7 +376,7 @@
         },
         {
           "runner": "playwright",
-          "config": "playwright.packet-13.config.ts",
+          "config": "internal-docs/testing/playwright/configs/playwright.packet-13.config.ts",
           "files": [
             "e2e/packet-13/isolation.spec.ts",
             "e2e/packet-13/voice-demo.spec.ts",
@@ -380,7 +390,7 @@
       "groups": [
         {
           "runner": "playwright",
-          "config": "playwright.packet-12.config.ts",
+          "config": "internal-docs/testing/playwright/configs/playwright.packet-12.config.ts",
           "files": [
             "e2e/packet-12/critical-journey.spec.ts",
             "e2e/packet-12/time-wheel-rapid-keys.spec.ts"
@@ -393,7 +403,7 @@
       "groups": [
         {
           "runner": "playwright",
-          "config": "playwright.packet-11c.config.ts",
+          "config": "internal-docs/testing/playwright/configs/playwright.packet-11c.config.ts",
           "files": [
             "e2e/packet-11c/production.spec.ts"
           ]
@@ -413,10 +423,12 @@
             "src/app/api/ai/task/route.test.ts",
             "src/app/api/ai/transcript/route.test.ts",
             "src/app/api/onemap/search/route.test.ts",
+            "src/app/api/voice/access/voice-access-handler.test.ts",
             "src/app/api/voice/usersig/voice-minute-ledger.test.ts",
             "src/app/api/voice/usersig/voice-usersig-config.test.ts",
             "src/app/api/voice/usersig/voice-usersig-handler.test.ts",
             "src/app/api/voice/usersig/voice-usersig-signer.test.ts",
+            "src/config/build-exclusions.test.ts",
             "tests/packet-11c-c7-harness-isolation.test.ts",
             "tests/release/build-artifact.test.ts",
             "tests/release/headers.test.ts"

@@ -19,6 +19,8 @@ export type FakeVoiceTranscriberScript = Readonly<{
   providerStop?: VoiceProviderStop;
   /** Segments emitted right after a STARTED start. */
   segmentsOnStart?: readonly VoiceSegment[];
+  /** After `segmentsOnStart`, report that the provider ended the session by itself (Web Speech's early end; draft). */
+  providerEndsAfterSegments?: boolean;
 }>;
 
 type VoiceStartResultScript =
@@ -33,6 +35,8 @@ export type FakeVoiceTranscriber = VoiceTranscriberPort &
     /** Emits to the session started by the given call (0-based), to prove stale sessions are dropped. */
     emitTo(sessionIndex: number, segment: VoiceSegment): void;
     fail(reason: VoiceSessionFailureReason): void;
+    /** Reports that the provider ended the latest session by itself (Web Speech's browser-initiated end; draft). */
+    providerEnd(): void;
     completeStart(result?: VoiceStartResultScript): void;
     completeRelease(): void;
     lastSignal(): AbortSignal | null;
@@ -75,6 +79,8 @@ export function createFakeVoiceTranscriber(script: FakeVoiceTranscriberScript = 
     const started = Object.freeze({ kind: "STARTED" as const, session: handleFor(), maxSessionSeconds: result.maxSessionSeconds ?? DEFAULT_MAX_SESSION_SECONDS });
     queueMicrotask(() => {
       for (const segment of script.segmentsOnStart ?? []) request.onSegment(segment);
+      // A macrotask later, so the caller has seen STARTED (a provider end is only meaningful for a listening session).
+      if (script.providerEndsAfterSegments === true) globalThis.setTimeout(() => request.onProviderEnded?.(), 0);
     });
     return started;
   }
@@ -100,6 +106,9 @@ export function createFakeVoiceTranscriber(script: FakeVoiceTranscriberScript = 
     },
     fail(reason: VoiceSessionFailureReason) {
       sessions[sessions.length - 1]?.onFailure(reason);
+    },
+    providerEnd() {
+      sessions[sessions.length - 1]?.onProviderEnded?.();
     },
     completeStart(result: VoiceStartResultScript = { kind: "STARTED" }) {
       const resolve = pendingStart;

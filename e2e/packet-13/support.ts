@@ -31,10 +31,14 @@ export const SCRIPTS = {
     dose: "How many tablets should I take?",
     mixed: "sugar 15 mmol, how many units now",
     otherUnit: "Sugar reading 120 mg/dL",
-    // 13s.3 (extractor round 4): a health question (HEALTH_QUESTION), an out-of-range spoken value, a reported amount (TAKEN: stored;
-    // SKIPPED: not stored).
+    // 13s.3 (extractor round 4): a health question (HEALTH_QUESTION), a reported amount (TAKEN: stored; SKIPPED: not stored).
+    // CR-11 (owner decisions 2026-10-11): case 11, "60 mmol/L", now asks for an explicit number-and-unit confirmation.
     health: "Is a sugar of 15 dangerous?",
     outOfRange: "My sugar was 60 mmol",
+    sixtyWords: "My sugar was sixty mmol",
+    zero: "sugar zero mmol",
+    sixtyNoUnit: "My sugar was sixty",
+    mixedSixty: "My sugar was 60 mmol, I had chicken rice for lunch",
     amountTaken: "I injected 10 units of my dark pen",
     amountSkipped: "I skipped 10 units of my dark pen",
   },
@@ -52,6 +56,10 @@ export const SCRIPTS = {
     otherUnit: "血糖120mg",
     health: "血糖十五危险吗？",
     outOfRange: "血糖60毫摩尔",
+    sixtyWords: "血糖六十毫摩尔",
+    zero: "血糖零毫摩尔",
+    sixtyNoUnit: "血糖六十",
+    mixedSixty: "血糖60毫摩尔，我午饭吃了鸡饭",
     amountTaken: "我打了十个单位的黑色的笔",
     amountSkipped: "我没有打十个单位的黑色的笔",
   },
@@ -78,4 +86,45 @@ export async function speak(page: Page, m: AppMessages, say: string): Promise<vo
   const stop = page.getByRole("button", { name: m.voice.state.stop });
   await expect(stop).toBeEnabled();
   await stop.click();
+}
+
+/** CR-11 record-count audit (the R-28 method): IndexedDB `jagaon` recordRevisions / recordHeads counted by record type (read-only). */
+export type RecordCounts = Record<string, number>;
+export async function recordCounts(page: Page): Promise<RecordCounts> {
+  return page.evaluate(
+    () =>
+      new Promise<Record<string, number>>((resolve, reject) => {
+        const open = indexedDB.open("jagaon");
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const out: Record<string, number> = {};
+          const tx = db.transaction(["recordRevisions", "recordHeads"], "readonly");
+          for (const store of ["recordRevisions", "recordHeads"]) {
+            const request = tx.objectStore(store).getAll();
+            request.onsuccess = () => {
+              for (const row of request.result as Array<{ recordType: string }>) out[`${store}.${row.recordType}`] = (out[`${store}.${row.recordType}`] ?? 0) + 1;
+            };
+          }
+          tx.oncomplete = () => {
+            db.close();
+            resolve(out);
+          };
+        };
+      }),
+  );
+}
+/**
+ * Derived records the background intelligence coordinator writes on its own schedule after the profile starts (never from a voice or
+ * manual save); the audit compares patient records only.
+ */
+const DERIVED_RECORD_TYPES = ["LEARNED_KNOWLEDGE", "PATTERN_EVIDENCE_SNAPSHOT", "PATTERN_OBSERVATION"];
+/** The changed patient-record counts between two audits (only non-zero differences; derived intelligence records excluded). */
+export function countDelta(before: RecordCounts, after: RecordCounts): RecordCounts {
+  return Object.fromEntries(
+    [...new Set([...Object.keys(before), ...Object.keys(after)])]
+      .filter((key) => !DERIVED_RECORD_TYPES.includes(key.split(".")[1]!))
+      .map((key) => [key, (after[key] ?? 0) - (before[key] ?? 0)])
+      .filter(([, value]) => value !== 0),
+  );
 }

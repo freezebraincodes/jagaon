@@ -2,6 +2,7 @@ import { VOICE_AMBIGUITY_REASONS, VOICE_MAX_CANDIDATES, VOICE_SOURCE_PHRASE_MAX_
 import { voiceWordMatcher } from "@/domain/voice/voice-advice-redirect";
 import { VOICE_COUNTERFACTUAL_CUES, voiceVocabulary } from "@/domain/voice/voice-vocabulary";
 import { TRANSCRIPT_EXTRACTION_CONTRACT_VERSION, type ExtractionFact, type ExtractionOutput, type TranscriptExtractionLocale } from "@/domain/transcript-extraction/transcript-extraction-contract";
+import { isMmolEntryValue } from "@/domain/voice/glucose-entry-format";
 import { hasCounterfactualCue, hasNegationCue, spokenNumbers } from "@/domain/transcript-extraction/transcript-extraction-lexicon";
 
 /** Review minor: the canonical decimal text (no leading zeros in the integer part: "06.80" → "6.80"), never the raw model string. */
@@ -16,7 +17,8 @@ const canonicalValue = (value: string) => value.replace(/^0+(?=\d)/, "");
  * not model (CORRECTION, OTHER_PERSON, MULTIPLE_NUMBERS) and the voice slice's broader uncertainty and status-unknown cues are derived
  * locally from the span's words with the voice slice's own vocabulary (read-only), and only ever ADD caution:
  * - GLUCOSE_READING: `valueText`, unit MMOL_PER_L with `unitSource: SPOKEN` only when spoken, else UNSTATED/null (+UNIT_UNSTATED). Never
- *   APP_DEFAULT (the default unit is applied locally only). A mg/dL reading or a value outside the voice format becomes UNSUPPORTED_SPAN.
+ *   APP_DEFAULT (the default unit is applied locally only). A mg/dL reading or a value outside the voice format (CR-11: 1–4 integer
+ *   digits, at most one decimal) becomes UNSUPPORTED_SPAN.
  * - MEAL_NOTE: the meal `slot` only when exactly one slot word is in the span; `itemText` null (the contract does not isolate food words).
  * - MEDICATION_OCCURRENCE: the status (UNKNOWN when a voice status-unknown cue such as "forgot" is in the span), `medicineRef` ALWAYS
  *   UNRESOLVED with the verbatim description (else the span's words); mapping to a medicine is local. 13s.3: a spoken amount fills
@@ -31,7 +33,6 @@ export type VoiceMapping =
   | Readonly<{ kind: "MAPPED"; candidates: readonly VoiceCandidate[]; downgraded: number }>
   | Readonly<{ kind: "UNMAPPABLE"; reason: "PHRASE_TOO_LONG" | "TOO_MANY_CANDIDATES" | "VOICE_SCHEMA" | "SPAN_MISMATCH" }>;
 
-const VALUE_TEXT = /^\d{1,2}(?:\.\d{1,2})?$/;
 
 function cues(language: VoiceLanguage) {
   const vocabulary = voiceVocabulary(language);
@@ -72,7 +73,9 @@ function mapFact(fact: ExtractionFact, language: VoiceLanguage): Built {
   };
 
   if (fact.kind === "GLUCOSE_READING") {
-    if (fact.unit === "MG_PER_DL" || fact.value === null || !VALUE_TEXT.test(fact.value)) return unsupported;
+    // CR-11 (owner R-6; the feature stays off): the same new-entry format as the voice slice (1–4 integer digits, at most one decimal);
+    // "6.80" or "9.25" is never shortened or rounded: it becomes UNSUPPORTED_SPAN.
+    if (fact.unit === "MG_PER_DL" || fact.value === null || !isMmolEntryValue(canonicalValue(fact.value))) return unsupported;
     const reasons = new Set(shared);
     if (fact.unit === null) reasons.add("UNIT_UNSTATED");
     if (new Set(spokenNumbers(text)).size > 1) reasons.add("MULTIPLE_NUMBERS");

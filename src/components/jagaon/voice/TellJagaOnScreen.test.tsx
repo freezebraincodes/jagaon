@@ -330,26 +330,278 @@ describe("Tell JagaOn screen", () => {
     expect(skipped.onManualEntry).toHaveBeenCalledWith("MEDICATION");
   });
 
-  for (const [locale, text] of [["en-SG", "My sugar was 60 mmol"], ["zh-SG", "血糖60毫摩尔"]] as const) {
-    it(`${locale}: 13s.3 OUT_OF_RANGE: "${text}" is shown in plain words, never one-tap saved; a typed out-of-range value is refused by the review`, async () => {
+  // CR-11 (owner decisions 2026-10-11, design v3.1): this replaces the 13s.3 OUT_OF_RANGE test (a 60 was refused; it now confirms).
+  for (const [locale, digits, words, zero, unstated] of [
+    ["en-SG", "My sugar was 60 mmol", "My sugar was sixty mmol", "sugar zero mmol", "My sugar was sixty"],
+    ["zh-SG", "血糖60毫摩尔", "血糖六十毫摩尔", "血糖零毫摩尔", "血糖六十"],
+  ] as const) {
+    const panelOf = (card: HTMLElement, value: string) => within(card).getByRole("region", { name: `${value} mmol/L` });
+
+    it(`${locale}: CR-11 AC-1 / AC-2 / AC-6: "${digits}" and "${words}" open the confirmation (60.0 mmol/L); Save as shown saves 60.0 once`, async () => {
+      for (const text of [digits, words]) {
+        const context = setup({ locale, text });
+        await speakAndStop(context);
+        const card = (await screen.findAllByRole("article"))[0]!;
+        const panel = panelOf(card, "60.0");
+        expect(within(panel).getByRole("heading", { name: "60.0 mmol/L" })).toBeInTheDocument();
+        expect(within(panel).getByText(context.pending.card.confirmBody)).toBeInTheDocument();
+        expect(within(panel).getByText(context.pending.card.unitSpoken)).toBeInTheDocument();
+        expect(within(panel).getAllByRole("button").map((button) => button.textContent)).toEqual([context.pending.card.saveAsShown, context.pending.card.editReading, context.pending.card.cancel]);
+        expect(within(card).queryByRole("button", { name: context.pending.card.save })).toBeNull();
+        expect(card.textContent).not.toMatch(/verified|已验证|核实无误|dangerous|危险|too high|过高/i);
+        const saveAsShown = within(panel).getByRole("button", { name: context.pending.card.saveAsShown });
+        fireEvent.click(saveAsShown);
+        fireEvent.click(saveAsShown);
+        await waitFor(() => expect(within(card).getByRole("status")).toHaveTextContent(context.pending.card.saved));
+        expect(context.onSaveFacts).toHaveBeenCalledTimes(1);
+        expect(context.onSaveFacts).toHaveBeenCalledWith({ kind: "GLUCOSE", valueText: "60.0", unit: "MMOL_PER_L", unitSource: "SPOKEN" });
+        expect(within(card).queryByText(context.pending.card.confirmBody)).toBeNull();
+        expect(within(card).getByText("60.0")).toBeInTheDocument();
+        expect(within(card).getByRole("button", { name: context.pending.card.save })).toBeDisabled();
+        cleanup();
+      }
+    });
+
+    it(`${locale}: CR-11 AC-3: the latch: Edit reading to 45 returns to the confirmation (focused); saved as 45.0`, async () => {
+      const context = setup({ locale, text: digits });
+      await speakAndStop(context);
+      const card = (await screen.findAllByRole("article"))[0]!;
+      fireEvent.click(within(panelOf(card, "60.0")).getByRole("button", { name: context.pending.card.editReading }));
+      const input = within(card).getByLabelText(context.pending.card.valueLabel) as HTMLInputElement;
+      expect(input.value).toBe("");
+      fireEvent.change(input, { target: { value: "45" } });
+      fireEvent.click(within(card).getByRole("button", { name: context.pending.card.save }));
+      const panel = panelOf(card, "45.0");
+      expect(within(panel).getByRole("heading", { name: "45.0 mmol/L" })).toHaveFocus();
+      expect(within(panel).getByText(context.pending.card.confirmBody)).toBeInTheDocument();
+      expect(context.onSaveFacts).not.toHaveBeenCalled();
+      fireEvent.click(within(panel).getByRole("button", { name: context.pending.card.saveAsShown }));
+      await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledWith({ kind: "GLUCOSE", valueText: "45.0", unit: "MMOL_PER_L", unitSource: "PERSON" }));
+      expect(context.onSaveFacts).toHaveBeenCalledTimes(1);
+    });
+
+    it(`${locale}: CR-11 AC-4 / AC-5: Cancel writes nothing; the card stays unsaved; Save this opens the confirmation again`, async () => {
+      const context = setup({ locale, text: digits });
+      await speakAndStop(context);
+      const card = (await screen.findAllByRole("article"))[0]!;
+      fireEvent.click(within(panelOf(card, "60.0")).getByRole("button", { name: context.pending.card.cancel }));
+      expect(within(card).queryByRole("region")).toBeNull();
+      expect(within(card).getByText("60.0")).toBeInTheDocument();
+      expect(within(card).getByRole("status")).toHaveTextContent("");
+      fireEvent.click(within(card).getByRole("button", { name: context.pending.card.save }));
+      expect(within(panelOf(card, "60.0")).getByRole("heading")).toHaveFocus();
+      fireEvent.click(within(panelOf(card, "60.0")).getByRole("button", { name: context.pending.card.editReading }));
+      fireEvent.click(within(card).getByRole("button", { name: context.pending.card.leaveOut }));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(context.onSaveFacts).not.toHaveBeenCalled();
+    });
+
+    it(`${locale}: round 5 (revised B): a hedged reading always opens the confirmation with the number and unit; an unstated unit needs the tick; nothing saves before Save as shown`, async () => {
+      const spoken = locale === "en-SG" ? "My sugar was about 7.8 mmol" : "血糖大约七点八毫摩尔";
+      const context = setup({ locale, text: spoken, glucoseEntryUnit: "MMOL_PER_L" });
+      await speakAndStop(context);
+      const card = (await screen.findAllByRole("article"))[0]!;
+      const panel = panelOf(card, "7.8");
+      expect(within(panel).getByText(context.pending.card.confirmBody)).toBeInTheDocument();
+      expect(within(panel).getByText(context.pending.card.unitSpoken)).toBeInTheDocument();
+      expect(within(card).queryByRole("button", { name: context.pending.card.save })).toBeNull();
+      expect(context.onSaveFacts).not.toHaveBeenCalled();
+      fireEvent.click(within(panel).getByRole("button", { name: context.pending.card.saveAsShown }));
+      await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledWith({ kind: "GLUCOSE", valueText: "7.8", unit: "MMOL_PER_L", unitSource: "SPOKEN" }));
+      cleanup();
+      const unstated = setup({ locale, text: locale === "en-SG" ? "sugar ~7" : "血糖七左右", glucoseEntryUnit: "MMOL_PER_L" });
+      await speakAndStop(unstated);
+      const unstatedCard = (await screen.findAllByRole("article"))[0]!;
+      const unstatedPanel = panelOf(unstatedCard, "7.0");
+      expect(within(unstatedPanel).queryByText(unstated.pending.card.unitAppDefault)).toBeNull();
+      const saveAsShown = within(unstatedPanel).getByRole("button", { name: unstated.pending.card.saveAsShown });
+      expect(saveAsShown).toBeDisabled();
+      fireEvent.click(within(unstatedPanel).getByLabelText(unstated.pending.card.confirmUnit));
+      fireEvent.click(saveAsShown);
+      await waitFor(() => expect(unstated.onSaveFacts).toHaveBeenCalledWith({ kind: "GLUCOSE", valueText: "7.0", unit: "MMOL_PER_L", unitSource: "PERSON" }));
+      expect(unstated.onSaveFacts).toHaveBeenCalledTimes(1);
+    });
+
+    it(`${locale}: round 5 (revised B): the hedge latch survives Cancel and an edit to 6`, async () => {
+      const context = setup({ locale, text: locale === "en-SG" ? "My sugar was about 7.8 mmol" : "血糖大约七点八毫摩尔" });
+      await speakAndStop(context);
+      const card = (await screen.findAllByRole("article"))[0]!;
+      fireEvent.click(within(panelOf(card, "7.8")).getByRole("button", { name: context.pending.card.cancel }));
+      fireEvent.click(within(card).getByRole("button", { name: context.pending.card.edit }));
+      fireEvent.change(within(card).getByLabelText(context.pending.card.valueLabel), { target: { value: "6" } });
+      fireEvent.click(within(card).getByRole("button", { name: context.pending.card.save }));
+      expect(within(panelOf(card, "6.0")).getByText(context.pending.card.confirmBody)).toBeInTheDocument();
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(context.onSaveFacts).not.toHaveBeenCalled();
+    });
+
+    it(`${locale}: round 8: a signed medicine amount is never shown or saved as an amount; the card needs an edit (existing copy) and an edit saves no amount`, async () => {
+      const text = locale === "en-SG" ? "I injected -2 units of my dark pen" : "我打了-2个单位的黑色的笔";
       const context = setup({ locale, text });
       await speakAndStop(context);
       const card = (await screen.findAllByRole("article"))[0]!;
-      expect(within(card).getByText(context.pending.card.outOfRange)).toBeInTheDocument();
-      expect(within(card).queryByText(context.pending.card.unitSpoken)).toBeNull();
+      expect(within(card).getByText(context.pending.card.needsEdit)).toBeInTheDocument();
+      expect(within(card).queryByText(context.pending.card.amountReported(locale === "en-SG" ? "2 units" : "2 个单位"))).toBeNull();
+      expect(within(card).queryByText(context.pending.card.amountWillBeSaved)).toBeNull();
+      expect(card.textContent).not.toMatch(/(?<![-−\d])2 (?:units|个单位)/);
       expect(within(card).getByRole("button", { name: context.pending.card.save })).toBeDisabled();
       fireEvent.click(within(card).getByRole("button", { name: context.pending.card.edit }));
+      fireEvent.change(within(card).getByLabelText(context.pending.card.chooseMedicine), { target: { value: DARK.recordId } });
+      fireEvent.change(within(card).getByLabelText(context.pending.card.statusQuestion), { target: { value: "TAKEN" } });
+      fireEvent.click(within(card).getByRole("button", { name: context.pending.card.save }));
+      await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledWith({ kind: "MEDICATION_EVENT", medication: DARK, status: "TAKEN", reportedAmount: null }));
+    });
+
+    it(`${locale}: round 3 (ruling 5): a confirmation that is already open when the review appears does not take focus`, async () => {
+      const context = setup({ locale, text: digits });
+      await speakAndStop(context);
+      const card = (await screen.findAllByRole("article"))[0]!;
+      const panel = panelOf(card, "60.0");
+      await act(async () => {
+        await Promise.resolve();
+      });
+      // Nothing moves focus when the review loads (the Stop control that had it is gone): focus stays on the document body, outside
+      // the card and its panel; only the person's own action moves it to the panel heading (see the I-2 test).
+      expect(panel.contains(document.activeElement)).toBe(false);
+      expect(card.contains(document.activeElement)).toBe(false);
+      expect(document.activeElement).toBe(document.body);
+      expect(within(panel).getByRole("heading", { name: "60.0 mmol/L" })).not.toHaveFocus();
+    });
+
+    it(`${locale}: fix round 1 I-2: focus goes to the edit field after Edit reading, to Save this after Cancel, and to the saved status after Save as shown`, async () => {
+      const context = setup({ locale, text: digits });
+      await speakAndStop(context);
+      const card = (await screen.findAllByRole("article"))[0]!;
+      fireEvent.click(within(panelOf(card, "60.0")).getByRole("button", { name: context.pending.card.editReading }));
+      expect(document.activeElement).toBe(within(card).getByLabelText(context.pending.card.valueLabel));
+      fireEvent.change(within(card).getByLabelText(context.pending.card.valueLabel), { target: { value: "45" } });
+      fireEvent.click(within(card).getByRole("button", { name: context.pending.card.save }));
+      fireEvent.click(within(panelOf(card, "45.0")).getByRole("button", { name: context.pending.card.cancel }));
+      expect(document.activeElement).toBe(within(card).getByRole("button", { name: context.pending.card.save }));
+      expect(document.activeElement).not.toBe(document.body);
+      fireEvent.click(within(card).getByRole("button", { name: context.pending.card.save }));
+      fireEvent.click(within(panelOf(card, "60.0")).getByRole("button", { name: context.pending.card.saveAsShown }));
+      await waitFor(() => expect(within(card).getByRole("status")).toHaveTextContent(context.pending.card.saved));
+      expect(document.activeElement).toBe(within(card).getByRole("status"));
+    });
+
+    it(`${locale}: fix round 1 I-3 (M15): the latch survives Cancel: Cancel → Edit → 44 opens the confirmation for 44.0 mmol/L`, async () => {
+      for (const viaEditedPanel of [false, true]) {
+        const context = setup({ locale, text: digits });
+        await speakAndStop(context);
+        const card = (await screen.findAllByRole("article"))[0]!;
+        if (viaEditedPanel) {
+          fireEvent.click(within(panelOf(card, "60.0")).getByRole("button", { name: context.pending.card.editReading }));
+          fireEvent.change(within(card).getByLabelText(context.pending.card.valueLabel), { target: { value: "45" } });
+          fireEvent.click(within(card).getByRole("button", { name: context.pending.card.save }));
+          fireEvent.click(within(panelOf(card, "45.0")).getByRole("button", { name: context.pending.card.cancel }));
+        } else {
+          fireEvent.click(within(panelOf(card, "60.0")).getByRole("button", { name: context.pending.card.cancel }));
+        }
+        fireEvent.click(within(card).getByRole("button", { name: context.pending.card.edit }));
+        fireEvent.change(within(card).getByLabelText(context.pending.card.valueLabel), { target: { value: "44" } });
+        fireEvent.click(within(card).getByRole("button", { name: context.pending.card.save }));
+        expect(within(panelOf(card, "44.0")).getByText(context.pending.card.confirmBody)).toBeInTheDocument();
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(context.onSaveFacts).not.toHaveBeenCalled();
+        cleanup();
+      }
+    });
+
+    it(`${locale}: fix round 1 I-1: the card's field has no maxlength; a 7+ character paste is refused with the message and leaves the field unchanged`, async () => {
+      const context = setup({ locale, text: digits });
+      await speakAndStop(context);
+      const card = (await screen.findAllByRole("article"))[0]!;
+      fireEvent.click(within(panelOf(card, "60.0")).getByRole("button", { name: context.pending.card.editReading }));
       const input = within(card).getByLabelText(context.pending.card.valueLabel) as HTMLInputElement;
+      expect(input).not.toHaveAttribute("maxlength");
+      fireEvent.change(input, { target: { value: "1234.56" } });
       expect(input.value).toBe("");
-      fireEvent.change(input, { target: { value: "60" } });
-      fireEvent.click(within(card).getByRole("button", { name: context.pending.card.save }));
-      await waitFor(() => expect(within(card).getByRole("status")).toHaveTextContent(context.pending.card.outOfRange));
+      expect(within(card).getByRole("alert")).toHaveTextContent(context.pending.card.valueFormatRefused);
+      fireEvent.change(input, { target: { value: "123" } });
+      expect(within(card).queryByRole("alert")).toBeNull();
+      fireEvent.change(input, { target: { value: "1234.56" } });
+      expect(input.value).toBe("123");
+      expect(within(card).getByRole("alert")).toHaveTextContent(context.pending.card.valueFormatRefused);
       expect(context.onSaveFacts).not.toHaveBeenCalled();
-      fireEvent.change(input, { target: { value: "6.0" } });
+    });
+
+    it(`${locale}: CR-11 AC-7: "${zero}" shows 0.0 mmol/L in the confirmation and saves 0.0 only after Save as shown`, async () => {
+      const context = setup({ locale, text: zero });
+      await speakAndStop(context);
+      const card = (await screen.findAllByRole("article"))[0]!;
+      const panel = panelOf(card, "0.0");
+      expect(context.onSaveFacts).not.toHaveBeenCalled();
+      fireEvent.click(within(panel).getByRole("button", { name: context.pending.card.saveAsShown }));
+      await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledWith({ kind: "GLUCOSE", valueText: "0.0", unit: "MMOL_PER_L", unitSource: "SPOKEN" }));
+    });
+
+    it(`${locale}: CR-11 AC-13: an unstated unit outside the window needs the explicit "Yes, mmol/L" (no default); inside it the default is labelled`, async () => {
+      const context = setup({ locale, text: unstated, glucoseEntryUnit: "MMOL_PER_L" });
+      await speakAndStop(context);
+      const card = (await screen.findAllByRole("article"))[0]!;
+      const panel = panelOf(card, "60.0");
+      expect(within(panel).queryByText(context.pending.card.unitAppDefault)).toBeNull();
+      expect(within(panel).getByText(context.messages.voice.review.unitUnstated)).toBeInTheDocument();
+      const yes = within(panel).getByLabelText(context.pending.card.confirmUnit) as HTMLInputElement;
+      expect(yes.checked).toBe(false);
+      const saveAsShown = within(panel).getByRole("button", { name: context.pending.card.saveAsShown });
+      expect(saveAsShown).toBeDisabled();
+      fireEvent.click(yes);
+      fireEvent.click(saveAsShown);
+      await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledWith({ kind: "GLUCOSE", valueText: "60.0", unit: "MMOL_PER_L", unitSource: "PERSON" }));
+      cleanup();
+      const inside = setup({ locale, text: locale === "en-SG" ? "My sugar was thirty" : "血糖三十", glucoseEntryUnit: "MMOL_PER_L" });
+      await speakAndStop(inside);
+      expect(await screen.findByText(inside.pending.card.unitAppDefault)).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: /mmol\/L$/ })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: inside.pending.card.save }));
+      await waitFor(() => expect(inside.onSaveFacts).toHaveBeenCalledWith({ kind: "GLUCOSE", valueText: "30.0", unit: "MMOL_PER_L", unitSource: "APP_DEFAULT" }));
+    });
+
+    it(`${locale}: CR-11 AC-15: the meal saved first leaves the 60 card unsaved ("not been saved"); confirming later does not touch the meal`, async () => {
+      const text = locale === "en-SG" ? "My sugar was 60 mmol, I had chicken rice for lunch" : "血糖60毫摩尔，我午饭吃了鸡饭";
+      const context = setup({ locale, text });
+      await speakAndStop(context);
+      const [glucoseCard, mealCard] = await screen.findAllByRole("article");
+      fireEvent.click(within(mealCard!).getByRole("button", { name: context.pending.card.save }));
+      await waitFor(() => expect(within(mealCard!).getByRole("status")).toHaveTextContent(context.pending.card.saved));
+      expect(within(panelOf(glucoseCard!, "60.0")).getByText(context.pending.card.confirmBody)).toBeInTheDocument();
+      expect(context.onSaveFacts).toHaveBeenCalledTimes(1);
+      expect(context.onSaveFacts.mock.calls[0]![0]).toMatchObject({ kind: "MEAL" });
+      fireEvent.click(within(panelOf(glucoseCard!, "60.0")).getByRole("button", { name: context.pending.card.saveAsShown }));
+      await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledTimes(2));
+      expect(context.onSaveFacts.mock.calls[1]![0]).toEqual({ kind: "GLUCOSE", valueText: "60.0", unit: "MMOL_PER_L", unitSource: "SPOKEN" });
+      expect(within(mealCard!).getByRole("status")).toHaveTextContent(context.pending.card.saved);
+    });
+
+    it(`${locale}: CR-11 AC-9 / AC-10 / AC-11: the card's edit field refuses a second decimal digit (typed or pasted), never rounds; 1234.5 confirms`, async () => {
+      const context = setup({ locale, text: digits });
+      await speakAndStop(context);
+      const card = (await screen.findAllByRole("article"))[0]!;
+      fireEvent.click(within(panelOf(card, "60.0")).getByRole("button", { name: context.pending.card.editReading }));
+      const input = within(card).getByLabelText(context.pending.card.valueLabel) as HTMLInputElement;
+      fireEvent.change(input, { target: { value: "9.2" } });
+      for (const pasted of ["9.25", "60.00", "6..5", "-5", "1e3", "060"]) {
+        fireEvent.change(input, { target: { value: pasted } });
+        expect(input.value, pasted).toBe("9.2");
+        expect(within(card).getByRole("alert")).toHaveTextContent(context.pending.card.valueFormatRefused);
+      }
+      fireEvent.change(input, { target: { value: "9" } });
+      fireEvent.blur(input);
+      expect(input.value).toBe("9.0");
+      fireEvent.focus(input);
+      expect(input.value).toBe("9");
+      fireEvent.change(input, { target: { value: "1234.5" } });
       fireEvent.click(within(card).getByRole("button", { name: context.pending.card.save }));
-      await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledWith({ kind: "GLUCOSE", valueText: "6.0", unit: "MMOL_PER_L", unitSource: "PERSON" }));
-      fireEvent.click(within(card).getByRole("button", { name: context.pending.card.manualGlucose }));
-      expect(context.onManualEntry).toHaveBeenCalledWith("GLUCOSE");
+      fireEvent.click(within(panelOf(card, "1234.5")).getByRole("button", { name: context.pending.card.saveAsShown }));
+      await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledWith({ kind: "GLUCOSE", valueText: "1234.5", unit: "MMOL_PER_L", unitSource: "PERSON" }));
     });
   }
 
@@ -582,6 +834,8 @@ describe("Tell JagaOn screen", () => {
       expect(context.fake.calls.indexOf("release")).toBeGreaterThan(context.fake.calls.indexOf("start:en"));
     });
 
+    // W-6a (deliberate change): the limit now stops like Stop (no TIMED_OUT). Round 4: a 30 s limit is not the 60 s limit, so the plain
+    // stop path applies (no "60-second" notice); nothing was captured, so the nothing-understood state.
     it("M-11: the session time limit ends listening, releases the microphone and saves nothing", async () => {
       const pending: Array<{ callback: () => void; ms: number }> = [];
       const timers = { setTimeout: (callback: () => void, ms: number) => (pending.push({ callback, ms }), pending.length), clearTimeout: () => undefined };
@@ -595,8 +849,11 @@ describe("Tell JagaOn screen", () => {
         limit!.callback();
         await Promise.resolve();
       });
-      expect(await screen.findByText(context.messages.voice.state.timedOut)).toBeInTheDocument();
+      expect(await screen.findByText(context.messages.voice.review.nothingFound)).toBeInTheDocument();
+      expect(screen.queryByText(context.pending.limit.empty)).toBeNull();
+      expect(screen.queryByText(context.messages.voice.state.timedOut)).toBeNull();
       await waitFor(() => expect(context.fake.calls).toContain("release"));
+      expect(context.fake.calls).toContain("stop");
       expect(context.onSaveFacts).not.toHaveBeenCalled();
     });
 

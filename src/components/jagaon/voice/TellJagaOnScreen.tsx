@@ -5,6 +5,7 @@ import { reviewVoiceCandidates, type VoiceFactDecision, type VoiceSaveIntent } f
 import { VOICE_DISCLOSURE_INITIAL_STATE, voiceDisclosureReducer } from "@/application/voice/voice-cloud-disclosure";
 import { createVoiceSessionController, type VoiceSessionController, type VoiceSessionSnapshot, type VoiceTimers } from "@/application/voice/voice-session-controller";
 import type { VoiceTranscriberPort } from "@/application/voice/voice-transcriber-port";
+import type { VoiceProviderId, VoiceProviderResolution } from "@/application/voice/voice-provider-selection";
 import { analyseTranscript, type VoiceMedicineDirectory } from "@/domain/voice/voice-candidate-extractor";
 import type { VoiceAnalysis, VoiceCandidate, VoiceFactCandidate, VoiceLanguage, VoiceMedicationRef, VoiceRedirectCategory } from "@/domain/voice/voice-contracts";
 import { gateRemoteTranscriptExtraction } from "@/domain/voice/voice-remote-extraction-gate";
@@ -36,6 +37,20 @@ import { voiceScreenCopy } from "./voice-screen-copy";
  * - The temporary transcript lives in this component's memory only; it is cleared on discard, close and unmount. Late results are
  *   discarded by the session controller; the microphone is released on stop, cancel, timeout and unmount.
  * - Nothing is simulated: the screen never shows a transcript or a fact it did not receive.
+ * - Web Speech (owner-approved scope and wording 2026-10-11): with `resolveProvider`, the provider is resolved
+ *   at idle (on open and on every restart, before the disclosure) and fixed for the session; the disclosure is the provider's own (the
+ *   Tencent text for TRTC, the browser-speech text for Web Speech), shown before EVERY start. No fallback: a failed or unsupported
+ *   provider shows its failure/unavailable path; another provider is never started. A browser-initiated end (`endedBy: "PROVIDER"`)
+ *   shows the early-end notice above what was captured (until something is saved); nothing restarts. `onSessionActivity` reports while
+ *   a session is starting, listening or stopping (also the cancel after an unmount), so the app can lock the provider selector.
+ * - W-6a (owner decision 2026-10-11): the client listening ceiling is 60 s (the effective limit stays the smaller of this and the
+ *   server's maximum). At the limit capture stops like Stop (`endedBy: "LIMIT"`): what was completed goes to the normal review. Nothing is
+ *   saved automatically. The "60-second" limit notice is shown only when the effective limit was exactly 60 s (else the plain stop path,
+ *   with no notice), so its wording is true.
+ * - End notices (owner round 4, truth by state): an end notice (browser end or limit) is shown only where its wording is true and only
+ *   until something is saved. REVIEW and REDIRECT display the transcript below the notice: the "captured" variant. The nothing-understood
+ *   end state shows no transcript: the "empty" variant when nothing was captured, and the round-6 "not shown" variant (owner-approved)
+ *   when text was captured but cannot be shown (e.g. too long, no words).
  */
 export type VoiceRememberedTerm = Readonly<{ recordId: string; revisionId: string; language: VoiceLanguage; phrase: string; medication: VoiceMedicationRef | null }>;
 export type VoiceTerminologyPort = Readonly<{
@@ -65,8 +80,15 @@ export type TellJagaOnScreenProps = Readonly<{
    * restart; false or a rejection shows "unavailable" plus manual entry before any disclosure. Absent: only `voiceAvailable` applies.
    */
   checkAvailability?: () => Promise<boolean>;
-  /** Called only after the disclosure is accepted (the production loader uses dynamic imports). */
-  loadTranscriber: (accessPasscode: () => string | null) => Promise<VoiceTranscriberPort>;
+  /**
+   * Web Speech: resolves the session's provider at idle (production: the probe's enabled providers ∩ this browser's support, plus the
+   * developer choice). Takes precedence over `checkAvailability`. Absent: the provider is TRTC (the existing behaviour).
+   */
+  resolveProvider?: () => Promise<VoiceProviderResolution>;
+  /** Called only after the disclosure is accepted, with the session's fixed provider (the production loaders use dynamic imports). */
+  loadTranscriber: (accessPasscode: () => string | null, provider: VoiceProviderId) => Promise<VoiceTranscriberPort>;
+  /** True while a session is starting, listening or stopping (also during the cancel after an unmount); false otherwise. */
+  onSessionActivity?: (active: boolean) => void;
   terminology: VoiceTerminologyPort;
   /** The app's effective glucose ENTRY unit (fixed mmol/L in this slice; owner decision #2). */
   glucoseEntryUnit: "MMOL_PER_L" | null;
@@ -120,7 +142,12 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
   const language: VoiceLanguage = locale === "zh-SG" ? "zh" : "en";
   const passcodeId = useId();
   const [disclosure, dispatchDisclosure] = useReducer(voiceDisclosureReducer, VOICE_DISCLOSURE_INITIAL_STATE);
-  const [phase, setPhase] = useState<Phase>(() => (!voiceAvailable ? { kind: "ENDED", reason: "UNAVAILABLE" } : props.checkAvailability ? { kind: "CHECKING" } : { kind: "DISCLOSURE" }));
+  const [phase, setPhase] = useState<Phase>(() => (!voiceAvailable ? { kind: "ENDED", reason: "UNAVAILABLE" } : props.resolveProvider || props.checkAvailability ? { kind: "CHECKING" } : { kind: "DISCLOSURE" }));
+  // Web Speech: the provider resolved at idle; fixed for the session that the next accepted disclosure starts.
+  const [provider, setProvider] = useState<VoiceProviderId>("TRTC");
+  // How the last session ended when it needs a notice: the browser ended it, or it reached the 60 s limit; `captured` when it produced
+  // transcript text.
+  const [endNotice, setEndNotice] = useState<Readonly<{ kind: "PROVIDER" | "LIMIT"; captured: boolean }> | null>(null);
   const [snapshot, setSnapshot] = useState<VoiceSessionSnapshot | null>(null);
   const [entered, setEntered] = useState("");
   const passcode = useRef<string | null>(null);
@@ -135,20 +162,42 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
     touches.current += 1;
   }, []);
 
-  // Review I-5: the availability probe (fail closed) before any disclosure, on open and on every restart.
-  const { checkAvailability } = props;
+  // Review I-5: the availability probe (fail closed) before any disclosure, on open and on every restart. Web Speech: the provider
+  // resolution replaces it when given (the provider is chosen here, at idle only).
+  const { checkAvailability, resolveProvider, onSessionActivity } = props;
   useEffect(() => {
-    if (phase.kind !== "CHECKING" || !checkAvailability) return;
+    if (phase.kind !== "CHECKING" || (!checkAvailability && !resolveProvider)) return;
     let current = true;
-    void checkAvailability()
-      .then((available) => available === true, () => false)
-      .then((available) => {
-        if (current && mounted.current) setPhase(available ? { kind: "DISCLOSURE" } : { kind: "ENDED", reason: "UNAVAILABLE" });
-      });
+    const resolution: Promise<VoiceProviderResolution> = resolveProvider
+      ? resolveProvider().then(
+          (result) => (result?.kind === "AVAILABLE" && (result.provider === "TRTC" || result.provider === "WEB_SPEECH") ? result : result?.kind === "UNSUPPORTED" ? result : { kind: "UNAVAILABLE" as const }),
+          () => ({ kind: "UNAVAILABLE" as const }),
+        )
+      : checkAvailability!().then(
+          (available) => (available === true ? { kind: "AVAILABLE" as const, provider: "TRTC" as const } : { kind: "UNAVAILABLE" as const }),
+          () => ({ kind: "UNAVAILABLE" as const }),
+        );
+    void resolution.then((result) => {
+      if (!current || !mounted.current) return;
+      if (result.kind === "AVAILABLE") {
+        setProvider(result.provider);
+        setPhase({ kind: "DISCLOSURE" });
+      } else setPhase({ kind: "ENDED", reason: result.kind === "UNSUPPORTED" ? "UNSUPPORTED" : "UNAVAILABLE" });
+    });
     return () => {
       current = false;
     };
-  }, [phase.kind, checkAvailability]);
+  }, [phase.kind, checkAvailability, resolveProvider]);
+
+  // Web Speech: session activity for the app's provider selector (locked while a session starts, listens or stops).
+  const activityReporter = useRef(onSessionActivity);
+  useEffect(() => {
+    activityReporter.current = onSessionActivity;
+  }, [onSessionActivity]);
+  const sessionActive = phase.kind === "SESSION" && (snapshot === null || snapshot.state === "STARTING" || snapshot.state === "LISTENING" || snapshot.state === "STOPPING");
+  useEffect(() => {
+    activityReporter.current?.(sessionActive);
+  }, [sessionActive]);
 
   // The disclosure is shown before every start (one grant per start).
   useEffect(() => {
@@ -170,8 +219,14 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
       const current = controller.current;
       controller.current = null;
       passcode.current = null;
+      const report = activityReporter.current;
       if (current) {
-        void current.cancel().finally(() => current.discardTranscript());
+        void current.cancel().finally(() => {
+          current.discardTranscript();
+          report?.(false);
+        });
+      } else {
+        report?.(false);
       }
     };
   }, []);
@@ -183,6 +238,11 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         return;
       }
       const transcript = session.takeTranscript() ?? "";
+      if (mounted.current) {
+        const captured = transcript.trim().length > 0;
+        // The "60-second" limit wording is true only when the effective limit was 60 s; any other limit is the plain stop path.
+        setEndNotice(next.endedBy === "PROVIDER" ? { kind: "PROVIDER", captured } : next.endedBy === "LIMIT" && next.limitSeconds === 60 ? { kind: "LIMIT", captured } : null);
+      }
       try {
         const [directory, medicines] = await Promise.all([terminology.directory(language), terminology.activeMedicines()]);
         const analysis = analyseTranscript(transcript, language, { medicines: directory, glucoseEntryUnit });
@@ -208,16 +268,23 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
     if (accepted.kind !== "GRANTED") return;
     dispatchDisclosure({ type: "RESET" });
     setPhase({ kind: "SESSION" });
+    setSnapshot(null);
+    setEndNotice(null);
+    // Round 7 (final review a1): a new session starts with nothing saved, so an earlier session's save never hides its end notice.
+    setAnySaved(false);
+    // The provider is fixed for this session (resolved at idle, before this disclosure).
+    const sessionProvider = provider;
     let transcriber: VoiceTranscriberPort;
     try {
-      transcriber = await loadTranscriber(() => passcode.current);
+      transcriber = await loadTranscriber(() => passcode.current, sessionProvider);
     } catch {
       dispatchDisclosure({ type: "RESET" });
       if (mounted.current) setPhase({ kind: "ENDED", reason: "UNAVAILABLE" });
       return;
     }
     if (!mounted.current) return;
-    const { timers = DEFAULT_TIMERS, startTimeoutMs = 20_000, maxSessionSeconds = 120 } = props;
+    // W-6a (owner decision 2026-10-11): the client listening ceiling is 60 s; the server's maximum may only lower it.
+    const { timers = DEFAULT_TIMERS, startTimeoutMs = 20_000, maxSessionSeconds = 60 } = props;
     let session: VoiceSessionController;
     session = createVoiceSessionController({
       transcriber,
@@ -251,7 +318,9 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
     controller.current?.discardTranscript();
     dispatchDisclosure({ type: "RESET" });
     setSnapshot(null);
-    setPhase(checkAvailability ? { kind: "CHECKING" } : { kind: "DISCLOSURE" });
+    setEndNotice(null);
+    setAnySaved(false);
+    setPhase(checkAvailability || resolveProvider ? { kind: "CHECKING" } : { kind: "DISCLOSURE" });
   }
 
   async function decideFact(decision: VoiceFactDecision): Promise<VoiceFactOutcome> {
@@ -259,7 +328,8 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
     const current = controller.current?.snapshot();
     const known = phase.medicines.map((entry) => entry.medication);
     const review = reviewVoiceCandidates({ analysis: phase.analysis, reviewedSessionToken: phase.sessionToken, currentSession: { sessionToken: current?.sessionToken ?? -1, state: current?.state ?? "IDLE" }, knownMedications: known, decisions: [decision] });
-    if (review.kind !== "INTENTS" || review.intents.length !== 1) return (review.rejected ?? []).some((entry) => entry.reason === "OUT_OF_RANGE") ? "OUT_OF_RANGE" : "REJECTED";
+    // CR-11: a refusal (for example a reading above 50 mmol/L without the card's "Save as shown") saves nothing and says so.
+    if (review.kind !== "INTENTS" || review.intents.length !== 1) return "REJECTED";
     touch();
     const result = await onSaveFacts(review.intents[0]!.intent);
     touch();
@@ -303,6 +373,25 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
 
   /** 13s.3: the fixed redirect wording is chosen by the redirect's category (never by its message key string). */
   const redirectBody = (category: VoiceRedirectCategory) => (category === "HEALTH_QUESTION" ? copy.redirect.healthBody : copy.redirect.body);
+  const webSpeech = provider === "WEB_SPEECH";
+  // End notices (browser end, 60 s limit), by state: REVIEW and REDIRECT show the transcript below ("captured" wording); the
+  // nothing-understood state shows none, so only the "nothing captured" wording is true there. Hidden once something is saved.
+  const endNoticeText = (where: "TRANSCRIPT_SHOWN" | "NOTHING_UNDERSTOOD"): string | null => {
+    if (endNotice === null || anySaved) return null;
+    // Round 6 (owner-approved): text captured but not displayed (nothing understood) has its own wording.
+    const variant = where === "TRANSCRIPT_SHOWN" ? (endNotice.captured ? "CAPTURED" : null) : endNotice.captured ? "NOT_SHOWN" : "EMPTY";
+    if (variant === null) return null;
+    if (endNotice.kind === "PROVIDER") return variant === "CAPTURED" ? copy.webSpeech.earlyEnd : variant === "EMPTY" ? copy.webSpeech.earlyEndEmpty : copy.webSpeech.earlyEndNotShown;
+    return variant === "CAPTURED" ? copy.limit.captured : variant === "EMPTY" ? copy.limit.empty : copy.limit.notShown;
+  };
+  const endNoticeFor = (where: "TRANSCRIPT_SHOWN" | "NOTHING_UNDERSTOOD") => {
+    const text = endNoticeText(where);
+    return text === null ? null : (
+      <div className={`notice ${endNotice?.kind === "PROVIDER" ? "voice-early-end" : "voice-limit-end"}`} role="note">
+        <p>{text}</p>
+      </div>
+    );
+  };
 
   const statusText =
     phase.kind === "CHECKING"
@@ -387,6 +476,7 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
 
       {phase.kind === "REVIEW" ? (
         <section className="voice-review">
+          {endNoticeFor("TRANSCRIPT_SHOWN")}
           <h2 className="voice-section-label">{copy.review.transcriptLabel}</h2>
           <p className="voice-transcript">{phase.transcript}</p>
           {remoteOffered && remote === "IDLE" ? (
@@ -463,11 +553,12 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
 
       {phase.kind === "REDIRECT" ? (
         <section className="voice-redirect-only">
+          {endNoticeFor("TRANSCRIPT_SHOWN")}
           <h2 className="voice-section-label">{copy.review.transcriptLabel}</h2>
           <p className="voice-transcript">{phase.transcript}</p>
           <div className="notice voice-redirect" role="note">
             <p>{redirectBody(phase.category)}</p>
-            <p>{copy.redirect.transcribedNote}</p>
+            <p>{webSpeech ? copy.webSpeech.transcribedNote : copy.redirect.transcribedNote}</p>
           </div>
           {chooser}
           <div className="voice-actions">
@@ -481,6 +572,7 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
 
       {phase.kind === "ENDED" ? (
         <section className="voice-ended">
+          {phase.reason === "NOT_UNDERSTOOD" ? endNoticeFor("NOTHING_UNDERSTOOD") : null}
           {chooser}
           <div className="voice-actions">
             {voiceAvailable && phase.reason !== "UNAVAILABLE" && phase.reason !== "UNSUPPORTED" ? (
@@ -498,8 +590,18 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
       {phase.kind === "DISCLOSURE" && disclosure.kind === "SHOWN" ? (
         <ModalDialog
           className="voice-disclosure-dialog"
-          title={copy.disclosure.title}
-          description={<p>{copy.disclosure.body}</p>}
+          title={webSpeech ? copy.webSpeech.consentTitle : copy.disclosure.title}
+          description={
+            webSpeech ? (
+              <>
+                {copy.webSpeech.consentBody.map((paragraph) => (
+                  <p key={paragraph}>{paragraph}</p>
+                ))}
+              </>
+            ) : (
+              <p>{copy.disclosure.body}</p>
+            )
+          }
           onClose={decline}
           initialFocusSelector="[data-voice-disclosure-safe]"
           actions={

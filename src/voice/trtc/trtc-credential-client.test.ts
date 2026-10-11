@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTrtcCredentialClient, fetchVoiceAvailability, type VoiceCredentialFetcher } from "./trtc-credential-client";
+import { createTrtcCredentialClient, createVoiceAccessClient, fetchVoiceAvailability, fetchVoiceProviders, fetchVoiceProvidersAnswer, type VoiceCredentialFetcher } from "./trtc-credential-client";
 
 const PASSCODE = "TEST-ONLY-voice-passcode";
 const ISSUED = { kind: "ISSUED", sdkAppId: 1400000001, userId: "jv_user", userSig: "TEST-ONLY-usersig", roomId: "jr_room", expiresAt: "2026-10-09T10:05:00.000Z", maxSessionSeconds: 90 };
@@ -92,5 +92,60 @@ describe("TRTC credential client", () => {
       },
     ];
     for (const answer of answers) expect(await fetchVoiceAvailability({ fetcher: answer })).toBe(false);
+  });
+
+  // Web Speech (owner-approved scope 2026-10-11).
+  it("Web Speech: the provider list comes from the same GET (in order); anything but a valid available answer is none", async () => {
+    const fetcher = vi.fn<VoiceCredentialFetcher>(async () => json({ available: true, providers: ["WEB_SPEECH", "TRTC"] }));
+    expect(await fetchVoiceProviders({ fetcher })).toEqual(["WEB_SPEECH", "TRTC"]);
+    expect(fetcher).toHaveBeenCalledWith("/api/voice/usersig", { method: "GET", cache: "no-store", redirect: "error" });
+    expect(await fetchVoiceAvailability({ fetcher: async () => json({ available: true, providers: ["WEB_SPEECH"] }) })).toBe(true);
+    for (const answer of [
+      async () => json({ available: false }),
+      async () => json({ available: true }),
+      async () => json({ available: true, providers: ["WEB_SPEECH"] }, 429),
+      async () => json({ available: true, providers: ["SIMULATED"] }),
+      async () => json({ available: true, providers: [] }),
+      async () => json({ available: true, providers: ["TRTC"], sdkAppId: 1 }),
+      async () => new Response("not json"),
+      async () => {
+        throw new TypeError("TEST-ONLY network");
+      },
+    ]) {
+      expect(await fetchVoiceProviders({ fetcher: answer })).toEqual([]);
+    }
+  });
+
+  it("Web Speech: the access check sends one same-origin POST of {} with the passcode (no credential back); no passcode, nothing sent", async () => {
+    const fetcher = vi.fn<VoiceCredentialFetcher>(async () => json({ kind: "GRANTED", maxSessionSeconds: 45 }));
+    const signal = new AbortController().signal;
+    expect(await createVoiceAccessClient({ accessPasscode: () => PASSCODE, fetcher })(signal)).toEqual({ kind: "GRANTED", maxSessionSeconds: 45 });
+    expect(fetcher).toHaveBeenCalledWith("/api/voice/access", { method: "POST", headers: { "content-type": "application/json", "x-jagaon-demo-passcode": PASSCODE }, body: "{}", signal, cache: "no-store", redirect: "error" });
+    const silent = vi.fn<VoiceCredentialFetcher>();
+    expect(await createVoiceAccessClient({ accessPasscode: () => null, fetcher: silent })(signal)).toEqual({ kind: "REFUSED", reason: "ACCESS_DENIED" });
+    expect(silent).not.toHaveBeenCalled();
+    const refusal = async (body: unknown, status = 403) => createVoiceAccessClient({ accessPasscode: () => PASSCODE, fetcher: async () => json(body, status) })(signal);
+    expect(await refusal({ kind: "REFUSED", reason: "VOICE_DISABLED" })).toEqual({ kind: "REFUSED", reason: "VOICE_DISABLED" });
+    expect(await refusal({ kind: "REFUSED", reason: "RATE_LIMITED" }, 429)).toEqual({ kind: "REFUSED", reason: "RATE_LIMITED" });
+    expect(await refusal({ kind: "GRANTED", maxSessionSeconds: 45 }, 500)).toEqual({ kind: "FAILED", reason: "NETWORK_FAILURE" });
+    expect(await refusal({ kind: "GRANTED", maxSessionSeconds: 45, userSig: "x" }, 200)).toEqual({ kind: "FAILED", reason: "NETWORK_FAILURE" });
+    expect(await refusal(ISSUED, 200)).toEqual({ kind: "FAILED", reason: "NETWORK_FAILURE" });
+  });
+
+  it("round 6: the probe answer tells a failed or rate-limited check apart from an answer (voice off is an answer)", async () => {
+    expect(await fetchVoiceProvidersAnswer({ fetcher: async () => json({ available: true, providers: ["WEB_SPEECH", "TRTC"] }) })).toEqual({ kind: "ANSWERED", providers: ["WEB_SPEECH", "TRTC"] });
+    expect(await fetchVoiceProvidersAnswer({ fetcher: async () => json({ available: false }) })).toEqual({ kind: "ANSWERED", providers: [] });
+    for (const answer of [
+      async () => json({ available: false }, 429),
+      async () => json({ available: true, providers: ["WEB_SPEECH"] }, 500),
+      async () => json({ available: true, providers: ["SIMULATED"] }),
+      async () => new Response("not json"),
+      async () => new Response("x".repeat(9_000)),
+      async () => {
+        throw new TypeError("TEST-ONLY network");
+      },
+    ]) {
+      expect(await fetchVoiceProvidersAnswer({ fetcher: answer })).toEqual({ kind: "FAILED" });
+    }
   });
 });
