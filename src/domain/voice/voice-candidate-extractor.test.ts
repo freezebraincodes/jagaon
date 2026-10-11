@@ -696,3 +696,245 @@ describe("CR-11 round 10: an opener between a number and a sign keeps the sign",
     }
   });
 });
+
+/**
+ * Owner decision 2026-10-12 (second person): English "you"/"your" marks a fact OTHER_PERSON only inside that fact's own clause (a
+ * reading: the clause(s) from its first cue to its number and unit); every other other-person cue, and Chinese 你/您, stays
+ * transcript-wide.
+ */
+describe("owner decision 2026-10-12: English second person is clause-local", () => {
+  const DARK_PEN: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [] };
+  const factsOf = (text: string, language: "en" | "zh", medicines?: VoiceMedicineDirectory) => analysed(text, language, medicines).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+
+  it('a "you" in another clause never marks a reading, meal or medicine as someone else\'s', () => {
+    // The extraction step alone (as if the question were not separable): the unsupported question clause adds UNCERTAINTY (C1 backstop).
+    const reading = extractVoiceCandidates("My sugar is 6.8 mmol. Do you think I should see the doctor?", "en").candidates.filter((c) => c.kind === "GLUCOSE_READING");
+    expect(reading).toMatchObject([{ valueText: "6.8", unit: "MMOL_PER_L", state: "AMBIGUOUS", ambiguity: ["UNCERTAINTY"] }]);
+    // A redirected (excluded) question with "you": the reading is as it would be without the question.
+    const redirected = analysed("My sugar is 6.8 mmol. Can you remind me later?", "en");
+    expect(redirected.redirect).not.toBeNull();
+    expect(redirected.candidates).toMatchObject([{ kind: "GLUCOSE_READING", valueText: "6.8", unit: "MMOL_PER_L", unitSource: "SPOKEN", state: "UNDERSTOOD", ambiguity: [] }]);
+    expect(factsOf("I had chicken rice for breakfast. Can you remind me later?", "en")).toMatchObject([{ kind: "MEAL_NOTE", slot: "BREAKFAST", itemText: "chicken rice", state: "UNDERSTOOD", ambiguity: [] }]);
+    expect(factsOf("I took my dark pen. Thank you.", "en", DARK_PEN)).toMatchObject([{ kind: "MEDICATION_OCCURRENCE", status: "TAKEN", state: "UNDERSTOOD", ambiguity: [] }]);
+    expect(factsOf("I took my dark pen, thank you", "en", DARK_PEN)).toMatchObject([{ kind: "MEDICATION_OCCURRENCE", status: "TAKEN", state: "UNDERSTOOD", ambiguity: [] }]);
+  });
+
+  it('"you"/"your" inside the fact\'s own clause still gives OTHER_PERSON', () => {
+    for (const text of ["Your sugar is 6.8 mmol", "My sugar is 6.8 mmol for you", "my sugar is 6.8 mmol do you think I should see the doctor"]) {
+      expect(factsOf(text, "en"), text).toMatchObject([{ kind: "GLUCOSE_READING", state: "AMBIGUOUS", ambiguity: expect.arrayContaining(["OTHER_PERSON"]) }]);
+    }
+    expect(factsOf("You had chicken rice for lunch", "en")).toMatchObject([{ kind: "MEAL_NOTE", state: "AMBIGUOUS", ambiguity: ["OTHER_PERSON"] }]);
+    expect(factsOf("You took your dark pen", "en", DARK_PEN)).toMatchObject([{ kind: "MEDICATION_OCCURRENCE", state: "AMBIGUOUS", ambiguity: ["OTHER_PERSON"] }]);
+    // The split at the glucose cue never separates a reading from the possessive right before its cue.
+    const split = factsOf("I had chicken rice and your sugar 6.8 mmol", "en");
+    expect(split.find((c) => c.kind === "GLUCOSE_READING")).toMatchObject({ state: "AMBIGUOUS", ambiguity: expect.arrayContaining(["OTHER_PERSON"]) });
+  });
+
+  it("every other other-person cue stays transcript-wide", () => {
+    for (const other of ["My wife had rice.", "Mdm Tan had rice.", "I had his rice.", "John's lunch was rice."]) {
+      const text = `My sugar is 6.8 mmol. ${other}`;
+      expect(factsOf(text, "en").find((c) => c.kind === "GLUCOSE_READING"), text).toMatchObject({ ambiguity: expect.arrayContaining(["OTHER_PERSON"]) });
+    }
+    expect(factsOf("I had chicken rice for breakfast. My wife had noodles for lunch.", "en")[0]).toMatchObject({ kind: "MEAL_NOTE", ambiguity: expect.arrayContaining(["OTHER_PERSON"]) });
+  });
+
+  it("Chinese is unchanged: 你/您 in another clause still gives OTHER_PERSON", () => {
+    expect(factsOf("我的血糖六点八。你觉得我要去看医生吗？", "zh")).toMatchObject([{ kind: "GLUCOSE_READING", ambiguity: expect.arrayContaining(["OTHER_PERSON"]) }]);
+    expect(factsOf("我午饭吃了鸡饭。你明天提醒我。", "zh")).toMatchObject([{ kind: "MEAL_NOTE", ambiguity: expect.arrayContaining(["OTHER_PERSON"]) }]);
+    expect(factsOf("我的血糖六点八。谢谢您。", "zh")).toMatchObject([{ kind: "GLUCOSE_READING", ambiguity: expect.arrayContaining(["OTHER_PERSON"]) }]);
+  });
+});
+
+/**
+ * Owner decision 2026-10-12 (second person), fix round 1 (safety review Critical): an implied subject belongs to the fact's own
+ * clause. A "you"/"your" earlier in the SAME sentence marks a fact whose clause has no first person of its own OTHER_PERSON.
+ */
+describe("owner decision 2026-10-12, fix round 1: a clause without its own subject keeps an earlier \"you\" of its sentence", () => {
+  const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+
+  it.each([
+    ["you had chicken rice and took the dark pen", "MEDICATION_OCCURRENCE"],
+    ["you took metformin, took the dark pen", "MEDICATION_OCCURRENCE"],
+    ["you took your metformin then took the dark pen", "MEDICATION_OCCURRENCE"],
+    ["you ate breakfast then took the dark pen", "MEDICATION_OCCURRENCE"],
+    ["You took the dark pen and had chicken rice for lunch", "MEAL_NOTE"],
+    ["you took the dark pen and then ate chicken rice", "MEAL_NOTE"],
+    ["You had chicken rice for lunch then ate noodles", "MEAL_NOTE"],
+    ["You had chicken rice for lunch, ate noodles for dinner", "MEAL_NOTE"],
+    ["you had chicken rice and had noodles for dinner", "MEAL_NOTE"],
+    ["You had lunch then sugar 6.8 mmol", "GLUCOSE_READING"],
+    ["You took the dark pen this morning, sugar was 6.8 mmol", "GLUCOSE_READING"],
+    ["After you ate, sugar 6.8 mmol", "GLUCOSE_READING"],
+  ] as const)("%j: every fact, the last %s included, is OTHER_PERSON", (text, lastKind) => {
+    const facts = factsOf(text);
+    expect(facts.at(-1)?.kind, text).toBe(lastKind);
+    for (const fact of facts) expect(fact, `${text} → ${fact.sourcePhrase}`).toMatchObject({ state: "AMBIGUOUS", ambiguity: expect.arrayContaining(["OTHER_PERSON"]) });
+  });
+
+  it("the fact's own first person outweighs an earlier \"you\"; another sentence or a later \"you\" never carries it", () => {
+    // Base: OTHER_PERSON. Now the speaker's ("my sugar"); fix round 3 (rule 2): the cancelled earlier "you" leaves UNCERTAINTY (edit-only).
+    expect(factsOf("you had chicken rice for lunch and then my sugar was 6.8 mmol").find((c) => c.kind === "GLUCOSE_READING")).toMatchObject({ valueText: "6.8", state: "AMBIGUOUS", ambiguity: ["UNCERTAINTY"] });
+    expect(factsOf("you took metformin, I took the dark pen")).toMatchObject([{ ambiguity: ["OTHER_PERSON"] }, { sourcePhrase: "I took the dark pen", state: "AMBIGUOUS", ambiguity: ["UNCERTAINTY"] }]);
+    expect(factsOf("Thank you, I had chicken rice for lunch")).toMatchObject([{ kind: "MEAL_NOTE", state: "AMBIGUOUS", ambiguity: ["UNCERTAINTY"] }]);
+    expect(factsOf("Did you eat? I had chicken rice for lunch.")).toMatchObject([{ kind: "MEAL_NOTE", state: "UNDERSTOOD", ambiguity: [] }]);
+    expect(factsOf("My sugar is 6.8 mmol, I had kaya toast for breakfast, can you remind me later?")).toMatchObject([
+      { kind: "GLUCOSE_READING", state: "UNDERSTOOD", ambiguity: [] },
+      { kind: "MEAL_NOTE", state: "UNDERSTOOD", ambiguity: [] },
+    ]);
+    expect(factsOf("my sugar is 6.8 mmol and I had kaya toast for breakfast can you remind me later")).toMatchObject([{ kind: "GLUCOSE_READING", ambiguity: ["UNCERTAINTY"] }]);
+  });
+});
+
+/**
+ * Owner decision 2026-10-12 (second person), fix round 2 (controller ruling): only a SUBJECT-form first person (I, I'm, I've, I'd, I'll,
+ * we; the contractions with their apostrophe) in the fact's own clause outweighs an earlier "you" of its sentence; for a reading also
+ * "my" before its cue. "my", "me", "mine", "myself" elsewhere, and "ill", "id", "ive", "im", never do.
+ */
+describe("owner decision 2026-10-12, fix round 2: only a subject-form first person outweighs an earlier \"you\"", () => {
+  const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+
+  it.each([
+    ["you had lunch then took my dark pen", "MEDICATION_OCCURRENCE"],
+    ["you had lunch, injected my dark pen", "MEDICATION_OCCURRENCE"],
+    ["you ate breakfast then took the dark pen for me", "MEDICATION_OCCURRENCE"],
+    ["you had lunch, took the dark pen for me", "MEDICATION_OCCURRENCE"],
+    ["you had lunch then took mine dark pen", "MEDICATION_OCCURRENCE"],
+    ["you had lunch then ate my noodles", "MEAL_NOTE"],
+    ["you had breakfast, then ate my chicken rice for lunch", "MEAL_NOTE"],
+    ["you had lunch then sugar 6.8 mmol for me", "GLUCOSE_READING"],
+    ["you had chicken rice and took the dark pen while ill", "MEDICATION_OCCURRENCE"],
+    ["you had lunch, took the dark pen at ive", "MEDICATION_OCCURRENCE"],
+  ] as const)("%j: every fact, the last %s included, is OTHER_PERSON", (text, lastKind) => {
+    const facts = factsOf(text);
+    expect(facts.at(-1)?.kind, text).toBe(lastKind);
+    for (const fact of facts) expect(fact, `${text} → ${fact.sourcePhrase}`).toMatchObject({ state: "AMBIGUOUS", ambiguity: expect.arrayContaining(["OTHER_PERSON"]) });
+  });
+
+  it("a subject-form first person (with its apostrophe) or a reading's \"my\" before its cue still outweighs it", () => {
+    // Fix round 3 (rule 2): each cancelled earlier "you" leaves UNCERTAINTY (edit-only, never one tap).
+    expect(factsOf("you had chicken rice for lunch and then my sugar was 6.8 mmol").find((c) => c.kind === "GLUCOSE_READING")).toMatchObject({ state: "AMBIGUOUS", ambiguity: ["UNCERTAINTY"] });
+    expect(factsOf("you took metformin, I took the dark pen")[1]).toMatchObject({ sourcePhrase: "I took the dark pen", state: "AMBIGUOUS", ambiguity: ["UNCERTAINTY"] });
+    expect(factsOf("you took metformin, I've taken the dark pen")[1]).toMatchObject({ kind: "MEDICATION_OCCURRENCE", ambiguity: expect.not.arrayContaining(["OTHER_PERSON"]) });
+    expect(factsOf("you took metformin, I’ve taken the dark pen")[1]).toMatchObject({ kind: "MEDICATION_OCCURRENCE", ambiguity: expect.not.arrayContaining(["OTHER_PERSON"]) });
+    expect(factsOf("you took metformin, we took the dark pen")[1]).toMatchObject({ kind: "MEDICATION_OCCURRENCE", state: "AMBIGUOUS", ambiguity: ["UNCERTAINTY"] });
+    expect(factsOf("Did you eat? I had chicken rice for lunch.")).toMatchObject([{ kind: "MEAL_NOTE", state: "UNDERSTOOD", ambiguity: [] }]);
+    expect(factsOf("My sugar is 6.8 mmol, I had kaya toast for breakfast, can you remind me later?")).toMatchObject([
+      { kind: "GLUCOSE_READING", state: "UNDERSTOOD", ambiguity: [] },
+      { kind: "MEAL_NOTE", state: "UNDERSTOOD", ambiguity: [] },
+    ]);
+  });
+});
+
+/**
+ * Owner decision 2026-10-12 (second person), fix round 3 (controller ruling): a subject-form first person cancels an earlier "you" of
+ * the sentence only BEFORE the fact's first verb or cue in its own clause ("took the dark pen I gave" is not the speaker's), and a
+ * cancelled "you" leaves UNCERTAINTY (edit-only, never one tap).
+ */
+describe("owner decision 2026-10-12, fix round 3: only a first person before the fact's verb or cue cancels, and leaves UNCERTAINTY", () => {
+  const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+
+  it.each([
+    ["you had lunch then took the dark pen I gave", "MEDICATION_OCCURRENCE"],
+    ["you had lunch then took the dark pen like I said", "MEDICATION_OCCURRENCE"],
+    ["you had lunch then took the dark pen before I did", "MEDICATION_OCCURRENCE"],
+    ["you had lunch then took metformin I'd say", "MEDICATION_OCCURRENCE"],
+    ["you had lunch then ate the noodles I cooked", "MEAL_NOTE"],
+    ["you had lunch then ate noodles I made for dinner", "MEAL_NOTE"],
+    ["you had breakfast then ate chicken rice for lunch as I said", "MEAL_NOTE"],
+    ["you ate then sugar was 6.8 mmol after I woke up", "GLUCOSE_READING"],
+    ["you ate then sugar was 6.8 mmol when I woke up", "GLUCOSE_READING"],
+    ["you ate then sugar was 6.8 mmol I woke up", "GLUCOSE_READING"],
+  ] as const)("%j: every fact, the last %s included, is OTHER_PERSON", (text, lastKind) => {
+    const facts = factsOf(text);
+    expect(facts.at(-1)?.kind, text).toBe(lastKind);
+    for (const fact of facts) expect(fact, `${text} → ${fact.sourcePhrase}`).toMatchObject({ state: "AMBIGUOUS", ambiguity: expect.arrayContaining(["OTHER_PERSON"]) });
+  });
+
+  it("rule 2: a first person before the verb or cue cancels the earlier \"you\" but leaves UNCERTAINTY, never one tap", () => {
+    for (const [text, kind] of [
+      ["you took metformin, I took the dark pen", "MEDICATION_OCCURRENCE"],
+      ["you took metformin, I'll take the dark pen", "MEDICATION_OCCURRENCE"],
+      ["you took metformin, we took the dark pen", "MEDICATION_OCCURRENCE"],
+      ["you and I took the dark pen", "MEDICATION_OCCURRENCE"],
+      ["you took the dark pen, I ate noodles for dinner", "MEAL_NOTE"],
+      ["you had chicken rice for lunch and then my sugar was 6.8 mmol", "GLUCOSE_READING"],
+      ["you had lunch then I checked my sugar 6.8 mmol", "GLUCOSE_READING"],
+    ] as const) {
+      const fact = factsOf(text).at(-1);
+      expect(fact?.kind, text).toBe(kind);
+      expect(fact, text).toMatchObject({ state: "AMBIGUOUS", ambiguity: expect.arrayContaining(["UNCERTAINTY"]) });
+      expect(fact?.kind === "MEAL_NOTE" || fact?.kind === "GLUCOSE_READING" || fact?.kind === "MEDICATION_OCCURRENCE" ? fact.ambiguity : [], text).not.toContain("OTHER_PERSON");
+    }
+  });
+
+  it("rule 3: a \"you\" only in another sentence or later in the sentence, or no \"you\" at all, leaves the fact as it was", () => {
+    expect(factsOf("Did you eat? I had chicken rice for lunch.")).toMatchObject([{ kind: "MEAL_NOTE", state: "UNDERSTOOD", ambiguity: [] }]);
+    expect(factsOf("My sugar is 6.8 mmol, I had kaya toast for breakfast, can you remind me later?")).toMatchObject([
+      { kind: "GLUCOSE_READING", state: "UNDERSTOOD", ambiguity: [] },
+      { kind: "MEAL_NOTE", state: "UNDERSTOOD", ambiguity: [] },
+    ]);
+    expect(factsOf("I took the dark pen I gave myself")).toMatchObject([{ kind: "MEDICATION_OCCURRENCE", ambiguity: expect.not.arrayContaining(["OTHER_PERSON"]) }]);
+    expect(factsOf("I had lunch then took the dark pen")).toMatchObject([{ kind: "MEAL_NOTE" }, { kind: "MEDICATION_OCCURRENCE", state: "UNDERSTOOD", ambiguity: [] }]);
+    expect(factsOf("My sugar was 6.8 mmol after I woke up").find((c) => c.kind === "GLUCOSE_READING")).toMatchObject({ ambiguity: expect.not.arrayContaining(["OTHER_PERSON"]) });
+  });
+});
+
+/**
+ * Owner decision 2026-10-12 (second person), fix round 4 (controller ruling): a fact with no subject-form first person before its verb
+ * or cue, in the sentence right after one holding "you"/"your", gets UNCERTAINTY (edit-only; never OTHER_PERSON, never one tap).
+ */
+describe("owner decision 2026-10-12, fix round 4: a subjectless fact right after a sentence with \"you\" is edit-only", () => {
+  const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+
+  it.each([
+    ["You took metformin. Took the dark pen.", "MEDICATION_OCCURRENCE"],
+    ["You had lunch. Then took the dark pen.", "MEDICATION_OCCURRENCE"],
+    ["you took metformin; took the dark pen", "MEDICATION_OCCURRENCE"],
+    ["you took metformin! took the dark pen", "MEDICATION_OCCURRENCE"],
+    ["you took metformin... took the dark pen", "MEDICATION_OCCURRENCE"],
+    ["you took metformin。took the dark pen", "MEDICATION_OCCURRENCE"],
+    ["You had breakfast. Then ate chicken rice for lunch.", "MEAL_NOTE"],
+    ["You had breakfast. Sugar 6.8 mmol.", "GLUCOSE_READING"],
+  ] as const)("%j: the last %s is AMBIGUOUS with UNCERTAINTY, not OTHER_PERSON", (text, kind) => {
+    const fact = factsOf(text).at(-1);
+    expect(fact?.kind, text).toBe(kind);
+    expect(fact, text).toMatchObject({ state: "AMBIGUOUS", ambiguity: expect.arrayContaining(["UNCERTAINTY"]) });
+    expect(fact?.kind === "MEAL_NOTE" || fact?.kind === "GLUCOSE_READING" || fact?.kind === "MEDICATION_OCCURRENCE" ? fact.ambiguity : [], text).not.toContain("OTHER_PERSON");
+  });
+
+  it("a fact with its own subject after the \"you\" sentence, or a \"you\" only later, stays as it was; Chinese is unchanged", () => {
+    expect(factsOf("Did you eat? I had chicken rice for lunch.")).toMatchObject([{ kind: "MEAL_NOTE", state: "UNDERSTOOD", ambiguity: [] }]);
+    expect(factsOf("You had breakfast. My sugar was 6.8 mmol.").at(-1)).toMatchObject({ kind: "GLUCOSE_READING", state: "UNDERSTOOD", ambiguity: [] });
+    expect(factsOf("I took my dark pen. Thank you.")).toMatchObject([{ kind: "MEDICATION_OCCURRENCE", state: "UNDERSTOOD", ambiguity: [] }]);
+    // Only the immediately previous sentence counts.
+    expect(factsOf("You had breakfast. I had lunch. Took the dark pen.").at(-1)).toMatchObject({ kind: "MEDICATION_OCCURRENCE", state: "UNDERSTOOD", ambiguity: [] });
+    expect(analysed("你吃了早饭。血糖六点八。", "zh").candidates.find((c) => c.kind === "GLUCOSE_READING")).toMatchObject({ ambiguity: expect.arrayContaining(["OTHER_PERSON"]) });
+  });
+});
+
+/**
+ * Owner decision 2026-10-12 (second person), fix round 5 (controller ruling): the look-back walks to the nearest earlier sentence with
+ * an explicit subject marker (a subject-form first person, or "you"/"your"); a "you" there makes a subjectless fact edit-only.
+ */
+describe("owner decision 2026-10-12, fix round 5: the nearest earlier sentence with a subject decides", () => {
+  const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+  const editOnly = { state: "AMBIGUOUS", ambiguity: expect.arrayContaining(["UNCERTAINTY"]) };
+
+  it("walks back over subjectless sentences to the \"you\"", () => {
+    const chain = factsOf("You had breakfast. Took metformin. Took the dark pen.").filter((c) => c.kind === "MEDICATION_OCCURRENCE");
+    expect(chain).toMatchObject([editOnly, editOnly]);
+    for (const fact of chain) expect(fact.ambiguity).not.toContain("OTHER_PERSON");
+    expect(factsOf("I told you. Took the dark pen.")).toMatchObject([{ kind: "MEDICATION_OCCURRENCE", ...editOnly }]);
+    expect(factsOf("I told you. Took the dark pen.")[0]!.ambiguity).not.toContain("OTHER_PERSON");
+  });
+
+  it("stops at the nearest first person without \"you\"; \"my\" is not a subject for the walk", () => {
+    expect(factsOf("You had breakfast. I had lunch. Took the dark pen.").at(-1)).toMatchObject({ kind: "MEDICATION_OCCURRENCE", state: "UNDERSTOOD", ambiguity: [] });
+    expect(factsOf("You had breakfast. My lunch was rice. Took the dark pen.").at(-1)).toMatchObject({ kind: "MEDICATION_OCCURRENCE", ...editOnly });
+  });
+});

@@ -53,7 +53,7 @@ import {
  * - unit MMOL_PER_L only when spoken (never "mmol/mol"); else UNSTATED;
  * - negation, uncertainty (comparatives, targets, past times), corrections and other people are flagged from the WHOLE transcript,
  *   except the clauses that produced a meal or medicine fact (their words belong to that fact); several numbers after one cue are
- *   all MULTIPLE_NUMBERS.
+ *   all MULTIPLE_NUMBERS. Owner decision 2026-10-12 (second person): English "you"/"your" count only in the fact's own clause.
  * Meals: a clause with an eating verb, or a meal word with "had/was/is", gives one MEAL_NOTE: the standard slot when said and the exact
  * food words when said. Medicines: a clause naming a medicine (a remembered term, an exact canonical name, or a generic medicine noun
  * with its 1–2 spoken describing words) gives one MEDICATION_OCCURRENCE with the occurrence status said (PLANNED, TAKEN, SKIPPED;
@@ -135,6 +135,30 @@ const TAIL_EXTRA_WORDS: Readonly<Record<VoiceLanguage, readonly string[]>> = Obj
 });
 /** Round 4 (I4): time possessives ("today's sugar", "this morning's reading") are not another person's. */
 const EN_TIME_POSSESSIVE = "(?<!(?:today|tonight|yesterday|morning|afternoon|evening|night|week|month|year|day|lunch|dinner|breakfast|supper))";
+/**
+ * Owner decision 2026-10-12 (second person): English "you"/"your" (often a question to the listener: "Do you think…?", "Can you
+ * remind me?") mark a fact OTHER_PERSON only inside that fact's own clause, never from another clause. Every other other-person cue
+ * stays transcript-wide; Chinese 你/您 too (Chinese is unchanged). The vocabulary list is unchanged (the between-allow-list still
+ * accepts them).
+ */
+const EN_SECOND_PERSON_CUES: readonly string[] = Object.freeze(["you", "your"]);
+/**
+ * Owner decision 2026-10-12 (second person), fix round 1 (safety review Critical; controller ruling): an implied subject is part of
+ * the fact's own clause, so a clause without a subject of its own ("took the dark pen", "then ate noodles", "sugar 6.8 mmol") keeps a
+ * "you"/"your" said earlier in the same sentence. Fix round 2 (controller ruling): only a SUBJECT-form first person exempts it: I, I'm,
+ * I've, I'd, I'll (the apostrophe, straight or curly, required: "ill", "id", "ive", "im" are other words) and inclusive "we". "my",
+ * "me", "mine", "myself" and "our" never do ("you had lunch then took my dark pen"), except "my" before a reading's cue (below).
+ */
+const EN_FIRST_PERSON_SUBJECT = /(?<![A-Za-z'’])(?:i['’](?:m|ve|d|ll)|i|we)(?![A-Za-z'’])/i;
+/** Fix round 2: a reading's own "my" before its cue ("…and then my sugar was 6.8") exempts it; anywhere else it never does. */
+const EN_POSSESSIVE_BEFORE_CUE = /(?<![A-Za-z'’])my(?![A-Za-z'’])/i;
+/**
+ * Fix round 3 (controller ruling): the first person counts only BEFORE the fact's first verb or cue in its own clause ("took the dark
+ * pen I gave", "ate the noodles I cooked", "sugar was 6.8 mmol after I woke up" are not the speaker's). A medicine's verb: a status
+ * word or one of these (or its medicine phrase, if earlier); a meal's: an eat verb or one of EN_MEAL_LINK_VERBS; a reading's: its cue.
+ */
+const EN_MEDICINE_VERBS = /(?<![A-Za-z])(?:take|takes|taking|took|taken|inject(?:ed|ing|s)?|use|uses|using|used)(?![A-Za-z])/i;
+const EN_MEAL_LINK_VERBS = /(?<![A-Za-z])(?:had|have|has|having|was|is|were)(?![A-Za-z])/i;
 
 const escape = (word: string) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function englishAlternation(words: readonly string[]): string {
@@ -163,6 +187,11 @@ type Patterns = Readonly<{
   uncertainty: RegExp;
   correction: RegExp;
   otherPerson: RegExp;
+  /** Owner decision 2026-10-12 (second person): tested on the fact's own clause only; null for Chinese (你/您 stay in `otherPerson`). */
+  secondPerson: RegExp | null;
+  /** Fix round 2: the fact's own subject-form first person, and a reading's "my" before its cue; null for Chinese. */
+  firstPersonSubject: RegExp | null;
+  possessiveBeforeCue: RegExp | null;
   eat: RegExp;
   slot: RegExp;
   noun: RegExp;
@@ -196,7 +225,10 @@ function compile(language: VoiceLanguage, vocabulary: VoiceVocabulary): Patterns
       negation: new RegExp(`(?<![A-Za-z])(?:${englishAlternation(vocabulary.negationCues.filter((cue) => cue !== "n't"))})(?![A-Za-z])|n['’]t(?![A-Za-z])`, "i"),
       uncertainty: words(vocabulary.uncertaintyCues),
       correction: words(vocabulary.correctionCues),
-      otherPerson: new RegExp(`(?<![A-Za-z])(?:${englishAlternation(vocabulary.otherPersonCues.filter((cue) => !cue.startsWith("'")))})(?![A-Za-z])|${EN_TIME_POSSESSIVE}['’]s\\s+(?:sugar|blood|glucose|reading|insulin|medicine|pill|pen|lunch|breakfast|dinner)`, "i"),
+      otherPerson: new RegExp(`(?<![A-Za-z])(?:${englishAlternation(vocabulary.otherPersonCues.filter((cue) => !cue.startsWith("'") && !EN_SECOND_PERSON_CUES.includes(cue)))})(?![A-Za-z])|${EN_TIME_POSSESSIVE}['’]s\\s+(?:sugar|blood|glucose|reading|insulin|medicine|pill|pen|lunch|breakfast|dinner)`, "i"),
+      secondPerson: new RegExp(`(?<![A-Za-z])(?:${englishAlternation(EN_SECOND_PERSON_CUES)})(?![A-Za-z])`, "i"),
+      firstPersonSubject: EN_FIRST_PERSON_SUBJECT,
+      possessiveBeforeCue: EN_POSSESSIVE_BEFORE_CUE,
       eat: words(vocabulary.eatVerbs),
       slot: words(slotWords),
       noun: words(vocabulary.medicineNouns),
@@ -219,6 +251,9 @@ function compile(language: VoiceLanguage, vocabulary: VoiceVocabulary): Patterns
     uncertainty: words(vocabulary.uncertaintyCues, ""),
     correction: words(vocabulary.correctionCues, ""),
     otherPerson: words(vocabulary.otherPersonCues, ""),
+    secondPerson: null,
+    firstPersonSubject: null,
+    possessiveBeforeCue: null,
     eat: words(vocabulary.eatVerbs, ""),
     slot: words(slotWords, ""),
     noun: words(vocabulary.medicineNouns, ""),
@@ -233,6 +268,8 @@ function compile(language: VoiceLanguage, vocabulary: VoiceVocabulary): Patterns
 }
 
 const PATTERNS: Readonly<Record<VoiceLanguage, Patterns>> = Object.freeze({ en: compile("en", voiceVocabulary("en")), zh: compile("zh", voiceVocabulary("zh")) });
+/** Fix round 3: the planned-status words alone, without the subject forms "i'll", "we'll", "i will" (a subject before "take" counts). */
+const PLANNED_STATUS_WORDS: Readonly<Record<VoiceLanguage, RegExp>> = Object.freeze({ en: voiceWordMatcher(voiceVocabulary("en").statusPlanned, "en"), zh: voiceWordMatcher(voiceVocabulary("zh").statusPlanned, "zh", "") });
 
 // ---------------------------------------------------------------------------------------------------------------------------------
 // Numbers
@@ -565,7 +602,7 @@ function trimRange(text: string, start: number, end: number): Range | null {
   return end > start ? { start, end } : null;
 }
 
-function clauses(text: string, language: VoiceLanguage, boundaries: number[]): Range[] {
+function clauses(text: string, language: VoiceLanguage, boundaries: number[], splitAtCue = true): Range[] {
   const cuts: Array<[number, number]> = boundaries.map((index) => [index, index + 1]);
   for (const match of text.matchAll(language === "zh" ? ZH_CLAUSE_CUT : EN_CLAUSE_CUT)) cuts.push([match.index, match.index + match[0].length]);
   cuts.sort((left, right) => left[0] - right[0]);
@@ -579,7 +616,7 @@ function clauses(text: string, language: VoiceLanguage, boundaries: number[]): R
   }
   const last = trimRange(text, cursor, text.length);
   if (last) ranges.push(last);
-  return ranges.flatMap((range) => splitAtGlucoseCue(text, range, language));
+  return splitAtCue ? ranges.flatMap((range) => splitAtGlucoseCue(text, range, language)) : ranges;
 }
 
 /**
@@ -839,6 +876,35 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
   const ordered = (reasons: Set<VoiceAmbiguityReason>) => VOICE_AMBIGUITY_REASONS.filter((reason) => reasons.has(reason));
   const wholeCorrection = patterns.correction.test(text);
   const wholeOtherPerson = patterns.otherPerson.test(text);
+  // Owner decision 2026-10-12 (second person): "you"/"your" count only inside the fact's own clause (`text.slice(from, to)`).
+  const secondPersonIn = (from: number, to: number) => patterns.secondPerson?.test(text.slice(from, to)) ?? false;
+  // Fix rounds 1–3 (controller rulings): ... or earlier in the same sentence (an implied subject: "you had rice and took the dark pen",
+  // "… then took my dark pen") unless the fact's clause has its own subject-form first person BEFORE its first verb or cue (`pivot`;
+  // for a reading also "my" there). Such a cancelled "you" still leaves UNCERTAINTY (edit-only, never one tap: round 3, rule 2).
+  // Another sentence, or a "you" later than the clause, never counts.
+  const secondPersonReason = (from: number, to: number, pivot: number, withPossessive = false): "OTHER_PERSON" | "UNCERTAINTY" | null => {
+    if (secondPersonIn(from, to)) return "OTHER_PERSON";
+    const index = sentenceIndex(from);
+    const sentenceStart = index === 0 ? 0 : boundaries[index - 1]! + 1;
+    const lead = text.slice(from, Math.max(from, pivot));
+    const ownSubject = (patterns.firstPersonSubject?.test(lead) ?? false) || (withPossessive && (patterns.possessiveBeforeCue?.test(lead) ?? false));
+    if (secondPersonIn(sentenceStart, from)) return ownSubject ? "UNCERTAINTY" : "OTHER_PERSON";
+    // Fix rounds 4–5 (controller rulings): a subjectless fact after a sentence holding "you"/"your" ("You took metformin. Took the dark
+    // pen.") is edit-only: UNCERTAINTY, never OTHER_PERSON. The walk back skips sentences with neither "you"/"your" nor a subject-form
+    // first person ("my" is not one here) and stops at the nearest one with either: "you" there (even "I told you") gives UNCERTAINTY;
+    // a first person alone gives nothing ("You had breakfast. I had lunch. Took the dark pen.").
+    if (ownSubject || patterns.secondPerson === null) return null;
+    let previousEnd = sentenceStart - 1;
+    for (let previous = index - 1; previous >= 0; previous -= 1) {
+      const previousStart = previous === 0 ? 0 : boundaries[previous - 1]! + 1;
+      if (secondPersonIn(previousStart, previousEnd)) return "UNCERTAINTY";
+      if (patterns.firstPersonSubject?.test(text.slice(previousStart, previousEnd))) return null;
+      previousEnd = previousStart - 1;
+    }
+    return null;
+  };
+  /** Round 3: the offset of the first match of any of `verbs` in the clause (the clause end when none). */
+  const firstVerbAt = (range: Range, verbs: ReadonlyArray<RegExp>) => range.start + Math.min(range.end - range.start, ...verbs.map((verb) => verb.exec(text.slice(range.start, range.end))?.index ?? Infinity));
   const cueInClause = new RegExp(patterns.cue.source, patterns.cue.flags.replace("g", ""));
 
   const candidates: Array<{ start: number; candidate: VoiceCandidate }> = [];
@@ -883,6 +949,9 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
       if (patterns.uncertainty.test(sentence.replace(statusWords, " "))) reasons.add("UNCERTAINTY");
       if (wholeCorrection) reasons.add("CORRECTION");
       if (wholeOtherPerson) reasons.add("OTHER_PERSON");
+      const medicinePivot = Math.min(found.start, firstVerbAt(range, [patterns.statusTaken, patterns.statusSkipped, PLANNED_STATUS_WORDS[language], patterns.statusUnknown, EN_MEDICINE_VERBS]));
+      const medicineSecond = secondPersonReason(range.start, range.end, medicinePivot);
+      if (medicineSecond) reasons.add(medicineSecond);
       if (found.ref.kind === "UNRESOLVED") reasons.add("MEDICINE_UNRESOLVED");
       if (status === "UNKNOWN") reasons.add("STATUS_UNCLEAR");
       // Owner #4: an amount the person reported for this occurrence, exactly as spoken (never advice).
@@ -911,6 +980,8 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
       if (patterns.uncertainty.test(sentence) || patterns.statusPlanned.test(clause)) reasons.add("UNCERTAINTY");
       if (wholeCorrection) reasons.add("CORRECTION");
       if (wholeOtherPerson) reasons.add("OTHER_PERSON");
+      const mealSecond = secondPersonReason(range.start, range.end, firstVerbAt(range, [patterns.eat, EN_MEAL_LINK_VERBS]));
+      if (mealSecond) reasons.add(mealSecond);
       const ambiguity = ordered(reasons);
       candidates.push({ start: range.start, candidate: Object.freeze({ kind: "MEAL_NOTE", ...base(range.start, range.end), slot: mealSlot(clause, vocabulary, language), itemText, state: ambiguity.length === 0 ? "UNDERSTOOD" : "AMBIGUOUS", ambiguity }) });
       factRanges.push(range);
@@ -933,6 +1004,10 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
   const cues: Cue[] = [...glucoseText.matchAll(patterns.cue)].map((match) => ({ start: match.index, end: match.index + match[0].length }));
   const numbers = language === "en" ? englishNumbers(glucoseText, patterns, vocabulary) : chineseNumbers(glucoseText, patterns);
   const clauseAt = (offset: number) => allClauses.find((range) => range.start <= offset && offset < range.end) ?? null;
+  // Owner decision 2026-10-12 (second person): a reading's own clause starts at the clause of its first cue BEFORE the I1 split at the
+  // cue, so a possessive right before the cue ("I had rice and your sugar 6.8") stays with the reading (conservative).
+  const unsplitClauses = clauses(text, language, boundaries, false);
+  const readingClauseStart = (offset: number) => unsplitClauses.find((range) => range.start <= offset && offset < range.end)?.start ?? clauseAt(offset)?.start ?? offset;
   const readings = numbers
     .map((number) => {
       const windowCues = cues.filter((cue) => cue.end <= number.start && number.start - cue.end <= WINDOW[language] && sentenceIndex(cue.end) === sentenceIndex(number.start) && !patterns.otherMeasure.test(text.slice(cue.end, number.start)));
@@ -968,8 +1043,15 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
     if (patterns.negation.test(glucoseScope)) reasons.add("NEGATION");
     if (patterns.uncertainty.test(glucoseScope)) reasons.add("UNCERTAINTY");
     if (wholeCorrection) reasons.add("CORRECTION");
-    // Explicit kinship, title or pronoun cues anywhere: OTHER_PERSON (never saved for this profile, not even from an edit).
+    // Explicit kinship, title or pronoun cues anywhere: OTHER_PERSON (never saved for this profile, not even from an edit). Owner
+    // decision 2026-10-12 (second person): "you"/"your" only in the reading's own clause(s), from its first cue's clause to the end of
+    // the clause holding its number and unit ("Your sugar is 6.8", "My sugar is 6.8 for you"), never from another clause.
+    // Fix rounds 1–3: and an earlier "you" of the sentence unless a subject-form first person or "my" comes before the reading's first
+    // cue in its clause ("You had lunch then sugar 6.8", "… 6.8 mmol for me", "… 6.8 mmol after I woke up"); then UNCERTAINTY ("… and
+    // then my sugar was 6.8": the speaker's, but edit-only).
     if (wholeOtherPerson) reasons.add("OTHER_PERSON");
+    const readingSecond = secondPersonReason(readingClauseStart(start), clauseAt(end - 1)?.end ?? end, start, true);
+    if (readingSecond) reasons.add(readingSecond);
     // Cr1 + round 4 (C1, I4 decision): the allow-list now runs from the start of the SENTENCE (the meal and medicine clauses and the
     // redirected questions blank). A miss is NOT an explicit other-person cue, so it adds UNCERTAINTY (edit-only: the person may
     // correct and save it, never one tap) instead of OTHER_PERSON, which no edit can clear. Explicit cues still give OTHER_PERSON.
