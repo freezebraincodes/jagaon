@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createFakeVoiceTranscriber, type FakeVoiceTranscriberScript } from "./fake-voice-transcriber";
 import { voiceDisclosureReducer, VOICE_DISCLOSURE_INITIAL_STATE, type VoiceDisclosureGrant } from "./voice-cloud-disclosure";
 import { createVoiceSessionController, type VoiceSessionSnapshot, type VoiceTimers } from "./voice-session-controller";
+import type { VoiceTranscriberPort } from "./voice-transcriber-port";
 
 /** A manual timer: tests fire timeouts explicitly. */
 function manualTimers() {
@@ -275,6 +276,60 @@ describe("voice session controller", () => {
     controller.discardTranscript();
     expect(controller.takeTranscript()).toBeNull();
     controller.discardTranscript();
+  });
+
+  it("carries the provider stop into the snapshot (null before a release; CONFIRMED, UNCONFIRMED, START_UNRESOLVED, NOT_STARTED) without changing any state", async () => {
+    const confirmed = setup();
+    expect(confirmed.controller.snapshot().providerStop).toBeNull();
+    await confirmed.controller.start({ language: "en", grant: grant() });
+    expect(confirmed.controller.snapshot().providerStop).toBeNull();
+    expect(await confirmed.controller.stop()).toMatchObject({ state: "COMPLETED", microphoneReleased: true, providerStop: { kind: "CONFIRMED" } });
+    // A new session starts with no provider stop again.
+    await confirmed.controller.start({ language: "en", grant: grant() });
+    expect(confirmed.controller.snapshot().providerStop).toBeNull();
+
+    const providerStop = { kind: "UNCONFIRMED", reason: "NO_ROBOT_LEFT_EVENT", robotId: "robot-1", taskId: "task-1" } as const;
+    for (const end of ["stop", "cancel"] as const) {
+      const unconfirmed = setup({ providerStop });
+      await unconfirmed.controller.start({ language: "en", grant: grant() });
+      unconfirmed.fake.emit({ kind: "FINAL", segmentId: "s1", text: "Sugar 7" });
+      const done = await unconfirmed.controller[end]();
+      expect(done).toMatchObject({ state: end === "stop" ? "COMPLETED" : "CANCELLED", microphoneReleased: true, providerStop });
+      expect(unconfirmed.states).toEqual(["STARTING", "LISTENING", "STOPPING", end === "stop" ? "COMPLETED" : "CANCELLED"]);
+      expect(unconfirmed.controller.takeTranscript()).toBe(end === "stop" ? "Sugar 7" : null);
+    }
+    const unknownTask = setup({ providerStop: { kind: "UNCONFIRMED", reason: "STOP_THREW", robotId: "robot-1", taskId: null } });
+    await unknownTask.controller.start({ language: "en", grant: grant() });
+    expect((await unknownTask.controller.cancel()).providerStop).toEqual({ kind: "UNCONFIRMED", reason: "STOP_THREW", robotId: "robot-1", taskId: null });
+
+    // A FAILED start carries the adapter's own outcome; without one it is unknown (null), never NOT_STARTED by assumption.
+    const unknown = setup({ start: { kind: "FAILED", reason: "PERMISSION_DENIED" } });
+    await unknown.controller.start({ language: "en", grant: grant() });
+    expect(unknown.controller.snapshot()).toMatchObject({ state: "FAILED", failureReason: "PERMISSION_DENIED", microphoneReleased: true, providerStop: null });
+    const notStarted = setup({ start: { kind: "FAILED", reason: "PERMISSION_DENIED", providerStop: { kind: "NOT_STARTED" } } });
+    await notStarted.controller.start({ language: "en", grant: grant() });
+    expect(notStarted.controller.snapshot()).toMatchObject({ state: "FAILED", providerStop: { kind: "NOT_STARTED" } });
+    const unresolved = { kind: "UNCONFIRMED", reason: "START_UNRESOLVED", robotId: null, taskId: "task-1" } as const;
+    const timedOut = setup({ start: { kind: "MANUAL" } });
+    const starting = timedOut.controller.start({ language: "en", grant: grant() });
+    await flush();
+    timedOut.clock.fire(15_000);
+    timedOut.fake.completeStart({ kind: "FAILED", reason: "PROVIDER_FAILURE", providerStop: unresolved });
+    await starting;
+    expect(timedOut.controller.snapshot()).toMatchObject({ state: "FAILED", failureReason: "START_TIMEOUT", providerStop: unresolved });
+  });
+
+  it("an unreadable provider stop in the report becomes null; a rejecting release stays honest", async () => {
+    for (const providerStop of [undefined, null, "CONFIRMED", { kind: "STOPPED" }, { kind: "UNCONFIRMED", reason: "REJECTED", robotId: "r", taskId: null }, { kind: "UNCONFIRMED", reason: "STOP_THREW", robotId: 1, taskId: null }, { kind: "UNCONFIRMED", reason: "STOP_THREW", robotId: "r" }, { kind: "UNCONFIRMED", reason: "STOP_THREW", robotId: null, taskId: null }, { kind: "UNCONFIRMED", reason: "START_UNRESOLVED", robotId: "r", taskId: null }]) {
+      const session = { stop: async () => ({ microphoneReleased: true, providerStop }), cancel: async () => ({ microphoneReleased: true, providerStop }) };
+      const controller = createVoiceSessionController({ transcriber: { start: async () => ({ kind: "STARTED", session, maxSessionSeconds: 60 }) } as unknown as VoiceTranscriberPort, timers: manualTimers().timers, startTimeoutMs: 15_000, maxSessionSeconds: 90 });
+      await controller.start({ language: "en", grant: grant() });
+      expect(await controller.stop(), JSON.stringify(providerStop)).toMatchObject({ state: "COMPLETED", microphoneReleased: true, providerStop: null });
+    }
+    const rejecting = { stop: () => Promise.reject(new Error("TEST-ONLY")), cancel: () => Promise.reject(new Error("TEST-ONLY")) };
+    const controller = createVoiceSessionController({ transcriber: { start: async () => ({ kind: "STARTED", session: rejecting, maxSessionSeconds: 60 }) } as unknown as VoiceTranscriberPort, timers: manualTimers().timers, startTimeoutMs: 15_000, maxSessionSeconds: 90 });
+    await controller.start({ language: "en", grant: grant() });
+    expect(await controller.cancel()).toMatchObject({ state: "CANCELLED", microphoneReleased: false, providerStop: null });
   });
 
   it("persists nothing and logs nothing", async () => {

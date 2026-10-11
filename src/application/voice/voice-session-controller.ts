@@ -1,8 +1,10 @@
 import type { VoiceLanguage } from "@/domain/voice/voice-contracts";
 import { consumeVoiceDisclosureGrant, isVoiceDisclosureGrantUsable, type VoiceDisclosureGrant } from "./voice-cloud-disclosure";
 import {
+  VOICE_PROVIDER_STOP_UNCONFIRMED_REASONS,
   VOICE_SESSION_FAILURE_REASONS,
   type VoiceCredentialRefusal,
+  type VoiceProviderStop,
   type VoiceReleaseReport,
   type VoiceSegment,
   type VoiceSessionFailureReason,
@@ -24,6 +26,9 @@ import {
  *   clear the text at once and discard every later segment. A session token drops events of an older session.
  * - The terminal state is set only AFTER the handle reported its release (also on start-timeout, cancel and failure paths).
  * - `takeTranscript()` returns the sealed final text of a COMPLETED session once, then clears it. Nothing is persisted or logged.
+ * - `providerStop` carries the adapter's provider-stop outcome (validated; null before a release, or when no readable outcome was
+ *   reported). A FAILED start carries its own release's outcome when the adapter reports it, else null (unknown, never NOT_STARTED by
+ *   assumption). It changes no state, text or timer.
  */
 export type VoiceSessionState = "IDLE" | "STARTING" | "LISTENING" | "STOPPING" | "COMPLETED" | "CANCELLED" | "TIMED_OUT" | "FAILED";
 type TerminalState = "COMPLETED" | "CANCELLED" | "TIMED_OUT" | "FAILED";
@@ -38,6 +43,8 @@ export type VoiceSessionSnapshot = Readonly<{
   credentialRefusal: VoiceCredentialRefusal | null;
   /** The adapter's release report for the last session (null while none ended). */
   microphoneReleased: boolean | null;
+  /** The adapter's provider-stop outcome for the last session (null while none ended, or when the report was unreadable). */
+  providerStop: VoiceProviderStop | null;
 }>;
 
 export type VoiceTimers = Readonly<{
@@ -76,12 +83,29 @@ function validSegment(segment: unknown): segment is VoiceSegment {
   return (kind === "INTERIM" || kind === "FINAL") && typeof segmentId === "string" && segmentId.length > 0 && segmentId.length <= MAX_SEGMENT_ID_CHARS && typeof text === "string" && text.length <= MAX_SEGMENT_TEXT_CHARS;
 }
 
-async function release(action: () => Promise<VoiceReleaseReport>): Promise<VoiceReleaseReport> {
+type ReleaseOutcome = Readonly<{ microphoneReleased: boolean; providerStop: VoiceProviderStop | null }>;
+
+function providerStopOf(value: unknown): VoiceProviderStop | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { kind, reason, robotId, taskId } = value as Record<string, unknown>;
+  if (kind === "CONFIRMED" || kind === "NOT_STARTED") return Object.freeze({ kind });
+  if (kind !== "UNCONFIRMED" || (taskId !== null && typeof taskId !== "string")) return null;
+  if (reason === "START_UNRESOLVED") return robotId === null ? Object.freeze({ kind, reason, robotId, taskId }) : null;
+  const known = VOICE_PROVIDER_STOP_UNCONFIRMED_REASONS.find((candidate) => candidate === reason);
+  if (known === undefined || known === "START_UNRESOLVED" || typeof robotId !== "string") return null;
+  return Object.freeze({ kind, reason: known, robotId, taskId });
+}
+
+/** A start that handed over no session: the microphone was released by the adapter; the provider outcome is what it reported. */
+const noSessionRelease = (result: VoiceStartResult | undefined): ReleaseOutcome =>
+  Object.freeze({ microphoneReleased: true, providerStop: result?.kind === "FAILED" ? providerStopOf(result.providerStop) : null });
+
+async function release(action: () => Promise<VoiceReleaseReport>): Promise<ReleaseOutcome> {
   try {
     const report = await action();
-    return { microphoneReleased: report?.microphoneReleased === true };
+    return { microphoneReleased: report?.microphoneReleased === true, providerStop: providerStopOf(report?.providerStop) };
   } catch {
-    return { microphoneReleased: false };
+    return { microphoneReleased: false, providerStop: null };
   }
 }
 
@@ -98,6 +122,7 @@ export function createVoiceSessionController(options: VoiceSessionControllerOpti
   let failureReason: VoiceSessionSnapshot["failureReason"] = null;
   let credentialRefusal: VoiceCredentialRefusal | null = null;
   let microphoneReleased: boolean | null = null;
+  let providerStop: VoiceProviderStop | null = null;
   let accepting = false;
   let handle: VoiceSessionHandle | null = null;
   let abort: AbortController | null = null;
@@ -110,7 +135,7 @@ export function createVoiceSessionController(options: VoiceSessionControllerOpti
   const join = (parts: Iterable<string>) => [...parts].map((part) => part.trim()).filter((part) => part.length > 0).join(separator());
 
   function snapshot(): VoiceSessionSnapshot {
-    return Object.freeze({ state, sessionToken: token, language, liveText: join([...finals.values(), ...interims.values()]), failureReason, credentialRefusal, microphoneReleased });
+    return Object.freeze({ state, sessionToken: token, language, liveText: join([...finals.values(), ...interims.values()]), failureReason, credentialRefusal, microphoneReleased, providerStop });
   }
 
   function emit(): void {
@@ -133,7 +158,7 @@ export function createVoiceSessionController(options: VoiceSessionControllerOpti
     interims.clear();
   }
 
-  function finish(session: number, report: VoiceReleaseReport): void {
+  function finish(session: number, report: ReleaseOutcome): void {
     if (session !== token || endKind === null) return;
     clearTimers();
     accepting = false;
@@ -141,6 +166,7 @@ export function createVoiceSessionController(options: VoiceSessionControllerOpti
     sealed = endKind === "COMPLETED" ? join(finals.values()) : null;
     finals.clear();
     microphoneReleased = report.microphoneReleased;
+    providerStop = report.providerStop;
     state = endKind;
     handle = null;
     abort = null;
@@ -215,6 +241,7 @@ export function createVoiceSessionController(options: VoiceSessionControllerOpti
     failureReason = null;
     credentialRefusal = null;
     microphoneReleased = null;
+    providerStop = null;
     endKind = null;
     ending = null;
     accepting = true;
@@ -236,12 +263,12 @@ export function createVoiceSessionController(options: VoiceSessionControllerOpti
 
     if (session !== token || endKind !== null) {
       // Cancelled or timed out while starting (or superseded): release a late session, then finish. A FAILED start released itself.
-      const report = started ? await release(() => started.session.cancel()) : { microphoneReleased: true };
+      const report = started ? await release(() => started.session.cancel()) : noSessionRelease(result);
       finish(session, report);
       return { kind: "RAN" };
     }
     if (!started || !positiveInteger(started.maxSessionSeconds)) {
-      const report = started ? await release(() => started.session.cancel()) : { microphoneReleased: true };
+      const report = started ? await release(() => started.session.cancel()) : noSessionRelease(result);
       endKind = "FAILED";
       failureReason = !started && result?.kind === "FAILED" ? result.reason : "PROVIDER_FAILURE";
       credentialRefusal = !started && result?.kind === "FAILED" && failureReason === "CREDENTIAL_REFUSED" ? (result.credentialRefusal ?? null) : null;

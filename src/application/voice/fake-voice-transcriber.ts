@@ -1,4 +1,4 @@
-import type { VoiceSessionFailureReason, VoiceReleaseReport, VoiceSegment, VoiceStartRequest, VoiceStartResult, VoiceTranscriberPort } from "./voice-transcriber-port";
+import type { VoiceProviderStop, VoiceSessionFailureReason, VoiceReleaseReport, VoiceSegment, VoiceStartRequest, VoiceStartResult, VoiceTranscriberPort } from "./voice-transcriber-port";
 
 /**
  * Packet 13 slice (P13S, S3): a scripted fake transcriber, for tests and an offline harness ONLY. It never touches a microphone, a
@@ -15,13 +15,15 @@ export type FakeVoiceTranscriberScript = Readonly<{
   release?: "AUTO" | "MANUAL";
   /** The release report (default: released). */
   microphoneReleased?: boolean;
+  /** The release report's provider stop (default: CONFIRMED). A scripted FAILED start may carry its own `providerStop`. */
+  providerStop?: VoiceProviderStop;
   /** Segments emitted right after a STARTED start. */
   segmentsOnStart?: readonly VoiceSegment[];
 }>;
 
 type VoiceStartResultScript =
   | Readonly<{ kind: "STARTED"; maxSessionSeconds?: number }>
-  | Readonly<{ kind: "FAILED"; reason: Extract<VoiceStartResult, { kind: "FAILED" }>["reason"]; credentialRefusal?: Extract<VoiceStartResult, { kind: "FAILED" }>["credentialRefusal"] }>;
+  | Readonly<{ kind: "FAILED"; reason: Extract<VoiceStartResult, { kind: "FAILED" }>["reason"]; credentialRefusal?: Extract<VoiceStartResult, { kind: "FAILED" }>["credentialRefusal"]; providerStop?: VoiceProviderStop }>;
 
 export type FakeVoiceTranscriber = VoiceTranscriberPort &
   Readonly<{
@@ -37,6 +39,7 @@ export type FakeVoiceTranscriber = VoiceTranscriberPort &
   }>;
 
 const DEFAULT_MAX_SESSION_SECONDS = 60;
+const CONFIRMED: VoiceProviderStop = Object.freeze({ kind: "CONFIRMED" });
 
 export function createFakeVoiceTranscriber(script: FakeVoiceTranscriberScript = {}): FakeVoiceTranscriber {
   const calls: string[] = [];
@@ -49,7 +52,7 @@ export function createFakeVoiceTranscriber(script: FakeVoiceTranscriberScript = 
     const release = (call: "stop" | "cancel"): Promise<VoiceReleaseReport> => {
       calls.push(call);
       if (released) return released;
-      const report = Object.freeze({ microphoneReleased: script.microphoneReleased ?? true });
+      const report: VoiceReleaseReport = Object.freeze({ microphoneReleased: script.microphoneReleased ?? true, providerStop: script.providerStop ?? CONFIRMED });
       released =
         script.release === "MANUAL"
           ? new Promise((resolve) => {
@@ -68,7 +71,7 @@ export function createFakeVoiceTranscriber(script: FakeVoiceTranscriberScript = 
   }
 
   function resolveWith(request: VoiceStartRequest, result: VoiceStartResultScript): VoiceStartResult {
-    if (result.kind === "FAILED") return Object.freeze({ kind: "FAILED", reason: result.reason, ...(result.credentialRefusal ? { credentialRefusal: result.credentialRefusal } : {}) });
+    if (result.kind === "FAILED") return Object.freeze({ kind: "FAILED", reason: result.reason, ...(result.credentialRefusal ? { credentialRefusal: result.credentialRefusal } : {}), ...(result.providerStop ? { providerStop: result.providerStop } : {}) });
     const started = Object.freeze({ kind: "STARTED" as const, session: handleFor(), maxSessionSeconds: result.maxSessionSeconds ?? DEFAULT_MAX_SESSION_SECONDS });
     queueMicrotask(() => {
       for (const segment of script.segmentsOnStart ?? []) request.onSegment(segment);

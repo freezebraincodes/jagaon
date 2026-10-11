@@ -21,8 +21,9 @@ describe("fake voice transcriber (tests and harness only)", () => {
     await Promise.resolve();
     expect(segments).toEqual([{ kind: "FINAL", segmentId: "1", text: "Sugar 7" }]);
     if (result.kind !== "STARTED") return;
-    expect(await result.session.stop()).toEqual({ microphoneReleased: true });
-    expect(await result.session.cancel()).toEqual({ microphoneReleased: true });
+    const report = await result.session.stop();
+    expect(report).toEqual({ microphoneReleased: true, providerStop: { kind: "CONFIRMED" } });
+    expect(await result.session.cancel()).toBe(report);
     expect(fake.calls).toEqual(["start:en", "stop", "release", "cancel"]);
   });
 
@@ -36,6 +37,16 @@ describe("fake voice transcriber (tests and harness only)", () => {
     manual.completeStart({ kind: "FAILED", reason: "START_TIMEOUT" });
     expect(await pending).toEqual({ kind: "FAILED", reason: "START_TIMEOUT" });
     expect(manual.calls).toEqual(["start:en", "abort"]);
+  });
+
+  it("can be scripted to an unconfirmed provider stop", async () => {
+    const providerStop = { kind: "UNCONFIRMED", reason: "STOP_TIMED_OUT", robotId: "robot-1", taskId: null } as const;
+    const fake = createFakeVoiceTranscriber({ providerStop, microphoneReleased: false });
+    const result = await fake.start({ language: "en", grant: grant(), onSegment: () => undefined, onFailure: () => undefined, signal: new AbortController().signal });
+    if (result.kind !== "STARTED") throw new Error("expected STARTED");
+    expect(await result.session.cancel()).toEqual({ microphoneReleased: false, providerStop });
+    const failing = createFakeVoiceTranscriber({ start: { kind: "FAILED", reason: "PROVIDER_FAILURE", providerStop: { kind: "UNCONFIRMED", reason: "START_UNRESOLVED", robotId: null, taskId: null } } });
+    expect(await failing.start({ language: "en", grant: grant(), onSegment: () => undefined, onFailure: () => undefined, signal: new AbortController().signal })).toEqual({ kind: "FAILED", reason: "PROVIDER_FAILURE", providerStop: { kind: "UNCONFIRMED", reason: "START_UNRESOLVED", robotId: null, taskId: null } });
   });
 
   it("has no microphone, network, provider or storage access", () => {
