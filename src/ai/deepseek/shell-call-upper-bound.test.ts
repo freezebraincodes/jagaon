@@ -122,9 +122,9 @@ describe("shell call upper bound (Packet 11C Addendum C, C5)", () => {
       expect(route.costMicroUsd).toBeGreaterThanOrEqual(exact.costMicroUsd);
       expect(route.outputTokens).toBe(exact.outputTokens);
     }
-    // The measured maximum under the frozen prompt 11b.18 and schema kie-schema.11c.1 (pinned exactly, so any change to the fixed part
+    // The measured maximum under candidate prompt 11b.20 and schema kie-schema.11c.1 (pinned exactly, so any change to the fixed part
     // of a body shows here); the constant is that maximum rounded up to 8 KiB.
-    expect(maxOverhead).toBe(5_626);
+    expect(maxOverhead).toBe(5_920); // 11b.19: 5,907
     expect(AI_SHELL_PROVIDER_BODY_OVERHEAD_MAX_BYTES).toBe(8_192);
   }, 60_000);
 

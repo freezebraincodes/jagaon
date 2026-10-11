@@ -14,6 +14,7 @@ import { SLOT_PLAN_VERSION, type AiLocale, type AiTaskRequest, type ShellFieldPa
 import { capture, existingFixtureDigest, versionNormalisedFixtureDigest } from "./packet-11-presentation-guard.test";
 import { SOURCE_BACKED_SCENARIOS, sourceBackedFixture, type SourceBackedScenario } from "./packet-11-source-backed-fixtures";
 import { CURRENT_SLOT_PLAN_VERSION, differingPaths, HISTORICAL_SLOT_PLAN_VERSION, normaliseSlotPlanVersion, SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY } from "./packet-11-slot-plan-version-normalisation";
+import { normalise11b20Prompt } from "./packet-11-prompt-change-normalisation";
 
 /**
  * Packet 11C Task 4 byte guard (evaluation-only, offline). A source-backed EXPLAIN request (real evaluator -> history view -> Task 3
@@ -28,6 +29,9 @@ import { CURRENT_SLOT_PLAN_VERSION, differingPaths, HISTORICAL_SLOT_PLAN_VERSION
  * in exactly two fields (the shell input's `slotPlanVersion` and the output schema's echo enum). Byte identity with the class is therefore
  * checked after the documented structural normalisation (`normaliseSlotPlanVersion`), which must touch exactly those two fields; any
  * other difference fails with the differing keys. The current (un-normalised) class hashes are pinned too.
+ * 11b.20 candidate: historical comparisons additionally map the whole 11b.20 instructions back to the exact 11b.18 asset (normalise11b20Prompt:
+ * ROLE, BANS and EXPLAIN guidance restored, checked against the pinned 11b.18 digests) and the embedded bundle key back to @11b.18; historical
+ * hashes are preserved, not repinned. These comparisons are provenance diagnostics, not current-prompt provider evaluation evidence.
  */
 const CLASS_BODY_SHA: Readonly<Record<AiLocale, string>> = {
   "en-SG": "c46ab171eac08602ea3d9e4913c447c7c71643e67971ce725a085ad08cfb2d7d",
@@ -35,8 +39,8 @@ const CLASS_BODY_SHA: Readonly<Record<AiLocale, string>> = {
 };
 /** The same class bodies under ai-slot-plan.11b.9 (current values; any future change shows here). */
 const CURRENT_CLASS_BODY_SHA: Readonly<Record<AiLocale, string>> = {
-  "en-SG": "1756934e47137b7434d3499c6952f30adf6056161fc5f6523c53ec526f22a13b",
-  "zh-SG": "63f161dcddc2195bec407c79aec6abf4a5edb3f73db2f37b0df51ea382c136ae",
+  "en-SG": "43ad7c722c83131384b149356a161e95ed18653ffd4b6adfd03f3226fc85b1d8",
+  "zh-SG": "dc0b943bb15015b184e91d8da1d62a8e0baee1c7bd1dc9e722a91667e8306790",
 };
 const HISTORICAL_FIXTURE_DIGEST = "a77a79aa1c56b1530758147f12573051c4d786035f8926901bbbdaa19d3edd92";
 const LOCALES = ["en-SG", "zh-SG"] as const;
@@ -52,11 +56,11 @@ const ordinaryBody = async (locale: AiLocale) => {
 };
 /** Requires a version-only difference from the historical class body: exactly 2 normalised fields, then byte identity (else: the keys). */
 async function expectVersionOnlyDifference(body: string, locale: AiLocale, label: string) {
-  const normalised = normaliseSlotPlanVersion(body);
+  const normalised = normaliseSlotPlanVersion(normalise11b20Prompt(body));
   expect(normalised.occurrences, label).toBe(SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY);
   expect(normalised.paths, label).toEqual(["input[0].content[0].text#slotPlanVersion", "text.format.schema.properties.slotPlanVersion.enum[0]"]);
   if (sha256(normalised.body) !== CLASS_BODY_SHA[locale]) {
-    const reference = normaliseSlotPlanVersion(await ordinaryBody(locale)).body;
+    const reference = normaliseSlotPlanVersion(normalise11b20Prompt(await ordinaryBody(locale))).body;
     expect.fail(`${label}: the body differs from the historical class beyond the slot-plan version field: ${sha256(reference) === CLASS_BODY_SHA[locale] ? differingPaths(normalised.body, reference).join(", ") : "(the class reference itself moved)"}`);
   }
   expect(sha256(normalised.body), label).toBe(CLASS_BODY_SHA[locale]);

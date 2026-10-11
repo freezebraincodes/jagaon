@@ -8,7 +8,7 @@ const explainRequest = () => ({
   shellInputVersion: "ai-shell-input.explain-pattern@11b.8",
   shellSchemaVersion: "ai-shell.explain-pattern@11b.8",
   slotPlanVersion: "ai-slot-plan.11b.9",
-  taskType: "EXPLAIN_PATTERN", locale: "en-SG", runtimeBundleKey: "ai.explain-pattern@11b.18", claimFamily: "COMPARABLE_SLOT_TREND",
+  taskType: "EXPLAIN_PATTERN", locale: "en-SG", runtimeBundleKey: "ai.explain-pattern@11b.20", claimFamily: "COMPARABLE_SLOT_TREND",
   tokenInventory: ["S1", "S3"],
   fields: [
     { path: "headline", requiredSlots: ["S1"], maxCodePoints: 60, maxSentences: 1, mayBeAtomOnly: false },
@@ -21,7 +21,7 @@ const careRequest = () => ({
   shellInputVersion: "ai-shell-input.draft-care-preparation-summary@11b.7",
   shellSchemaVersion: "ai-shell.draft-care-preparation-summary@11b.7",
   slotPlanVersion: "ai-slot-plan.11b.9",
-  taskType: "DRAFT_CARE_PREPARATION_SUMMARY", locale: "zh-SG", runtimeBundleKey: "ai.draft-care-preparation-summary@11b.18", claimFamily: null,
+  taskType: "DRAFT_CARE_PREPARATION_SUMMARY", locale: "zh-SG", runtimeBundleKey: "ai.draft-care-preparation-summary@11b.20", claimFamily: null,
   tokenInventory: ["S1"],
   fields: [
     { path: "sections[0].intro", requiredSlots: [], maxCodePoints: 40, maxSentences: 1, mayBeAtomOnly: false },

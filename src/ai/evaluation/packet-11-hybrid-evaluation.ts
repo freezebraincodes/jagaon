@@ -172,10 +172,10 @@ export const APPROVED_HYBRID_CONTRACT = Object.freeze({
   shellRequestVersion: "ai-shell-request.11b.11",
   shellMaxOutputTokens: Object.freeze({ EXPLAIN_PATTERN: 512, DRAFT_CARE_PREPARATION_SUMMARY: 1024 } as const),
   shellTemperature: 0.2,
-  promptVersion: "11b.18",
+  promptVersion: "11b.20",
   // Packet 11C B5 contract freeze (offline): label only; the schema's slotPlanVersion enum carries ai-slot-plan.11b.9.
   providerSchemaVersion: "kie-schema.11c.1",
-  shellRulesRevision: "ai-shell-rules.11b.16-r10",
+  shellRulesRevision: "ai-shell-rules.11b.18-r12",
   // Packet 11C phase 2 (owner decision option (a), 2026-10-08, offline): slot plan 11b.9 (eligibility accounting; bodies differ only in
   // this version field) and atoms 11b.7 (version record for PERIOD_SUMMARY and its lead joiner).
   slotPlanVersion: "ai-slot-plan.11b.9",
@@ -193,8 +193,8 @@ export const APPROVED_HYBRID_CONTRACT = Object.freeze({
   // the conservative usage accounting; the policy is unchanged.
   evaluationReportVersion: "packet11-eval.20",
   fullEvaluationPolicy: "hybrid-full-policy.2",
-  explainBundle: "ai.explain-pattern@11b.18",
-  careBundle: "ai.draft-care-preparation-summary@11b.18",
+  explainBundle: "ai.explain-pattern@11b.20",
+  careBundle: "ai.draft-care-preparation-summary@11b.20",
   shellSchemaVersions: Object.freeze({ EXPLAIN_PATTERN: "ai-shell.explain-pattern@11b.8", DRAFT_CARE_PREPARATION_SUMMARY: "ai-shell.draft-care-preparation-summary@11b.7" } as const),
   shellInputVersions: Object.freeze({ EXPLAIN_PATTERN: "ai-shell-input.explain-pattern@11b.8", DRAFT_CARE_PREPARATION_SUMMARY: "ai-shell-input.draft-care-preparation-summary@11b.7" } as const),
 } as const);

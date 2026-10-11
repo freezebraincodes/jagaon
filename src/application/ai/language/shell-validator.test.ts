@@ -10,7 +10,7 @@ import { localeTextAccepted, spelledCounts } from "../ai-output-validator";
 import { assembleComposition } from "./assembler";
 import { defaultShells } from "./default-shells";
 import { MEANING_RULES, meaningMatches } from "../ai-meaning-rules";
-import { CLINICAL_LABEL_CATEGORIES, CLINICAL_LABEL_ENTRIES, CLINICAL_LABEL_RULES, CLINICAL_NEUTRAL_PHRASES, CLINICAL_TOKEN_SEPARATOR, foldShellScanText, joinedZhScanText, pairJoinedCandidates, provenanceSafeMatch, SHELL_DIRECTIVE_PATTERNS, SHELL_LEXICAL_RULES, SHELL_RULES_REVISION, shellClinicalLabel, shellDirectiveViolation, shellLexicalViolations, shellRegisterViolation, shellScanCopies, standInOccurrence, standInShadow, TRADITIONAL_TO_SIMPLIFIED } from "./shell-lexicon";
+import { CLINICAL_LABEL_CATEGORIES, CLINICAL_LABEL_ENTRIES, CLINICAL_LABEL_RULES, CLINICAL_NEUTRAL_PHRASES, CLINICAL_TOKEN_SEPARATOR, foldShellScanText, joinedZhScanText, pairJoinedCandidates, provenanceSafeMatch, r12CueWordJoined, SHELL_CLAUSE_DIRECTIVE_PATTERNS, SHELL_DIRECTIVE_PATTERNS, SHELL_R12_SPLIT_CUE_WORDS, SHELL_LEXICAL_RULES, SHELL_RULES_REVISION, shellClinicalLabel, shellDirectiveViolation, shellLexicalViolations, shellRegisterViolation, shellScanCopies, standInOccurrence, standInShadow, TRADITIONAL_TO_SIMPLIFIED } from "./shell-lexicon";
 import { countSentences, languagePresent, meaningfulWording, SHELL_GATE_ORDER, shellMeaningScan, stripSlotTokens, validateShellCandidate } from "./shell-validator";
 import { AI_LANGUAGE_COPY } from "./ai-language-copy";
 import { verifyComposition } from "./assembler";
@@ -70,7 +70,7 @@ const CARE_ZH = "p11.draft-care-preparation-summary.zh-sg.ordinary";
 describe("shell lexicon ai-shell-rules.11b.15-r8", () => {
   // Rules r3 (owner list revision) supersedes r2 additively, r4 (wording quality) adds the S7 register and S7b wording rules, and
   // r5 (clinical labels) adds gate S6b and r6 makes its matching precise; the r2 behaviour pinned in this block is unchanged.
-  it("pins the rules revision (r10 since 11b.16, with the r9 refinement; r8 since 11b.15)", () => expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.16-r10"));
+  it("pins the rules revision (r12 since 11b.18; r11 since 11b.17; r10 since 11b.16, with the r9 refinement; r8 since 11b.15)", () => expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.18-r12"));
   it("folds a scan copy: NFKC, apostrophes, double quotes, dashes, spaces and format characters", () => {
     expect(foldShellScanText("Don’t ‘x’ ‛y ʼ ʹ ′ ＇ ` ´")).toBe("Don't 'x' 'y ' ' ' ' ' '");
     expect(foldShellScanText("“a” „b‟ ″c″ ＂d＂ «e»")).toBe('"a" "b" "c" "d" "e"');
@@ -649,9 +649,15 @@ describe("shell rules ai-shell-rules.11b.8-r3 (content coverage)", () => {
   // r6 fix round 1: 6 more for the sibling forms (嚨 絞 腸 濕 溼 癒) and 2 for the neutral 病历 (歷 曆); 194 → 202.
   // r6 fix round 2: 腳 and 蓋 for 脚痛/脚疼 and 膝盖痛/膝盖疼 (202 → 204).
   // Rules r10: six additive rows (观 踪 细 监 让 觉).
-  const TRADITIONAL_MAP_SIZE = 210;
-  // Rules r10 added 特格外步再家仔神警惕目及察追密人令 (the r10 directive entries).
-  const SAME_IN_TRADITIONAL = "一七三上下不中之九了事二五些交享人什今仔仟令以任份伍位低住何你佰依保修倍值偏健傍克全八公六再凌出分切利到刻前加包化十千卅午半卡危即原去及可司囊四回因在地增壹外多夜大天太好妨存它安完定害家密察射小少就尺差已常年康建廿引很得微心必忘快忽急患您情惕想意成我所打批找拜拾按挺捌提摩支收改放救整斤新日早明星昨是晚晨更最月有服期未末本杯果柒查柱格次正步每比毛毫汞添漏片特玖理瓶生用由留略病百的盎目看碗磅示神秒立米粒糖素考者肆胰能致落血表要警起超跌跟路身近追送造遍遵都酮重量降除零需非食餐高";
+  // Rules r11: two additive rows (键 for 关键, 词 for the open 关键词); 210 → 212.
+  // Rules r12: 38 additive rows for the r12 claim-shape entries (蠻 穩 擊 選 運 動 鍛 煉 飲 樣 對 實 幫 見 備 顧 帶 溝 討 論 檔 儲 師 現 擁 許 兒 憊 興 喪 煩 獨 擾
+  // 滿 輕 鬆 餒 驕); 212 → 250. Rules r12 fix round 1: 剛 (刚才/刚刚 in the F3 person-did window); 250 → 251.
+  // Rules r12 fix round 2: 維 (维持); 251 → 252.
+  const TRADITIONAL_MAP_SIZE = 252;
+  // Rules r10 added 特格外步再家仔神警惕目及察追密人令 (the r10 directive entries); rules r11 added 字 (关键字 stays open) and 容 (the 关键内容 sample).
+  // Rules r12 added 相真平控制突凸眼醒散走行活物膳治做助益善效作奏管通自己被替核同士掌握也或概免肯感累疲倦乏焦舒辛苦沮失力怕孤困欣慰委屈灰奈豪傲似乎像解然
+  // (the r12 claim-shape entries; each is written the same in Traditional); r12 fix round 1 added 良先此才曾直; fix round 2 added 指促持.
+  const SAME_IN_TRADITIONAL = "一七三上下不中之乎乏九也了事二五些交享人什今仔仟令以任份伍似位低住何作你佰依促保修倍倦值偏做健傍傲像先克免全八公六再凌凸出分切利到制刻前力加助包化十千卅午半卡危即原去及可司同善囊四回因困在地增士壹外多夜大天太失奈奏好妨委字存孤它安完定害家容密察射小少就尺屈差己已常平年康建廿引很得微心必忘快忽怕急患您情惕想意感慰成我或所才打批找拜拾持指按挺捌掌控提握摩支收改放效救散整斤新日早明星昨是晚晨更曾替最月有服期未末本杯果柒查柱核格概次欣正此步每比毛毫汞沮治活添漏灰焦然片物特玖理瓶生用由留略疲病百的益盎目直相看真眼碗磅示神秒突立管米粒糖素累考者肆肯胰能膳自致舒良苦落血行表被要解警豪走起超跌跟路身辛近追送通造遍遵都酮醒重量降除零需非食餐高";
 
   // --- English -------------------------------------------------------------------------------------------------
   it.each([
@@ -865,6 +871,18 @@ describe("shell rules ai-shell-rules.11b.8-r3 (content coverage)", () => {
     "密切关注", "密切观察", "密切监测", "引人注目", "令人担忧", "让人担心", "令人不安", "引起关注", "引起您的重视", "重要", "很重要",
     // r10 tightened before commit (coordinator ruling): modal + attention verb.
     "应关注", "须关注", "需关注", "要关注", "得关注", "多关注", "多加关注", "可以多关注", "您需关注", "您要关注", "您应关注", "应重视", "须警惕", "要留心", "要特别注意", "要多加注意",
+    // DIRECTIVE r11
+    "重点", "重点是", "关键", "关键内容", "很关键", "显著", "很显著",
+    // DIRECTIVE r12 (claim shapes: F1 data judgement, F2 benefit or cause, F3 completed-state claim, F4 attributed feeling)
+    "结果很好", "这些记录蛮好", "比较突出的记录", "凸显的内容", "是要点", "记录中的要点", "读数控制得很好", "这些记录很稳定", "数值平稳",
+    "散步对您有帮助", "运动对您有益", "锻炼有帮助", "饮食有好处", "运动见效",
+    "已经保存", "已发送", "已上传", "保存好了", "已为您储存", "已存档", "护理团队现在有了", "医生拥有", "药剂师已经收到了",
+    "您可能会感到", "您可能觉得有点累", "您也许觉得疲惫", "您看起来很烦", "您觉得很轻松", "您觉得满意", "您觉得骄傲", "您觉得有点儿烦",
+    "您觉得很高兴", "您觉得沮丧", "您或许会觉得孤独", "您觉得困扰", "您觉得气馁", "感到辛苦是可以理解的",
+    // r12 fix round 1 (I2): 良好 / 令人满意 of data, 效果很好, the modal + emotion form and 您辛苦了.
+    "读数控制良好", "数值令人满意", "运动效果很好", "您一定很担心", "您可能有些担心", "您辛苦了", "辛苦您了",
+    // r12 fix round 2: holder-independent benefit claims.
+    "对您的健康有帮助", "有助于维持身体", "该项对您有帮助", "它很有帮助",
     // r3 NUMBER_WORD, PERCENT, UNIT, DATE_OR_TIME
     "五十", "廿", "卅", "百", "千", "万", "亿", "两", "零", "十分钟", "三四", "三成", "五倍", "三点", "三半", "一半", "半数", "过半", "大半", "半个", "半天", "半年", "半月", "半小时",
     "一餐", "两顿", "一杯", "一碗", "一片", "三粒", "一颗", "一支", "一瓶", "一包", "一小时", "五分钟", "十秒", "一星期", "一礼拜", "五号", "三日", "一倍",
@@ -918,7 +936,7 @@ describe("shell rules ai-shell-rules.11b.8-r3 (content coverage)", () => {
     }
   });
   it("r3 Traditional map covers every character of the zh rule lists whose Traditional form differs", () => {
-    const sources = [...SHELL_LEXICAL_RULES.map(([, pattern]) => pattern.source), ...SHELL_DIRECTIVE_PATTERNS.map((pattern) => pattern.source), ...MEANING_RULES.filter((rule) => rule.locale === "zh").map((rule) => rule.pattern.source), "次个条项天周月年份位种组回遍笔", ZH_ENTRIES.join("")];
+    const sources = [...SHELL_LEXICAL_RULES.map(([, pattern]) => pattern.source), ...SHELL_DIRECTIVE_PATTERNS.map((pattern) => pattern.source), ...SHELL_CLAUSE_DIRECTIVE_PATTERNS.map((pattern) => pattern.source), ...SHELL_R12_SPLIT_CUE_WORDS, ...MEANING_RULES.filter((rule) => rule.locale === "zh").map((rule) => rule.pattern.source), "次个条项天周月年份位种组回遍笔", ZH_ENTRIES.join("")];
     const characters = new Set(sources.join("").match(/[㐀-鿿豈-﫿]/gu) ?? []);
     const covered = new Set(TRADITIONAL_TO_SIMPLIFIED.values());
     // A Traditional character written into a rule (一成不變) is itself a map key and needs no entry.
@@ -1274,8 +1292,8 @@ describe("shell rules ai-shell-rules.11b.12-r5 (clinical labels)", () => {
   };
 
   // --- gate order, closed lists ----------------------------------------------------------------------------------
-  it("pins the rules revision (r10 since 11b.16, with the r9 refinement; r8 since 11b.15; r6 in 11b.13) and the gate order with S6b after S5 and S6 and before S7", () => {
-    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.16-r10");
+  it("pins the rules revision (r12 since 11b.18; r11 since 11b.17; r10 since 11b.16, with the r9 refinement; r8 since 11b.15; r6 in 11b.13) and the gate order with S6b after S5 and S6 and before S7", () => {
+    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.18-r12");
     expect(SHELL_GATE_ORDER).toEqual(["S1", "S2", "S2a", "S3", "S4", "S4b", "S5", "S6", "S6b", "S7", "S7b"]);
     expect(Object.isFrozen(SHELL_GATE_ORDER)).toBe(true);
   });
@@ -1620,8 +1638,8 @@ describe("shell rules ai-shell-rules.11b.13-r6 (clinical-label boundary precisio
   const EN_WORDS = () => CLINICAL_LABEL_CATEGORIES.flatMap((category) => CLINICAL_LABEL_ENTRIES[category].en);
 
   // --- revision, gate, closed lists ------------------------------------------------------------------------------
-  it("pins the current rules (r10 since 11b.16, with the r9 refinement; r8 since 11b.15; r6 lists unchanged); S6b keeps its position, reason, non-repairability and category detail", () => {
-    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.16-r10");
+  it("pins the current rules (r12 since 11b.18; r11 since 11b.17; r10 since 11b.16, with the r9 refinement; r8 since 11b.15; r6 lists unchanged); S6b keeps its position, reason, non-repairability and category detail", () => {
+    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.18-r12");
     expect(SHELL_GATE_ORDER).toEqual(["S1", "S2", "S2a", "S3", "S4", "S4b", "S5", "S6", "S6b", "S7", "S7b"]);
     expect(at("en", "observation", "Your diabetes notes show {{S2}}.")).toEqual(S6B("DISEASE_OR_CONDITION"));
   });
@@ -1982,7 +2000,7 @@ describe("shell rules ai-shell-rules.11b.14-r7 (contextual English up/down)", ()
 
   // --- revision and the r1 entry ------------------------------------------------------------------------------------
   it("pins rules r7 and the unchanged gate order", () => {
-    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.16-r10");
+    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.18-r12");
     expect(SHELL_GATE_ORDER).toEqual(["S1", "S2", "S2a", "S3", "S4", "S4b", "S5", "S6", "S6b", "S7", "S7b"]);
   });
   it("the r1 COMPARATIVE_DIRECTION entry lists every earlier alternative except bare up and down; the zh forms are unchanged", () => {
@@ -2380,8 +2398,8 @@ describe("shell rules ai-shell-rules.11b.15-r8 (S6 placeholder provenance)", () 
     return { authority: matched.some((entry) => entry.kind === "AUTHORITY"), clinical: matched.some((entry) => entry.kind === "CLINICAL"), directive: scans.some((scan) => shellDirectiveViolation(scan, locale)) };
   };
 
-  it("pins the rules revision (r10 since 11b.16, with the r9 refinement; r8 since 11b.15) and the unchanged gate order", () => {
-    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.16-r10");
+  it("pins the rules revision (r12 since 11b.18; r11 since 11b.17; r10 since 11b.16, with the r9 refinement; r8 since 11b.15) and the unchanged gate order", () => {
+    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.18-r12");
     expect(SHELL_GATE_ORDER).toEqual(["S1", "S2", "S2a", "S3", "S4", "S4b", "S5", "S6", "S6b", "S7", "S7b"]);
     expect(ZH_STAND_IN).toBe("该项");
     expect(EN_STAND_IN).toBe("the item");
@@ -2648,8 +2666,8 @@ const R9_S6_REJECTION = { kind: "REJECTED", gate: "S6", reason: "CLINICAL_MEANIN
 const ACCEPTED = { kind: "ACCEPTED" };
 
 describe("shell rules r10 (one freeze with the r9 refinement): no implied urgency, no advice to attend, no assigned importance (actual chain)", () => {
-  it("is labelled ai-shell-rules.11b.16-r10", () => {
-    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.16-r10");
+  it("was labelled ai-shell-rules.11b.16-r10; r12 (additive, after r11) is the current label and every r10 case below still holds", () => {
+    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.18-r12");
   });
 
   it("r9 positive: the recorded case-2 headline and its descriptive variants pass every gate and compose", () => {
@@ -2859,5 +2877,675 @@ describe("shell rules r10 (one freeze with the r9 refinement): no implied urgenc
   it("English parity with r9: a descriptive phrase passes, a directive rejects", () => {
     expect(r10Probe("en-headline", "Here are the items you noted, {{S1}}.")).toEqual(ACCEPTED);
     expect(r10Probe("en-headline", "Please keep track of {{S1}}.")).toEqual(R9_S6_REJECTION);
+  });
+});
+
+// --- Rules r11 (owner decision 2026-10-11, salience option (a)) ------------------------------------------------------------------
+/**
+ * Rules r11 (owner decision 2026-10-11, salience option (a)): model wording must not assign importance or noteworthiness to the person's
+ * readings or patterns. Additive to r10 and read by S6 exactly as the r10 entries; model-written framing only. Every case runs through the
+ * ACTUAL chain (r10Probe: the fixture's request → planSlots → validateShellCandidate → composeAiResult with verifyComposition) on the same
+ * recorded ordinary bases as r10. The recorded FULL run stays FAIL: r11 rescores nothing.
+ */
+describe("shell rules r11: no salience words and no attention imperatives in model-written framing (actual chain)", () => {
+  it("was labelled ai-shell-rules.11b.17-r11; r12 (additive) is the current label and every r11 case below still holds", () => {
+    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.18-r12");
+  });
+
+  // The owner's minimum negative list, each in the EXPLAIN headline it was written for.
+  it.each<[R10Field, string]>([
+    ["en-headline", "Here are the key items: {{S1}}."],
+    ["en-headline", "A significant change: {{S1}}."],
+    ["en-headline", "This is crucial: {{S1}}."],
+    ["en-headline", "Look closely at {{S1}}."],
+    ["en-headline", "Notice {{S1}}."],
+    ["en-headline", "You may notice {{S1}}."],
+    ["en-headline", "Keep in mind {{S1}}."],
+    ["en-headline", "Here are the items to watch: {{S1}}."],
+    ["zh-headline", "重点是{{S1}}。"],
+    ["zh-headline", "关键内容：{{S1}}。"],
+    ["zh-headline", "{{S1}}显著。"],
+    ["zh-headline", "重點是{{S1}}。"],
+    ["zh-headline", "關鍵內容：{{S1}}。"],
+    ["zh-headline", "{{S1}}顯著。"],
+  ])("r11 owner list: %s %j rejects at S6", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(R9_S6_REJECTION);
+  });
+
+  // Variants read through the EXISTING scan copies (case and space folding, typographic quotes, the en pair joins of single words, the zh
+  // ideograph gap and separator joins, the Traditional→Simplified copy with the additive r11 rows), close siblings and both field kinds.
+  it.each<[R10Field, string]>([
+    ["en-headline", "Here are the KEY items: {{S1}}."],
+    ["en-headline", "Here are the key   items: {{S1}}."],
+    ["en-headline", "Here are the ‘key’ items: {{S1}}."],
+    ["en-headline", "Here are the key {{S1}}."],
+    ["en-headline", "Here is what is key: {{S1}}."],
+    ["en-headline", "Here is the key to {{S1}}."],
+    ["en-headline", "Significantly, here is {{S1}}."],
+    ["en-headline", "SIGNIFICANT: {{S1}}."],
+    ["en-headline", "Here is a signi ficant look at {{S1}}."],
+    ["en-headline", "Here is the significance of {{S1}}."],
+    ["en-headline", "This is cru-cial: {{S1}}."],
+    ["en-headline", "Crucially, here is {{S1}}."],
+    ["en-headline", "Look very closely at {{S1}}."],
+    ["en-headline", "Look at {{S1}} closely."],
+    ["en-headline", "Look carefully at {{S1}}."],
+    ["en-headline", "NOTICE {{S1}}."],
+    ["en-headline", "No tice {{S1}}."],
+    ["en-headline", "Here is {{S1}}; notice how it reads."],
+    ["en-headline", "Here is {{S1}}, notice the pattern."],
+    ["en-headline", "You will notice {{S1}}."],
+    ["en-headline", "You’ll notice {{S1}}."],
+    ["en-headline", "Here are the things to notice: {{S1}}."],
+    ["en-headline", "Keep {{S1}} in mind."],
+    ["en-headline", "KEEP   IN   MIND {{S1}}."],
+    ["en-headline", "Bear in mind {{S1}}."],
+    ["en-headline", "Something to keep in mind: {{S1}}."],
+    ["en-headline", "Here is {{S1}} to watch."],
+    ["en-headline", "Here are the items to monitor: {{S1}}."],
+    ["en-intro", "These are the key readings."],
+    ["en-intro", "These readings are significant."],
+    ["en-intro", "Keep these readings in mind."],
+    ["en-intro", "Here are the readings to watch."],
+    ["zh-headline", "这里的重点是{{S1}}。"],
+    ["zh-headline", "重 点是{{S1}}。"],
+    ["zh-headline", "重、点是{{S1}}。"],
+    ["zh-headline", "这里是关键的内容，{{S1}}。"],
+    ["zh-headline", "这里是很关键的{{S1}}。"],
+    ["zh-headline", "关 键内容：{{S1}}。"],
+    ["zh-headline", "这里是显著的{{S1}}。"],
+    ["zh-headline", "这里是显、著的{{S1}}。"],
+    ["zh-headline", "{{S1}}很显著。"],
+    ["zh-headline", "這裡的重點是{{S1}}。"],
+    ["zh-headline", "這裡是關鍵的內容，{{S1}}。"],
+    ["zh-headline", "這裡是顯著的{{S1}}。"],
+    ["zh-intro", "以下是重点测量记录。"],
+    ["zh-intro", "以下是关键的测量记录。"],
+    ["zh-intro", "以下的测量记录很显著。"],
+  ])("r11 variant: %s %j rejects at S6", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(R9_S6_REJECTION);
+  });
+
+  // Not over-broad: the owner's benign descriptive forms, the person-described and non-evaluative uses the context checks keep open, and
+  // the r10 approved forms (all still asserted in the r10 block above, which runs under r11).
+  it.each<[R10Field, string]>([
+    ["zh-headline", "这里呈现您所关注的{{S1}}。"],
+    ["zh-headline", "这里呈现您所留意的{{S1}}。"],
+    ["en-headline", "Here are the notes concerning {{S1}}."],
+    ["en-headline", "Here are the items you noted, {{S1}}."],
+    ["en-headline", "Here is a summary of the readings you selected: {{S1}}."],
+    ["en-headline", "Here are the items you noticed: {{S1}}."],
+    ["en-headline", "Here is the notice about {{S1}}."],
+    ["en-headline", "Here are the readings you chose to watch: {{S1}}."],
+    ["en-headline", "Here are the readings you wanted to monitor: {{S1}}."],
+    ["en-headline", "Here are the items you marked as significant: {{S1}}."],
+    ["en-headline", "Here are the entries you keyed in: {{S1}}."],
+    ["en-headline", "Here are the keywords you used: {{S1}}."],
+    ["en-headline", "Here is a low-key summary of {{S1}}."],
+    ["en-headline", "Here are the items you kept in mind: {{S1}}."],
+    ["en-headline", "Here are the items you keep in mind: {{S1}}."],
+    ["en-headline", "Here is a closer look at {{S1}}."],
+    ["en-headline", "Here is a look at what you tracked: {{S1}}."],
+    ["en-headline", "Here is what the pattern looks at: {{S1}}."],
+    ["en-intro", "Here is what you chose to note down."],
+    ["zh-headline", "这里呈现您记录的关键词，{{S1}}。"],
+    ["zh-headline", "這裡呈現您記錄的關鍵詞，{{S1}}。"],
+    ["zh-headline", "这里呈现您认为关键的{{S1}}。"],
+    ["zh-headline", "這裡呈現您認為關鍵的{{S1}}。"],
+    ["zh-headline", "这里呈现您所标记为重点的{{S1}}。"],
+    ["zh-headline", "这里呈现您认为重要的{{S1}}。"],
+    ["zh-headline", "您的记录显示如下，{{S1}}。"],
+    ["zh-headline", "這裡呈現您的記錄顯示的{{S1}}。"],
+  ])("r11 accepted form: %s %j is accepted", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(ACCEPTED);
+  });
+
+  it("the recorded FULL outcomes are unchanged under r11: the ordinary bases and case 2 are accepted; cases 1, 3 and 4 reject as recorded", () => {
+    for (const field of Object.keys(R10_BASES) as R10Field[]) {
+      const base = R10_BASES[field];
+      expect(r10Probe(field, "headline" in base.shells ? base.shells.headline : base.shells.sections[0]!.intro), field).toEqual(ACCEPTED);
+    }
+    expect(recordedExplain(R9_RECORDED.case2)).toEqual(ACCEPTED);
+    expect(recordedExplain(R9_RECORDED.case1)).toEqual(R9_S6_REJECTION);
+    expect(recordedExplain(R9_RECORDED.case3)).toEqual(R9_S6_REJECTION);
+    const care = envelope("DRAFT_CARE_PREPARATION_SUMMARY", "en-SG", R9_CASE4.tokens, { sections: R9_CASE4.sections });
+    expect(throughChain(fixtureRequest(R9_CASE4.fixture), care)).toEqual({ kind: "REJECTED", gate: "S5", reason: "FACT_FIDELITY_FAILED", repairable: false, lexical: ["DATE_OR_TIME"] });
+  });
+
+  it("scope: r11 reads model-written framing only; a patient-written question with the same words composes unchanged", () => {
+    for (const [field, question] of [
+      ["en-intro", "Is this key or significant? Is it crucial? Should I look closely, notice it and keep it in mind, and which ones to watch?"],
+      ["zh-intro", "这是重点吗？关键吗？变化显著吗？"],
+    ] as const) {
+      const base = R10_BASES[field];
+      const original = fixtureRequest(base.fixture);
+      const facts = original.facts.map((fact) => (fact.field === "QUESTION_TEXT" && fact.value.kind === "TEXT" ? { ...fact, value: { ...fact.value, text: question } } : fact));
+      expect(facts.filter((fact) => fact.value.kind === "TEXT" && fact.value.text === question), question).toHaveLength(1);
+      const request = { ...original, facts } as AiTaskRequest;
+      expect(throughChain(request, envelope("DRAFT_CARE_PREPARATION_SUMMARY", base.locale, base.tokens, base.shells)), question).toEqual(ACCEPTED);
+    }
+  });
+});
+
+// --- Rules r12 (owner decision 2026-10-11, policy-led prompt 11b.20) ---------------------------------------------------------------
+/**
+ * Rules r12 (owner decision 2026-10-11, with the policy-led prompt 11b.20: describe, never evaluate): four claim shapes, each a holder
+ * and an assertion in the same clause, never a bare keyword — F1 a judgement of the person's data, F2 a benefit or cause of an activity
+ * or treatment, F3 a completed-state claim, F4 an attributed feeling. Additive to r10/r11 and read by S6 exactly as their entries;
+ * model-written framing only. Every case runs through the ACTUAL chain (r10Probe: the fixture's request → planSlots →
+ * validateShellCandidate → composeAiResult with verifyComposition) on the same recorded ordinary bases, in both languages and in both
+ * field kinds (the EXPLAIN headline and the first care intro). The recorded FULL run stays FAIL: r12 rescores nothing.
+ */
+const S5_FACT_REJECTION = (lexical: readonly string[]) => ({ kind: "REJECTED", gate: "S5", reason: "FACT_FIDELITY_FAILED", repairable: false, lexical });
+const S6_AUTHORITY_REJECTION = { kind: "REJECTED", gate: "S6", reason: "AUTHORITY_BOUNDARY_VIOLATION", repairable: false };
+describe("shell rules r12: no judgement, benefit, completed-state or feeling claims in model-written framing (actual chain)", () => {
+  it("is labelled ai-shell-rules.11b.18-r12", () => {
+    expect(SHELL_RULES_REVISION).toBe("ai-shell-rules.11b.18-r12");
+  });
+
+  // The owner's must-reject list, in both field kinds. All reject at S6 under r12; the rows marked "existing" were already rejected before
+  // r12 (the gate is unchanged) and are listed so the whole list stays pinned.
+  it.each<[R10Field, string]>([
+    // F1 judgement of the person's data.
+    ["en-headline", "Well done, these results look good: {{S1}}."],
+    ["en-intro", "Well done, these results look good."],
+    ["en-headline", "Your levels are well controlled: {{S1}}."],
+    ["en-intro", "Your levels are well controlled."],
+    ["en-headline", "Here are the readings that stand out: {{S1}}."],
+    ["en-intro", "Here are the readings that stand out."],
+    ["en-headline", "Here are the readings that matter most: {{S1}}."],
+    ["en-intro", "Here are the readings that matter most."],
+    ["en-headline", "Here are noticeable readings: {{S1}}."],
+    ["en-intro", "Here are noticeable readings."],
+    ["en-headline", "Here are insignificant readings: {{S1}}."],
+    ["en-intro", "Here are insignificant readings."],
+    ["zh-headline", "以下是比较突出的记录，{{S1}}。"],
+    ["zh-intro", "以下是比较突出的记录"],
+    ["zh-headline", "以下是记录中的要点，{{S1}}。"],
+    ["zh-intro", "以下是记录中的要点"],
+    ["zh-headline", "这里呈现突出的内容，{{S1}}。"],
+    ["zh-intro", "这里呈现突出的内容"],
+    ["zh-headline", "这里呈现凸显的内容，{{S1}}。"],
+    ["zh-intro", "这里呈现凸显的内容"],
+    ["zh-headline", "您的结果很好，{{S1}}。"], // existing: the shared zh reassurance rule (结果 … 很好) already rejected it at S6
+    ["zh-intro", "您的结果很好"], // existing (as above)
+    // F2 benefit or cause.
+    ["en-headline", "Great work, your walks are helping your health: {{S1}}."],
+    ["en-intro", "Great work, your walks are helping your health."],
+    ["en-headline", "Your medicine is working: {{S1}}."], // was S6b (clinical label "medicine") before r12; S6 runs first now
+    ["en-intro", "Your medicine is working."],
+    ["zh-headline", "散步对您的健康有帮助，{{S1}}。"],
+    ["zh-intro", "散步对您的健康有帮助"],
+    // F3 completed-state claim.
+    ["en-headline", "These notes have been saved for you: {{S1}}."],
+    ["en-intro", "These notes have been saved for you."],
+    ["en-headline", "Your care team has these notes now: {{S1}}."],
+    ["en-intro", "Your care team has these notes now."],
+    ["en-headline", "These readings have been sent: {{S1}}."],
+    ["en-intro", "These readings have been sent."],
+    ["zh-headline", "这些记录已经保存好了，{{S1}}。"],
+    ["zh-intro", "这些记录已经保存好了"],
+    // F4 attributed feeling.
+    ["en-headline", "You may be feeling worried about this: {{S1}}."],
+    ["en-intro", "You may be feeling worried about this."],
+    ["en-headline", "It is understandable to feel tired of keeping track: {{S1}}."],
+    ["en-intro", "It is understandable to feel tired of keeping track."],
+    ["zh-headline", "您可能会感到有些疲惫，{{S1}}。"],
+    ["zh-intro", "您可能会感到有些疲惫"],
+    ["zh-headline", "您可能觉得有点累，{{S1}}。"],
+    ["zh-intro", "您可能觉得有点累"],
+  ])("r12 owner list: %s %j rejects at S6", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(R9_S6_REJECTION);
+  });
+
+  // Two owner-list rows were already rejected by an earlier gate, which r12 does not change (recorded, not weakened).
+  it.each<[R10Field, string, unknown]>([
+    ["zh-headline", "运动可以降低血糖，{{S1}}。", S5_FACT_REJECTION(["COMPARATIVE_DIRECTION", "MEASURE_NAME"])],
+    ["zh-intro", "运动可以降低血糖", S5_FACT_REJECTION(["COMPARATIVE_DIRECTION", "MEASURE_NAME"])],
+    ["zh-headline", "这些内容已发送给医生，{{S1}}。", S6_AUTHORITY_REJECTION],
+    ["zh-intro", "这些内容已发送给医生", S6_AUTHORITY_REJECTION],
+  ])("r12 owner list, earlier gate: %s %j keeps its earlier rejection", (field, text, expected) => {
+    expect(r10Probe(field, text)).toEqual(expected);
+  });
+
+  // Variants read through the EXISTING scan copies (case and space folding, typographic quotes, the en pair joins, the zh ideograph gap and
+  // separator joins, the Traditional→Simplified copy with the additive r12 rows) and close siblings of each frame, in both field kinds.
+  it.each<[R10Field, string]>([
+    ["en-headline", "THESE RESULTS LOOK GOOD: {{S1}}."],
+    ["en-headline", "These  results   look   good: {{S1}}."],
+    ["en-headline", "Here are the readings that stand-out: {{S1}}."],
+    ["en-headline", "Here are the ‘noticeable’ readings: {{S1}}."],
+    ["en-headline", "{{S1}} looks stable."],
+    ["en-headline", "{{S1}} stands out."],
+    ["en-headline", "Here is {{S1}}; it looks great."],
+    ["en-headline", "Here is {{S1}}; they are on track."],
+    ["en-intro", "These readings seem nicely balanced."],
+    ["en-intro", "These numbers really matter."],
+    ["zh-headline", "以下是比較突出的記錄，{{S1}}。"],
+    ["zh-headline", "以下是比较 突出的记录，{{S1}}。"],
+    ["zh-headline", "以下是比较、突出的记录，{{S1}}。"],
+    ["zh-headline", "這裡呈現凸顯的內容，{{S1}}。"],
+    ["zh-headline", "以下是記錄中的要點，{{S1}}。"],
+    ["zh-headline", "这里呈现的{{S1}}很稳定。"],
+    ["zh-headline", "这里呈现的{{S1}}比较突出。"],
+    ["zh-headline", "这里呈现的{{S1}}很穩定。"],
+    ["zh-intro", "以下是要点"],
+    ["zh-intro", "这些记录都很稳定"],
+    ["en-headline", "Your walks are HELPING your health: {{S1}}."],
+    ["en-headline", "Your walks are help ing your health: {{S1}}."],
+    ["en-headline", "Your workouts are helping: {{S1}}."],
+    ["en-headline", "Exercise may benefit you: {{S1}}."],
+    ["en-intro", "Walking is good for you."],
+    ["en-intro", "Your meals are paying off."],
+    ["zh-headline", "散步對您的健康有幫助，{{S1}}。"],
+    ["zh-headline", "散 步对您有帮助，{{S1}}。"],
+    ["zh-headline", "散步～对您有帮助，{{S1}}。"],
+    ["zh-headline", "锻炼对您有帮助，{{S1}}。"],
+    ["zh-intro", "运动对您很有益"],
+    ["zh-intro", "鍛煉對您有幫助"],
+    ["en-headline", "These notes have  been saved: {{S1}}."],
+    ["en-headline", "THESE READINGS HAVE BEEN SENT: {{S1}}."],
+    ["en-headline", "{{S1}} has been shared with your clinic."],
+    ["en-intro", "Your notes are now saved."],
+    ["en-intro", "Your doctor now has these notes."],
+    ["zh-headline", "這些記錄已經保存好了，{{S1}}。"],
+    ["zh-headline", "这些记录已 经保存，{{S1}}。"],
+    ["zh-headline", "这些记录已经保～存好了，{{S1}}。"],
+    ["zh-headline", "这里呈现的{{S1}}已经更新。"],
+    ["zh-intro", "这些内容已为您保存"],
+    ["zh-intro", "这些記錄已經上傳"],
+    ["en-headline", "You may be FEELING worried: {{S1}}."],
+    ["en-headline", "You might feel a bit tired: {{S1}}."],
+    ["en-headline", "You seem worried about {{S1}}."],
+    ["en-intro", "You might be tired of keeping track."],
+    ["en-intro", "It is natural to feel overwhelmed."],
+    ["zh-headline", "您可能會感到有些疲憊，{{S1}}。"],
+    ["zh-headline", "您可能覺得有點累，{{S1}}。"],
+    ["zh-headline", "您 可能 觉得 有点累，{{S1}}。"],
+    ["zh-headline", "您可～能觉得有点累，{{S1}}。"],
+    ["zh-intro", "您看起来有些疲惫"],
+    ["zh-intro", "感到辛苦是可以理解的"],
+  ])("r12 variant: %s %j rejects at S6", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(R9_S6_REJECTION);
+  });
+
+  // Not over-broad: the owner's must-stay-accepted list (both field kinds), the phrasing the 11b.20 policy encourages, the r10 forms F4 must
+  // not break, and descriptive neighbours of each frame (the person's own recording, choosing, marking and regarding; helping the person
+  // prepare; "how it works"; a health record).
+  it.each<[R10Field, string]>([
+    // F1.
+    ["en-headline", "Here is a look at {{S1}}."],
+    ["en-intro", "Here is a look at what you chose to include."],
+    ["en-headline", "Here is what the pattern looks at: {{S1}}."],
+    ["en-intro", "Here is what the pattern looks at."],
+    ["en-headline", "Here's a gentle look at {{S1}}."],
+    ["en-intro", "Here's a gentle look at what you chose to include."],
+    ["en-headline", "Here are the items you noticed: {{S1}}."],
+    ["en-intro", "Here are the items you noticed."],
+    ["en-headline", "Here are the readings you marked as noticeable, {{S1}}."],
+    ["en-intro", "Here are the readings you marked as noticeable."],
+    ["en-headline", "Here is a summary of the readings you selected: {{S1}}."],
+    ["en-intro", "Here is a summary of the readings you selected."],
+    ["zh-headline", "这里呈现您所留意的项目，{{S1}}。"],
+    ["zh-intro", "这里呈现您所留意的项目"],
+    ["zh-headline", "您想要点明的问题如下，{{S1}}。"],
+    ["zh-intro", "您想要点明的问题如下"],
+    ["zh-headline", "只要点开就能看到以下内容，{{S1}}。"],
+    ["zh-intro", "只要点开就能看到以下内容"],
+    ["zh-headline", "以下是主要记录，{{S1}}。"],
+    ["zh-intro", "以下是主要记录"],
+    ["zh-headline", "关键词如下，{{S1}}。"],
+    ["zh-intro", "您记录的关键词如下"],
+    // F2.
+    ["en-headline", "This summary may help you prepare for your visit: {{S1}}."],
+    ["en-intro", "This summary may help you prepare for your visit."],
+    ["en-headline", "Here is what you chose to record: {{S1}}."],
+    ["en-intro", "Here is what you chose to record."],
+    ["zh-headline", "这份说明依据您记录下来的资料，{{S1}}。"],
+    ["zh-intro", "这份说明依据您记录下来的资料"],
+    // F3.
+    ["en-headline", "Here are the readings you recorded: {{S1}}."],
+    ["en-intro", "Here are the readings you recorded."],
+    ["en-headline", "These come from what you wrote down: {{S1}}."],
+    ["en-intro", "These come from what you wrote down."],
+    ["en-headline", "Here is what you chose to note down: {{S1}}."],
+    ["en-intro", "Here is what you chose to note down."],
+    ["zh-headline", "这份说明依据您记录下来的{{S1}}。"],
+    ["zh-intro", "这份说明依据您记录下来的内容"],
+    ["zh-headline", "这些是您自己写下的内容，{{S1}}。"],
+    ["zh-intro", "这些是您自己写下的内容"],
+    // F4, and the r10 person-regarded forms it must not break.
+    ["en-headline", "Thank you for preparing these questions: {{S1}}."],
+    ["en-intro", "Thank you for preparing these questions."],
+    ["en-headline", "Thanks for keeping these records: {{S1}}."],
+    ["en-intro", "Thanks for keeping these records."],
+    ["zh-headline", "感谢您整理这些内容，{{S1}}。"],
+    ["zh-intro", "感谢您整理这些内容"],
+    ["zh-headline", "谢谢您准备了这些想问的内容，{{S1}}。"],
+    ["zh-intro", "谢谢您准备了这些想问的内容"],
+    ["zh-headline", "这里呈现您认为重要的{{S1}}。"],
+    ["zh-headline", "这里呈现您所觉得重要的{{S1}}。"],
+    ["zh-headline", "这里呈现您觉得重要的{{S1}}。"],
+    // Encouraged by the 11b.20 policy (no upstream/downstream contradiction).
+    ["en-intro", "Here's what you chose to bring along."],
+    ["en-headline", "This view comes from {{S1}}."],
+    ["en-headline", "Thank you for recording this; here is {{S1}}."],
+    ["zh-headline", "谢谢您的记录，这里呈现{{S1}}。"],
+    ["zh-headline", "这份说明来自您记录下来的{{S1}}。"],
+    ["zh-intro", "感谢您细心整理这些内容"],
+    // Descriptive neighbours.
+    ["en-headline", "Here is how it works: {{S1}}."],
+    ["en-headline", "It may help you prepare to see these together: {{S1}}."],
+    ["en-headline", "Here are the readings you have recorded: {{S1}}."],
+    ["en-headline", "Here are the notes you shared: {{S1}}."],
+    ["en-headline", "It is fine to bring these along: {{S1}}."],
+    ["en-headline", "Here is what you recorded about your walks: {{S1}}."],
+    ["en-headline", "Here is what you wrote about how you feel: {{S1}}."],
+    ["en-intro", "Thank you for noting how you felt."],
+    ["en-intro", "These notes may help you prepare for your visit."],
+    ["zh-headline", "这份说明可以帮助您准备，{{S1}}。"],
+    ["zh-headline", "这些内容有助于您回顾，{{S1}}。"],
+    ["zh-headline", "这里呈现您已记录的内容，{{S1}}。"],
+    ["zh-headline", "这里呈现您的健康记录，{{S1}}。"],
+    ["zh-headline", "这里呈现您认为突出的{{S1}}。"],
+    ["zh-headline", "这里呈现您写下的感受，{{S1}}。"],
+    ["zh-intro", "这些是您记录的运动内容"],
+    ["zh-intro", "这些问题有助于您沟通"],
+  ])("r12 accepted form: %s %j is accepted", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(ACCEPTED);
+  });
+
+  it("the recorded FULL outcomes are unchanged under r12: the ordinary bases and case 2 are accepted; cases 1, 3 and 4 reject as recorded", () => {
+    for (const field of Object.keys(R10_BASES) as R10Field[]) {
+      const base = R10_BASES[field];
+      expect(r10Probe(field, "headline" in base.shells ? base.shells.headline : base.shells.sections[0]!.intro), field).toEqual(ACCEPTED);
+    }
+    expect(recordedExplain(R9_RECORDED.case2)).toEqual(ACCEPTED);
+    expect(recordedExplain(R9_RECORDED.case1)).toEqual(R9_S6_REJECTION);
+    expect(recordedExplain(R9_RECORDED.case3)).toEqual(R9_S6_REJECTION);
+    const care = envelope("DRAFT_CARE_PREPARATION_SUMMARY", "en-SG", R9_CASE4.tokens, { sections: R9_CASE4.sections });
+    expect(throughChain(fixtureRequest(R9_CASE4.fixture), care)).toEqual({ kind: "REJECTED", gate: "S5", reason: "FACT_FIDELITY_FAILED", repairable: false, lexical: ["DATE_OR_TIME"] });
+  });
+
+  it("scope: r12 reads model-written framing only; a patient-written question with the same claims composes unchanged", () => {
+    for (const [field, question] of [
+      ["en-intro", "Is it well controlled? Are my walks helping? Has it been saved? I feel tired."],
+      ["zh-intro", "结果很好吗？散步有帮助吗？已经保存了吗？我感到很累。"],
+    ] as const) {
+      const base = R10_BASES[field];
+      const original = fixtureRequest(base.fixture);
+      const facts = original.facts.map((fact) => (fact.field === "QUESTION_TEXT" && fact.value.kind === "TEXT" ? { ...fact, value: { ...fact.value, text: question } } : fact));
+      expect(facts.filter((fact) => fact.value.kind === "TEXT" && fact.value.text === question), question).toHaveLength(1);
+      const request = { ...original, facts } as AiTaskRequest;
+      const candidate = envelope("DRAFT_CARE_PREPARATION_SUMMARY", base.locale, base.tokens, base.shells);
+      expect(throughChain(request, candidate), question).toEqual(ACCEPTED);
+      // Fix round 1 (M4): the patient text is present verbatim in the composed output (self-proving scope).
+      expect(JSON.stringify(composedThroughChain(request, candidate)), question).toContain(question);
+    }
+  });
+});
+
+/** The full chain, returning the composition itself (r12 fix round 1, for the verbatim scope check). */
+function composedThroughChain(request: AiTaskRequest, candidate: Record<string, unknown>): unknown {
+  const taskBundle = AI_HYBRID_RUNTIME_BUNDLES[request.taskType as "EXPLAIN_PATTERN"];
+  const planned = planSlots(request, taskBundle);
+  if (planned.kind !== "PLANNED") throw new Error(`unplannable ${request.requestId}`);
+  const validated = validateShellCandidate(planned.plan, taskBundle, JSON.stringify(candidate));
+  if (validated.kind === "REJECTED") throw new Error(`rejected ${validated.gate}`);
+  const composed = composeAiResult(request, planned.plan, planned.atoms, validated.shells, taskBundle, { verify: verifyComposition });
+  if (composed.kind === "REJECTED") throw new Error("composition rejected");
+  return composed;
+}
+
+/** One r12 probe of the EXPLAIN evidence field (fix round 1, M3): the recorded ordinary EXPLAIN base with its evidence replaced. */
+function r12EvidenceProbe(locale: "en-SG" | "zh-SG", evidence: string) {
+  const base = R10_BASES[locale === "en-SG" ? "en-headline" : "zh-headline"];
+  return throughChain(fixtureRequest(base.fixture), envelope("EXPLAIN_PATTERN", base.locale, base.tokens, { headline: base.shells.headline, evidence }));
+}
+
+// --- Rules r12 fix round 1 (independent review I1/I2/M3) ---------------------------------------------------------------------------
+/**
+ * Fix round 1: the F2 holder is narrowed to an activity or treatment ("this", "it", 这 and the slot stand-in no longer hold a benefit
+ * claim); the zh frames read clause-preserving copies (no holder/assertion pairing across ，。；！？、 or a line break); the zh F3 exemption
+ * reads the person's own earlier action with up to two time or manner adverbs (您之前已经保存的); the zh attributive F1 needs 的 or the noun
+ * directly (稳定地记录 stays open); and the plain forms the four shapes intend are added inside the same frames. Actual chain throughout.
+ */
+describe("shell rules r12 fix round 1: encouraged wording stays open, plain forms of the four shapes reject (actual chain)", () => {
+  it.each<[R10Field, string]>([
+    // I1(a): the person's own earlier action (F3 exemption window).
+    ["zh-intro", "感谢您之前已经保存的记录"],
+    ["zh-intro", "这些是您之前已分享的提问"],
+    ["zh-intro", "这些是您刚才已经更新的内容"],
+    ["zh-intro", "这是您先前已更新的内容"],
+    // I1(b): a summary or demonstrative helping the person prepare or understand is not a benefit claim (F2 holder narrowed).
+    ["en-intro", "This may help you get ready for your visit."],
+    ["en-headline", "This may help you understand {{S1}}."],
+    ["en-headline", "This helps you revisit {{S1}}."],
+    ["en-intro", "This can be useful for your visit."],
+    ["en-intro", "Thank you; it helps to keep these together."],
+    ["zh-intro", "这样可以帮助您做好准备"],
+    ["zh-headline", "这有助于您了解{{S1}}。"],
+    ["zh-intro", "这可以帮助您回想想问的内容"],
+    // I1(c): the adverbial 稳定地 + a verb is not a judgement of data.
+    ["zh-intro", "谢谢您一直以来稳定地记录"],
+    // I1(d): no pairing across a clause boundary.
+    ["zh-headline", "这里呈现{{S1}}，可以帮助您回想。"],
+    ["zh-intro", "您的饮食记录在这里，有助于您和医生交流"],
+    ["zh-intro", "这里整理了您的饮食记录，可以帮助您在就诊时说明"],
+    // The person as subject of the active perfect stays open (I2 F3).
+    ["en-intro", "Here are the notes you have saved."],
+    ["en-intro", "Here is what you've recorded."],
+    // F4 must not break r10 or the encouraged thanks.
+    ["zh-headline", "这里呈现您认为重要的{{S1}}。"],
+    ["zh-headline", "这里呈现您所觉得重要的{{S1}}。"],
+    ["en-intro", "Thank you for preparing these questions."],
+    ["zh-intro", "感谢您整理这些内容"],
+  ])("r12 fix round 1 accepted form: %s %j is accepted", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(ACCEPTED);
+  });
+
+  it.each<[R10Field, string]>([
+    // I2 F3: the active perfect with the app, JagaOn, "we" or a third party as subject; zh parity.
+    ["en-intro", "We have saved these notes for you."],
+    ["en-intro", "The app has saved these notes."],
+    ["en-intro", "JagaOn has updated your notes."],
+    ["en-intro", "We've sent these to your care team."],
+    ["en-headline", "We have saved {{S1}} for you."],
+    ["zh-intro", "系统已保存这些记录"],
+    ["zh-intro", "您的记录已经保存好了"],
+    // I2 F1.
+    ["en-intro", "Your readings are looking good."],
+    ["en-intro", "Your readings have been steady."],
+    ["en-intro", "Everything looks good here."],
+    ["en-intro", "All of this looks good."],
+    ["en-intro", "The readings you recorded look good."],
+    ["en-headline", "Your readings have been steady: {{S1}}."],
+    ["zh-intro", "这些读数控制良好"],
+    ["zh-intro", "这些读数表现良好"],
+    ["zh-intro", "这些数值令人满意"],
+    ["zh-headline", "这些读数控制良好，{{S1}}。"],
+    // I2 F2.
+    ["en-intro", "Walking regularly helps."],
+    ["en-intro", "Your diet has made a difference."],
+    ["zh-intro", "坚持运动效果很好"],
+    ["zh-headline", "坚持运动效果很好，{{S1}}。"],
+    // I2 F4.
+    ["zh-intro", "您一定很担心"],
+    ["zh-intro", "您可能有些担心"],
+    ["zh-intro", "这段时间您辛苦了"],
+    ["zh-headline", "您一定很担心，这里呈现{{S1}}。"],
+    // Same-clause rejections stay rejected; F2 with an activity holder still rejects.
+    ["zh-intro", "以下是比较突出的记录"],
+    ["zh-intro", "散步对您很有帮助"],
+    ["zh-intro", "这些读数很稳定"],
+    ["en-intro", "Your walks are helping your health."],
+    // Traditional, spacing and non-boundary punctuation variants of the added forms.
+    ["zh-intro", "這些讀數控制良好"],
+    ["zh-intro", "您一定很擔心"],
+    ["zh-intro", "堅持運動 效果很好"],
+    ["zh-intro", "这些数值令人满～意"],
+  ])("r12 fix round 1 rejected form: %s %j rejects at S6", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(R9_S6_REJECTION);
+  });
+
+  // M3: the EXPLAIN evidence field goes through the same S6 path.
+  it.each<["en-SG" | "zh-SG", string, unknown]>([
+    ["en-SG", "This explanation draws on {{S3}}.", ACCEPTED],
+    ["en-SG", "This draws on {{S3}}, which has been reviewed.", R9_S6_REJECTION],
+    ["en-SG", "These results look good: {{S3}}.", R9_S6_REJECTION],
+    ["en-SG", "This may help you understand {{S3}}.", ACCEPTED],
+    ["en-SG", "We have updated {{S3}} for you.", R9_S6_REJECTION],
+    ["zh-SG", "这份说明依据{{S3}}来整理。", ACCEPTED],
+    ["zh-SG", "这份说明依据您之前已分享的{{S3}}。", ACCEPTED],
+    ["zh-SG", "这份说明依据您已分享的{{S3}}。", ACCEPTED],
+    ["zh-SG", "这份说明依据{{S3}}，这些读数很稳定。", R9_S6_REJECTION],
+    ["zh-SG", "这份说明依据{{S3}}，散步对您很有帮助。", R9_S6_REJECTION],
+    ["zh-SG", "这份说明依据{{S3}}，您可能会感到疲惫。", R9_S6_REJECTION],
+  ])("r12 evidence field: %s %j", (locale, evidence, expected) => {
+    expect(r12EvidenceProbe(locale, evidence)).toEqual(expected);
+  });
+});
+
+// --- Rules r12 fix round 2 (coordinator: F2 regression, clause-mark split) ---------------------------------------------------------
+/**
+ * Fix round 2: the narrowed F2 activity/treatment holder stays, and a holder-independent benefit shape is added — a benefit verb whose
+ * object or complement is a health, body or reading target (helps your health, good for your health, 对您的健康有帮助, 有助于控制血糖), and an
+ * intransitive "is helping"/"is working" closing a clause with a data, slot or demonstrative subject ({{S1}} is helping., 该项对您有帮助).
+ * "help you get ready / understand / revisit …" has no such target and stays open. A single 、 or ， between the two characters of an r12
+ * cue bigram (已、经, 已，经) is read as a split inside one word; every other clause mark keeps its boundary. Actual chain throughout.
+ */
+describe("shell rules r12 fix round 2: holder-independent benefit claims and in-word clause-mark splits (actual chain)", () => {
+  it.each<[R10Field, string, unknown]>([
+    ["en-intro", "It helps your health.", R9_S6_REJECTION],
+    ["en-intro", "This helps your sugar.", R9_S6_REJECTION],
+    ["en-headline", "{{S1}} is helping.", R9_S6_REJECTION],
+    ["en-headline", "{{S1}} is helping your health.", R9_S6_REJECTION],
+    ["en-intro", "This is good for your health.", R9_S6_REJECTION],
+    ["en-intro", "This helps you control your levels.", R9_S6_REJECTION],
+    ["en-intro", "It is working.", R9_S6_REJECTION],
+    ["zh-intro", "这对您的健康有帮助", R9_S6_REJECTION],
+    ["zh-headline", "该项对您有帮助，{{S1}}。", R9_S6_REJECTION],
+    ["zh-headline", "{{S1}}对您有帮助。", R9_S6_REJECTION],
+    ["zh-intro", "它对您很有帮助", R9_S6_REJECTION],
+    ["zh-intro", "这样很有帮助。", R9_S6_REJECTION],
+    // An earlier gate already rejects this one (血糖 is a measurement name at S5); recorded, unchanged.
+    ["zh-intro", "它有助于控制血糖", S5_FACT_REJECTION(["MEASURE_NAME"])],
+    // In-word clause-mark splits of a cue word reject like the unsplit word (Simplified and Traditional).
+    ["zh-intro", "这些记录已、经保存", R9_S6_REJECTION],
+    ["zh-intro", "这些内容已，经发送", R9_S6_REJECTION],
+    ["zh-headline", "这些记录已、经保存，{{S1}}。", R9_S6_REJECTION],
+    ["zh-intro", "這些記錄已、經保存", R9_S6_REJECTION],
+    ["zh-intro", "以下是比较突、出的记录", R9_S6_REJECTION],
+  ])("r12 fix round 2 rejected form: %s %j", (field, text, expected) => {
+    expect(r10Probe(field, text)).toEqual(expected);
+  });
+
+  it.each<[R10Field, string]>([
+    ["en-intro", "This may help you get ready for your visit."],
+    ["en-headline", "This may help you understand {{S1}}."],
+    ["en-headline", "This helps you revisit {{S1}}."],
+    ["en-intro", "This summary may help you prepare for your visit."],
+    ["en-intro", "This may help you check what you wanted to ask."],
+    ["en-intro", "Thank you; it helps to keep these together."],
+    ["en-headline", "Here is how it works: {{S1}}."],
+    ["en-intro", "Here are your notes about your health."],
+    ["zh-intro", "这样可以帮助您做好准备"],
+    ["zh-headline", "这有助于您了解{{S1}}。"],
+    ["zh-intro", "这可以帮助您回想想问的内容"],
+    ["zh-headline", "这里呈现{{S1}}，可以帮助您回想。"],
+    ["zh-intro", "您的饮食记录在这里，有助于您和医生交流"],
+    ["zh-intro", "这里整理了您的饮食记录，可以帮助您在就诊时说明"],
+    ["zh-intro", "这里整理了您的健康记录"],
+    ["zh-intro", "这里是您的记录，好好回顾一下"],
+    ["zh-intro", "感谢您之前已经保存的记录"],
+  ])("r12 fix round 2 accepted form: %s %j is accepted", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(ACCEPTED);
+  });
+
+  it("evidence field: a holder-independent benefit claim rejects; provenance stays open", () => {
+    expect(r12EvidenceProbe("en-SG", "This draws on {{S3}}, which helps your health.")).toEqual(R9_S6_REJECTION);
+    expect(r12EvidenceProbe("en-SG", "This may help you understand {{S3}}.")).toEqual(ACCEPTED);
+    expect(r12EvidenceProbe("zh-SG", "这份说明依据{{S3}}，对您的健康有帮助。")).toEqual(R9_S6_REJECTION);
+    expect(r12EvidenceProbe("zh-SG", "这份说明依据您之前已分享的{{S3}}。")).toEqual(ACCEPTED);
+  });
+});
+
+// --- Rules r12 fix round 3 (owner option (a) for re-review IMP-1) -----------------------------------------------------------------
+/**
+ * Fix round 3: the round-2 cue-bigram join is replaced. A single 、/， is rebuilt as part of a word ONLY when it sits strictly inside one word
+ * of the closed, reviewed r12 cue-word list (SHELL_R12_SPLIT_CUE_WORDS), so the two halves rebuild exactly that word; a mark after a
+ * complete word (整理，想…, 都有，帮助…, 而已，经…) stays a clause boundary. The owner's required rows run through the actual chain.
+ */
+describe("shell rules r12 fix round 3: clause marks are rebuilt only inside listed cue words (actual chain)", () => {
+  it("the cue-word join rebuilds only an in-word split of a listed cue word and keeps every other clause mark", () => {
+    expect(r12CueWordJoined("这些记录已、经保存好了")).toBe("这些记录已经保存好了");
+    expect(r12CueWordJoined("散步对您的健康有，帮助")).toBe("散步对您的健康有帮助");
+    expect(r12CueWordJoined("读数很稳，定")).toBe("读数很稳定");
+    expect(r12CueWordJoined("以下内容依据您的记录整理，想问的问题也一并列出")).toBe("以下内容依据您的记录整理，想问的问题也一并列出");
+    expect(r12CueWordJoined("您的散步和饮食记录都有，帮助您回想")).toBe("您的散步和饮食记录都有，帮助您回想");
+    expect(r12CueWordJoined("这些内容只是整理而已，经您确认后可带去")).toBe("这些内容只是整理而已，经您确认后可带去");
+    expect(r12CueWordJoined("这里呈现该项，可以帮助您回想")).toBe("这里呈现该项，可以帮助您回想");
+    expect(SHELL_R12_SPLIT_CUE_WORDS).toEqual(["已经", "保存", "发送", "提交", "分享", "突出", "凸显", "稳定", "平稳", "良好", "满意", "有帮助", "有助于", "帮助", "健康", "感到", "觉得", "可能", "疲惫", "担心", "辛苦"]);
+  });
+
+  it.each<[R10Field, string]>([
+    // The seven IMP-1 sentences (re-review): ordinary two-clause wording.
+    ["zh-intro", "以下内容依据您的记录整理，想问的问题也一并列出"],
+    ["zh-intro", "这些问题已为您整理，想问的内容如下"],
+    ["zh-intro", "这些内容已为您整理，想带去的问题也在这里"],
+    ["zh-intro", "您的记录已整理，想问的问题在下方"],
+    ["zh-intro", "这些记录由您自己管理，想带去的都在这里"],
+    ["zh-intro", "您的散步和饮食记录都有，帮助您回想"],
+    ["zh-intro", "您的运动记录都有，帮助您了解这段时间"],
+    // The person's own saved or shared records, also with a 、/， inside 已经 (owner addendum).
+    ["zh-intro", "感谢您之前已经保存的记录"],
+    ["zh-intro", "这些是您之前已分享的提问"],
+    ["zh-intro", "感谢您之前已、经保存的记录"],
+    ["zh-intro", "这些是您之前已，经分享的提问"],
+    // Earlier harmless two-clause and enumeration cases.
+    ["zh-headline", "这里呈现{{S1}}，可以帮助您回想。"],
+    ["zh-intro", "您的饮食记录在这里，有助于您和医生交流"],
+    ["zh-intro", "这些内容只是整理而已，经您确认后可带去"],
+    ["zh-intro", "这里方便您就诊，所有记录都在下方"],
+    ["zh-intro", "这些内容方便您核对，您的健康记录也在其中"],
+    ["zh-intro", "这些内容为您呈现，在就诊时方便查看"],
+    ["zh-intro", "您记录了工作、用餐和散步的时间"],
+    ["zh-intro", "这里呈现您的记录，已为您按顺序排列"],
+    ["zh-intro", "这里是您的记录，保存在您的日志中"],
+    ["zh-intro", "您写下的问题都在这里，一定能找到"],
+    ["zh-intro", "这些内容来自您，觉得有用就带上"],
+    ["zh-intro", "这些记录您都看过，辛苦记录的内容如下"],
+    ["zh-intro", "这里列出散步、运动和饮食的记录"],
+  ])("r12 fix round 3 accepted form: %s %j is accepted", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(ACCEPTED);
+  });
+
+  it("the 已，经 split before 发送给医生 rejects at S6 through the shared authority rule (already 已经发送给 on the joined copy)", () => {
+    expect(r10Probe("zh-intro", "这些内容已，经发送给医生")).toEqual(S6_AUTHORITY_REJECTION);
+  });
+
+  it("evidence field: the person's own earlier shared records stay open, also split inside 已经", () => {
+    expect(r12EvidenceProbe("zh-SG", "这份说明依据您之前已分享的{{S3}}。")).toEqual(ACCEPTED);
+    expect(r12EvidenceProbe("zh-SG", "这份说明依据您之前已、经分享的{{S3}}。")).toEqual(ACCEPTED);
+    expect(r12EvidenceProbe("zh-SG", "这份说明依据{{S3}}，已、经保存好了。")).toEqual(R9_S6_REJECTION);
+  });
+
+  it.each<[R10Field, string]>([
+    ["zh-intro", "这些记录已、经保存好了"],
+    ["zh-intro", "系统已、经保存这些记录"],
+    ["zh-headline", "这里呈现突、出的内容，{{S1}}。"],
+    ["zh-intro", "读数很稳，定"],
+    ["zh-intro", "您可能感、到有些疲惫"],
+    ["zh-intro", "散步对您的健康有，帮助"],
+    ["zh-intro", "散步对您的健、康有帮助"],
+    ["zh-intro", "您可、能觉得有点累"],
+    ["zh-intro", "数值令人满、意"],
+    ["zh-intro", "读数控制良、好"],
+    ["zh-intro", "這些記錄已、經保存好了"],
+    ["zh-intro", "以下是比較突、出的記錄"],
+    ["zh-intro", "读数很穩，定"],
+    ["zh-intro", "散步對您的健康有，幫助"],
+  ])("r12 fix round 3 rejected form: %s %j rejects at S6", (field, text) => {
+    expect(r10Probe(field, text)).toEqual(R9_S6_REJECTION);
   });
 });

@@ -311,9 +311,9 @@ describe("per-task hybrid shell output caps ai-shell-request.11b.10 (EXPLAIN 512
     expect(rows).toHaveLength(1);
     expect(aiInvocationAuditRowSchema.safeParse(rows[0]).success).toBe(true);
     expect(rows[0]).toMatchObject({ outcomeCode: "PROVIDER_FAILED", runtimeBundleKey: AI_HYBRID_RUNTIME_BUNDLES[task].bundleKey, attempts: { count: 1, structuralRepairUsed: false } });
-    // The current bundle set (11b.18: prompt 11b.18, rules r8, observation ownership); the request profile is ai-shell-request.11b.11
+    // The current bundle set (11b.20 offline candidate: prompt 11b.20, rules r12); the request profile is ai-shell-request.11b.11
     // (caps unchanged, temperature 0.2).
-    expect(AI_HYBRID_RUNTIME_BUNDLES[task].bundleKey).toMatch(/@11b\.18$/);
+    expect(AI_HYBRID_RUNTIME_BUNDLES[task].bundleKey).toMatch(/@11b\.20$/);
   });
 });
 

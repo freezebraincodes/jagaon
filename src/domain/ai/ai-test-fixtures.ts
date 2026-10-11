@@ -92,7 +92,7 @@ export function sourceBackedRequest(): Record<string, unknown> & AiTaskRequest {
   return structuredClone({
     ...BASE,
     taskType: "EXPLAIN_PATTERN",
-    runtimeBundleKey: "ai.explain-pattern@11b.18",
+    runtimeBundleKey: "ai.explain-pattern@11b.20",
     facts: [
       periodInterval("fact-1", "2026-09-01", "2026-09-14", 1),
       periodCount("fact-2", 8, 2),

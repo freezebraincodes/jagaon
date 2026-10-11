@@ -30,10 +30,10 @@ const LOCALES: readonly AiLocale[] = ["en-SG", "zh-SG"];
 const CASES = LOCALES.flatMap((locale) => CLASSES.map(([shape, slug]) => [locale, shape, slug] as const));
 /** Current (11b.9) body SHA-256 of each class, i.e. of the stored fixture body; pinned so any drift shows. */
 const CURRENT_CLASS_BODY_SHA: Readonly<Record<string, string>> = {
-  "en-SG ordinary": "e5d0f9fab5493efd23154fcc52b9361fcaea581e7dd551415a1047bcbe2f1044",
-  "en-SG hidden-limitation": "2e775b9a049c17f49796567da14c32aee265e3e6106efdd189df2d3d0f504716",
-  "zh-SG ordinary": "99eb6c946b5aca943e92afbcf674fe7ca12c1d9de13017c55dd97570536f4f17",
-  "zh-SG hidden-limitation": "c44369ac4759bd7baf0d8df1cfd15f94cfeb227c526e78d970b310bb6629afdb",
+  "en-SG ordinary": "358bd7e9f19769e41ea9c093f89f274b985e9d99048aae5012bd46f15fa6e6ef",
+  "en-SG hidden-limitation": "f1da1c2d28a87e474e7d141af7d0d8a42abc9b69b1ad68eba7554779dee6ea12",
+  "zh-SG ordinary": "258e37da92488c0c38f844f92ada39a2db77ad542756ab6b6ae0e6e5b84fba93",
+  "zh-SG hidden-limitation": "27ee20f0311a9a401282fb45e43271745fa1b983ec31a124fbffcf08b07e8328",
 };
 const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 const fixtureBody = async (locale: AiLocale, slug: string) => {

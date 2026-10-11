@@ -13,6 +13,7 @@ import { SLOT_PLAN_VERSION, type ShellTask } from "@/domain/ai";
 import type { AiEvaluationFixture } from "./packet-11-fixtures";
 import { hybridFixturesForPhase } from "./packet-11-hybrid-fixtures";
 import { CURRENT_SLOT_PLAN_VERSION, differingPaths, normaliseSlotPlanVersion, SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY } from "./packet-11-slot-plan-version-normalisation";
+import { normalise11b20Prompt } from "./packet-11-prompt-change-normalisation";
 
 /**
  * Presentation correction guard (owner instruction 2026-10-08, offline): the P1/P3 presentation changes are application-only. The 70
@@ -25,9 +26,12 @@ import { CURRENT_SLOT_PLAN_VERSION, differingPaths, normaliseSlotPlanVersion, SL
  * else. Both comparisons below go through the documented structural normalisation (`normaliseSlotPlanVersion`: exactly the shell input's
  * `slotPlanVersion` and the output schema's echo enum, 11b.9 -> 11b.8, twice per body, counted): the normalised bodies and every
  * eligibility must still equal the historical digest and the confirmation run's bytes. The current (un-normalised) digest is pinned too.
+ * 11b.20 candidate (offline): provenance comparison first maps the whole instructions back to the exact 11b.18 asset and the embedded
+ * runtimeBundleKey (20 -> 18), then the two historical slot-plan values. The original historical digest remains unchanged. This proves
+ * bounded byte changes only; it does not make old provider outputs evidence for the new prompt. The 140 count is slot-plan fields only.
  */
 const HISTORICAL_DIGEST = "a77a79aa1c56b1530758147f12573051c4d786035f8926901bbbdaa19d3edd92";
-const CURRENT_DIGEST = "5e7c96959d1d60b441abc54e7384cc0cb30dc33594ba9603f4e64c16de423ff8";
+const CURRENT_DIGEST = "aa7064a24fe1a1eb95ba0ba62b54ce2990844f89d5b8d4aa292870f1b9d8e856";
 const SENTINEL = "ds-SENTINEL-CREDENTIAL-presentation-guard";
 const NOW = () => "2026-10-08T00:00:00.000Z";
 const CONFIRMATION_TRACE = "test-results/packet-11-hybrid-live-trace/20261007T131032Z-6a13e8630a3464c8";
@@ -70,7 +74,7 @@ export async function existingFixtureDigest(): Promise<string> {
 function normalisedRows(rows: ReadonlyArray<{ id: string; eligibility: string; body: string | null }>) {
   return rows.map((row) => {
     if (row.body === null) return { ...row, occurrences: 0 };
-    const normalised = normaliseSlotPlanVersion(row.body);
+    const normalised = normaliseSlotPlanVersion(normalise11b20Prompt(row.body));
     return { ...row, body: normalised.body, occurrences: normalised.occurrences };
   });
 }
@@ -84,7 +88,7 @@ export async function versionNormalisedFixtureDigest(): Promise<{ digest: string
 }
 
 describe("Packet 11 presentation correction guard (offline)", () => {
-  it("the 70 model-facing request bodies and remote eligibility equal the pre-change digest, apart from the documented slot-plan version field", async () => {
+  it("the 70 bodies and eligibility preserve historical bytes apart from the two prompt edits, bundle key and slot-plan fields", async () => {
     expect(SLOT_PLAN_VERSION).toBe(CURRENT_SLOT_PLAN_VERSION);
     const rows = await snapshot();
     expect(rows).toHaveLength(70);

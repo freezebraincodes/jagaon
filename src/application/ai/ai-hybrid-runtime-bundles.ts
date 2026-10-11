@@ -82,18 +82,23 @@ import { AI_TASK_RUNTIME_BUNDLES, type AiComponentRef, type AiTaskRuntimeBundle 
  * contract pins moved in 11C, so eval.18-era evidence is an earlier contract). Neither label reaches a model: bundle keys, components,
  * remote eligibility and every model-facing byte are unchanged (packet-11c-contract-freeze.test.ts).
  */
-export const AI_HYBRID_BUNDLE_VERSION = "11b.18";
+// Batch 2 offline candidate: the two shared prompt edits moved prompt/bundle labels to 11b.19. The 11b.20 candidate (policy-led ROLE, BANS and
+// EXPLAIN guidance) moves them to 11b.20. Caps, schema, timeouts and activation stay unchanged.
+export const AI_HYBRID_BUNDLE_VERSION = "11b.20";
 /** The components unchanged since bundle set 11b.7. */
 const AI_HYBRID_UNCHANGED_COMPONENT_VERSION = "11b.7";
-/** The validator profile: shell rules r8 (11b.15) plus field ownership in the validator (11b.18). */
+/**
+ * The validator profile component version: 11b.18 since field ownership in the validator. The shell rules it applies are versioned
+ * separately (AI_HYBRID_VERSIONS.shellRules: r8 in 11b.15, now ai-shell-rules.11b.18-r12); the component version stays 11b.18.
+ */
 const AI_HYBRID_VALIDATOR_PROFILE_VERSION = "11b.18";
 export const AI_HYBRID_VERSIONS = deepFreeze({
   slotPlan: SLOT_PLAN_VERSION,
   atomRenderer: "ai-atoms.11b.7",
   defaultShells: "ai-shells-default.11b.8",
-  shellRules: "ai-shell-rules.11b.16-r10",
+  shellRules: "ai-shell-rules.11b.18-r12",
   languageCopy: "ai-language-copy.11b.10",
-  prompt: "11b.18",
+  prompt: "11b.20",
   providerSchema: "kie-schema.11c.1",
   validatorRules: "11b.2-meaning-r7",
   fixtureSet: "packet11-fixtures.11b.16",

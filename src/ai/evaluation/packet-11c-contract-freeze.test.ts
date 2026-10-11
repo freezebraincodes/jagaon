@@ -66,6 +66,7 @@ import { hybridFixturesForPhase, PACKET_11_HYBRID_FIXTURE_SET_REVISION } from ".
 import { plannedFixture } from "./packet-11-hybrid-test-support";
 import { capture, existingFixtureDigest, versionNormalisedFixtureDigest } from "./packet-11-presentation-guard.test";
 import { normaliseSlotPlanVersion, SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY } from "./packet-11-slot-plan-version-normalisation";
+import { normalise11b20Prompt } from "./packet-11-prompt-change-normalisation";
 import { SOURCE_BACKED_SCENARIOS, sourceBackedFixture } from "./packet-11-source-backed-fixtures";
 
 /**
@@ -142,7 +143,7 @@ const ENABLED: AiActivationManifest = {
   tasks: { ...AI_ACTIVATION_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED", DRAFT_CARE_PREPARATION_SUMMARY: "SYNTHETIC_REMOTE_ENABLED" },
 };
 
-/** The frozen contract, as literals. */
+/** Offline re-freeze candidate pins. Passing these tests is not owner re-freeze approval or model qualification. */
 const FROZEN = Object.freeze({
   slotPlan: "ai-slot-plan.11b.9",
   atomRenderer: "ai-atoms.11b.7",
@@ -154,15 +155,23 @@ const FROZEN = Object.freeze({
   // The r10 rule text was tightened before commit (coordinator ruling after the independent review: zh modal + attention verb, the zh
   // form of "needs your attention"); the label stays 11b.16-r10 because r10 is uncommitted and has no bound evidence, and the rule text
   // feeds no digest (regenerated with the existing generator: contract digest and classIds unchanged).
-  shellRules: "ai-shell-rules.11b.16-r10",
+  // r11 offline pins (salience option (a), 2026-10-11): additive R11 directive entries (significant, crucial, key in
+  // evaluative use; look closely, notice, keep in mind, to watch; 重点, 关键, 显著) and two Traditional rows. Prompt, request bytes and bodies
+  // were unchanged by that validator-only step, relative to 11b.18. Batch 2 below changes the prompt/body separately. The old FULL stays FAIL.
+  shellRules: "ai-shell-rules.11b.18-r12",
+  // r12 offline pins (owner decision 2026-10-11, policy-led prompt): additive R12_DIRECTIVE claim-shape entries (F1 data judgement, F2 benefit
+  // or cause, F3 completed-state claim, F4 attributed feeling) and 38 Traditional rows. Batch 2 moved prompt and bundle labels to 11b.19 (two
+  // shared edits); the 11b.20 candidate (policy-led rewrite of ROLE, BANS and the two EXPLAIN guidance paragraphs) moves them to 11b.20 and
+  // changes every model-facing body again.
+  // Request classes are regenerated PENDING, with no inherited evidence/sign-off; historical byte guards invert only documented edits.
   shellRequestProfile: "ai-shell-request.11b.11",
-  prompt: { version: "11b.18", assetsSha256: "e6e1160cc8796109c3fb974db97a9d9562d2ee888be1ba071744a8de1bf07c9b" },
+  prompt: { version: "11b.20", assetsSha256: "5c3950c93c0d0de7fe4b158e1fc54248769e1a51fe7ac3b19236a5d2c95b0234" },
   providerSchema: { label: "kie-schema.11c.1", schemasSha256: "0e60fbd6cfc630ba69472862e59533f33e46818f90d1c4af7ffc582958c49672" },
   validatorRules: "11b.2-meaning-r7",
   approvedMeaningRegistry: "ai-meaning-registry.11b.1",
   bundles: {
-    bundleSet: "11b.18",
-    keys: { EXPLAIN_PATTERN: "ai.explain-pattern@11b.18", DRAFT_CARE_PREPARATION_SUMMARY: "ai.draft-care-preparation-summary@11b.18" },
+    bundleSet: "11b.20",
+    keys: { EXPLAIN_PATTERN: "ai.explain-pattern@11b.20", DRAFT_CARE_PREPARATION_SUMMARY: "ai.draft-care-preparation-summary@11b.20" },
     shellInputVersions: { EXPLAIN_PATTERN: "ai-shell-input.explain-pattern@11b.8", DRAFT_CARE_PREPARATION_SUMMARY: "ai-shell-input.draft-care-preparation-summary@11b.7" },
     shellOutputVersions: { EXPLAIN_PATTERN: "ai-shell.explain-pattern@11b.8", DRAFT_CARE_PREPARATION_SUMMARY: "ai-shell.draft-care-preparation-summary@11b.7" },
   },
@@ -235,11 +244,16 @@ const FROZEN = Object.freeze({
   // r10 re-freeze (deliberate, includes the r9 refinement): shellRules is a contract input, so the contract digest and all 12 classIds
   // changed (was 5bec1f2a…, definitions d17c62cd…); no request byte, model-facing body, endpoint or prompt changed; records regenerated
   // with the existing generator, ALL PENDING with no evidence.
+  // r11 validator-only step: shellRules is a contract input, so the contract digest and all 12 classIds changed again (was 30bb1549…,
+  // definitions 6db8b350…); no request byte, model-facing body, endpoint or prompt changed; records regenerated with the existing
+  // generator, ALL PENDING with no evidence. Batch 2 then bound the 11b.19 prompts, bodies and bundle keys (contract e415a265…). The 11b.20/r12
+  // candidate binds the 11b.20 prompts, bodies and bundle keys and shell rules r12; regenerated with the same derivation, ALL PENDING with no
+  // evidence or sign-off; owner approval pending.
   requestClasses: {
     scheme: "ai-request-class.11c.1",
     remoteEligibilityPolicy: "ai-remote-eligibility.11c.1",
-    contractDigest: "30bb1549cbcdc31776316df36431718dc5f8683b9573c62491fd47e8261be971",
-    definitionsSha256: "6db8b350440c009825c9e6931a57a62a89609482ea3603116d491a92ace10f7d",
+    contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1",
+    definitionsSha256: "a80ec876018ac7018af8dc8cb9fdf5e8aaf5f2d0212ab79c217d0616dc7c6ade",
     contractBindings: { classBodies: 12, endpointSha256: "6a440b422e727dd307ca07f0f1df977bd3ac1d0d62917187225a12b9f5f306de", sourceBackedAndCareClassBodiesBound: true },
     classesPerTaskLocale: { "EXPLAIN_PATTERN en-SG": 3, "EXPLAIN_PATTERN zh-SG": 3, "DRAFT_CARE_PREPARATION_SUMMARY en-SG": 3, "DRAFT_CARE_PREPARATION_SUMMARY zh-SG": 3 },
     samples: 70,
@@ -286,19 +300,19 @@ const FROZEN = Object.freeze({
   runtimeBundles: { modelSnapshot: null, routeProfile: "deterministic-only.11a.1" },
   modelFacingBodies: {
     fixtures70: {
-      current: "5e7c96959d1d60b441abc54e7384cc0cb30dc33594ba9603f4e64c16de423ff8",
+      current: "aa7064a24fe1a1eb95ba0ba62b54ce2990844f89d5b8d4aa292870f1b9d8e856",
       versionNormalisedToHistorical: "a77a79aa1c56b1530758147f12573051c4d786035f8926901bbbdaa19d3edd92",
       normalisedFields: 140,
     },
     sourceBackedExplainClasses: {
-      current: { "en-SG": "1756934e47137b7434d3499c6952f30adf6056161fc5f6523c53ec526f22a13b", "zh-SG": "63f161dcddc2195bec407c79aec6abf4a5edb3f73db2f37b0df51ea382c136ae" },
+      current: { "en-SG": "43ad7c722c83131384b149356a161e95ed18653ffd4b6adfd03f3226fc85b1d8", "zh-SG": "dc0b943bb15015b184e91d8da1d62a8e0baee1c7bd1dc9e722a91667e8306790" },
       versionNormalisedToHistorical: { "en-SG": "c46ab171eac08602ea3d9e4913c447c7c71643e67971ce725a085ad08cfb2d7d", "zh-SG": "b9398514d6b931c94e8acfa78c7faf421606cc9cf2d6f80ee448eedee9e32855" },
     },
     careClasses: {
-      "en-SG ordinary": "e5d0f9fab5493efd23154fcc52b9361fcaea581e7dd551415a1047bcbe2f1044",
-      "en-SG hidden-limitation": "2e775b9a049c17f49796567da14c32aee265e3e6106efdd189df2d3d0f504716",
-      "zh-SG ordinary": "99eb6c946b5aca943e92afbcf674fe7ca12c1d9de13017c55dd97570536f4f17",
-      "zh-SG hidden-limitation": "c44369ac4759bd7baf0d8df1cfd15f94cfeb227c526e78d970b310bb6629afdb",
+      "en-SG ordinary": "358bd7e9f19769e41ea9c093f89f274b985e9d99048aae5012bd46f15fa6e6ef",
+      "en-SG hidden-limitation": "f1da1c2d28a87e474e7d141af7d0d8a42abc9b69b1ad68eba7554779dee6ea12",
+      "zh-SG ordinary": "258e37da92488c0c38f844f92ada39a2db77ad542756ab6b6ae0e6e5b84fba93",
+      "zh-SG hidden-limitation": "27ee20f0311a9a401282fb45e43271745fa1b983ec31a124fbffcf08b07e8328",
     },
   },
 });
@@ -651,7 +665,7 @@ const ACTUAL: { readonly [K in FrozenItem]: () => unknown } = {
       fixtures70: { current: await existingFixtureDigest(), versionNormalisedToHistorical: normalised.digest, normalisedFields: normalised.occurrences },
       sourceBackedExplainClasses: {
         current: Object.fromEntries(LOCALES.map((locale) => [locale, classSha(sourceBacked, locale)])),
-        versionNormalisedToHistorical: Object.fromEntries(LOCALES.map((locale) => [locale, classSha(sourceBacked, locale, (body) => normaliseSlotPlanVersion(body).body)])),
+        versionNormalisedToHistorical: Object.fromEntries(LOCALES.map((locale) => [locale, classSha(sourceBacked, locale, (body) => normaliseSlotPlanVersion(normalise11b20Prompt(body)).body)])),
       },
       careClasses: Object.fromEntries(care.map((entry) => [entry.key, sha256(entry.body)])),
     };

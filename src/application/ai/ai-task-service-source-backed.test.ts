@@ -172,7 +172,7 @@ describe("hybrid service still handles a source-backed request (Packet 11C Task 
     expect(calls).toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ outcomeCode: "TASK_DISABLED", runtimeBundleKey: "ai.explain-pattern@11b.18", attempts: { count: 0 } });
+    expect(rows[0]).toMatchObject({ outcomeCode: "TASK_DISABLED", runtimeBundleKey: "ai.explain-pattern@11b.20", attempts: { count: 0 } });
   });
 
   it("when remote is enabled in a test manifest, only the value-blind shell request reaches the provider", async () => {

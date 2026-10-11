@@ -41,6 +41,7 @@
             "src/ai/kie/kie-shell-responses-provider.test.ts",
             "src/ai/prompts/packet-11-prompts.test.ts",
             "src/ai/prompts/packet-11-shell-prompts.test.ts",
+            "src/ai/evaluation/packet-11-prompt-change-normalisation.test.ts",
             "src/ai/transcript-extraction/transcript-extraction-request.test.ts",
             "src/app/layout.test.ts",
             "src/application/ai/ai-audit-lifecycle.test.ts",

@@ -56,8 +56,25 @@ import { spelledCounts } from "../ai-output-validator";
  * and the evaluative use of important / notable / noteworthy / worth noting / 重要 / 值得一提 that assigns importance or noteworthiness.
  * Context checks keep the descriptive forms (您所关注的, 您所留意的, 您所留心的, 您关注的, "notes concerning …", "the items you
  * paid attention to", "the items you marked as important", 您认为重要的) accepted. The FULL run under r8 stays FAIL; r9/r10 rescore nothing.
+ * Rules r11 (owner decision 2026-10-11, salience option (a), offline): ADDITIVE only — every r1–r10 entry, table, scan copy, join and
+ * provenance rule is unchanged. r11 adds the R11_DIRECTIVE entries (read by S6 exactly as the r10 entries) and an additive
+ * R11_TRADITIONAL_TABLE. In model-written shell wording only, they reject the evaluative use of significant(ly), crucial(ly) and key,
+ * the attention imperatives look closely, notice (imperative or "you may/will notice"), keep in mind and "… to watch", and the zh
+ * salience words 重点, 关键 and 显著. Context checks keep descriptive forms accepted ("the items you noticed", "the readings you chose
+ * to watch", "the items you marked as significant", "the entries you keyed in", 关键词, 您认为关键的), and every r10 approved form stays
+ * accepted. The recorded FULL run stays FAIL; r11 rescores nothing.
+ * Rules r12 (owner decision 2026-10-11, with the policy-led prompt 11b.20, offline): ADDITIVE only — every r1–r11 entry, table, scan
+ * copy, join and provenance rule is unchanged. r12 adds the R12_DIRECTIVE entries (read by S6 exactly as the r10/r11 entries) and an
+ * additive R12_TRADITIONAL_TABLE. In model-written shell wording only, four claim shapes reject, each needing a holder and an assertion
+ * in the same clause: F1 a judgement of the person's data ("these results look good", "the readings that stand out", 突出的记录), F2 a
+ * benefit or cause of an activity or treatment ("your walks are helping", 散步对您有帮助), F3 a completed-state claim ("have been
+ * saved", "your care team has these", 已经保存), F4 an attributed feeling ("you may be feeling worried", 您可能会感到). The person's own
+ * marking, regarding, recording and choosing stay accepted, as do every r10 and r11 approved form. Fix round 1 (independent review, label
+ * unchanged because r12 is uncommitted and has no bound evidence): the F2 holder is narrowed to an activity or treatment; the zh frames
+ * read clause-preserving copies (S6 role CLAUSE in shell-validator.ts); the zh F3 exemption reads the person's own earlier action; the
+ * plain forms of the four shapes are added inside the same frames. The recorded FULL run stays FAIL.
  */
-export const SHELL_RULES_REVISION = "ai-shell-rules.11b.16-r10";
+export const SHELL_RULES_REVISION = "ai-shell-rules.11b.18-r12";
 export type ShellLexicalViolation = "DIGIT" | "NUMBER_WORD" | "UNIT" | "PERCENT" | "REFERENCE" | "DATE_OR_TIME" | "COMPARATIVE_DIRECTION" | "MEASURE_NAME" | "QUOTATION" | "FORMAT_CHARACTER" | "DISALLOWED_CHARACTER";
 
 /** Format (Cf) and control (Cc) characters, except tab, line feed and carriage return. */
@@ -179,8 +196,20 @@ const R6_TRADITIONAL_TABLE: ReadonlyArray<readonly [string, string]> = [
  * 跟踪, 仔细, 监测, 让人, 觉得). Scanning only.
  */
 const R10_TRADITIONAL_TABLE: ReadonlyArray<readonly [string, string]> = [["观", "觀"], ["踪", "蹤"], ["细", "細"], ["监", "監"], ["让", "讓"], ["觉", "覺"]];
-/** Traditional character → Simplified character (rules r3, extended by r5, r6 and r10); read-only by contract, used only to build scan copies. */
-export const TRADITIONAL_TO_SIMPLIFIED: ReadonlyMap<string, string> = new Map([...TRADITIONAL_TABLE, ...R5_TRADITIONAL_TABLE, ...R6_TRADITIONAL_TABLE, ...R10_TRADITIONAL_TABLE].flatMap(([simplified, traditional]) => [...traditional].map((character) => [character, simplified] as const)));
+/** Rules r11 (additive; every row above is unchanged): the Traditional forms the r11 zh entries need (关键, and 关键词 kept open). Scanning only. */
+const R11_TRADITIONAL_TABLE: ReadonlyArray<readonly [string, string]> = [["键", "鍵"], ["词", "詞"]];
+/**
+ * Rules r12 (additive; every row above is unchanged): the Traditional forms the r12 zh entries need (稳定, 运动, 锻炼, 饮食, 帮助, 见效, 这样,
+ * 对您, 确实, 准备, 回顾, 带去, 沟通, 讨论, 存档, 储存, 药剂师, 现在, 拥有, 也许, 有点儿, 疲惫, 高兴, 沮丧, 烦, 孤独, 困扰, 满意, 轻松, 气馁, 骄傲,
+ * 蛮, 点击, 选出; fix round 1: 刚才/刚刚). Scanning only.
+ */
+const R12_TRADITIONAL_TABLE: ReadonlyArray<readonly [string, string]> = [["蛮", "蠻"], ["稳", "穩"], ["击", "擊"], ["选", "選"], ["运", "運"], ["动", "動"], ["锻", "鍛"], ["炼", "煉"], ["饮", "飲"], ["样", "樣"], ["对", "對"], ["实", "實"], ["帮", "幫"], ["见", "見"], ["备", "備"], ["顾", "顧"], ["带", "帶"], ["沟", "溝"], ["讨", "討"], ["论", "論"], ["档", "檔"], ["储", "儲"], ["师", "師"], ["现", "現"], ["拥", "擁"], ["许", "許"], ["儿", "兒"], ["惫", "憊"], ["兴", "興"], ["丧", "喪"], ["烦", "煩"], ["独", "獨"], ["扰", "擾"], ["满", "滿"], ["轻", "輕"], ["松", "鬆"], ["馁", "餒"], ["骄", "驕"],
+  // r12 fix round 1: 刚 for the person-did window (刚才, 刚刚).
+  ["刚", "剛"],
+  // r12 fix round 2: 维 for the holder-independent benefit target (维持).
+  ["维", "維"]];
+/** Traditional character → Simplified character (rules r3, extended by r5, r6, r10, r11 and r12); read-only by contract, used only to build scan copies. */
+export const TRADITIONAL_TO_SIMPLIFIED: ReadonlyMap<string, string> = new Map([...TRADITIONAL_TABLE, ...R5_TRADITIONAL_TABLE, ...R6_TRADITIONAL_TABLE, ...R10_TRADITIONAL_TABLE, ...R11_TRADITIONAL_TABLE, ...R12_TRADITIONAL_TABLE].flatMap(([simplified, traditional]) => [...traditional].map((character) => [character, simplified] as const)));
 const toSimplified = (scan: string): string => Array.from(scan, (character) => TRADITIONAL_TO_SIMPLIFIED.get(character) ?? character).join("");
 
 /**
@@ -428,8 +457,209 @@ const R10_DIRECTIVE: readonly RegExp[] = Object.freeze([
   // zh.
   /值得(?:特别|格外|多加|加以|进一步|再|去|您|我们|大家|好好|仔细){0,2}(?:关注|注意|留意|留心|留神|重视|警惕|注目|一提|提及|一看|当心|小心|担心|担忧|关心|观察|追踪|跟踪|跟进|监测)|(?<!所)(?:留心|留神)|(?:注意|留意|留心|留神|关注)一下|您(?:注意|留心|留神|关注|当心|小心|警惕|重视)(?![到的过過])|您(?:要|多|多加|好好|再|得|可以|可|不妨|最好|务必|一定|需|应|应该)(?:注意|留心|留神|关注|当心|小心|警惕|重视)|(?:要|应|需|须|得|多|多加|可以多)(?:关注|留心|留神|重视|警惕)|要(?:特别|多加)注意|(?:^|[。！？!?.；;：:])\s*(?:关注|当心|小心|警惕|重视|留神|留心|密切)(?![到的过過])|密切(?:关注|注意|留意|留心|观察|监测|跟进|追踪|跟踪)|引人(?:注目|关注|注意|担忧|担心)|(?:令|让)人(?:担忧|担心|不安|忧虑|关注|注目)|引起(?:您的?)?(?:关注|注意|重视|警惕)|(?<!您所?(?:[认認][为為爲]|[觉覺]得|[视視][为為爲]|[标標][记記]?[为為爲]))重要/,
 ].map((pattern) => Object.freeze(pattern)));
-/** Every S6 directive pattern (r1/r2, r3 with the r9 refinement, then r10), exported read-only for the Traditional-coverage test. */
-export const SHELL_DIRECTIVE_PATTERNS: readonly RegExp[] = Object.freeze([...DIRECTIVE, ...R3_DIRECTIVE, ...R10_DIRECTIVE]);
+/**
+ * Rules r11 (owner decision 2026-10-11, salience option (a): model wording must not assign importance or noteworthiness to the person's
+ * readings or patterns), additive to the r1, r3 and r10 directive entries and read by S6 exactly as they are. Context-checked phrases,
+ * never a bare keyword:
+ * en salience — significant(ly), significance, crucial(ly) unless the person did the marking (the r10 R10_EN_PERSON_MARKED check: "the
+ *   items you marked as significant"); key attributive ("the key items", "key {{S1}}", "the ‘key’ items", "the key to …") unless a
+ *   legend or typing reading follows (the key below/for/of …, key in; keyed in, keywords and low-key stay open), and key predicative
+ *   after a copula ("is key", "remains very key");
+ * en look closely — "look (more …) closely/carefully", "look at … closely" at a clause end, "closely look";
+ * en notice — "notice" opening a sentence (optionally after do/just/now/also/simply/first/then/and; not "notice of" or "notice
+ *   board"), after a comma before an object (", notice how/the/…"), and "you may/might/will/would/could/can/should/'ll notice";
+ *   "the items you noticed" and a mid-sentence noun "notice" stay open;
+ * en keep in mind — "keep/bear … in mind" unless it describes the person ("the items you keep in mind", "you have been keeping … in
+ *   mind"); "kept in mind" is past description and stays open;
+ * en to watch — "to watch/monitor/notice" (also "to keep watching", "to closely watch") unless the person chose it ("the readings you
+ *   chose to watch", "you wanted to monitor");
+ * zh — 重点 and 关键 unless the person is the one who regards it so (the r10 您认为/您觉得/您视为/您标为 check), 关键词/关键字 stay open; 显著
+ *   (Traditional 重點, 關鍵, 顯著 through the T→S copy; 顯著 is read on the copy itself because 著 maps to 着).
+ */
+const R11_ZH_PERSON_REGARDED = String.raw`(?<!您所?(?:[认認][为為爲]|[觉覺]得|[视視][为為爲]|[标標][记記]?[为為爲]))`;
+const R11_EN_PERSON_CHOSE = String.raw`(?<!\byou(?:\s+(?:have|had)|'ve|'d)?\s+(?:\w+\s+)?(?:chose|choose|chosen|choosing|decided|decide|want|wanted|wish|wished|like|liked|asked|plan|planned|start|started|continue|continued|prefer|preferred|tend|tended|used|tried|went|came)\s+)`;
+const R11_DIRECTIVE: readonly RegExp[] = Object.freeze([
+  // en salience.
+  new RegExp(String.raw`${R10_EN_PERSON_MARKED}\b(?:significant(?:ly)?|significance|crucial(?:ly)?)\b`, "i"),
+  new RegExp(String.raw`${R10_EN_PERSON_MARKED}(?<!\blow[\s-]?)\bkey\b['*]*\s+(?!(?:in|into|for|of|on|below|above|here|there|and|or|with|that|which|shows?|showed|explains?|lists?|reads?)\b)(?=[a-z])|\b(?:is|are|was|were|be|been|being|remains?|remained|seems?|seemed|looks?|looked|appears?|appeared|feels?|felt|stays?|stayed|becomes?|became|'s|'re)\s+(?:(?:especially|particularly|really|very|most|so|truly|absolutely|quite|also|still|now|equally)\s+)?key\b`, "i"),
+  // en look closely.
+  /\blook(?:s|ed|ing)?\s+(?:(?:more|very|really|extra|especially|particularly|a\s+bit|a\s+little)\s+)?(?:closely|carefully)\b|\blook(?:s|ed|ing)?\s+at\b[^.!?,;:]{0,40}?\bclosely\s*(?:[.!?,;:]|$)|\b(?:closely|carefully)\s+look(?:s|ed|ing)?\b/i,
+  // en notice.
+  /(?:^|[.!?:;]\s*)(?:(?:do|just|now|also|simply|first|then|and)\s+)?notice\b(?!\s+(?:of|boards?)\b)|,\s*(?:and\s+)?notice\s+(?:how|that|what|whether|the|this|these|those|it|them|any|your)\b|\byou(?:'ll|'d|\s+(?:may|might|will|would|could|can|should|shall))\s+(?:(?:also|now|probably|likely|then|soon|quickly|easily|already|immediately|clearly|readily)\s+)?notice\b/i,
+  // en keep in mind.
+  /(?<!\byou(?:\s+(?:have|had)\s+been|'ve\s+been|'d\s+been|\s+are|'re|\s+were)?\s+)\b(?:keep|keeps|keeping|bear|bears|bearing)\b[^.!?]{0,40}?\bin\s+mind\b/i,
+  // en to watch.
+  new RegExp(String.raw`${R11_EN_PERSON_CHOSE}\bto\s+(?:(?:keep|closely|carefully)\s+)?(?:watch|monitor|notice)\b`, "i"),
+  // zh.
+  new RegExp(String.raw`${R11_ZH_PERSON_REGARDED}(?:重点|关键(?![词詞字]))|[显顯]著`),
+].map((pattern) => Object.freeze(pattern)));
+/**
+ * Rules r12 (owner decision 2026-10-11, policy-led prompt 11b.20: describe, never evaluate), additive to the r1, r3, r10 and r11 directive
+ * entries. The en entries are read by S6 exactly as those entries (every scan copy, the en pair/triple joins, the token-separated copy,
+ * stand-in provenance); the zh entries (fix round 1) read the clause-preserving copies only (SHELL_CLAUSE_DIRECTIVE_PATTERNS below), with
+ * the same token-separated reading and provenance. The stand-in "the item" / 该项 counts as a data holder (F1). Four claim shapes, each a
+ * HOLDER and an ASSERTION in the same clause (no clause punctuation between them), never a bare keyword:
+ * F1 judgement of the person's data — a data noun (readings, results, levels, numbers, values, sugar, figures, items, entries, data,
+ *   these, they, it, this, everything, all of this; 读数, 结果, 数值, 记录, 血糖, 数据, 这些, 它, 内容, 项目), optionally followed by a short
+ *   relative clause with the person as subject ("the readings you recorded"), with an evaluative, state or salience predicate after a
+ *   linking verb, also progressive or perfect (look/are/seem/are looking/have been good, fine, okay, great, healthy, stable, steady,
+ *   under control, well controlled, on track, in range, improving, noticeable, (in)significant …; stand out, matter; 很好, 不错, 理想,
+ *   正常, 稳定, 控制得好, 良好, 令人满意, 突出, 凸显) or that adjective before the noun, directly or with 的 ("noticeable readings",
+ *   突出的记录; never the adverbial 稳定地 + a verb), and 是/为 … 要点 (要点开 and 要点明 are 要 + 点开/点明 and stay open). The r10
+ *   person-marked ("the readings you marked as noticeable") and r11 person-regarded (您认为突出的) checks keep the person's own judgement
+ *   open; "it is fine to …" is not a judgement.
+ * F2 benefit or cause — an ACTIVITY OR TREATMENT holder only (walk(s), walking and other activity gerunds, exercise, activity, diet,
+ *   food, meal(s), medicine, medication, insulin, pen, treatment; 散步, 运动, 锻炼, 饮食, 药, 胰岛素, 治疗) with a benefit or causal verb
+ *   (help, benefit, good for, improve, work, lower, reduce, keep … down/in check, pay off, make a difference; 有助, 有帮助, 有益, 改善,
+ *   降低, 有效, 帮助, 效果很好 …), with at most one -ly adverb between ("walking regularly helps"). Fix round 1: a summary, this view or a
+ *   bare demonstrative (this, it, 这, 这样) or the slot stand-in is not an activity, so "This may help you get ready …" and 这样可以帮助您
+ *   做好准备 stay open; "help(s) you prepare/review/bring …" and 有助于您准备/整理/回顾 … stay open after an activity too; "how it works"
+ *   is not a claim. Fix round 2 adds two holder-independent F2 shapes: a benefit verb whose object or complement is a health, body or
+ *   reading target ("helps your health", "good for your health", "helps you control your levels"; 对您的健康有帮助, 有助于控制…血糖/身体),
+ *   and an intransitive "is helping"/"is working" closing a clause with a data, slot or demonstrative subject ("{{S1}} is helping.";
+ *   该项/它 + 有帮助, 这样很有帮助。).
+ * F3 completed-state claim — a perfect or passive saved/sent/shared/reviewed/received/updated/submitted construction ("have been
+ *   saved", "is now sent"), the active perfect with the app, JagaOn, "we", "I" or a third party as subject ("we have saved", "JagaOn has
+ *   updated"), or a recipient who now has the notes ("your care team has these"); zh 已(经) + 保存/发送/提交/审核/分享/更新/收到/发给 …
+ *   and 保存好了. The person's own action stays open ("the readings you recorded", "you have saved", 您已记录的, 您记录下来的; zh: 您 with
+ *   up to two time or manner adverbs before 已 — 您之前已经保存的, 您刚才已更新的 — is the person's action; 您的记录已保存 is not).
+ * F4 attributed feeling — the person with an emotion or inner state the model cannot ground ("you may be feeling worried", "you seem
+ *   tired", "understandable to feel"; 您(可能)(会)感到, 您(可能)觉得 + 累/疲惫/担心 …, 您 + a modal + an emotion (您一定很担心), 您辛苦了,
+ *   您看起来 + an emotion). 您认为重要的 and 您所觉得重要的 (r10) stay open: 觉得 counts only with an emotion word, and the bare emotion only
+ *   after a modal.
+ * Traditional forms read through the T→S copy with the additive R12_TRADITIONAL_TABLE rows.
+ */
+const R12_EN_DEGREE = String.raw`(?:all|both|very|really|quite|pretty|so|truly|fairly|reasonably|mostly|generally|overall|still|now|clearly|rather|particularly|especially|nicely|already|also|definitely|certainly)`;
+// Fix round 1: "everything", "all of this/these/them" and "all this" are data holders too ("everything looks good here").
+const R12_EN_DATA_HOLDER = String.raw`\b(?:readings?|results?|levels?|numbers?|values?|sugars?|figures?|items?|entries|data|these|they|it|this|everything|all\s+(?:of\s+)?(?:this|these|them))`;
+// Fix round 1: a short relative clause with the person as subject may sit between the holder and the predicate ("the readings you recorded
+// look good"); the person's own marking ("the readings you marked as noticeable") is still read by R10_EN_PERSON_MARKED before the adjective.
+const R12_EN_HOLDER_RELATIVE = String.raw`(?:\s+(?:that\s+|which\s+)?you(?:\s+have|'ve)?\s+[a-z]+(?:\s+(?:down|in|up|out))?)?`;
+// Fix round 1: progressive and perfect linking forms ("are looking", "have been", "has stayed").
+const R12_EN_LINK = String.raw`(?:'s|'re|'ve\s+been|\s+(?:(?:is|are|was|were)\s+(?:looking|seeming|staying|remaining|getting)|(?:has|have|had)\s+(?:been(?:\s+(?:looking|staying|remaining))?|stayed|remained|looked|seemed)|is|are|was|were|be|been|being|look|looks|looked|looking|seem|seems|seemed|appear|appears|appeared|remain|remains|remained|stay|stays|stayed|sound|sounds))`;
+const R12_EN_EVALUATIVE = String.raw`(?:good|fine|ok|okay|alright|all\s+right|great|healthy|stable|steady|excellent|ideal|perfect|nice|lovely|reassuring|positive|encouraging|promising|impressive|under\s+control|(?:well|nicely|tightly)[\s-]+(?:controlled|managed|kept|maintained|balanced)|(?:on|in)\s+track|in\s+(?:range|target|check|order|line)|on\s+target|within\s+(?:range|target)|improving|noticeable|(?:in)?significant|remarkable|meaningful|striking|telling)\b`;
+const R12_EN_EMOTION = String.raw`(?:(?:a\s+(?:bit|little)|quite|rather|somewhat|very|so|really|too|a\s+lot)\s+)?(?:worried|anxious|tired|exhausted|stressed|overwhelmed|frustrated|sad|upset|concerned|nervous|scared|afraid|frightened|discouraged|disappointed|unwell|relieved|happy|proud|hopeful|reassured|calm|confident|uneasy|uncertain|unsure|alone|lonely|drained|weary|burdened|pressured|guilty|fatigued|worn\s+out|fed\s+up|annoyed|better|good|great|fine|okay|ok)\b`;
+// Fix round 1 (F2 holder narrowed): only an activity or treatment holds a benefit claim. "this", "it" and the slot stand-in are no longer
+// F2 holders, so "This may help you get ready …" (the summary helping the person) stays open; activity gerunds count ("walking regularly
+// helps").
+const R12_EN_ACTIVITY_HOLDER = String.raw`(?<!\bhow\s+)\b(?:walks?|walking|exercis(?:e|es|ing)|workouts?|activit(?:y|ies)|diet|food|foods|meals?|eating(?:\s+well)?|medicines?|medications?|insulin|pens?|treatments?|cycling|swimming|running|jogging|stretching|gardening|dancing|resting|sleeping|(?:staying|keeping)\s+active)`;
+// F3 subjects that are not the person (fix round 1: the active perfect, "we have saved", "the app has updated").
+const R12_EN_OTHER_SUBJECT = String.raw`\b(?:we|i|jagaon|the\s+app|this\s+app|the\s+system|the\s+application|(?:your\s+|the\s+)?(?:care\s+team|team|doctors?|nurses?|clinicians?|clinic|pharmacists?|specialists?|physicians?)|someone|somebody)`;
+const R12_EN_DONE = String.raw`(?:saved|sent|shared|reviewed|received|updated|submitted|recorded|stored|forwarded|delivered|uploaded|synced|backed\s+up|filed|logged|passed\s+on|checked|approved|seen)`;
+const R12_DIRECTIVE: readonly RegExp[] = Object.freeze([
+  // F1 en: data holder, then a linking verb and an evaluative or state adjective ("these results look good", "your levels are well controlled").
+  new RegExp(String.raw`${R12_EN_DATA_HOLDER}${R12_EN_HOLDER_RELATIVE}(?:\s+(?:that|which))?(?:\s+${R12_EN_DEGREE}){0,2}${R12_EN_LINK}(?:\s+${R12_EN_DEGREE}){0,2}\s+${R10_EN_PERSON_MARKED}${R12_EN_EVALUATIVE}(?!\s+(?:to|for\s+(?:you|us)\s+to)\b)`, "i"),
+  // F1 en: data holder, then a salience verb ("the readings that stand out", "the readings that matter most").
+  new RegExp(String.raw`${R12_EN_DATA_HOLDER}(?:\s+(?:that|which))?(?:\s+${R12_EN_DEGREE}){0,2}\s+(?:(?:stand|stands|standing|stood|stick|sticks|sticking|stuck|jump|jumps|jumped|jumping)[\s-]+out|matter(?:s|ed|ing)?)\b`, "i"),
+  // F1 en: the evaluative adjective before the data noun ("noticeable readings", "insignificant readings"), unless the person marked it.
+  new RegExp(String.raw`${R10_EN_PERSON_MARKED}\b(?:noticeable|(?:in)?significant|standout|stand-out|outstanding|remarkable|striking|good|great|excellent|healthy|stable|steady|ideal|perfect|reassuring|encouraging|promising|impressive|(?:well|nicely)[\s-](?:controlled|managed))['*]*\s+(?:the\s+)?(?:readings?|results?|levels?|numbers?|values?|sugars?|figures?|items?|entries|data)\b`, "i"),
+  // F2 en: activity or treatment holder, then a benefit or causal verb ("your walks are helping your health", "your medicine is working",
+  // "walking regularly helps", "your diet has made a difference").
+  new RegExp(String.raw`${R12_EN_ACTIVITY_HOLDER}(?:\s+(?:is|are|was|were|has|have|had|been|be|will|would|may|might|can|could|should|seems?\s+to|appears?\s+to|tends?\s+to|really|truly|clearly|already|also|definitely|certainly|actually|still|now|all|both)){0,3}(?:\s+[a-z]+ly)?\s+(?:help(?:s|ed|ing)?(?!\s+(?:you\s+)?(?:to\s+)?(?:prepare|see|review|bring|find|remember|recall|read|organi[sz]e|gather|collect|look|share|ask|plan|talk|discuss|note|list|go\s+through|keep\s+track|track|follow\s+along)\b)|benefit(?:s|ed|ing)?|(?:good|great|helpful|beneficial|useful|effective)\s+for|helpful|beneficial|effective|improv\w*|work(?:s|ed|ing)?|lower(?:s|ed|ing)?|reduc(?:e|es|ed|ing)|pay(?:s|ing)?\s+off|paid\s+off|(?:make|makes|made|making)\s+(?:a\s+)?(?:(?:real|big|great|huge|positive|good)\s+)?difference|keep(?:s|ing)?\s+(?:\w+\s+){0,2}(?:down|in\s+check|under\s+control|steady|stable))\b`, "i"),
+  // F2 en (fix round 2, holder-independent): a benefit verb whose object or complement is a health, body or reading target ("it helps your
+  // health", "this helps your sugar", "this is good for your health", "helps you control your levels"); "help you get ready / understand /
+  // revisit …" has no such target and stays open.
+  new RegExp(String.raw`\b(?:help(?:s|ed|ing)?|benefit(?:s|ed|ing)?|improv(?:e|es|ed|ing)|good\s+for|great\s+for|helpful\s+for|beneficial\s+for|useful\s+for|work(?:s|ed|ing)?\s+(?:for|on))\s+(?:(?:you\s+)?(?:to\s+)?(?:keep|control|manage|lower|reduce|improve|stabili[sz]e|balance|steady)\s+)?(?:(?:your|the|my|their)\s+)?(?:(?:overall|general|blood)\s+)?(?:health|sugars?|glucose|levels?|readings?|numbers?|body|condition|control|weight|pressure|well-?being)\b`, "i"),
+  // F2 en (fix round 2): intransitive "is helping" / "is working" (or "helps" / "works") closing a clause, with a data, slot or demonstrative
+  // subject ("{{S1}} is helping.", "it is working."); "how it works" stays open.
+  /(?<!\bhow\s+)\b(?:it|this|that|these|they|items?|readings?|results?|numbers?|levels?|everything)\s+(?:(?:is|are|was|were|'s|'re)\s+(?:(?:really|clearly|definitely|already|also|still|now)\s+)?(?:helping|working)|(?:(?:really|clearly|definitely|already|also)\s+)?(?:helps|works))\s*(?:[.!?;:,]|$)/i,
+  // F3 en: perfect or passive completed-state claims, a recipient who now has the notes, and (fix round 1) the active perfect with the
+  // app, "we" or a third party as subject ("we have saved", "JagaOn has updated"); the person as subject ("you have saved") stays open.
+  new RegExp(String.raw`\b(?:has|have|had|'s|'ve)\s+(?:(?:now|already|just|also|all|safely|securely|successfully)\s+){0,2}been\s+(?:(?:now|already|just|all|safely|securely|successfully|automatically)\s+){0,2}${R12_EN_DONE}\b|\b(?:is|are|was|were|gets?|got)\s+(?:(?:now|already|just|also|all|safely|securely|successfully|automatically)\s+){0,2}(?:saved|sent|shared|reviewed|received|submitted|stored|forwarded|delivered|uploaded|synced|backed\s+up|updated|passed\s+on)\b|\b(?:care\s+team|team|doctors?|nurses?|clinicians?|clinic|pharmacists?|specialists?|physicians?)\s+(?:(?:now|already|also|will|should|can|may)\s+){0,2}(?:has|have|had|holds?|got|gets?|receives?|received|sees?|saw|see|knows?)\s+(?:(?:all|both)\s+)?(?:these|this|them|it|the|your|a\s+copy)\b|${R12_EN_OTHER_SUBJECT}(?:'ve|'s|\s+(?:has|have|had))\s+(?:(?:now|already|just|also|all|safely|securely|successfully|automatically)\s+){0,2}(?:${R12_EN_DONE}|changed|added)\b`, "i"),
+  // F4 en: the person with an emotion or inner state the model cannot ground.
+  new RegExp(String.raw`\byou(?:'re|'ll|'d|\s+(?:are|were|will|would|may|might|could|must|probably|likely|possibly|perhaps|also|still|now|sometimes|often|well))*\s+(?:be\s+)?(?:feel|feels|feeling)\s+(?:like\s+)?(?:${R12_EN_EMOTION}|(?:(?:a\s+(?:bit|little)|quite|rather|very|so|really)\s+)?(?:down|low)\b)|\b(?:understandabl[ey]|natural|normal|common|only\s+human)\s+(?:for\s+you\s+)?to\s+(?:feel|be\s+feeling)\b|\b(?:okay|ok|fine|alright)\s+(?:for\s+you\s+)?to\s+(?:feel|be\s+feeling|be)\s+${R12_EN_EMOTION}|\byou(?:'re|\s+are)?\s+(?:seem|seems|seemed|appear|appears|appeared|look|looks|looked|sound|sounds|sounded|must\s+be|may\s+be|might\s+be|could\s+be|are\s+probably|'re\s+probably|are\s+likely)(?:\s+to\s+be)?\s+${R12_EN_EMOTION}`, "i"),
+].map((pattern) => Object.freeze(pattern)));
+/** Every S6 directive pattern (r1/r2, r3 with the r9 refinement, r10, r11, then the r12 en entries), exported read-only for the Traditional-coverage test. */
+export const SHELL_DIRECTIVE_PATTERNS: readonly RegExp[] = Object.freeze([...DIRECTIVE, ...R3_DIRECTIVE, ...R10_DIRECTIVE, ...R11_DIRECTIVE, ...R12_DIRECTIVE]);
+
+/**
+ * Rules r12 fix round 1 (zh "same clause"): the r12 zh frames read CLAUSE-PRESERVING copies (shellClauseScanTexts), never the joined
+ * copies, so a holder ending one clause never pairs with an assertion opening the next (这里呈现{{S1}}，可以帮助您回想). A clause boundary is
+ * ，。！？；：、 (and their ASCII forms) or a line break; the gap between a holder and its assertion may not cross one. Every other
+ * punctuation, symbol or whitespace run between two ideographs is removed in that copy (clauseJoinedZhScanText), so a split INSIDE a listed
+ * word by a non-boundary mark (突～出, 保（存）) still reads as the word. Fix round 3 (owner option (a)): a single 、 or ， is removed ONLY
+ * when it sits strictly inside one word of the closed, reviewed R12_ZH_SPLIT_CUE_WORDS list (已、经保存, 突、出, 稳，定, 感、到, 有，帮助),
+ * so the two halves rebuild exactly that cue word; every other clause mark — including one after a complete word such as 整理，想… or
+ * 都有，帮助… — keeps its boundary. The inherited joined copies and every other rule are unchanged.
+ */
+const CLAUSE_JOIN_SEPARATOR = (): RegExp => /(?<=[\u3400-\u9FFF\uF900-\uFAFF])[^\u3400-\u9FFF\uF900-\uFAFFA-Za-z0-9_，。！？；：、,.!?;:\n\r]+(?=[\u3400-\u9FFF\uF900-\uFAFF])/g;
+/** The zh scan copy with every non-boundary separator run between two ideographs removed, repeated until stable; clause marks are kept. */
+export function clauseJoinedZhScanText(scan: string): string {
+  let current = scan;
+  for (let next = current.replace(CLAUSE_JOIN_SEPARATOR(), ""); next !== current; next = current.replace(CLAUSE_JOIN_SEPARATOR(), "")) current = next;
+  return current;
+}
+const R12_ZH_DATA_HOLDER = "(?:读数|结果|数值|记录|血糖|数据|这些|它们?|该项|内容|项目)";
+const R12_ZH_EMOTION = "(?:有些|有点儿?|一些|很|非常|比较|挺|特别|十分|更加?|格外|相当|太)?(?:累|疲惫|疲倦|疲劳|疲乏|担心|担忧|焦虑|紧张|难过|伤心|不舒服|辛苦|开心|高兴|安心|放心|沮丧|失落|压力|烦|害怕|不安|无助|孤单|孤独|困扰|欣慰|满意|轻松|委屈|灰心|气馁|无奈|吃力|心累|自豪|骄傲)";
+const R12_ZH_MODAL = "(?:可能|也许|或许|大概|应该|一定|难免|肯定)";
+const R12_ZH_CLAUSE_GAP = "[^，。！？；：、,.!?;:\\n\\r]";
+/** Fix round 1 (F3 zh): the person's own earlier action — 您 with up to two time or manner adverbs before 已 (您之前已经保存的, 您刚才已更新的). */
+const R12_ZH_PERSON_DID = "(?<!您(?:之前|先前|此前|早前|早先|刚才|刚刚|曾经?|一直|都|也|自己){0,2})";
+const R12_ZH_CLAUSE_SOURCES: readonly string[] = [
+  // F1 zh: data holder then an evaluative, state or salience predicate in the same clause (fix round 1: 良好, 控制良好, 令人满意).
+  `${R12_ZH_DATA_HOLDER}${R12_ZH_CLAUSE_GAP}{0,6}?${R11_ZH_PERSON_REGARDED}(?:(?:很|非常|挺|相当|比较|都|全都|还|蛮|真|特别|十分)+(?:好|不错|理想|正常|稳定|平稳|健康)|不错(?!过)|理想|稳定|平稳|控制得(?:很|非常|相当|比较|还|挺)?(?:好|不错|理想|稳定)|(?:都|很|非常|十分)?良好|(?:令|让)人满意|突出|凸显|显眼|醒目)`,
+  // F1 zh: the adjective before the noun — directly, or with 的 (fix round 1: never with the adverbial 地, so 稳定地记录 stays open).
+  `${R11_ZH_PERSON_REGARDED}(?:(?:比较|很|最|非常|特别|较为|格外|更)?(?:突出|凸显|显眼|醒目|理想|稳定|不错(?!过))|(?:很|非常|挺|比较|特别|十分)好)(?:的${R12_ZH_CLAUSE_GAP}{0,4}?)?${R12_ZH_DATA_HOLDER}`,
+  // F1 zh: 是/为 … 要点 (要点开/明/击/选/出 are 要 + a verb and stay open).
+  `(?:是|为)(?:${R12_ZH_CLAUSE_GAP}{0,6}?中的)?要点(?![开明击选出])|${R12_ZH_DATA_HOLDER}中?的要点(?![开明击选出])`,
+  // F2 zh: activity or treatment holder then a benefit or causal predicate in the same clause (fix round 1: 这 and the slot stand-in are no
+  // longer holders; 效果很好); helping the person prepare stays open.
+  `(?:散步|走路|步行|运动|锻炼|活动|饮食|食物|膳食|药物|药|胰岛素|治疗)${R12_ZH_CLAUSE_GAP}{0,8}?(?:有助|有帮助|有益|有好处|改善|降低|有效|起作用|见效|奏效|管用|帮助|帮到|效果(?:很|非常|挺|特别|相当|都)?(?:好|不错|明显))(?!于?您?(?:准备|整理|回顾|查看|记住|带上|带去|提问|沟通|讨论|找到))`,
+  // F2 zh (fix round 2, holder-independent): a benefit predicate on a health, body or reading target (对您的健康有帮助, 有助于控制血糖), and
+  // the slot stand-in or 它 (also 这/这样 closing a clause) as the subject of an intransitive benefit (该项对您有帮助, 这样很有帮助。).
+  `对您?的?(?:健康|身体|血糖|读数|指标)${R12_ZH_CLAUSE_GAP}{0,4}?(?:有帮助|有助|有益|有好处|有效|好处)|(?:有助于|有益于|有利于|帮助|改善|促进)您?的?(?:控制|稳定|降低|改善|管理|维持|保持)?(?:您的)?(?:健康|身体|血糖|读数|指标)|(?:该项|它们?)(?:对您)?(?:很|会|也|确实|真的)?(?:有帮助|有益|有好处|起作用|管用|奏效|有效)|这样?(?:很|会|也|确实|真的)?(?:有帮助|起作用|管用|奏效)(?=$|[，。！？；：、,.!?;:])`,
+  // F3 zh: 已(经) + a saved/sent/reviewed verb, or 保存好了, unless the person did it; a recipient who now has the notes.
+  `${R12_ZH_PERSON_DID}已(?:经)?(?:被|为您|帮您|替您|给您)?(?:保存|发送|发出|提交|审核|审阅|分享|更新|收到|发给|传给|交给|上传|存档|储存|存好|传送|转发|同步|备份)|${R12_ZH_PERSON_DID}(?:保存|存|发送|提交|上传|备份|同步)好了|(?:医生|护理团队|医疗团队|护士|诊所|药剂师)(?:现在|已经|已)?(?:有了|拥有|收到了|看到了|掌握了)`,
+  // F4 zh: 您 (+ a modal) + 感到; 您 (+ a modal) + 觉得/感觉 + an emotion; 您 + a modal + an emotion (fix round 1: 您一定很担心, 您可能有些担心);
+  // 您辛苦了 (fix round 1); 您看起来 + an emotion; an emotion called understandable.
+  `您${R12_ZH_MODAL}?(?:也)?(?:会)?感到|您${R12_ZH_MODAL}?(?:也)?(?:会)?(?:觉得|感觉到?)${R12_ZH_EMOTION}|您${R12_ZH_MODAL}(?:也)?(?:会)?${R12_ZH_EMOTION}|您(?:真的|实在|也)?辛苦了|辛苦您了|您(?:看起来|看上去|似乎|好像|显得)${R12_ZH_EMOTION}|(?:感到|觉得|感觉)${R12_ZH_EMOTION}(?:是|也是|也)?(?:可以理解|难免|很自然|人之常情)|(?:难免|自然)(?:会)?(?:感到|觉得)`,
+];
+/** The r12 zh clause patterns (read only on the clause-preserving zh copies), exported read-only for the Traditional-coverage test. */
+export const SHELL_CLAUSE_DIRECTIVE_PATTERNS: readonly RegExp[] = Object.freeze(R12_ZH_CLAUSE_SOURCES.map((source) => Object.freeze(new RegExp(source))));
+/**
+ * Rules r12 fix round 1: the clause-preserving texts the r12 zh patterns read for one text — zh-SG: the clause-joined scan copy and its
+ * Traditional→Simplified copy, always two entries (so the stand-in and shadow builds stay aligned); en-SG: none (the r12 en entries are
+ * in SHELL_DIRECTIVE_PATTERNS, and en copies never join across punctuation).
+ */
+export function shellClauseScanTexts(text: string, locale: AiLocale): string[] {
+  if (locale !== "zh-SG") return [];
+  const scan = clauseJoinedZhScanText(foldShellScanText(text, locale));
+  return [r12CueWordJoined(scan), r12CueWordJoined(toSimplified(scan))];
+}
+
+/**
+ * Rules r12 fix round 3 (owner option (a), 2026-10-11): the closed, reviewed list of r12 claim-shape cue words whose in-word clause-mark
+ * split (已、经, 突，出) is rebuilt. This is NOT a word ban: the words are rejected only where an r12 claim shape around them already
+ * rejects (holder + assertion in one clause); the list only decides which single 、/， is read as a split INSIDE one of these words.
+ * Each entry: the cue word, and (optional) characters that must not directly precede it — when they do, its first half is the end of a
+ * complete word (都有, 所有, 没有 …; 而已) and the mark after it is a real clause boundary (您的饮食记录都有，帮助您回想).
+ * Words whose first character commonly ends another word in ordinary wording (理想/理解 after 整理/管理, 作用 after 工作, 现在 after 呈现,
+ * 对您 after 核对, 诊所 after 就诊, 上传 after 以上, …) are deliberately absent.
+ */
+const R12_ZH_SPLIT_CUE_WORDS: ReadonlyArray<readonly [string, string]> = Object.freeze([
+  // F3 completed state.
+  ["已经", "而"], ["保存", ""], ["发送", ""], ["提交", ""], ["分享", ""],
+  // F1 judgement and salience.
+  ["突出", ""], ["凸显", ""], ["稳定", ""], ["平稳", ""], ["良好", ""], ["满意", ""],
+  // F2 benefit.
+  ["有帮助", "都所没还只也已就又才均皆共另尚仍现原拥含具享占固特"], ["有助于", "都所没还只也已就又才均皆共另尚仍现原拥含具享占固特"], ["帮助", ""], ["健康", ""],
+  // F4 attributed feeling.
+  ["感到", ""], ["觉得", ""], ["可能", ""], ["疲惫", ""], ["担心", ""], ["辛苦", ""],
+].map((entry) => Object.freeze(entry as [string, string])));
+/** One regex over every split point of every cue word: `(left half)` + one 、/， (optionally spaced) + lookahead `(right half)`. */
+const R12_CUE_WORD_SPLIT = new RegExp(
+  R12_ZH_SPLIT_CUE_WORDS.flatMap(([word, notAfter]) => {
+    const chars = [...word];
+    return chars.slice(1).map((_, index) => `${notAfter ? `(?<![${notAfter}])` : ""}(${chars.slice(0, index + 1).join("")})\\s*[、，,]\\s*(?=${chars.slice(index + 1).join("")})`);
+  }).join("|"),
+  "g",
+);
+/** Removes a single 、/， that sits strictly inside one listed cue word, keeping both halves; nothing else changes. */
+export function r12CueWordJoined(text: string): string {
+  return text.replace(R12_CUE_WORD_SPLIT, (...args: unknown[]) => String(args.slice(1).find((group) => typeof group === "string") ?? args[0]));
+}
+/** The closed cue-word list (words only; the not-after characters are exclusions, not rule vocabulary), exported read-only for the tests. */
+export const SHELL_R12_SPLIT_CUE_WORDS: readonly string[] = Object.freeze(R12_ZH_SPLIT_CUE_WORDS.map(([word]) => word));
 
 /** Rules r4: the evaluation-only S7 register detail. */
 export type ShellRegisterCode = "INFORMAL_SECOND_PERSON";
@@ -451,6 +681,8 @@ export function shellRegisterViolation(text: string, locale: AiLocale): ShellReg
 export function shellDirectiveViolation(text: string, locale?: AiLocale): boolean {
   const copies = locale ? shellScanCopies(text, locale) : [foldShellScanText(text)];
   if (copies.some((scan) => SHELL_DIRECTIVE_PATTERNS.some((pattern) => pattern.test(scan)))) return true;
+  // Rules r12 fix round 1: the r12 zh clause patterns, on the clause-preserving copies.
+  if (locale && shellClauseScanTexts(text, locale).some((scan) => SHELL_CLAUSE_DIRECTIVE_PATTERNS.some((pattern) => pattern.test(scan)))) return true;
   return locale === "en-SG" && pairJoinedCandidates(copies).some((candidate) => SHELL_DIRECTIVE_PATTERNS.some((pattern) => pattern.test(candidate)));
 }
 

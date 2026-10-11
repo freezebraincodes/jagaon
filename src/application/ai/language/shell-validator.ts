@@ -4,7 +4,7 @@ import type { AiHybridRuntimeBundle } from "../ai-hybrid-runtime-bundles";
 import { MEANING_RULES, meaningScanText } from "../ai-meaning-rules";
 import { localeTextAccepted } from "../ai-output-validator";
 import { AI_LANGUAGE_COPY, type LanguageCopy } from "./ai-language-copy";
-import { CLINICAL_TOKEN_SEPARATOR, foldShellScanText, provenanceSafeMatch, SHELL_DIRECTIVE_PATTERNS, shellClinicalLabel, shellDirectiveScanTexts, shellLexicalViolations, shellRegisterViolation, shellScanCopies, standInOccurrence, standInShadow, tokenSeparatedScanText, type ShellClinicalLabelCategory, type ShellLexicalViolation, type ShellRegisterCode, type StandInOccurrence } from "./shell-lexicon";
+import { CLINICAL_TOKEN_SEPARATOR, foldShellScanText, provenanceSafeMatch, SHELL_CLAUSE_DIRECTIVE_PATTERNS, SHELL_DIRECTIVE_PATTERNS, shellClauseScanTexts, shellClinicalLabel, shellDirectiveScanTexts, shellLexicalViolations, shellRegisterViolation, shellScanCopies, standInOccurrence, standInShadow, tokenSeparatedScanText, type ShellClinicalLabelCategory, type ShellLexicalViolation, type ShellRegisterCode, type StandInOccurrence } from "./shell-lexicon";
 
 /**
  * Packet 11B.6 shell validator, gates S1–S7 (spec Section 8.1). Applied before any atom is inserted. Only
@@ -154,12 +154,14 @@ function flatten(plan: SlotPlan, shells: unknown): Map<ShellFieldPath, string> |
 
 /** Rules r8: what S6 found in one field (the authority and clinical meaning rules and the directive lists). */
 export type ShellMeaningScan = Readonly<{ authority: boolean; clinical: boolean; directive: boolean }>;
-type S6Role = "AUTHORITY" | "CLINICAL" | "DIRECTIVE";
+type S6Role = "AUTHORITY" | "CLINICAL" | "DIRECTIVE" | "CLAUSE";
 /** The unchanged S6 rules by role: the shared meaning rules (authority read on the copy, clinical on its meaning scan text) and the directives. */
 const S6_PATTERNS: Readonly<Record<S6Role, readonly RegExp[]>> = Object.freeze({
   AUTHORITY: Object.freeze(MEANING_RULES.filter((rule) => rule.kind === "AUTHORITY").map((rule) => rule.pattern)),
   CLINICAL: Object.freeze(MEANING_RULES.filter((rule) => rule.kind === "CLINICAL").map((rule) => rule.pattern)),
   DIRECTIVE: SHELL_DIRECTIVE_PATTERNS,
+  // Rules r12 fix round 1: the r12 zh clause patterns, read only on the clause-preserving zh copies (a directive finding).
+  CLAUSE: SHELL_CLAUSE_DIRECTIVE_PATTERNS,
 });
 type S6Text = Readonly<{ role: S6Role; text: string }>;
 /**
@@ -169,11 +171,13 @@ type S6Text = Readonly<{ role: S6Role; text: string }>;
  * shellDirectiveViolation on each scan copy.
  */
 function s6Texts(text: string, locale: AiLocale): S6Text[] {
-  return shellScanCopies(text, locale).flatMap((scan) => [
-    { role: "AUTHORITY" as const, text: scan },
-    { role: "CLINICAL" as const, text: meaningScanText(scan) },
-    ...shellDirectiveScanTexts(scan, locale).map((entry) => ({ role: "DIRECTIVE" as const, text: entry })),
+  const perCopy: S6Text[] = shellScanCopies(text, locale).flatMap((scan): S6Text[] => [
+    { role: "AUTHORITY", text: scan },
+    { role: "CLINICAL", text: meaningScanText(scan) },
+    ...shellDirectiveScanTexts(scan, locale).map((entry): S6Text => ({ role: "DIRECTIVE", text: entry })),
   ]);
+  // Rules r12 fix round 1: the clause-preserving zh copies the r12 zh frames read (a fixed count per locale, so builds stay aligned).
+  return [...perCopy, ...shellClauseScanTexts(text, locale).map((entry): S6Text => ({ role: "CLAUSE", text: entry }))];
 }
 const hitIn = (entry: S6Text, occurrences: readonly StandInOccurrence[] | null): boolean =>
   S6_PATTERNS[entry.role].some((pattern) => (occurrences === null ? pattern.test(entry.text) : provenanceSafeMatch(pattern, entry.text, occurrences)));
@@ -196,12 +200,12 @@ export function shellMeaningScan(text: string, locale: AiLocale, standIn: string
   const read = stripSlotTokens(text, ` ${standIn} `);
   const standInTexts = s6Texts(read, locale);
   const separatedTexts = s6Texts(tokenSeparatedScanText(stripSlotTokens(text, CLINICAL_TOKEN_SEPARATOR), locale), locale);
-  const roles: readonly S6Role[] = ["AUTHORITY", "CLINICAL", "DIRECTIVE"];
-  const result: Record<S6Role, boolean> = { AUTHORITY: false, CLINICAL: false, DIRECTIVE: false };
+  const roles: readonly S6Role[] = ["AUTHORITY", "CLINICAL", "DIRECTIVE", "CLAUSE"];
+  const result: Record<S6Role, boolean> = { AUTHORITY: false, CLINICAL: false, DIRECTIVE: false, CLAUSE: false };
   for (const role of roles) result[role] = separatedTexts.some((entry) => entry.role === role && hitIn(entry, null));
   // Provenance is needed only when the stand-in reading matches something the token-separated reading does not already decide.
   const pending = standInTexts.map((entry, index) => ({ entry, index })).filter(({ entry }) => !result[entry.role] && hitIn(entry, null));
-  if (pending.length === 0) return Object.freeze({ authority: result.AUTHORITY, clinical: result.CLINICAL, directive: result.DIRECTIVE });
+  if (pending.length === 0) return Object.freeze({ authority: result.AUTHORITY, clinical: result.CLINICAL, directive: result.DIRECTIVE || result.CLAUSE });
   const shadow = standInShadow(standIn);
   const tokenCount = [...text.matchAll(slotTokenMatcher())].length;
   // occurrences[i]: the stand-in occurrences of standInTexts[i], or null when its provenance is unknown (fail closed).
@@ -221,7 +225,7 @@ export function shellMeaningScan(text: string, locale: AiLocale, standIn: string
     }
   }
   for (const { entry, index } of pending) if (!result[entry.role] && hitIn(entry, occurrences[index] ?? null)) result[entry.role] = true;
-  return Object.freeze({ authority: result.AUTHORITY, clinical: result.CLINICAL, directive: result.DIRECTIVE });
+  return Object.freeze({ authority: result.AUTHORITY, clinical: result.CLINICAL, directive: result.DIRECTIVE || result.CLAUSE });
 }
 
 export function validateShellCandidate(plan: SlotPlan, bundle: AiHybridRuntimeBundle, candidate: unknown, copy: LanguageCopy = AI_LANGUAGE_COPY): ShellValidationResult {

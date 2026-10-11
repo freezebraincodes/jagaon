@@ -45,7 +45,7 @@ function harness(results: Array<ProviderInvocationResult | Promise<ProviderInvoc
   const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async (row) => void rows.push(row) }, now: () => "2026-10-06T01:00:00.000Z", monotonicMs: () => 0, manifest: ENABLED, provider, requestClassGate: qualifiedTestRequestClassGate(), ...overrides });
   return { calls, rows, service };
 }
-const expectOneValidRow = (rows: AiInvocationAuditRow[], outcomeCode: string, runtimeBundleKey = "ai.explain-pattern@11b.18") => {
+const expectOneValidRow = (rows: AiInvocationAuditRow[], outcomeCode: string, runtimeBundleKey = "ai.explain-pattern@11b.20") => {
   expect(rows).toHaveLength(1);
   expect(aiInvocationAuditRowSchema.safeParse(rows[0]).success).toBe(true);
   // Packet 11C Addendum C (C5): every row the service writes is a current (11c.2) row.
@@ -408,7 +408,7 @@ describe("hybrid task service", () => {
     expect(run.calls).toHaveLength(0);
     expect(projectorSpy).not.toHaveBeenCalled();
     expect(verifySpy).not.toHaveBeenCalled();
-    expectOneValidRow(run.rows, reason, "ai.draft-care-preparation-summary@11b.18");
+    expectOneValidRow(run.rows, reason, "ai.draft-care-preparation-summary@11b.20");
     expect(run.rows[0]!.attempts).toEqual({ count: 0, structuralRepairUsed: false, timedOut: false });
   });
   it.each([
@@ -420,7 +420,7 @@ describe("hybrid task service", () => {
     const run = harness([completed(VALID)], overrides);
     expect(await run.service.execute(ineligibleRequest(INELIGIBLE_CASES[1][1]))).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode, reason });
     expect(run.calls).toHaveLength(0);
-    expectOneValidRow(run.rows, reason, "ai.draft-care-preparation-summary@11b.18");
+    expectOneValidRow(run.rows, reason, "ai.draft-care-preparation-summary@11b.20");
   });
   it("one structural repair is allowed and accepted on the second call", async () => {
     const run = harness([completed(`${JSON.stringify(VALID)}}`), completed(VALID)]);
@@ -879,7 +879,7 @@ describe("recordUnsent: the zero-attempt row of an explicit request (Packet 11C 
   it("uses the hybrid bundle of the request's own task and locale", async () => {
     const run = harness([]);
     await run.service.recordUnsent(unsent("NOT_ELIGIBLE", { taskType: "DRAFT_CARE_PREPARATION_SUMMARY", locale: "zh-SG" }));
-    expectOneValidRow(run.rows, "NOT_ELIGIBLE", "ai.draft-care-preparation-summary@11b.18");
+    expectOneValidRow(run.rows, "NOT_ELIGIBLE", "ai.draft-care-preparation-summary@11b.20");
     expect(run.rows[0]!.components.localePack.id).toBe("ai-locale.draft-care-preparation-summary.zh-sg");
   });
 

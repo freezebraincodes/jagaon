@@ -59,8 +59,8 @@ const FULL_FIXTURE_COUNT = 70;
 const SENTINEL = "ds-SENTINEL-CREDENTIAL-f011c4a7e2";
 const NOW = () => "2026-10-06T10:00:00.000Z";
 // The frozen contract (the same literals as the smoke, targeted and diagnostic runners; the whole Packet 11C contract is pinned in
-// packet-11c-contract-freeze.test.ts). CURRENT (Packet 11C B5 contract freeze, offline): prompt 11b.18, rules 11b.16-r10, request 11b.11,
-// bundle set 11b.18, provider schema kie-schema.11c.1, slot plan ai-slot-plan.11b.9, fixtures 11b.16, harness packet11-eval.19, policy
+// packet-11c-contract-freeze.test.ts). CURRENT (11b.20/r12 offline candidate; owner re-freeze pending): prompt 11b.20, rules 11b.18-r12, request 11b.11,
+// bundle set 11b.20, provider schema kie-schema.11c.1, slot plan ai-slot-plan.11b.9, fixtures 11b.16, harness packet11-eval.20, policy
 // hybrid-full-policy.2, caps 512/1024, temperature 0.2. Revision history follows (each line was the contract at its time).
 // Rules r8 (packet11-eval.14, offline only): rules 11b.15-r8, bundle set
 // 11b.15, fixtures 11b.13 and harness eval.14; the policy, prompt, request, caps and temperature are unchanged. The live block is not run.
@@ -82,11 +82,11 @@ const NOW = () => "2026-10-06T10:00:00.000Z";
 // Packet 11C Addendum C, C5 (offline only): harness packet11-eval.20 (the conservative usage accounting; owner decision C5-b). Policy,
 // thresholds and every model-facing byte are unchanged. The live block is not run.
 const REQUIRED_CONTRACT = Object.freeze({
-  prompt: "11b.18",
-  shellRules: "ai-shell-rules.11b.16-r10",
+  prompt: "11b.20",
+  shellRules: "ai-shell-rules.11b.18-r12",
   shellRequest: "ai-shell-request.11b.11",
-  explainBundle: "ai.explain-pattern@11b.18",
-  careBundle: "ai.draft-care-preparation-summary@11b.18",
+  explainBundle: "ai.explain-pattern@11b.20",
+  careBundle: "ai.draft-care-preparation-summary@11b.20",
   providerSchema: "kie-schema.11c.1",
   // Packet 11C phase 2 (option (a), 2026-10-08, offline): eligibility accounting only; request bodies differ only in this version field.
   slotPlan: "ai-slot-plan.11b.9",
@@ -103,8 +103,9 @@ const REQUIRED_CONTRACT = Object.freeze({
  * Observation ownership (prompt 11b.18, @11b.8): the EXPLAIN bodies no longer carry the observation field, its slots or glosses and
  * the EXPLAIN prompts are shorter, so the minimums fall (0.214618 / 0.429236 under prompt 11b.17).
  */
-const MINIMUM_ONE_CALL_EACH_USD = 0.208883;
-const MINIMUM_WITH_ALL_REPAIRS_USD = 0.417766;
+// 11b.20 exact-body upper bounds at the unchanged recorded catalogue rates (11b.19: 0.214763 / 0.429526); not a live spend authorization.
+const MINIMUM_ONE_CALL_EACH_USD = 0.216864;
+const MINIMUM_WITH_ALL_REPAIRS_USD = 0.433728;
 
 const createdDirectories = new Set<string>();
 const createdFiles = new Set<string>();

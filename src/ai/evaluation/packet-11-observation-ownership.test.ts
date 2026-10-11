@@ -1,5 +1,8 @@
 // @vitest-environment node
 import { createHash } from "node:crypto";
+import { historicalShellPrompt11b18, normalise11b20Prompt } from "./packet-11-prompt-change-normalisation";
+// 11b.20 provenance checks map the whole instructions back to the exact 11b.18 asset and the bundle key back to @11b.18 before comparing
+// historical care-body hashes (normalise11b20Prompt).
 import { describe, expect, it } from "vitest";
 import { AI_HYBRID_RUNTIME_BUNDLES, AI_HYBRID_VERSIONS } from "@/application/ai/ai-hybrid-runtime-bundles";
 import { createAiHybridTaskService } from "@/application/ai/ai-hybrid-task-service";
@@ -127,13 +130,13 @@ describe("observation ownership: the remote request", () => {
     // Packet 11C phase 2: the slot plan moved again (11b.9, eligibility accounting only). The documented structural version-only
     // normalisation first maps 11b.9 back to 11b.8 (exactly the 2 version fields of every body), then the existing historical mapping
     // takes 11b.8 back to the 11b.17-era 11b.7.
-    const versionNormalised = bodies.map((body) => normaliseSlotPlanVersion(body));
+    const versionNormalised = bodies.map((body) => normaliseSlotPlanVersion(normalise11b20Prompt(body)));
     expect(versionNormalised.map((entry) => entry.occurrences)).toEqual(bodies.map(() => SLOT_PLAN_VERSION_OCCURRENCES_PER_BODY));
     const normalised = versionNormalised.map(({ body }) => body.replaceAll("ai-slot-plan.11b.8", "ai-slot-plan.11b.7").replaceAll("@11b.18", "@11b.17"));
     expect(sha256(normalised.join("\n"))).toBe(CARE_BODIES_11B17_DIGEST);
     for (const body of bodies) {
       expect(body).toContain("ai-slot-plan.11b.9");
-      expect(body).toContain("ai.draft-care-preparation-summary@11b.18");
+      expect(body).toContain("ai.draft-care-preparation-summary@11b.20");
       expect(body).toContain("ai-shell-input.draft-care-preparation-summary@11b.7");
     }
   });
@@ -258,22 +261,29 @@ describe("observation ownership: versions", () => {
     // Packet 11C Task 6R (2026-10-08): application-only copy 11b.10 (the summary-role notice); every model-facing pin is unchanged.
     // Packet 11C B5 contract freeze: labels only, kie-schema.11c.1 and packet11-eval.19; no model-facing byte changed.
     // Packet 11C Addendum C (C5): packet11-eval.20 (the usage accounting); no model-facing byte changed.
-    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.9", atomRenderer: "ai-atoms.11b.7", defaultShells: "ai-shells-default.11b.8", shellRules: "ai-shell-rules.11b.16-r10", languageCopy: "ai-language-copy.11b.10", prompt: "11b.18", providerSchema: "kie-schema.11c.1", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.20", shellRequest: "ai-shell-request.11b.11" });
-    expect(AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN.bundleKey).toBe("ai.explain-pattern@11b.18");
-    expect(AI_HYBRID_RUNTIME_BUNDLES.DRAFT_CARE_PREPARATION_SUMMARY.bundleKey).toBe("ai.draft-care-preparation-summary@11b.18");
+    expect(AI_HYBRID_VERSIONS).toMatchObject({ slotPlan: "ai-slot-plan.11b.9", atomRenderer: "ai-atoms.11b.7", defaultShells: "ai-shells-default.11b.8", shellRules: "ai-shell-rules.11b.18-r12", languageCopy: "ai-language-copy.11b.10", prompt: "11b.20", providerSchema: "kie-schema.11c.1", validatorRules: "11b.2-meaning-r7", fixtureSet: "packet11-fixtures.11b.16", evaluationReport: "packet11-eval.20", shellRequest: "ai-shell-request.11b.11" });
+    expect(AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN.bundleKey).toBe("ai.explain-pattern@11b.20");
+    expect(AI_HYBRID_RUNTIME_BUNDLES.DRAFT_CARE_PREPARATION_SUMMARY.bundleKey).toBe("ai.draft-care-preparation-summary@11b.20");
     for (const task of ["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"] as const) {
       expect(AI_HYBRID_RUNTIME_BUNDLES[task].validatorProfile.version).toBe("11b.18");
-      expect(AI_HYBRID_RUNTIME_BUNDLES[task].promptTemplate.version).toBe("11b.18");
+      expect(AI_HYBRID_RUNTIME_BUNDLES[task].promptTemplate.version).toBe("11b.20");
       expect(AI_HYBRID_RUNTIME_BUNDLES[task].fixtureSet.version).toBe("11b.16");
     }
   });
   it("prompt 11b.18: the EXPLAIN text asks only for the headline and the evidence; the care prompts are byte-identical", () => {
     for (const locale of ["en-SG", "zh-SG"] as const) {
+      // The historical 11b.18 asset (restored exactly from the current one, pinned digest) keeps the 11b.18 points.
+      const historical = historicalShellPrompt11b18("EXPLAIN_PATTERN", locale);
+      expect(historical.toLowerCase()).not.toContain("observation");
+      expect(historical).toContain("Write a headline and an evidence sentence.");
+      expect(historical).toContain("Never link slots to each other");
+      expect(historical).toContain("Vary your wording naturally");
+      // 11b.20 (policy-led rewrite): the same task sentence and no-link point; the variation point moved into the shared role sentence.
       const text = shellPromptFor("EXPLAIN_PATTERN", locale)!.text;
       expect(text.toLowerCase()).not.toContain("observation");
       expect(text).toContain("Write a headline and an evidence sentence.");
       expect(text).toContain("Never link slots to each other");
-      expect(text).toContain("Vary your wording naturally");
+      expect(text).toContain("in varied words of your own");
     }
   });
 });

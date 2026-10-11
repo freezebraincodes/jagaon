@@ -1,5 +1,8 @@
 // @vitest-environment node
 import { execFileSync } from "node:child_process";
+import { normalise11b20Prompt } from "./packet-11-prompt-change-normalisation";
+// 11b.20 candidate: stored-output replay additionally maps the whole instructions back to the exact 11b.18 asset and the bundle key back to
+// @11b.18, for provenance matching only. It cannot demonstrate how the provider responds to 11b.20 or qualify any new request class.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
@@ -74,15 +77,15 @@ const HISTORICAL_RUN = Object.freeze({
  */
 const CHECKPOINT_1_SCENARIOS: readonly SourceBackedScenario[] = Object.freeze(["HIGHER", "LOWER", "VARIABILITY", "CORRECTED", "MANY_READINGS"] as const);
 const HISTORICAL_FIXTURE_DIGEST = "a77a79aa1c56b1530758147f12573051c4d786035f8926901bbbdaa19d3edd92";
-const CURRENT_FIXTURE_DIGEST = "5e7c96959d1d60b441abc54e7384cc0cb30dc33594ba9603f4e64c16de423ff8";
+const CURRENT_FIXTURE_DIGEST = "aa7064a24fe1a1eb95ba0ba62b54ce2990844f89d5b8d4aa292870f1b9d8e856";
 /** The stored (historical, 11b.8) class bodies, and the current (11b.9) bodies that equal them after the version-only normalisation. */
 const CLASS_BODY_SHA: Readonly<Record<AiLocale, string>> = {
   "en-SG": "c46ab171eac08602ea3d9e4913c447c7c71643e67971ce725a085ad08cfb2d7d",
   "zh-SG": "b9398514d6b931c94e8acfa78c7faf421606cc9cf2d6f80ee448eedee9e32855",
 };
 const CURRENT_CLASS_BODY_SHA: Readonly<Record<AiLocale, string>> = {
-  "en-SG": "1756934e47137b7434d3499c6952f30adf6056161fc5f6523c53ec526f22a13b",
-  "zh-SG": "63f161dcddc2195bec407c79aec6abf4a5edb3f73db2f37b0df51ea382c136ae",
+  "en-SG": "43ad7c722c83131384b149356a161e95ed18653ffd4b6adfd03f3226fc85b1d8",
+  "zh-SG": "dc0b943bb15015b184e91d8da1d62a8e0baee1c7bd1dc9e722a91667e8306790",
 };
 const LOCALES = ["en-SG", "zh-SG"] as const;
 const BUNDLE = AI_HYBRID_RUNTIME_BUNDLES.EXPLAIN_PATTERN;
@@ -147,7 +150,7 @@ async function replayOne(call: StoredCall, plan: SlotPlan, request: AiTaskReques
   const seen = { body: null as string | null, identical: false, versionFields: 0, versionPaths: [] as readonly string[], echoRewrites: 0 };
   const provider = createDeepSeekShellResponsesProvider({ token: "replay-placeholder", model: deepSeekFlash(), fetcher: async (url, init) => {
     seen.body = String(init.body);
-    const normalised = normaliseSlotPlanVersion(seen.body);
+    const normalised = normaliseSlotPlanVersion(normalise11b20Prompt(seen.body));
     seen.versionFields = normalised.occurrences;
     seen.versionPaths = normalised.paths;
     const headers = new Headers(init.headers);

@@ -66,8 +66,8 @@ const TARGETED_MAX_USD_LIMIT = 0.02;
 const SENTINEL = "ds-SENTINEL-CREDENTIAL-3c9e71b2d4";
 const NOW = () => "2026-10-07T10:00:00.000Z";
 // The frozen contract (the same literals as the smoke, FULL and diagnostic runners; the whole Packet 11C contract is pinned in
-// packet-11c-contract-freeze.test.ts). CURRENT (Packet 11C B5 contract freeze, offline): prompt 11b.18, rules 11b.16-r10, request 11b.11,
-// bundle set 11b.18, provider schema kie-schema.11c.1, slot plan ai-slot-plan.11b.9, fixtures 11b.16, harness packet11-eval.19, policy
+// packet-11c-contract-freeze.test.ts). CURRENT (11b.20/r12 offline candidate; owner re-freeze pending): prompt 11b.20, rules 11b.18-r12, request 11b.11,
+// bundle set 11b.20, provider schema kie-schema.11c.1, slot plan ai-slot-plan.11b.9, fixtures 11b.16, harness packet11-eval.20, policy
 // hybrid-full-policy.2, caps 512/1024, temperature 0.2. Revision history follows (each line was the contract at its time).
 // At creation (2026-10-07): prompt 11b.17, rules r8, request 11b.11, bundles @11b.17, fixtures 11b.15, harness eval.16, policy
 // hybrid-full-policy.1, caps 512/1024, temperature 0.2. The live block is not run.
@@ -83,11 +83,11 @@ const NOW = () => "2026-10-07T10:00:00.000Z";
 // Packet 11C Addendum C, C5 (offline only): harness packet11-eval.20 (the conservative usage accounting; owner decision C5-b). Policy,
 // thresholds and every model-facing byte are unchanged. The live block is not run.
 const REQUIRED_CONTRACT = Object.freeze({
-  prompt: "11b.18",
-  shellRules: "ai-shell-rules.11b.16-r10",
+  prompt: "11b.20",
+  shellRules: "ai-shell-rules.11b.18-r12",
   shellRequest: "ai-shell-request.11b.11",
-  explainBundle: "ai.explain-pattern@11b.18",
-  careBundle: "ai.draft-care-preparation-summary@11b.18",
+  explainBundle: "ai.explain-pattern@11b.20",
+  careBundle: "ai.draft-care-preparation-summary@11b.20",
   providerSchema: "kie-schema.11c.1",
   // Packet 11C phase 2 (option (a), 2026-10-08, offline): eligibility accounting only; request bodies differ only in this version field.
   slotPlan: "ai-slot-plan.11b.9",
@@ -103,15 +103,16 @@ const REQUIRED_CONTRACT = Object.freeze({
  */
 // Observation ownership (prompt 11b.18, @11b.8): the EXPLAIN bodies carry the headline and evidence only, so every body is shorter
 // (en 6,405 bytes, zh 6,470) and the bounds fall (11b.17: 0.002805 / 0.002847 / 0.002789 / 0.002817 / 0.002854 / 0.002808, sum 0.01692).
+// 11b.20 candidate (policy-led prompt): recomputed from the exact bodies (11b.19: 0.002697 en / 0.002717 zh, sum 0.016242).
 const PER_CALL_UPPER_BOUND_USD: Readonly<Record<(typeof TARGETED_IDS)[number], number>> = Object.freeze({
-  "p11.explain-pattern.en-sg.forbidden-adherence": 0.002613,
-  "p11.explain-pattern.en-sg.forbidden-cause": 0.002613,
-  "p11.explain-pattern.en-sg.abstention": 0.002613,
-  "p11.explain-pattern.zh-sg.forbidden-adherence": 0.002633,
-  "p11.explain-pattern.zh-sg.forbidden-cause": 0.002633,
-  "p11.explain-pattern.zh-sg.abstention": 0.002633,
+  "p11.explain-pattern.en-sg.forbidden-adherence": 0.002701,
+  "p11.explain-pattern.en-sg.forbidden-cause": 0.002701,
+  "p11.explain-pattern.en-sg.abstention": 0.002701,
+  "p11.explain-pattern.zh-sg.forbidden-adherence": 0.002721,
+  "p11.explain-pattern.zh-sg.forbidden-cause": 0.002721,
+  "p11.explain-pattern.zh-sg.abstention": 0.002721,
 });
-const UPPER_BOUND_SUM_USD = 0.015738;
+const UPPER_BOUND_SUM_USD = 0.016266;
 
 // ---- Offline write confinement: every trace and review file of an offline test goes under a fresh temp root -----------------
 const tempRoots = new Set<string>();
