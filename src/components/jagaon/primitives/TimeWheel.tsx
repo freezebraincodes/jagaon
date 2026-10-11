@@ -185,6 +185,23 @@ function paintWheel(slider: KeenSliderInstance, loop: boolean) {
 }
 
 /**
+ * Moves a column's Keen track to a slide unless it already rests there, so a
+ * value Keen itself settled on is never moved again and a running animation
+ * is always retargeted.
+ */
+function moveWheelTo(instance: KeenSliderInstance | null, index: number) {
+  if (!instance?.track.details) return;
+  const { animator, track } = instance;
+  if (animator.targetIdx === null && track.details.rel === index) return;
+  // Stop any earlier animation first: Keen ignores a move to where the track
+  // already is (a key pressed back before the first frame), and its target
+  // index is wrong for a zero-duration (reduced-motion) move, so the earlier
+  // animation could otherwise run on to settle on, and emit, a stale value.
+  animator.stop();
+  instance.moveToIdx(index, false, prefersReducedMotion() ? { duration: 0 } : undefined);
+}
+
+/**
  * One iOS-style wheel column. Keen Slider supplies the movement engine (touch
  * and mouse drag, inertia, snapping and looping); this component keeps the
  * listbox/option semantics, positions every option from Keen's track and
@@ -279,14 +296,7 @@ function WheelColumn({
   });
 
   useEffect(() => {
-    const instance = slider.current;
-    if (!instance?.track.details || userMotion.current) return;
-    const { animator, track } = instance;
-    // Compare with where Keen is heading, so a running animation is retargeted
-    // and a value Keen itself settled on is never moved again.
-    const heading = animator.targetIdx === null ? track.details.rel : track.absToRel(animator.targetIdx);
-    if (heading === currentIndex) return;
-    instance.moveToIdx(currentIndex, false, prefersReducedMotion() ? { duration: 0 } : undefined);
+    if (!userMotion.current) moveWheelTo(slider.current, currentIndex);
   }, [currentIndex]);
 
   function selectIndex(index: number) {
@@ -294,7 +304,12 @@ function WheelColumn({
       ? (index + values.length) % values.length
       : Math.max(0, Math.min(values.length - 1, index));
     const next = values[bounded];
-    if (next !== undefined && next !== value) onChange(next);
+    if (next === undefined) return;
+    // A key or tap outranks a drag or flick still settling: the wheel follows
+    // the newest choice instead of later emitting the gesture's value.
+    userMotion.current = false;
+    if (next !== value) onChange(next);
+    else moveWheelTo(slider.current, bounded);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {

@@ -382,7 +382,8 @@
           "runner": "playwright",
           "config": "playwright.packet-12.config.ts",
           "files": [
-            "e2e/packet-12/critical-journey.spec.ts"
+            "e2e/packet-12/critical-journey.spec.ts",
+            "e2e/packet-12/time-wheel-rapid-keys.spec.ts"
           ]
         }
       ]

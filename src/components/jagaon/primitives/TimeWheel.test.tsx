@@ -269,3 +269,122 @@ describe("TimeWheel on Keen Slider", () => {
     expect(container.querySelector('input[type="datetime-local"], input[type="time"], input[type="date"]')).toBeNull();
   });
 });
+
+/** Keen's snap animation lasts 500 ms; this waits well past it. */
+const SETTLE_MS = 1200;
+
+const press = (listbox: HTMLElement, ...keys: string[]) => {
+  for (const key of keys) fireEvent.keyDown(listbox, { key });
+};
+
+async function expectSettledOn(time: string, changes: string[], emitted: number) {
+  await pause(SETTLE_MS);
+  expect(value()).toBe(time);
+  // No late change from Keen after the last key.
+  expect(changes).toHaveLength(emitted);
+  expect(changes.at(-1)).toBe(time);
+  for (const listbox of [hour(), minute(), period()]) {
+    expect(centred(listbox)).toBe(selected(listbox));
+  }
+}
+
+describe("TimeWheel keeps the latest selection after rapid input", () => {
+  it("period pm -> am -> pm within one frame stays on pm", async () => {
+    const changes: string[] = [];
+    render(<Harness initial="15:12" onChange={(next) => changes.push(next)} />);
+    press(period(), "Home", "ArrowDown");
+    expect(value()).toBe("15:12");
+    await expectSettledOn("15:12", changes, 2);
+    expect(changes).toEqual(["03:12", "15:12"]);
+  });
+
+  it("period pm -> am -> pm within one frame stays on pm with reduced motion", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    const changes: string[] = [];
+    render(<Harness initial="15:12" onChange={(next) => changes.push(next)} />);
+    press(period(), "Home", "ArrowDown");
+    await expectSettledOn("15:12", changes, 2);
+  });
+
+  it("period am -> pm -> am within one frame stays on am", async () => {
+    const changes: string[] = [];
+    render(<Harness initial="08:00" onChange={(next) => changes.push(next)} />);
+    press(period(), "End", "ArrowUp");
+    expect(value()).toBe("08:00");
+    await expectSettledOn("08:00", changes, 2);
+  });
+
+  it("hour Home then ArrowDowns back to the starting hour stays there", async () => {
+    const changes: string[] = [];
+    render(<Harness initial="15:12" onChange={(next) => changes.push(next)} />);
+    press(hour(), "Home", "ArrowDown", "ArrowDown");
+    expect(value()).toBe("15:12");
+    await expectSettledOn("15:12", changes, 3);
+  });
+
+  it("minute Home then twelve ArrowDowns back to :12 stays there", async () => {
+    const changes: string[] = [];
+    render(<Harness initial="15:12" onChange={(next) => changes.push(next)} />);
+    press(minute(), "Home", ...Array<string>(12).fill("ArrowDown"));
+    expect(value()).toBe("15:12");
+    await expectSettledOn("15:12", changes, 13);
+  });
+
+  it("the evidence sequence (Home + ArrowDown on each column) settles on 8:00 pm", async () => {
+    const changes: string[] = [];
+    render(<Harness initial="15:12" onChange={(next) => changes.push(next)} />);
+    press(hour(), "Home", ...Array<string>(7).fill("ArrowDown"));
+    press(minute(), "Home");
+    press(period(), "Home", "ArrowDown");
+    expect(value()).toBe("20:00");
+    await expectSettledOn("20:00", changes, changes.length);
+  });
+
+  it("a key pressed while a flick is still coasting wins over the flick", async () => {
+    const changes: string[] = [];
+    render(<Harness initial="07:00" onChange={(next) => changes.push(next)} />);
+    await dragWheel(minute(), 2, { fling: true });
+    // The flick coasts for several hundred milliseconds; press a key mid-way.
+    await pause(50);
+    expect(changes).toEqual([]);
+    press(minute(), "End");
+    expect(value()).toBe("07:59");
+    await pause(3000);
+    expect(value()).toBe("07:59");
+    expect(changes).toEqual(["07:59"]);
+    expect(centred(minute())).toBe(selected(minute()));
+  }, 15_000);
+
+  it("a key choosing the current value during a flick brings the wheel back to it", async () => {
+    const changes: string[] = [];
+    render(<Harness initial="07:00" onChange={(next) => changes.push(next)} />);
+    await dragWheel(minute(), 2, { fling: true });
+    await pause(50);
+    press(minute(), "Home");
+    await pause(3000);
+    expect(value()).toBe("07:00");
+    expect(changes).toEqual([]);
+    expect(centred(minute())).toBe(selected(minute()));
+  }, 15_000);
+
+  it("slow keyboard steps and a tapped option still move the wheel", async () => {
+    const changes: string[] = [];
+    render(<Harness initial="15:12" onChange={(next) => changes.push(next)} />);
+    press(period(), "Home");
+    await pause(SETTLE_MS);
+    press(period(), "ArrowDown");
+    await pause(SETTLE_MS);
+    press(hour(), "ArrowDown");
+    await expectSettledOn("16:12", changes, 3);
+    fireEvent.click(within(hour()).getByRole("option", { name: "5" }));
+    await expectSettledOn("17:12", changes, 4);
+    await dragWheel(minute(), 1);
+    await waitFor(() => expect(value()).toBe("17:13"));
+    await expectSettledOn("17:13", changes, 5);
+  }, 15_000);
+});

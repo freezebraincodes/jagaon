@@ -227,6 +227,42 @@ describe("time wheel on journal screens", () => {
     expect(occurrence(vi.mocked(commands.correctGlucoseTime).mock.calls[0]![0])).toBe(singaporeWallClockToInstant(yesterday, "21:45"));
   });
 
+  for (const { name, setPmFirst, keys, time, card, period } of [
+    { name: "am -> pm -> am", setPmFirst: false, keys: ["End", "Home"], time: "08:00", card: /8:00 am/, period: en.readingTime.am },
+    { name: "pm -> am -> pm", setPmFirst: true, keys: ["Home", "ArrowDown"], time: "20:00", card: /8:00 pm/, period: en.readingTime.pm },
+  ]) {
+    it(`glucose entry: rapid ${name} keys keep the card, the wheel and the saved time on the last key`, async () => {
+      const commands = service();
+      const { container } = render(
+        <GlucoseEntryScreen messages={en} locale="en-SG" commandService={commands} goBack={() => undefined} />,
+      );
+      fireEvent.click(screen.getByRole("radio", { name: en.glucose.contextBedtime }));
+      fireEvent.change(screen.getByLabelText(/Reading \(mmol\/L\)/), { target: { value: "5.4" } });
+      openTimeEditor();
+      fireEvent.click(screen.getByRole("radio", { name: en.readingTime.dayYesterday }));
+      const press = (column: string, ...presses: string[]) => {
+        for (const key of presses) fireEvent.keyDown(wheel(column), { key });
+      };
+      if (setPmFirst) {
+        press(en.readingTime.periodLabel, "End");
+        settleWheels();
+        await wheelsAtRest();
+      }
+      // All keys inside one animation frame, as fast typing in a browser can do.
+      press(en.readingTime.hourLabel, "Home", ...Array<string>(7).fill("ArrowDown"));
+      press(en.readingTime.minuteLabel, "Home");
+      press(en.readingTime.periodLabel, ...keys);
+      expect(summary(container)).toMatch(card);
+      settleWheels();
+      await wheelsAtRest();
+      expect(summary(container)).toMatch(card);
+      expect(selected(en.readingTime.periodLabel)).toHaveTextContent(period);
+      fireEvent.click(screen.getByRole("button", { name: en.glucose.saveAction }));
+      await waitFor(() => expect(commands.recordGlucose).toHaveBeenCalledTimes(1));
+      expect(occurrence(vi.mocked(commands.recordGlucose).mock.calls[0]![0])).toBe(singaporeWallClockToInstant(yesterday, time));
+    });
+  }
+
   it("labels the wheel in zh-SG", () => {
     render(<GlucoseEntryScreen messages={zh} locale="zh-SG" commandService={service()} goBack={() => undefined} />);
     fireEvent.click(screen.getByRole("button", { name: zh.readingTime.editTime }));
