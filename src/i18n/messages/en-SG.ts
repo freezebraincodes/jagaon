@@ -230,6 +230,7 @@ export const enSGMessages: AppMessages = {
     historyNote: "Changing the time updates when this record occurred; the original version remains in history.",
     saveOccurrence: "Save occurrence time",
     useNow: "Use time now instead",
+    laterThanNow: "This time is later than now. Choose a time that has already passed. Nothing was saved.",
   },
   insulin: {
     title: "Record insulin",

@@ -229,6 +229,7 @@ export const zhSGMessages: AppMessages = {
     historyNote: "更改时间会更新这项记录的发生时间；原来的版本仍保留在历史记录中。",
     saveOccurrence: "保存发生时间",
     useNow: "改用现在的时间",
+    laterThanNow: "这个时间比现在晚。请选择已经过去的时间。没有保存任何内容。",
   },
   insulin: {
     title: "记录胰岛素",

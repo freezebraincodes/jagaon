@@ -19,6 +19,7 @@ import type { Instant } from "@/domain/shared/time";
 import {
   exactSingaporeOccurrence,
   formatSingaporeDateTime,
+  isLaterThanNow,
   shiftSingaporeDate,
   singaporeNowParts,
   singaporeWallClockToInstant,
@@ -112,8 +113,9 @@ export function ReadingTimeScreen({
       setNotSaved(true);
       return;
     }
-    setTimeError(instant ? null : messages.shared.requiredField);
-    if (!instant) return;
+    const later = instant !== null && isLaterThanNow(instant);
+    setTimeError(!instant ? messages.shared.requiredField : later ? msg.laterThanNow : null);
+    if (!instant || later) return;
 
     setSaved(false);
     setNotSaved(false);

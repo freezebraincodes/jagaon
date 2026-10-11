@@ -10,6 +10,7 @@ import { GlucoseEntryScreen } from "./GlucoseEntryScreen";
 import { InsulinEntryScreen } from "./InsulinEntryScreen";
 import { MealEntryScreen } from "./MealEntryScreen";
 import {
+  shiftSingaporeDate,
   singaporeNowParts,
   singaporeWallClockToInstant,
 } from "../journal/singapore-time";
@@ -372,6 +373,88 @@ describe("glucose entry", () => {
     fireEvent.change(glucoseValueInput(), { target: { value: "6.9" } });
     expect(save).toBeEnabled();
     expect(commands.recordGlucose).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a time later than now with a message and saves nothing until the time has passed", async () => {
+    const { commands } = renderGlucose();
+    chooseContext(en.glucose.contextBeforeBreakfast);
+    fireEvent.change(glucoseValueInput(), { target: { value: "6.2" } });
+    const tomorrow = shiftSingaporeDate(singaporeNowParts().date, 1);
+    setGlucoseTime(`${tomorrow}T07:40`);
+    fireEvent.click(screen.getByRole("button", { name: en.glucose.saveAction }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(en.readingTime.laterThanNow);
+    expect(screen.getByRole("group", { name: en.glucose.occurrenceTime })).toBeVisible();
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("radio", { name: en.readingTime.dayYesterday }));
+    expect(screen.queryByText(en.readingTime.laterThanNow)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: en.glucose.saveAction }));
+    await waitFor(() => expect(commands.recordGlucose).toHaveBeenCalledTimes(1));
+  });
+
+  it("refuses a time later than now before the confirmation step for 60", async () => {
+    const { commands } = renderGlucose();
+    chooseContext(en.glucose.contextBeforeBreakfast);
+    fireEvent.change(glucoseValueInput(), { target: { value: "60" } });
+    setGlucoseTime(`${shiftSingaporeDate(singaporeNowParts().date, 1)}T07:40`);
+    fireEvent.click(screen.getByRole("button", { name: en.glucose.saveAction }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(en.readingTime.laterThanNow);
+    expect(screen.queryByRole("button", { name: en.glucose.saveAsShown })).not.toBeInTheDocument();
+    expect(commands.recordGlucose).not.toHaveBeenCalled();
+  });
+
+  it("starts the next entry at the time now after a save, so it never inherits the saved entry's edited time", async () => {
+    const { commands } = renderGlucose();
+    chooseContext(en.glucose.contextBeforeBreakfast);
+    fireEvent.change(glucoseValueInput(), { target: { value: "6.2" } });
+    const yesterday = shiftSingaporeDate(singaporeNowParts().date, -1);
+    setGlucoseTime(`${yesterday}T07:40`);
+    fireEvent.click(screen.getByRole("button", { name: en.glucose.saveAction }));
+    await screen.findByText(en.glucose.saved);
+
+    fireEvent.change(glucoseValueInput(), { target: { value: "5.8" } });
+    fireEvent.click(screen.getByRole("button", { name: en.glucose.saveAction }));
+    await waitFor(() => expect(commands.recordGlucose).toHaveBeenCalledTimes(2));
+
+    const instants = vi.mocked(commands.recordGlucose).mock.calls.map(([input]) =>
+      input.temporal.kind === "POINT" && input.temporal.occurrence.kind === "EXACT" ? input.temporal.occurrence.instantUtc : null,
+    );
+    expect(instants[0]).toBe(singaporeWallClockToInstant(yesterday, "07:40"));
+    // The time now, at the wheel's whole-minute precision.
+    expect(Math.abs(Date.parse(instants[1]!) - Date.now())).toBeLessThan(2 * 60_000);
+  });
+
+  it("shows the next entry's day as today after an entry saved for another date", async () => {
+    renderGlucose();
+    chooseContext(en.glucose.contextBeforeBreakfast);
+    fireEvent.change(glucoseValueInput(), { target: { value: "6.2" } });
+    setGlucoseTime(`${shiftSingaporeDate(singaporeNowParts().date, -3)}T07:40`);
+    fireEvent.click(screen.getByRole("button", { name: en.glucose.saveAction }));
+    await screen.findByText(en.glucose.saved);
+
+    fireEvent.change(glucoseValueInput(), { target: { value: "5.8" } });
+    openTimeEditor();
+    expect(screen.getByRole("radio", { name: en.readingTime.dayToday })).toBeChecked();
+    expect(screen.queryByLabelText(en.readingTime.newDate)).not.toBeInTheDocument();
+  });
+
+  it("keeps a time chosen after a save for the next entry", async () => {
+    const { commands } = renderGlucose();
+    chooseContext(en.glucose.contextBeforeBreakfast);
+    fireEvent.change(glucoseValueInput(), { target: { value: "6.2" } });
+    fireEvent.click(screen.getByRole("button", { name: en.glucose.saveAction }));
+    await screen.findByText(en.glucose.saved);
+
+    const yesterday = shiftSingaporeDate(singaporeNowParts().date, -1);
+    setGlucoseTime(`${yesterday}T21:15`);
+    fireEvent.change(glucoseValueInput(), { target: { value: "5.8" } });
+    fireEvent.click(screen.getByRole("button", { name: en.glucose.saveAction }));
+    await waitFor(() => expect(commands.recordGlucose).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(commands.recordGlucose).mock.calls[1]![0].temporal).toEqual(
+      expect.objectContaining({ occurrence: expect.objectContaining({ instantUtc: singaporeWallClockToInstant(yesterday, "21:15") }) }),
+    );
   });
 
   it("labels every control in zh-SG", () => {

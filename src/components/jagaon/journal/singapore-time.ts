@@ -56,6 +56,14 @@ export function singaporeWallClockToInstant(
   return roundTrip.date === date && roundTrip.time === time ? instant : null;
 }
 
+/** Allowance for small clock differences: a time up to one minute ahead of now still counts as now. */
+const LATER_THAN_NOW_TOLERANCE_MS = 60_000;
+
+/** True when an occurrence time has not happened yet, so it cannot be recorded. */
+export function isLaterThanNow(instant: string, now: Date = new Date()): boolean {
+  return new Date(instant).getTime() > now.getTime() + LATER_THAN_NOW_TOLERANCE_MS;
+}
+
 export function exactSingaporeOccurrence(instantUtc: Instant) {
   return {
     kind: "POINT" as const,

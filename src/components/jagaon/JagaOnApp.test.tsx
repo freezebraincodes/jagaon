@@ -493,6 +493,8 @@ describe("JagaOnApp journal integration", () => {
 
     fireEvent.click(screen.getByRole("button", { name: en.readingTime.editTime }));
     await screen.findByText(en.readingTime.sameAsCurrent);
+    // Yesterday, so 09:15 is never later than now.
+    fireEvent.click(screen.getByRole("radio", { name: en.readingTime.dayYesterday }));
     fireEvent.change(screen.getByLabelText(en.readingTime.newTime), {
       target: { value: "09:15" },
     });

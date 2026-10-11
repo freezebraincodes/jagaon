@@ -171,6 +171,8 @@ export type ReadingTimeMessages = {
   historyNote: string;
   saveOccurrence: string;
   useNow: string;
+  /** Refusal when the chosen occurrence time is later than now. */
+  laterThanNow: string;
 };
 
 /** Insulin occurrence and meal entry messages (frames 04–05). */

@@ -23,6 +23,7 @@ import {
 import {
   exactSingaporeOccurrence,
   formatRelativeSingaporeTime,
+  isLaterThanNow,
   singaporeNowParts,
   singaporeWallClockToInstant,
 } from "../journal/singapore-time";
@@ -40,6 +41,12 @@ type GlucoseEntryScreenProps = {
   goBack: () => void;
   onCommitted?: () => void | Promise<void>;
 };
+
+/** The time now as the entry's `date`T`time` value. */
+function nowOccurrence() {
+  const now = singaporeNowParts();
+  return `${now.date}T${now.time}`;
+}
 
 type MeasurementMethod = "FINGERSTICK_METER" | "CGM" | "FLASH_SENSOR" | "OTHER" | "UNKNOWN";
 
@@ -63,10 +70,9 @@ export function GlucoseEntryScreen({
   const [method, setMethod] = useState<MeasurementMethod>("FINGERSTICK_METER");
   const [context, setContext] = useState<GlucoseContextChoice | null>(null);
   const [note, setNote] = useState("");
-  const [occurredAt, setOccurredAt] = useState(() => {
-    const now = singaporeNowParts();
-    return `${now.date}T${now.time}`;
-  });
+  const [occurredAt, setOccurredAt] = useState(nowOccurrence);
+  /** Changes when a new entry starts at the time now, so the time editor also starts afresh (day choice included). */
+  const [timeEntry, setTimeEntry] = useState(0);
   const [valueError, setValueError] = useState<string | null>(null);
   const [contextError, setContextError] = useState<string | null>(null);
   const [timeError, setTimeError] = useState<string | null>(null);
@@ -92,8 +98,16 @@ export function GlucoseEntryScreen({
     : messages.shared.requiredField;
 
   // Any edit after a commit starts a new, unsaved entry (and a new confirmation latch); any edit closes an open confirmation step.
-  function edited() {
-    if (saved) setLatched(false);
+  // The new entry starts at the time now, so it never inherits the saved entry's edited time, unless the edit is the time itself.
+  function edited(options: { keepTime?: boolean } = {}) {
+    if (saved) {
+      setLatched(false);
+      if (!options.keepTime) {
+        setOccurredAt(nowOccurrence());
+        setTimeError(null);
+        setTimeEntry((entry) => entry + 1);
+      }
+    }
     setSaved(false);
     setConfirmValue(null);
   }
@@ -167,8 +181,9 @@ export function GlucoseEntryScreen({
 
     setValueError(formatted !== null ? null : msg.invalidDecimal);
     setContextError(context ? null : messages.shared.requiredField);
-    setTimeError(instant ? null : messages.shared.requiredField);
-    if (formatted === null || !context || !instant) return;
+    const later = instant !== null && isLaterThanNow(instant);
+    setTimeError(!instant ? messages.shared.requiredField : later ? messages.readingTime.laterThanNow : null);
+    if (formatted === null || !context || !instant || later) return;
 
     // Completion: the field shows exactly what will be saved. Fix round 3 (owner ruling 7): an automatically added ".0" is remembered
     // like the one added on leaving the field, so continued entry (keypad, or typing after returning to the field) goes on from what
@@ -235,6 +250,7 @@ export function GlucoseEntryScreen({
         />
 
         <TimeCard
+          key={timeEntry}
           label={msg.occurrenceTime}
           summary={whenText}
           hint={msg.timeNowHint}
@@ -245,7 +261,7 @@ export function GlucoseEntryScreen({
           onChange={(next) => {
             setOccurredAt(next);
             setTimeError(null);
-            edited();
+            edited({ keepTime: true });
           }}
           error={timeError ?? undefined}
         />

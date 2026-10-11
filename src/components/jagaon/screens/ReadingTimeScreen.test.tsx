@@ -148,6 +148,18 @@ describe("ReadingTimeScreen", () => {
     expect(screen.getByRole("radio", { name: en.readingTime.dayOther })).toBeChecked();
   });
 
+  it("refuses a corrected time later than now with a message and saves nothing", async () => {
+    const commandService = renderScreen();
+    await loaded();
+    fireEvent.click(screen.getByRole("radio", { name: en.readingTime.dayOther }));
+    fireEvent.change(screen.getAllByLabelText(en.readingTime.newDate)[0]!, { target: { value: shiftSingaporeDate(today, 1) } });
+    fireEvent.click(screen.getByRole("button", { name: en.readingTime.saveOccurrence }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(en.readingTime.laterThanNow);
+    expect(commandService.correctGlucoseTime).not.toHaveBeenCalled();
+    expect(screen.queryByText(en.readingTime.saved)).not.toBeInTheDocument();
+  });
+
   it("sets the controls to the current time without saving", async () => {
     const commandService = renderScreen();
     await loaded();
@@ -161,6 +173,8 @@ describe("ReadingTimeScreen", () => {
   it("keeps the correction unsaved when the command fails", async () => {
     renderScreen(commands("FAILED"));
     await loaded();
+    // Yesterday, so the corrected 08:48 is never later than now.
+    fireEvent.click(screen.getByRole("radio", { name: en.readingTime.dayYesterday }));
     fireEvent.keyDown(screen.getByRole("listbox", { name: en.readingTime.hourLabel }), { key: "ArrowDown" });
     fireEvent.click(screen.getByRole("button", { name: en.readingTime.saveOccurrence }));
     expect(await screen.findByText(en.shared.notSaved)).toBeInTheDocument();
