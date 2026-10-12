@@ -4,6 +4,7 @@ import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
 import type { Instant } from "@/domain/shared/time";
 import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
 import { projectValidatedAiCareSummary } from "@/application/care-preparation/ai-care-summary-replacement";
+import { SYNTHETIC_CARE_QUESTION_TEXT } from "@/application/care-organisation/synthetic-care-organisation-seed";
 import { createBrowserJournalRuntime } from "./browser-journal-runtime";
 
 // Packet 11C B4b: a pass-through spy on the care-preparation service factory, so the runtime's injected AI projection can be pinned.
@@ -139,14 +140,15 @@ describe("browser journal runtime", () => {
     const reopened = await open(runtime.databaseName);
     const again = await reopened.careOrganisation.query.loadVisitPreparation();
     if (again.status !== "READY") throw new Error("ready");
-    expect(again.questions.map((question) => question.text)).toEqual(["Bring my meter?"]);
+    // The seeded demo question (owner decision 2026-10-12) stays beside the patient's own.
+    expect(again.questions.map((question) => question.text).sort()).toEqual(["Bring my meter?", SYNTHETIC_CARE_QUESTION_TEXT]);
     const items = await reopened.careOrganisation.query.loadPreventiveCare();
     expect(items.status === "READY" && items.items.length).toBe(4);
 
     await reopened.resetDemo();
     const restored = await reopened.careOrganisation.query.loadVisitPreparation();
     if (restored.status !== "READY") throw new Error("ready");
-    expect(restored.questions).toEqual([]);
+    expect(restored.questions.map((question) => question.text)).toEqual([SYNTHETIC_CARE_QUESTION_TEXT]);
     expect(restored.appointment?.payload.appointmentLabel).toBe("Dr Lim, Bukit Merah Polyclinic");
   }, INTEGRATION_TIMEOUT_MS);
 
@@ -235,7 +237,7 @@ describe("browser journal runtime", () => {
       counts: view.counts,
       unrecordedCount: view.unrecordedCount,
       reminders: view.reminders.map((reminder) => [reminder.label, reminder.state, reminder.times]),
-      careQuestions: view.careQuestions,
+      careQuestions: view.careQuestions.map((question) => [question.text, question.language, question.revisionNumber]),
     });
     const restored = await runtime.medicationSchedule.load({ locale: "en-SG", medicationRecordIds: scope });
     if (restored.status !== "READY") throw new Error("ready");

@@ -55,7 +55,7 @@ async function setup() {
   const service = createCarePreparationService(database, { now, ids });
   const query = createCarePreparationQuery(database);
   const invalidation = createCareSummaryInvalidation(database, { now, newCommandId: uuid, leaseToken: () => crypto.randomUUID(), instanceId: "test", service });
-  await seedSyntheticCareOrganisation({ database, seedAt: NOW, ids });
+  await seedSyntheticCareOrganisation({ database, seedAt: NOW, ids, demoQuestion: false });
   const glucose = await journal.recordGlucose({ payload: glucosePayload, temporal: { kind: "POINT", occurrence: exact("2026-10-03T13:00:00.000Z") }, recordedAt: NOW });
   if (glucose.kind !== "COMMITTED") throw new Error("glucose");
   const question = await organisation.createCareQuestion({ questionText: { text: "可以把笔放在包里吗？", language: "zh-SG" } });

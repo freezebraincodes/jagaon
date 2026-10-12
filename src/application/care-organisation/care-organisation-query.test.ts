@@ -7,7 +7,7 @@ import { createCarePlanCommandService } from "@/application/care-plan/care-plan-
 import { createJournalCommandService } from "@/application/journal/journal-command-service";
 import { createCareOrganisationService } from "./care-organisation-service";
 import { createCareOrganisationQuery, VISIT_PREPARATION_PERIOD_DAYS } from "./care-organisation-query";
-import { seedSyntheticCareOrganisation } from "./synthetic-care-organisation-seed";
+import { SYNTHETIC_CARE_QUESTION_TEXT, seedSyntheticCareOrganisation } from "./synthetic-care-organisation-seed";
 import { seedSyntheticCarePlan } from "@/application/medication-schedule/synthetic-care-plan-seed";
 import { barrierPresentationCopyFor } from "@/application/medication-schedule/barrier-presentation-copy";
 
@@ -129,9 +129,17 @@ describe("Screen 09 preventive-care projection", () => {
 });
 
 describe("Screen 10 visit-preparation projection", () => {
-  it("shows the next recorded appointment, the patient's own questions and in-period fact sources only", async () => {
+  it("seeds one demo question of the patient's own for the appointment (owner decision 2026-10-12)", async () => {
     const h = await setup();
     await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids });
+    const view = await h.query.loadVisitPreparation();
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.questions).toEqual([expect.objectContaining({ text: SYNTHETIC_CARE_QUESTION_TEXT, language: "und", relatedAppointment: view.appointment!.recordId })]);
+  });
+
+  it("shows the next recorded appointment, the patient's own questions and in-period fact sources only", async () => {
+    const h = await setup();
+    await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids, demoQuestion: false });
     const journal = createJournalCommandService(h.database, { now: () => NOW, ids });
     const glucose = (instantUtc: string) =>
       journal.recordGlucose({

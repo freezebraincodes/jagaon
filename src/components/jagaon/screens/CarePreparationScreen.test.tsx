@@ -47,7 +47,7 @@ async function setup({ seed = true, glucose = 0 }: { seed?: boolean; glucose?: n
   const carePlan = createCarePlanCommandService(database, { now: () => NOW, ids });
   const commands = createCareOrganisationService(database, { now: () => NOW, ids, carePlan });
   const query = createCareOrganisationQuery(database, { now: () => NOW });
-  if (seed) await seedSyntheticCareOrganisation({ database, seedAt: NOW, ids });
+  if (seed) await seedSyntheticCareOrganisation({ database, seedAt: NOW, ids, demoQuestion: false });
   const journal = createJournalCommandService(database, { now: () => NOW, ids });
   for (let index = 0; index < glucose; index += 1) {
     await journal.recordGlucose({

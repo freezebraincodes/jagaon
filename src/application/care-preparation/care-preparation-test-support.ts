@@ -51,7 +51,7 @@ export async function createCarePreparationHarness() {
   const service = createCarePreparationService(database, { now, ids: testIds });
   const query = createCarePreparationQuery(database);
   const invalidation = createCareSummaryInvalidation(database, { now, newCommandId: uuid, leaseToken: () => crypto.randomUUID(), instanceId: "test", service });
-  await seedSyntheticCareOrganisation({ database, seedAt: NOW, ids: testIds });
+  await seedSyntheticCareOrganisation({ database, seedAt: NOW, ids: testIds, demoQuestion: false });
 
   async function selection(overrides: Partial<CareSummarySelectionInput> = {}): Promise<CareSummarySelectionInput> {
     const view = await visit.loadVisitPreparation();

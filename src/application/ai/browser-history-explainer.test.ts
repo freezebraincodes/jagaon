@@ -32,6 +32,7 @@ import { projectValidatedAiCareSummary } from "@/application/care-preparation/ai
 import { buildCareSummaryAiRequest } from "@/application/care-preparation/ai-care-summary-request";
 import type { CareSummaryAiWordingPort } from "@/components/jagaon/screens/CareSummaryPreviewScreen";
 import { createBrowserJournalRuntime, type JagaOnRuntime } from "@/application/journal/browser-journal-runtime";
+import { SYNTHETIC_CARE_QUESTION_TEXT } from "@/application/care-organisation/synthetic-care-organisation-seed";
 
 // Packet 11C B4b: a pass-through spy, so a test can count the hybrid services one wiring builds (behaviour unchanged).
 vi.mock("./ai-hybrid-task-service", async (importOriginal) => {
@@ -1551,14 +1552,13 @@ describe("Packet 11C English activation, I-5: the shipped manifest and gate over
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const runtime = await demoRuntime(at);
-    const asked = await runtime.careOrganisation.commands.createCareQuestion({ questionText: { text: "Should I keep checking before breakfast every day? (demo)", language: "en-SG" } });
-    if (asked.kind !== "COMMITTED") throw new Error("question");
     const visit = await runtime.careOrganisation.query.loadVisitPreparation();
     if (visit.status !== "READY" || !visit.appointment) throw new Error("visit");
-    // The 14 local days ending today; the seeded appointment; the patient's question.
+    // The 14 local days ending today; the seeded appointment; the seeded demo question (owner decision 2026-10-12), saved as the
+    // add-question screen saves one.
     expect(Math.round((Date.parse(visit.period.endAtExclusive) - Date.parse(visit.period.startAt)) / 86_400_000)).toBe(14);
     expect(visit.factGroups.map((group) => [group.key, group.sources.length])).toEqual([["GLUCOSE", 11], ["INSULIN", 10], ["MEALS", 10], ["WALKS", 8]]);
-    expect(visit.questions).toHaveLength(1);
+    expect(visit.questions.map((entry) => [entry.text, entry.language])).toEqual([[SYNTHETIC_CARE_QUESTION_TEXT, "und"]]);
     const fetcher = fakeDemoRoute();
     const wording = createBrowserAiAssistance({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit, fetcher, now: () => at }).careSummary!;
     const evaluated = new Set(AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.classId));

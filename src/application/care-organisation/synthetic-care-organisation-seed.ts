@@ -30,6 +30,8 @@ export const SYNTHETIC_CARE_ORGANISATION_DATES = Object.freeze({
   appointmentInstant: "2026-10-14T01:40:00.000Z",
 });
 
+export const SYNTHETIC_CARE_QUESTION_TEXT = "Should I change anything before my next appointment?";
+
 function committed<T extends { kind: string }>(result: T): Extract<T, { kind: "COMMITTED" }> {
   if (result.kind !== "COMMITTED") throw new Error("SYNTHETIC_CARE_ORGANISATION_SEED_FAILED");
   return result as Extract<T, { kind: "COMMITTED" }>;
@@ -46,7 +48,13 @@ type SeedIds = {
   workItemId(): WorkItemId;
 };
 
-export async function seedSyntheticCareOrganisation(input: { database: JagaOnDatabase; seedAt: Instant; ids: SeedIds }): Promise<"SEEDED" | "SKIPPED"> {
+export async function seedSyntheticCareOrganisation(input: {
+  database: JagaOnDatabase;
+  seedAt: Instant;
+  ids: SeedIds;
+  /** The demo question (default on). Tests that exercise question handling from an empty list turn it off. */
+  demoQuestion?: boolean;
+}): Promise<"SEEDED" | "SKIPPED"> {
   const existing = (await input.database.table("recordHeads").where("recordType").anyOf(["PREVENTIVE_CARE_ITEM", "APPOINTMENT"]).toArray()) as RecordHead[];
   if (existing.length > 0) return "SKIPPED";
   // A stepping clock keeps the fixture's entry order deterministic.
@@ -105,7 +113,7 @@ export async function seedSyntheticCareOrganisation(input: { database: JagaOnDat
       occurrence: day(SYNTHETIC_CARE_ORGANISATION_DATES.footCheckRecorded),
     }),
   );
-  committed(
+  const appointment = committed(
     await co.scheduleAppointment({
       payload: {
         appointmentLabel: "Dr Lim, Bukit Merah Polyclinic",
@@ -117,6 +125,15 @@ export async function seedSyntheticCareOrganisation(input: { database: JagaOnDat
         locationLabel: "Bukit Merah Polyclinic",
       },
       scheduledAt: { kind: "EXACT", instantUtc: SYNTHETIC_CARE_ORGANISATION_DATES.appointmentInstant as Instant, timeZoneId: SINGAPORE, utcOffsetMinutes: 480 },
+    }),
+  );
+  // Owner decision 2026-10-12: one short question for the appointment, saved as the add-question screen saves one, so the visit
+  // summary can be prepared in the demo without typing. It is the patient's own wording; JagaOn never answers it.
+  if (input.demoQuestion === false) return "SEEDED";
+  committed(
+    await co.createCareQuestion({
+      questionText: { text: SYNTHETIC_CARE_QUESTION_TEXT, language: "und" },
+      relatedAppointment: { recordType: "APPOINTMENT", recordId: appointment.recordId, revisionId: appointment.revisionId },
     }),
   );
   return "SEEDED";
