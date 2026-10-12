@@ -27,6 +27,7 @@ import {
   BookIcon,
   BowlIcon,
   ChevronRightIcon,
+  FilterIcon,
   ListIcon,
   MapIcon,
   PhoneIcon,
@@ -73,6 +74,9 @@ function venueMeta(messages: AppMessages, place: NearbyFoodPlace): string | null
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+/** Owner decision 2026-10-12: the general food information card stays hidden until it has reviewed content. */
+const SHOW_GENERAL_FOOD_INFORMATION = false;
+
 // --- Section: Filters (user choices only; never health data) ---
 
 function FoodFilters({
@@ -89,101 +93,122 @@ function FoodFilters({
 }) {
   const msg = messages.food;
   const ANY = "ANY" as const;
+  // Owner decision 2026-10-12: the filters fold away so the map is visible at once; closed, a line names the active choices.
+  const [open, setOpen] = useState(false);
+  const active = [
+    filters.maxDistanceMetres ? msg.within(filters.maxDistanceMetres === 500 ? "500 m" : filters.maxDistanceMetres === 1000 ? "1 km" : "2 km") : null,
+    filters.cuisine
+      ? { CHINESE: msg.cuisineChinese, MALAY: msg.cuisineMalay, INDIAN: msg.cuisineIndian, WESTERN: msg.cuisineWestern }[filters.cuisine]
+      : null,
+    filters.venueType
+      ? { HAWKER_CENTRE: msg.venueHawker, COFFEE_SHOP: msg.venueCoffeeShop, MARKET: msg.venueMarket, FOOD_COURT: msg.venueFoodCourt }[filters.venueType]
+      : null,
+    filters.attribute
+      ? { HIGHER_IN_WHOLEGRAINS: msg.attrWholegrains, LOWER_IN_SUGAR: msg.attrLowerSugar, LOWER_IN_CALORIES: msg.attrLowerCalories }[filters.attribute]
+      : null,
+  ].filter((label): label is string => !!label);
   const cuisineOffered = (group: CuisineGroup) => !options || options.cuisineGroups.includes(group);
   const venueOffered = (type: VenueType) => !options || options.venueTypes.includes(type);
   return (
     <section className="food-filters" aria-labelledby="food-filters-heading">
       <div className="food-filters-head">
         <h2 id="food-filters-heading" className="eyebrow">
-          {msg.filtersHeading}
+          <button type="button" className="food-filters-toggle" aria-expanded={open} aria-controls="food-filters-panel" onClick={() => setOpen(!open)}>
+            <FilterIcon size={18} />
+            {msg.filtersHeading}
+            <ChevronRightIcon size={18} className={`food-filters-chevron${open ? " food-filters-chevron--open" : ""}`} />
+          </button>
         </h2>
         <button type="button" className="text-link" onClick={() => onChange(NO_FOOD_FILTERS)}>
           <ResetIcon size={18} />
           {msg.resetFilters}
         </button>
       </div>
-      <ToggleChips<"500" | "1000" | "2000">
-        label={msg.distanceLabel}
-        heading={
-          <p className="filter-heading">
-            <WalkIcon size={20} />
-            {msg.distanceLabel}
-          </p>
-        }
-        options={[
-          { value: "500", label: msg.within("500 m") },
-          { value: "1000", label: msg.within("1 km") },
-          { value: "2000", label: msg.within("2 km") },
-        ]}
-        selected={filters.maxDistanceMetres ? [String(filters.maxDistanceMetres) as "500"] : []}
-        onToggle={(value) =>
-          onChange({ ...filters, maxDistanceMetres: String(filters.maxDistanceMetres) === value ? null : (Number(value) as 500 | 1000 | 2000) })
-        }
-      />
-      <ToggleChips<CuisineGroup | typeof ANY>
-        label={msg.cuisineLabel}
-        heading={
-          <p className="filter-heading">
-            <BowlIcon size={20} />
-            {msg.cuisineLabel}
-          </p>
-        }
-        options={[
-          { value: ANY, label: msg.cuisineAny },
-          ...(
-            [
-              { value: "CHINESE", label: msg.cuisineChinese },
-              { value: "MALAY", label: msg.cuisineMalay },
-              { value: "INDIAN", label: msg.cuisineIndian },
-              { value: "WESTERN", label: msg.cuisineWestern },
-            ] as const
-          ).filter((option) => cuisineOffered(option.value)),
-        ]}
-        selected={[filters.cuisine ?? ANY]}
-        onToggle={(value) => onChange({ ...filters, cuisine: value === ANY ? null : value })}
-      />
-      {!options || options.venueTypes.length > 0 ? (
-        <ToggleChips<VenueType | typeof ANY>
-          label={msg.venueTypeLabel}
+      {!open && active.length > 0 ? <p className="food-filters-summary">{active.join(" · ")}</p> : null}
+      <div id="food-filters-panel" className="food-filters-panel" hidden={!open}>
+        <ToggleChips<"500" | "1000" | "2000">
+          label={msg.distanceLabel}
           heading={
             <p className="filter-heading">
-              <StoreIcon size={20} />
-              {msg.venueTypeLabel}
+              <WalkIcon size={20} />
+              {msg.distanceLabel}
+            </p>
+          }
+          options={[
+            { value: "500", label: msg.within("500 m") },
+            { value: "1000", label: msg.within("1 km") },
+            { value: "2000", label: msg.within("2 km") },
+          ]}
+          selected={filters.maxDistanceMetres ? [String(filters.maxDistanceMetres) as "500"] : []}
+          onToggle={(value) =>
+            onChange({ ...filters, maxDistanceMetres: String(filters.maxDistanceMetres) === value ? null : (Number(value) as 500 | 1000 | 2000) })
+          }
+        />
+        <ToggleChips<CuisineGroup | typeof ANY>
+          label={msg.cuisineLabel}
+          heading={
+            <p className="filter-heading">
+              <BowlIcon size={20} />
+              {msg.cuisineLabel}
             </p>
           }
           options={[
             { value: ANY, label: msg.cuisineAny },
             ...(
               [
-                { value: "HAWKER_CENTRE", label: msg.venueHawker },
-                { value: "COFFEE_SHOP", label: msg.venueCoffeeShop },
-                { value: "MARKET", label: msg.venueMarket },
-                { value: "FOOD_COURT", label: msg.venueFoodCourt },
+                { value: "CHINESE", label: msg.cuisineChinese },
+                { value: "MALAY", label: msg.cuisineMalay },
+                { value: "INDIAN", label: msg.cuisineIndian },
+                { value: "WESTERN", label: msg.cuisineWestern },
               ] as const
-            ).filter((option) => venueOffered(option.value)),
+            ).filter((option) => cuisineOffered(option.value)),
           ]}
-          selected={[filters.venueType ?? ANY]}
-          onToggle={(value) => onChange({ ...filters, venueType: value === ANY ? null : value })}
+          selected={[filters.cuisine ?? ANY]}
+          onToggle={(value) => onChange({ ...filters, cuisine: value === ANY ? null : value })}
         />
-      ) : null}
-      <ToggleChips<FilterableFoodAttribute>
-        label={msg.attributesLabel}
-        heading={
-          <p className="filter-heading">
-            <ShieldIcon size={20} />
-            {msg.attributesLabel}
-          </p>
-        }
-        aside={<span className="tag tag--reviewed">{msg.hpbWording}</span>}
-        options={[
-          { value: "HIGHER_IN_WHOLEGRAINS", label: msg.attrWholegrains },
-          { value: "LOWER_IN_SUGAR", label: msg.attrLowerSugar },
-          { value: "LOWER_IN_CALORIES", label: msg.attrLowerCalories },
-        ]}
-        selected={filters.attribute ? [filters.attribute] : []}
-        onToggle={(value) => onChange({ ...filters, attribute: filters.attribute === value ? null : value })}
-      />
-      <p className="provenance-line">{msg.attributesNote}</p>
+        {!options || options.venueTypes.length > 0 ? (
+          <ToggleChips<VenueType | typeof ANY>
+            label={msg.venueTypeLabel}
+            heading={
+              <p className="filter-heading">
+                <StoreIcon size={20} />
+                {msg.venueTypeLabel}
+              </p>
+            }
+            options={[
+              { value: ANY, label: msg.cuisineAny },
+              ...(
+                [
+                  { value: "HAWKER_CENTRE", label: msg.venueHawker },
+                  { value: "COFFEE_SHOP", label: msg.venueCoffeeShop },
+                  { value: "MARKET", label: msg.venueMarket },
+                  { value: "FOOD_COURT", label: msg.venueFoodCourt },
+                ] as const
+              ).filter((option) => venueOffered(option.value)),
+            ]}
+            selected={[filters.venueType ?? ANY]}
+            onToggle={(value) => onChange({ ...filters, venueType: value === ANY ? null : value })}
+          />
+        ) : null}
+        <ToggleChips<FilterableFoodAttribute>
+          label={msg.attributesLabel}
+          heading={
+            <p className="filter-heading">
+              <ShieldIcon size={20} />
+              {msg.attributesLabel}
+            </p>
+          }
+          aside={<span className="tag tag--reviewed">{msg.hpbWording}</span>}
+          options={[
+            { value: "HIGHER_IN_WHOLEGRAINS", label: msg.attrWholegrains },
+            { value: "LOWER_IN_SUGAR", label: msg.attrLowerSugar },
+            { value: "LOWER_IN_CALORIES", label: msg.attrLowerCalories },
+          ]}
+          selected={filters.attribute ? [filters.attribute] : []}
+          onToggle={(value) => onChange({ ...filters, attribute: filters.attribute === value ? null : value })}
+        />
+        <p className="provenance-line">{msg.attributesNote}</p>
+      </div>
     </section>
   );
 }
@@ -261,19 +286,22 @@ export function NearbyFoodScreen({ messages, locale, discovery, navigate }: Near
         <FoodStateView state={state} messages={messages} locale={locale} port={port} controller={controller} />
       </div>
 
-      <section className="general-food-card" aria-labelledby="general-food-heading">
-        <h2 id="general-food-heading" className="general-food-title">
-          <BookIcon size={24} />
-          {msg.generalInfoTitle}
-        </h2>
-        <p className="tag tag--reviewed">{msg.generalInfoLimit}</p>
-        <p className="medication-text">{msg.reviewedInfoUnavailable}</p>
-        <button type="button" className="more-row food-general-link" onClick={() => navigate("GENERAL_FOOD_INFORMATION")}>
-          <BookIcon size={28} className="icon more-row-icon" />
-          <span className="more-row-label">{msg.generalInfoAction}</span>
-          <ChevronRightIcon size={22} className="icon more-row-chevron" />
-        </button>
-      </section>
+      {/* Owner decision 2026-10-12: hidden until reviewed general food information exists. */}
+      {SHOW_GENERAL_FOOD_INFORMATION ? (
+        <section className="general-food-card" aria-labelledby="general-food-heading">
+          <h2 id="general-food-heading" className="general-food-title">
+            <BookIcon size={24} />
+            {msg.generalInfoTitle}
+          </h2>
+          <p className="tag tag--reviewed">{msg.generalInfoLimit}</p>
+          <p className="medication-text">{msg.reviewedInfoUnavailable}</p>
+          <button type="button" className="more-row food-general-link" onClick={() => navigate("GENERAL_FOOD_INFORMATION")}>
+            <BookIcon size={28} className="icon more-row-icon" />
+            <span className="more-row-label">{msg.generalInfoAction}</span>
+            <ChevronRightIcon size={22} className="icon more-row-chevron" />
+          </button>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -475,12 +503,14 @@ function ResultsMap({
   results,
   onSelect,
   onUnavailable,
+  selectedId = null,
 }: {
   messages: AppMessages;
   port: NearbyFoodDiscoveryPort;
   results: ResultSet;
   onSelect: (placeId: string) => void;
   onUnavailable: () => void;
+  selectedId?: string | null;
 }) {
   const map = port.profile.map;
   if (map.kind === "ONEMAP_TILES" && results.source === "LIVE") {
@@ -491,6 +521,7 @@ function ResultsMap({
         origin={results.origin}
         places={results.places.map((place, index) => ({ id: place.id, name: place.name, number: index + 1, coordinates: place.coordinates }))}
         onSelect={onSelect}
+        selectedId={selectedId}
         onUnavailable={onUnavailable}
       />
     );
@@ -631,55 +662,101 @@ function FoodStateView({
         </Banner>
       );
 
-    // State 12: venue details after a deliberate selection.
+    // State 12: venue details after a deliberate selection. Chosen from the map, the details open under the same map
+    // (owner decision 2026-10-12): the map stays mounted at the same position, the pin is highlighted and Close returns to it.
     case "VENUE_DETAILS": {
-      const { place, results } = state;
-      const synthetic = place.venueSource.kind === "SYNTHETIC_FIXTURE";
+      const back = state.returnTo;
+      const underMap = back.view === "map" && !back.mapFailed;
+      const details = <VenueDetails messages={messages} port={port} controller={controller} place={state.place} results={state.results} underMap={underMap} />;
+      if (!underMap) return details;
       return (
-        <article className="venue-details" aria-labelledby="venue-details-name">
-          <p className="eyebrow">{msg.detailsTitle}</p>
-          <h2 id="venue-details-name" className="venue-details-name">
-            {place.name}
-          </h2>
-          <dl className="venue-facts">
-            <div>
-              <dt className="sr-only">{msg.locationLabel}</dt>
-              <dd className="venue-address">
-                <PinIcon size={18} />
-                {place.address}
-              </dd>
-            </div>
-            <div>
-              <dt>{msg.distanceLabel}</dt>
-              <dd>{formatDistance(place.distanceMetres)}</dd>
-            </div>
-            {place.venueType ? (
-              <div>
-                <dt>{msg.venueTypeLabel}</dt>
-                <dd>{venueTypeLabel(messages, place.venueType)}</dd>
-              </div>
-            ) : null}
-            {place.cuisineLabels.length > 0 ? (
-              <div>
-                <dt>{msg.cuisineLabel}</dt>
-                <dd>{place.cuisineLabels.join(" · ")}</dd>
-              </div>
-            ) : null}
-          </dl>
-          <p className="provenance-line venue-provenance">
-            <PhoneIcon size={16} />
-            {msg.checkAvailability}
-          </p>
-          <GovernedAttributes messages={messages} place={place} directory={results.directory} />
-          {synthetic ? <Notice>{msg.directionsUnavailable}</Notice> : null}
-          <p className="source-attr">{synthetic || port.profile.map.kind !== "ONEMAP_TILES" ? msg.syntheticMapAttribution : msg.oneMapAttribution}</p>
-          <DirectorySources messages={messages} directory={results.directory} />
-          <Button variant="outline" onClick={controller.backFromDetails}>
-            <ListIcon size={20} />
-            {msg.viewList}
-          </Button>
-        </article>
+        <>
+          {back.offline ? (
+            <Banner variant="warning" title={msg.offlineTitle}>
+              {msg.offlineBody(back.results.directory.kind === "HPB_SNAPSHOT" ? back.results.directory.criteriaDatasetDate : SYNTHETIC_SNAPSHOT_DATE)}
+            </Banner>
+          ) : null}
+          <ViewToggle messages={messages} view="map" onChange={controller.switchView} />
+          <ResultsMap messages={messages} port={port} results={back.results} onSelect={controller.selectPlace} onUnavailable={controller.reportMapUnavailable} selectedId={state.place.id} />
+          {details}
+        </>
       );
     }
   }
+}
+
+/** A place's details: under the map when chosen there (with Close), or on its own when chosen from the list. */
+function VenueDetails({
+  messages,
+  port,
+  controller,
+  place,
+  results,
+  underMap,
+}: {
+  messages: AppMessages;
+  port: NearbyFoodDiscoveryPort;
+  controller: NearbyFoodController;
+  place: NearbyFoodPlace;
+  results: ResultSet;
+  underMap: boolean;
+}) {
+  const msg = messages.food;
+  const synthetic = place.venueSource.kind === "SYNTHETIC_FIXTURE";
+  const ref = useRef<HTMLElement>(null);
+  // Under the map, bring the details into view when a pin is chosen (the map stays where it is).
+  useEffect(() => {
+    if (underMap) ref.current?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+  }, [underMap, place.id]);
+  return (
+    <article ref={ref} className="venue-details" aria-labelledby="venue-details-name">
+      <p className="eyebrow">{msg.detailsTitle}</p>
+      <h2 id="venue-details-name" className="venue-details-name">
+        {place.name}
+      </h2>
+      <dl className="venue-facts">
+        <div>
+          <dt className="sr-only">{msg.locationLabel}</dt>
+          <dd className="venue-address">
+            <PinIcon size={18} />
+            {place.address}
+          </dd>
+        </div>
+        <div>
+          <dt>{msg.distanceLabel}</dt>
+          <dd>{formatDistance(place.distanceMetres)}</dd>
+        </div>
+        {place.venueType ? (
+          <div>
+            <dt>{msg.venueTypeLabel}</dt>
+            <dd>{venueTypeLabel(messages, place.venueType)}</dd>
+          </div>
+        ) : null}
+        {place.cuisineLabels.length > 0 ? (
+          <div>
+            <dt>{msg.cuisineLabel}</dt>
+            <dd>{place.cuisineLabels.join(" · ")}</dd>
+          </div>
+        ) : null}
+      </dl>
+      <p className="provenance-line venue-provenance">
+        <PhoneIcon size={16} />
+        {msg.checkAvailability}
+      </p>
+      <GovernedAttributes messages={messages} place={place} directory={results.directory} />
+      {synthetic ? <Notice>{msg.directionsUnavailable}</Notice> : null}
+      <p className="source-attr">{synthetic || port.profile.map.kind !== "ONEMAP_TILES" ? msg.syntheticMapAttribution : msg.oneMapAttribution}</p>
+      <DirectorySources messages={messages} directory={results.directory} />
+      {underMap ? (
+        <Button variant="outline" onClick={controller.backFromDetails}>
+          {messages.shared.close}
+        </Button>
+      ) : (
+        <Button variant="outline" onClick={controller.backFromDetails}>
+          <ListIcon size={20} />
+          {msg.viewList}
+        </Button>
+      )}
+    </article>
+  );
 }

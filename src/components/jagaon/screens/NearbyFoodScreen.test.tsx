@@ -49,10 +49,12 @@ function port(overrides: PortOverrides = {}) {
   return { profile: overrides.profile ?? base.profile, ...spies } satisfies NearbyFoodDiscoveryPort;
 }
 
-function show(discovery: NearbyFoodDiscoveryPort, locale: "en-SG" | "zh-SG" = "en-SG") {
+function show(discovery: NearbyFoodDiscoveryPort, locale: "en-SG" | "zh-SG" = "en-SG", options: { openFilters?: boolean } = {}) {
   const messages = getMessages(locale);
   const navigate = vi.fn();
   const view = render(<NearbyFoodScreen messages={messages} locale={locale} discovery={discovery} goBack={vi.fn()} navigate={navigate} />);
+  // The filters start folded away (owner decision 2026-10-12); most tests work with them open.
+  if (options.openFilters ?? true) fireEvent.click(screen.getByRole("button", { name: messages.food.filtersHeading }));
   return { messages, navigate, view };
 }
 
@@ -265,14 +267,12 @@ describe("NearbyFoodScreen on the provider-neutral port", () => {
     expect(discovery.findNearby).not.toHaveBeenCalled();
   });
 
-  it("shows the directory as unavailable without inventing venues and keeps general information reachable", async () => {
+  it("shows the directory as unavailable without inventing venues", async () => {
     const discovery = port({ findNearby: async () => ({ kind: "UNAVAILABLE", reason: "SNAPSHOT_UNAVAILABLE" }) as NearbyFoodResult });
-    const { navigate } = show(discovery);
+    show(discovery);
     search("123456");
     expect(await screen.findByText(en.food.directoryUnavailableTitle)).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: /places found/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: en.food.generalInfoAction }));
-    expect(navigate).toHaveBeenCalledWith("GENERAL_FOOD_INFORMATION");
   });
 
   it("labels offline results with the bundled dataset date", async () => {
@@ -297,6 +297,30 @@ describe("NearbyFoodScreen on the provider-neutral port", () => {
     expect(within(details).getByText(en.food.oneMapAttribution)).toBeInTheDocument();
     fireEvent.click(within(details).getByRole("button", { name: en.food.viewList }));
     expect(screen.getByRole("list", { name: en.food.resultsCount(2) })).toBeInTheDocument();
+  });
+
+  it("keeps the map on screen when a pin is chosen: the details open under it, another pin replaces them, Close returns to the map (owner decision 2026-10-12)", async () => {
+    show(port());
+    await useGps();
+    const map = await screen.findByRole("region", { name: en.food.viewMap });
+    const pins = within(map).getAllByRole("button");
+    fireEvent.click(pins[0]!);
+    // The same map element stays mounted; the details sit under it.
+    expect(screen.getByRole("region", { name: en.food.viewMap })).toBe(map);
+    const first = screen.getByRole("article");
+    const firstName = within(first).getByRole("heading").textContent;
+    expect(map.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(within(map).getAllByRole("button")[1]!);
+    expect(within(screen.getByRole("article")).getByRole("heading").textContent).not.toBe(firstName);
+    expect(screen.getByRole("region", { name: en.food.viewMap })).toBe(map);
+    fireEvent.click(within(screen.getByRole("article")).getByRole("button", { name: en.shared.close }));
+    expect(screen.queryByRole("article")).toBeNull();
+    expect(screen.getByRole("region", { name: en.food.viewMap })).toBe(map);
+    // From the details, the List toggle closes them and shows the list.
+    fireEvent.click(within(map).getAllByRole("button")[0]!);
+    fireEvent.click(screen.getByRole("button", { name: en.food.viewList }));
+    expect(screen.queryByRole("article")).toBeNull();
+    expect(screen.queryByRole("region", { name: en.food.viewMap })).toBeNull();
   });
 
   it("keeps the disabled directions control and synthetic wording only for synthetic places", async () => {
@@ -338,15 +362,34 @@ describe("NearbyFoodScreen on the provider-neutral port", () => {
     ["live search unavailable", (m) => m.food.liveGeocoderUnavailable, { resolveManualLocation: async () => ({ kind: "UNAVAILABLE", reason: "OFFLINE" }) as LocationResolution }, (m) => () => search("Toa Payoh", m)],
   ];
 
-  it.each(STATES)("renders the %s state in both locales with general information reachable", async (_name, text, overrides, arrange) => {
+  it.each(STATES)("renders the %s state in both locales, with the general food information card hidden", async (_name, text, overrides, arrange) => {
     for (const locale of ["en-SG", "zh-SG"] as const) {
       const messages = getMessages(locale);
       show(port(overrides), locale);
       await arrange(messages)();
       expect((await screen.findAllByText(text(messages))).length).toBeGreaterThan(0);
-      expect(screen.getByRole("button", { name: messages.food.generalInfoAction })).toBeInTheDocument();
-      expect(screen.getByText(messages.food.reviewedInfoUnavailable)).toBeInTheDocument();
+      // Owner decision 2026-10-12: hidden until reviewed general food information exists.
+      expect(screen.queryByRole("button", { name: messages.food.generalInfoAction })).toBeNull();
+      expect(screen.queryByText(messages.food.reviewedInfoUnavailable)).toBeNull();
       cleanup();
     }
+  });
+
+  it("folds the filters away at first, opens and closes them with one button, and names the active choices while closed (owner decision 2026-10-12)", () => {
+    show(port(), "en-SG", { openFilters: false });
+    const toggle = screen.getByRole("button", { name: en.food.filtersHeading });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("group", { name: en.food.distanceLabel })).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(within(screen.getByRole("group", { name: en.food.distanceLabel })).getByRole("button", { name: en.food.within("500 m") }));
+    fireEvent.click(within(screen.getByRole("group", { name: en.food.attributesLabel })).getByRole("button", { name: en.food.attrWholegrains }));
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("group", { name: en.food.distanceLabel })).toBeNull();
+    expect(screen.getByText(`${en.food.within("500 m")} · ${en.food.attrWholegrains}`)).toBeInTheDocument();
+    // Reset stays reachable while closed.
+    fireEvent.click(screen.getByRole("button", { name: en.food.resetFilters }));
+    expect(screen.queryByText(`${en.food.within("500 m")} · ${en.food.attrWholegrains}`)).toBeNull();
   });
 });

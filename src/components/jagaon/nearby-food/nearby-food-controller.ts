@@ -186,23 +186,24 @@ export function createNearbyFoodController(port: NearbyFoodDiscoveryPort): Nearb
     },
 
     switchView(view: "map" | "list") {
-      if (state.kind !== "RESULTS") return;
+      // From a place's details shown under the map, switching view closes the details (owner decision 2026-10-12).
+      const from = state.kind === "VENUE_DETAILS" ? state.returnTo : state;
+      if (from.kind !== "RESULTS") return;
       if (scope?.kind === "ORIGIN") scope = { ...scope, view };
-      set({ ...state, view });
+      set({ ...from, view });
     },
 
     selectPlace(placeId: string) {
-      const from = state;
-      const results = from.kind === "RESULTS" ? from.results : null;
-      const place = results?.places.find((entry) => entry.id === placeId);
-      if (!results || !place) return;
-      const returnTo: Extract<NearbyFoodScreenState, { kind: "RESULTS" }> =
-        from.kind === "RESULTS" ? from : { kind: "RESULTS", view: "list", results, mapFailed: false, offline: !port.isOnline() };
-      set({ kind: "VENUE_DETAILS", place, results, returnTo });
+      // Owner decision 2026-10-12: another pin chosen while a place's details are open replaces the details; the map stays.
+      const returnTo = state.kind === "RESULTS" ? state : state.kind === "VENUE_DETAILS" ? state.returnTo : null;
+      const place = returnTo?.results.places.find((entry) => entry.id === placeId);
+      if (!returnTo || !place) return;
+      set({ kind: "VENUE_DETAILS", place, results: returnTo.results, returnTo });
     },
 
     backFromDetails() {
-      if (state.kind === "VENUE_DETAILS") set({ ...state.returnTo, view: "list" });
+      // Back to the view the place was chosen from: the map for a pin, the list for a list item.
+      if (state.kind === "VENUE_DETAILS") set(state.returnTo);
     },
 
     reportMapUnavailable() {

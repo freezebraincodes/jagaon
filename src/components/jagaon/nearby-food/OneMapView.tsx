@@ -14,9 +14,13 @@ type Props = {
   origin: Coordinates;
   places: readonly MapPlace[];
   onSelect: (placeId: string) => void;
+  /** The place whose details are open; its marker is highlighted without rebuilding the map. */
+  selectedId?: string | null;
   /** Called once when tiles cannot be shown; the caller keeps the list. */
   onUnavailable: () => void;
 };
+
+const SELECTED_MARKER = "onemap-marker--selected";
 
 /** Failed tiles tolerated before any tile has loaded. */
 const TILE_FAILURE_LIMIT = 3;
@@ -27,17 +31,24 @@ const TILE_FAILURE_LIMIT = 3;
  * markers are keyboard-focusable, and repeated tile failure hands control
  * back to the list rather than showing a blank or invented map.
  */
-export function OneMapView({ messages, descriptor, origin, places, onSelect, onUnavailable }: Props) {
+export function OneMapView({ messages, descriptor, origin, places, onSelect, selectedId = null, onUnavailable }: Props) {
   const msg = messages.food;
   const containerRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
   const selectRef = useRef(onSelect);
   const unavailableRef = useRef(onUnavailable);
+  const selectedRef = useRef(selectedId);
+  const markersRef = useRef(new Map<string, { getElement(): HTMLElement | undefined }>());
 
   useEffect(() => {
     selectRef.current = onSelect;
     unavailableRef.current = onUnavailable;
   }, [onSelect, onUnavailable]);
+
+  useEffect(() => {
+    selectedRef.current = selectedId;
+    for (const [id, marker] of markersRef.current) marker.getElement()?.classList.toggle(SELECTED_MARKER, id === selectedId);
+  }, [selectedId]);
 
   const placesKey = JSON.stringify(places.map((place) => [place.id, place.number, place.coordinates.latitude, place.coordinates.longitude]));
 
@@ -79,16 +90,22 @@ export function OneMapView({ messages, descriptor, origin, places, onSelect, onU
           })
           .addTo(map);
 
+        markersRef.current.clear();
         for (const place of places) {
           const label = `${place.number} ${place.name}`;
-          L.marker([place.coordinates.latitude, place.coordinates.longitude], {
+          const marker = L.marker([place.coordinates.latitude, place.coordinates.longitude], {
             keyboard: true,
             title: label,
             alt: label,
-            icon: L.divIcon({ className: "onemap-marker", html: `<span aria-hidden="true">${place.number}</span>`, iconSize: [36, 36] }),
+            icon: L.divIcon({
+              className: `onemap-marker${place.id === selectedRef.current ? ` ${SELECTED_MARKER}` : ""}`,
+              html: `<span aria-hidden="true">${place.number}</span>`,
+              iconSize: [36, 36],
+            }),
           })
             .on("click", () => selectRef.current(place.id))
             .addTo(map);
+          markersRef.current.set(place.id, marker);
         }
         if (places.length > 0) {
           map.fitBounds(

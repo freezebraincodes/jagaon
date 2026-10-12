@@ -2884,6 +2884,52 @@ button.summary-tile:hover:not(:disabled) {
   gap: 12px;
 }
 
+/* Owner decision 2026-10-12: the filters fold away behind one toggle so the map shows at once. */
+.food-filters-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--tap);
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.food-filters-toggle:focus-visible {
+  outline: 3px solid var(--terracotta);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.food-filters-chevron {
+  transition: transform 0.15s ease;
+}
+
+.food-filters-chevron--open {
+  transform: rotate(90deg);
+}
+
+.food-filters-summary {
+  margin: -10px 0 0;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.food-filters-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.food-filters-panel[hidden] {
+  display: none;
+}
+
 .filter-heading {
   display: inline-flex;
   align-items: center;
@@ -4743,6 +4789,13 @@ button.summary-tile:hover:not(:disabled) {
   font-weight: 800;
   font-size: 1rem;
   box-shadow: 0 1px 3px rgba(43, 38, 32, 0.35);
+}
+
+.onemap-marker--selected {
+  background: var(--ink);
+  z-index: 1000 !important;
+  transform-origin: center;
+  box-shadow: 0 0 0 3px var(--terracotta), 0 2px 6px rgba(43, 38, 32, 0.45);
 }
 
 .onemap-marker:focus-visible {
