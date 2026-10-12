@@ -7,10 +7,10 @@ export const enSGMessages: AppMessages = {
   ai: {
     cancel: "Cancel",
     remoteTitle: "Use AI for this synthetic demo?",
-    // ai-disclosure.11c.1: replaces the approved row (it named Kie.ai and said the selected information is sent); the route is Direct
-    // DeepSeek (D2) and the request is value-blind. Human acceptance pending.
+    // ai-disclosure.11c.2: replaces the approved row (it named Kie.ai and said the selected information is sent); the request is
+    // value-blind. Owner decision 2026-10-12: says "AI" and names no provider (11c.1 named DeepSeek). Owner wording, verbatim.
     remoteBody:
-      "To suggest wording, JagaOn sends DeepSeek a request that contains no values, dates, names or your own text. JagaOn fills in your records itself and checks the result before showing it.",
+      "To suggest wording, JagaOn sends AI a request that contains no values, dates, names or your own text. JagaOn fills in your records itself and checks the result before showing it.",
     remoteLimit: "Do not enter real patient information in this hackathon demo.",
     pattern: { confirm: "Generate explanation" },
     // Packet 11C B4b: the approved care-summary rows (matrix Section 4), exact; `notEligible` is new (ai-care-summary.11c.1), human
@@ -39,12 +39,12 @@ export const enSGMessages: AppMessages = {
   aiAccess: {
     passcodeLabel: "Demo passcode",
   },
-  // ai-wording-setting.11c.2 (Packet 11C Addendum C, C2): the label is fixed by the hybrid spec (D11). The line is owner-decided wording
+  // ai-wording-setting.11c.3 (Packet 11C Addendum C, C2; owner decision 2026-10-12: "AI" replaces the provider name in 11c.2): the label is fixed by the hybrid spec (D11). The line is owner-decided wording
   // (owner UI decision U05, 2026-10-09, owner-ui-decisions-2026-10-09.md, verbatim; replaces the 11c.1 candidate). Not an
   // APPROVED_PACKET_11 row.
   aiWording: {
     keepOnDeviceLabel: "Keep wording on this device",
-    keepOnDeviceBody: "When on, pattern explanations and visit summaries use JagaOn’s standard wording without requesting DeepSeek wording. This setting does not control voice transcription.",
+    keepOnDeviceBody: "When on, pattern explanations and visit summaries use JagaOn’s standard wording without requesting AI wording. This setting does not control voice transcription.",
   },
   // ai-history-fallback.11c.1: owner-decided wording (owner UI decision U12, 2026-10-09, owner-ui-decisions-2026-10-09.md, verbatim). Not
   // an APPROVED_PACKET_11 row.

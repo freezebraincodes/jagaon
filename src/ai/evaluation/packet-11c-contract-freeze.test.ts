@@ -226,7 +226,8 @@ const FROZEN = Object.freeze({
     templatesWithAiMarking: ["care-summary-template.11c.2"],
     aiMarkingTextSha256: { "en-SG": "119705928ff2eac844db81bbf2eaa45e9f2bbbe8cd6488f4bab686ad02aee297", "zh-SG": "f2efac82ab2cffd171954a26fcdd9fd716133e6ab99daf5631fbea60b090c5b1" },
   },
-  disclosureCopy: { label: "ai-disclosure.11c.1", rowsSha256: "aa65470dd59aa8122f81e7e77dcb105c9724b6541696eb9b23af9d3c84300df1" },
+  // Owner decision 2026-10-12 (deliberate): the disclosure says "AI" and names no provider, 11c.1 -> 11c.2. Not model-facing.
+  disclosureCopy: { label: "ai-disclosure.11c.2", rowsSha256: "469d87ccabdffc952334193bc3de5b174985a855621b04cbd212acc2ef543177" },
   shellRoute: {
     path: "/api/ai/shell",
     providerKey: "deepseek",
@@ -311,7 +312,7 @@ const FROZEN = Object.freeze({
   remoteUseDisclosure: {
     policy: "ai-disclosure-policy.11c.2-per-request",
     behaviour: { duringAcceptedRequest: "ACCEPTED", afterThatRequestSettles: "NOT_ACCEPTED", laterRequestOnSameTokenWithoutDecision: "NOT_ACCEPTED", otherToken: "NOT_ACCEPTED", afterTokenAborts: "NOT_ACCEPTED", declined: "DECLINED", interimDefault: "NOT_ACCEPTED" },
-    dialogCopyLabel: "ai-disclosure.11c.1",
+    dialogCopyLabel: "ai-disclosure.11c.2",
     passcodeFieldRowsSha256: "3464497896470f9c7db7c8e0850c1ef8ec5591631f4006a26f56328d71996014",
   },
   // CL3 re-freeze (C6; label introduced in RF): names and order only, never a value.
@@ -333,12 +334,13 @@ const FROZEN = Object.freeze({
     ],
     notSentMarker: { field: "notSentToProvider", value: true, preCallAnswersCarryingIt: 8, afterCallAnswerKeys: ["kind", "reason", "usage"] },
   },
-  // CL3 re-freeze (C2): the private wording setting. The copy group moved 11c.1 -> 11c.2 by owner decisions U04/U05 (2026-10-09).
+  // CL3 re-freeze (C2): the private wording setting. The copy group moved 11c.1 -> 11c.2 by owner decisions U04/U05 (2026-10-09), then
+  // 11c.2 -> 11c.3 by owner decision 2026-10-12 ("AI" replaces the provider name; not model-facing).
   privateWording: {
     preferenceRow: { key: "keepWordingOnDevice", schemaVersion: "app-preference.keep-wording.11c.1" },
     backupPayload: { format: "jagaon-backup-payload", schemaVersion: 2, previousSchemaVersion: 1 },
     migrations: [{ migrationId: "jagaon.backup.0001-patient-settings", from: 1, to: 2 }],
-    copy: { label: "ai-wording-setting.11c.2", rowsSha256: "5b29366cbd41d54229a03e58554b6b8e37bfb79fb2964eddaa99ff7ca099f5d1" },
+    copy: { label: "ai-wording-setting.11c.3", rowsSha256: "5568d1a5f085d4a9d28e17facd799880a2419d5a7126971539eff0862aeb78b3" },
   },
   // CL3 re-freeze (owner decision U12): the history fallback line after an attempted remote request.
   historyFallback: { copy: { label: "ai-history-fallback.11c.1", rowsSha256: "87a23aac11ad7e0560ce034542ea72559d2d0bcb8cb25c32678eab421a60cf17" } },

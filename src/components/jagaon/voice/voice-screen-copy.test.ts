@@ -22,6 +22,8 @@ describe("voice-copy.13s.2 (screen-local; human acceptance pending)", () => {
       expect(strings.length).toBeGreaterThan(40);
       for (const text of strings) {
         expect(text, text).not.toMatch(/PENDING|TODO|TBD|lorem/i);
+        // Owner decision 2026-10-12: the copy says "AI" and names no provider.
+        expect(text, text).not.toMatch(/DeepSeek|Kie\b|Kie\.ai|Grok|OpenAI|Gemini|Claude/i);
         expect(text.trim().length, text).toBeGreaterThan(0);
       }
     });
@@ -29,10 +31,10 @@ describe("voice-copy.13s.2 (screen-local; human acceptance pending)", () => {
 
   it("uses the coordinator's exact remote-extraction disclosure wording", () => {
     expect(voiceScreenCopy(getMessages("en-SG"), "en-SG").remote.disclosure).toBe(
-      "If you choose this, the text of what you said (not the recording) is sent to DeepSeek, an AI service, to suggest what to fill in. JagaOn does not keep the text. You still check and confirm each item; nothing is saved automatically.",
+      "If you choose this, the text of what you said (not the recording) is sent to an AI service to suggest what to fill in. JagaOn does not keep the text. You still check and confirm each item; nothing is saved automatically.",
     );
     expect(voiceScreenCopy(getMessages("zh-SG"), "zh-SG").remote.disclosure).toBe(
-      "如果您选择这一项，您说的话的文字（不是录音）会发送给 AI 服务 DeepSeek，用来建议要填写的内容。JagaOn 不保存这些文字。每一项仍由您检查和确认，不会自动保存。",
+      "如果您选择这一项，您说的话的文字（不是录音）会发送给 AI 服务，用来建议要填写的内容。JagaOn 不保存这些文字。每一项仍由您检查和确认，不会自动保存。",
     );
   });
 });

@@ -310,7 +310,7 @@ describe("catalogue wording boundaries", () => {
     expect(`${en} ${zh}`).not.toMatch(/9c|11c|template|renderer|SUMMARY_|模板/i);
   });
 
-  it("pins the Packet 11 shared AI disclosure copy (ai.*): the approved rows exactly, the corrected remoteBody (ai-disclosure.11c.1), en/zh parity", () => {
+  it("pins the Packet 11 shared AI disclosure copy (ai.*): the approved rows exactly, the corrected remoteBody (ai-disclosure.11c.2), en/zh parity", () => {
     const en = getMessages("en-SG").ai;
     const zh = getMessages("zh-SG").ai;
     // Packet 11C B4b (deliberate): plus the shared fallback rows and the care-summary flow rows (pinned in the next test).
@@ -331,9 +331,10 @@ describe("catalogue wording boundaries", () => {
         remoteLimit: "Do not enter real patient information in this hackathon demo.",
         pattern: { confirm: "Generate explanation" },
         careSummary: { confirm: "Organise selected information" },
-        // ai-disclosure.11c.1 (coordinator ruling, human acceptance pending): replaces the approved row, which named Kie.ai and said the
-        // selected information is sent. The route is Direct DeepSeek (D2) and the request is value-blind.
-        remoteBody: "To suggest wording, JagaOn sends DeepSeek a request that contains no values, dates, names or your own text. JagaOn fills in your records itself and checks the result before showing it.",
+        // ai-disclosure.11c.2 (owner wording 2026-10-12): replaces the approved row, which named Kie.ai and said the
+        // selected information is sent. The request is value-blind. Owner decision 2026-10-12: the copy says "AI" and names no provider,
+        // so the model can change without a copy change.
+        remoteBody: "To suggest wording, JagaOn sends AI a request that contains no values, dates, names or your own text. JagaOn fills in your records itself and checks the result before showing it.",
         // ai-remote-use.11c.1 (Packet 11C B4a; human acceptance pending): the result when the disclosure was not accepted (nothing sent).
         remoteNotAccepted: "AI wording was not used. This is JagaOn's standard wording.",
       },
@@ -343,7 +344,7 @@ describe("catalogue wording boundaries", () => {
         remoteLimit: "请勿在此黑客松演示中输入真实病患资料。",
         pattern: { confirm: "生成说明" },
         careSummary: { confirm: "整理所选资料" },
-        remoteBody: "为了建议措辞，JagaOn 会向 DeepSeek 发送一个不包含数值、日期、姓名或您自己文字的请求。JagaOn 会自行填入您的记录，并在显示前检查结果。",
+        remoteBody: "为了建议措辞，JagaOn 会向 AI 发送一个不包含数值、日期、姓名或您自己文字的请求。JagaOn 会自行填入您的记录，并在显示前检查结果。",
         remoteNotAccepted: "未使用 AI 措辞。以下是 JagaOn 的标准措辞。",
       },
     });
@@ -355,14 +356,14 @@ describe("catalogue wording boundaries", () => {
       expect(text).not.toMatch(/你/);
     }
     expect(zh.remoteBody).toContain("您");
-    // The old route name is gone; the disclosure names the evaluated route and claims no consent, confidentiality, storage or deletion.
+    // The disclosure names no AI provider (owner decision 2026-10-12) and claims no consent, confidentiality, storage or deletion.
     for (const text of [...enStrings, ...zhStrings]) {
-      expect(text).not.toMatch(/Kie/i);
+      expect(text).not.toMatch(/Kie|DeepSeek/i);
       expect(text).not.toMatch(/consent|agree|confidential|private|privacy|secure|safe|stored|store|retain|delete|encrypt|medical advice|diagnos|recommend/i);
       expect(text).not.toMatch(/同意|保密|隐私|安全|保存|储存|删除|加密|建议您|诊断/);
     }
-    expect(en.remoteBody).toMatch(/DeepSeek/);
-    expect(zh.remoteBody).toMatch(/DeepSeek/);
+    expect(en.remoteBody).toContain("JagaOn sends AI a request");
+    expect(zh.remoteBody).toContain("JagaOn 会向 AI 发送");
     // Value-blind: the body denies sending values, dates, names and the person's own text, in both locales.
     expect(en.remoteBody).toMatch(/contains no values, dates, names or your own text/);
     expect(zh.remoteBody).toMatch(/不包含数值、日期、姓名或您自己文字/);

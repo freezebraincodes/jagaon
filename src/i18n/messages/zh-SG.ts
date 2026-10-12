@@ -10,9 +10,9 @@ export const zhSGMessages: AppMessages = {
   ai: {
     cancel: "取消",
     remoteTitle: "是否在此模拟演示中使用 AI？",
-    // ai-disclosure.11c.1: replaces the approved row (it named Kie.ai and said the selected information is sent); the route is Direct
-    // DeepSeek (D2) and the request is value-blind. 您 register, full-width punctuation. Human acceptance pending.
-    remoteBody: "为了建议措辞，JagaOn 会向 DeepSeek 发送一个不包含数值、日期、姓名或您自己文字的请求。JagaOn 会自行填入您的记录，并在显示前检查结果。",
+    // ai-disclosure.11c.2: replaces the approved row (it named Kie.ai and said the selected information is sent); the request is
+    // value-blind. Owner decision 2026-10-12: says "AI" and names no provider (11c.1 named DeepSeek). 您 register, full-width punctuation.
+    remoteBody: "为了建议措辞，JagaOn 会向 AI 发送一个不包含数值、日期、姓名或您自己文字的请求。JagaOn 会自行填入您的记录，并在显示前检查结果。",
     remoteLimit: "请勿在此黑客松演示中输入真实病患资料。",
     pattern: { confirm: "生成说明" },
     // Packet 11C B4b: the approved care-summary rows (matrix Section 4), exact; `notEligible` is new (ai-care-summary.11c.1; it does not
@@ -41,11 +41,11 @@ export const zhSGMessages: AppMessages = {
   aiAccess: {
     passcodeLabel: "演示通行码",
   },
-  // ai-wording-setting.11c.2 (Packet 11C Addendum C, C2): owner-decided wording (owner UI decisions U04 label and U05 line, 2026-10-09,
+  // ai-wording-setting.11c.3 (Packet 11C Addendum C, C2; owner decision 2026-10-12: "AI" replaces the provider name in 11c.2): owner-decided wording (owner UI decisions U04 label and U05 line, 2026-10-09,
   // owner-ui-decisions-2026-10-09.md, verbatim; replaces the 11c.1 candidates). Not APPROVED_PACKET_11 rows.
   aiWording: {
     keepOnDeviceLabel: "仅在此设备上生成措辞",
-    keepOnDeviceBody: "开启后，比较说明和就诊摘要使用 JagaOn 的标准措辞，不向 DeepSeek 请求措辞建议。此设置不控制语音转写。",
+    keepOnDeviceBody: "开启后，比较说明和就诊摘要使用 JagaOn 的标准措辞，不向 AI 请求措辞建议。此设置不控制语音转写。",
   },
   // ai-history-fallback.11c.1: owner-decided wording (owner UI decision U12, 2026-10-09, owner-ui-decisions-2026-10-09.md, verbatim). Not
   // an APPROVED_PACKET_11 row.

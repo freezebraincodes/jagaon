@@ -118,11 +118,11 @@ describe("Packet 11C C2: Keep wording on this device copy (ai-wording-setting.11
   it("ships exactly the spec's English label and the owner's U04/U05 strings, byte for byte", () => {
     expect(getMessages("en-SG").aiWording).toEqual({
       keepOnDeviceLabel: "Keep wording on this device",
-      keepOnDeviceBody: "When on, pattern explanations and visit summaries use JagaOn’s standard wording without requesting DeepSeek wording. This setting does not control voice transcription.",
+      keepOnDeviceBody: "When on, pattern explanations and visit summaries use JagaOn’s standard wording without requesting AI wording. This setting does not control voice transcription.",
     });
     expect(getMessages("zh-SG").aiWording).toEqual({
       keepOnDeviceLabel: "仅在此设备上生成措辞",
-      keepOnDeviceBody: "开启后，比较说明和就诊摘要使用 JagaOn 的标准措辞，不向 DeepSeek 请求措辞建议。此设置不控制语音转写。",
+      keepOnDeviceBody: "开启后，比较说明和就诊摘要使用 JagaOn 的标准措辞，不向 AI 请求措辞建议。此设置不控制语音转写。",
     });
   });
 
@@ -348,6 +348,22 @@ describe("Packet 9C care-summary copy (09-bilingual-copy-matrix.md Section 4)", 
   it("makes no positive delivery, receipt, review or clinical claim in Chinese", () => {
     for (const [key, text] of texts(zh)) {
       expect([key, text]).not.toEqual([key, expect.stringMatching(/已发送|已送达|已收到|医护人员已审核|诊所已确认|逾期|应做|符合资格|建议|诊断|原因|风险|依从性/)]);
+    }
+  });
+});
+
+describe("AI provider naming (owner decision 2026-10-12)", () => {
+  /** Every string a catalogue can render, functions called with sample arguments. */
+  const strings = (value: unknown, out: string[] = []): string[] => {
+    if (typeof value === "string") out.push(value);
+    else if (typeof value === "function") out.push(String((value as (...args: unknown[]) => unknown)(3, "X", 2)));
+    else if (value && typeof value === "object") for (const child of Object.values(value)) strings(child, out);
+    return out;
+  };
+
+  it("no rendered string names an AI provider in either locale, so the model can change without a copy change", () => {
+    for (const locale of ["en-SG", "zh-SG"] as const) {
+      for (const text of strings(getMessages(locale))) expect(text, text).not.toMatch(/DeepSeek|Kie\b|Kie\.ai|Grok|OpenAI|Gemini|Claude/i);
     }
   });
 });
