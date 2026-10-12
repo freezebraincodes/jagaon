@@ -11,7 +11,7 @@ import {
   sortPlacesByDistance,
   type NearbyFoodPlace,
 } from "./nearby-food-contracts";
-import { createSyntheticNearbyFood, SYNTHETIC_ORIGIN, SYNTHETIC_PLACES } from "./synthetic-nearby-food";
+import { createSyntheticNearbyFood, SYNTHETIC_FIXTURE_VERSION, SYNTHETIC_ORIGIN, SYNTHETIC_PLACES } from "./synthetic-nearby-food";
 
 const place = (overrides: Partial<NearbyFoodPlace> = {}): NearbyFoodPlace => ({
   id: "p-1",
@@ -125,7 +125,11 @@ describe("synthetic adapter on the shared contract", () => {
       expect(nearbyFoodPlaceSchema.safeParse(entry).success).toBe(true);
       expect(entry.venueSource.kind).toBe("SYNTHETIC_FIXTURE");
       expect(entry.governedAttributes).toEqual([]);
-      expect(entry.name).toMatch(/\(demo\)$/);
+      // Owner decision 2026-10-12: names carry no "(demo)" suffix; the synthetic
+      // fixture source and the "(synthetic)" address remain the visible proof.
+      expect(entry.venueSource).toEqual({ kind: "SYNTHETIC_FIXTURE", fixtureVersion: SYNTHETIC_FIXTURE_VERSION });
+      expect(entry.address).toMatch(/\(synthetic\)$/);
+      expect(entry.name).not.toMatch(/\(demo\)/);
     }
     expect(result.directory).toEqual({ kind: "SYNTHETIC" });
     expect(await synthetic.resolveManualLocation("ab")).toMatchObject({ kind: "AMBIGUOUS" });

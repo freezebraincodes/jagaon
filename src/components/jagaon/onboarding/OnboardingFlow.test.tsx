@@ -131,7 +131,7 @@ describe("onboarding welcome", () => {
     click(en.onboarding.usePrepared);
     expect(saves).toHaveLength(1);
     expect(saves[0]).toMatchObject({ status: "COMPLETED", locale: "en-SG" });
-    expect(saves[0]!.medicines.map((m) => m.displayName)).toEqual(["Nocturin pen (demo)", "Veltora pen (demo)"]);
+    expect(saves[0]!.medicines.map((m) => m.displayName)).toEqual(["Nocturin pen", "Veltora pen"]);
     expect(onExit).toHaveBeenCalledWith({ state: saves[0], destination: "TODAY" });
     expect(storage.getItem(DEMO_ONBOARDING_STORAGE_KEY)).not.toBeNull();
   });
@@ -146,12 +146,12 @@ describe("onboarding primary flow", () => {
     expect(progress()).toHaveAttribute("aria-valuenow", "1");
     expect(progress()).toHaveAttribute("aria-valuetext", en.onboarding.stepOf(1, 5));
     expect(screen.getByRole("heading", { level: 1, name: en.onboarding.profileTitle })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/Preferred name/), { target: { value: "Mdm Tan (demo)" } });
+    fireEvent.change(screen.getByLabelText(/Preferred name/), { target: { value: "Mdm Tan" } });
     click(en.shared.continue);
     expect(saves.at(-1)).toMatchObject({
       status: "IN_PROGRESS",
       lastCompletedStep: "PROFILE",
-      preferredName: "Mdm Tan (demo)",
+      preferredName: "Mdm Tan",
       medicines: [],
     });
 
@@ -163,12 +163,12 @@ describe("onboarding primary flow", () => {
 
     // Step 3 — fictional selection.
     expect(progress()).toHaveAttribute("aria-valuenow", "3");
-    fireEvent.click(screen.getByRole("radio", { name: /Nocturin pen \(demo\)/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Nocturin pen/ }));
     click(en.shared.continue);
     expect(saves.at(-1)).toMatchObject({ lastCompletedStep: "ADD_MEDICINE" });
     expect(saves.at(-1)!.medicines[0]).toMatchObject({
       catalogueKey: "nocturin-pen-demo",
-      displayName: "Nocturin pen (demo)",
+      displayName: "Nocturin pen",
       genericName: "insulin glargine",
       reviewedContentKey: "insulin-glargine",
       form: null,
@@ -185,7 +185,7 @@ describe("onboarding primary flow", () => {
     // Read-only values wrap under enlarged text, so they are not single-line inputs.
     expect(medicineValue.tagName).not.toBe("INPUT");
     expect(medicineValue).toHaveAttribute("aria-readonly", "true");
-    expect(medicineValue).toHaveTextContent("Nocturin pen (demo)");
+    expect(medicineValue).toHaveTextContent("Nocturin pen");
     expect(within(about).getByText(en.medication.glarginePurpose)).toBeInTheDocument();
     expect(within(about).getByText("insulin glargine")).toBeInTheDocument();
     expect(within(about).getByRole("link", { name: /HealthHub/ })).toBeInTheDocument();
@@ -209,7 +209,7 @@ describe("onboarding primary flow", () => {
 
     // Step 5 — review.
     expect(progress()).toHaveAttribute("aria-valuenow", "5");
-    expect(screen.getByText("Mdm Tan (demo)")).toBeInTheDocument();
+    expect(screen.getByText("Mdm Tan")).toBeInTheDocument();
     expect(screen.getByText("“Inject 12 units every night at 9 pm” (demo label)")).toBeInTheDocument();
     expect(screen.getByText(en.onboarding.notMissed)).toBeInTheDocument();
     click(en.onboarding.finishSetup);
@@ -227,7 +227,7 @@ describe("onboarding primary flow", () => {
     click(en.onboarding.startSetup);
     click(en.shared.continue);
     click(en.onboarding.addMedicine);
-    fireEvent.click(screen.getByRole("radio", { name: /Veltora pen \(demo\)/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Veltora pen/ }));
     click(en.shared.continue);
     click(en.onboarding.saveRecorded);
     click(en.onboarding.finishSetup);
@@ -240,12 +240,12 @@ describe("onboarding primary flow", () => {
     click(en.onboarding.startSetup);
     click(en.shared.continue);
     click(en.onboarding.addMedicine);
-    fireEvent.click(screen.getByRole("radio", { name: /Glucotab \(demo\)/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Glucotab/ }));
     click(en.shared.continue);
     click(en.onboarding.saveRecorded);
     fireEvent.click(screen.getAllByRole("button", { name: en.shared.back }).at(-1)!);
     expect(screen.getByRole("heading", { level: 1, name: en.onboarding.medicinesTitle })).toBeInTheDocument();
-    expect(screen.getByText("Glucotab (demo)")).toBeInTheDocument();
+    expect(screen.getByText("Glucotab")).toBeInTheDocument();
     click(en.shared.continue);
     expect(saves.at(-1)).toMatchObject({ lastCompletedStep: "DIRECTIONS" });
     expect(screen.getByRole("heading", { level: 1, name: en.onboarding.reviewTitle })).toBeInTheDocument();
@@ -263,18 +263,18 @@ describe("reviewed-information evidence", () => {
     return store;
   }
 
-  it("shows reviewed aspart content only for Veltora pen (demo) with its visible generic", () => {
-    toDirections(/Veltora pen \(demo\)/);
-    expect(screen.getByRole("radio", { name: /Veltora pen \(demo\)/ })).toHaveAccessibleName(/insulin aspart/);
+  it("shows reviewed aspart content only for Veltora pen with its visible generic", () => {
+    toDirections(/Veltora pen/);
+    expect(screen.getByRole("radio", { name: /Veltora pen/ })).toHaveAccessibleName(/insulin aspart/);
     click(en.shared.continue);
     const about = screen.getByRole("region", { name: en.medication.aboutThisMedicine });
     expect(within(about).getByText(en.medication.aspartPurpose)).toBeInTheDocument();
     expect(within(about).getByText("insulin aspart")).toBeInTheDocument();
   });
 
-  it("keeps Glucotab (demo) without reviewed information", () => {
-    toDirections(/Glucotab \(demo\)/);
-    expect(screen.getByRole("radio", { name: /Glucotab \(demo\)/ })).toHaveAccessibleName(
+  it("keeps Glucotab without reviewed information", () => {
+    toDirections(/Glucotab/);
+    expect(screen.getByRole("radio", { name: /Glucotab/ })).toHaveAccessibleName(
       new RegExp(en.onboarding.reviewedUnavailableTag),
     );
     click(en.shared.continue);
@@ -301,7 +301,7 @@ describe("reviewed-information evidence", () => {
   });
 
   it("does not retain a hidden catalogue choice after the search text changes", () => {
-    const { saves } = toDirections(/Nocturin pen \(demo\)/);
+    const { saves } = toDirections(/Nocturin pen/);
     fireEvent.change(screen.getByLabelText(en.onboarding.medicineNameLabel), {
       target: { value: "Oxatril (demo)" },
     });
@@ -316,7 +316,7 @@ describe("reviewed-information evidence", () => {
   });
 
   it("never renders a placeholder token anywhere in the flow", () => {
-    toDirections(/Nocturin pen \(demo\)/);
+    toDirections(/Nocturin pen/);
     click(en.shared.continue);
     expect(document.body.textContent).not.toMatch(/\{[a-zA-Z]+\}|demo-glargine|demo-aspart/);
   });

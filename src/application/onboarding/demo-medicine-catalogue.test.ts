@@ -8,9 +8,9 @@ import {
 describe("demo medicine catalogue", () => {
   it("contains exactly the three fictional display choices, frozen", () => {
     expect(DEMO_MEDICINE_CATALOGUE.map((entry) => entry.displayName)).toEqual([
-      "Nocturin pen (demo)",
-      "Veltora pen (demo)",
-      "Glucotab (demo)",
+      "Nocturin pen",
+      "Veltora pen",
+      "Glucotab",
     ]);
     expect(Object.isFrozen(DEMO_MEDICINE_CATALOGUE)).toBe(true);
     for (const entry of DEMO_MEDICINE_CATALOGUE) expect(Object.isFrozen(entry)).toBe(true);

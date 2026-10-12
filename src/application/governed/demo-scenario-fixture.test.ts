@@ -10,12 +10,12 @@ describe("demo-scenario-fixture", () => {
   const fixture = createDemoScenarioFixture();
 
   it("defaults to the prepared synthetic profile", () => {
-    expect(fixture.displayName).toBe("Mdm Tan (demo)");
-    expect(fixture.displayNameZh).toBe("Mdm Tan (demo)");
+    expect(fixture.displayName).toBe("Mdm Tan");
+    expect(fixture.displayNameZh).toBe("Mdm Tan");
     expect(fixture.defaultLocale).toBe("en-SG");
     expect(fixture.recordedPrescriptions.map((p) => p.displayName)).toEqual([
-      "Nocturin pen (demo)",
-      "Veltora pen (demo)",
+      "Nocturin pen",
+      "Veltora pen",
     ]);
   });
 
@@ -92,7 +92,8 @@ describe("demo-scenario-fixture", () => {
     for (const food of fixture.usualFoods) {
       expect(Object.keys(food).sort()).toEqual(["id", "kind", "label", "quantityText"]);
     }
-    expect(fixture.activity.place).toContain("(demo)");
+    // Owner decision 2026-10-12: names carry no "(demo)" suffix.
+    expect(fixture.activity).toEqual({ title: "Morning walk", place: "Jelutong Park", minutes: 28 });
   });
 
   it("does not translate recorded directions", () => {

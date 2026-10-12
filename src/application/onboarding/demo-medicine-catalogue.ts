@@ -27,7 +27,7 @@ export type DemoCatalogueEntry = {
 export const DEMO_MEDICINE_CATALOGUE: readonly DemoCatalogueEntry[] = Object.freeze([
   Object.freeze({
     key: "nocturin-pen-demo",
-    displayName: "Nocturin pen (demo)",
+    displayName: "Nocturin pen",
     nameKind: "BRAND",
     genericName: "insulin glargine",
     form: "PRE_FILLED_PEN",
@@ -35,7 +35,7 @@ export const DEMO_MEDICINE_CATALOGUE: readonly DemoCatalogueEntry[] = Object.fre
   } as const),
   Object.freeze({
     key: "veltora-pen-demo",
-    displayName: "Veltora pen (demo)",
+    displayName: "Veltora pen",
     nameKind: "BRAND",
     genericName: "insulin aspart",
     form: "PRE_FILLED_PEN",
@@ -43,7 +43,7 @@ export const DEMO_MEDICINE_CATALOGUE: readonly DemoCatalogueEntry[] = Object.fre
   } as const),
   Object.freeze({
     key: "glucotab-demo",
-    displayName: "Glucotab (demo)",
+    displayName: "Glucotab",
     nameKind: "GENERIC",
     genericName: null,
     form: "TABLET",

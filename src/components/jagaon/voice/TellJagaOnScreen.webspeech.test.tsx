@@ -57,8 +57,8 @@ class MockRecognition implements WebSpeechRecognitionLike {
 
 function terminology(): VoiceTerminologyPort {
   return {
-    directory: async () => ({ terms: [], names: [{ name: "Nocturin pen (demo)", medication: DARK }] }),
-    activeMedicines: async () => [{ medication: DARK, names: ["Nocturin pen (demo)"] }],
+    directory: async () => ({ terms: [], names: [{ name: "Nocturin pen", medication: DARK }] }),
+    activeMedicines: async () => [{ medication: DARK, names: ["Nocturin pen"] }],
     remember: async () => ({ kind: "COMMITTED" }),
   };
 }

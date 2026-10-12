@@ -116,7 +116,7 @@ const UNCHANGED_FIXTURES = Object.freeze({
   ]),
   activity: Object.freeze({
     title: "Morning walk",
-    place: "Jelutong Park (demo)",
+    place: "Jelutong Park",
     minutes: 28,
   }),
   careDates: Object.freeze([

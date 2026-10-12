@@ -10,17 +10,22 @@ describe("prepared onboarding fixture", () => {
     expect(state.status).toBe("COMPLETED");
     expect(state.lastCompletedStep).toBe("REVIEW");
     expect(state.locale).toBe("zh-SG");
-    expect(state.preferredName).toContain("(demo)");
+    // Owner decision 2026-10-12: names carry no "(demo)" suffix.
+    expect(state.preferredName).toBe("Mdm Tan");
   });
 
   it("uses the same fictional catalogue and evidence mappings as the manual flow", () => {
     const state = createPreparedOnboardingState("en-SG", "2026-10-02T08:00:00.000Z");
-    expect(state.medicines.map((m) => m.displayName)).toEqual(["Nocturin pen (demo)", "Veltora pen (demo)"]);
+    expect(state.medicines.map((m) => m.displayName)).toEqual(["Nocturin pen", "Veltora pen"]);
     for (const medicine of state.medicines) {
       const entry = findDemoCatalogueEntry(medicine.catalogueKey)!;
       expect(medicine.genericName).toBe(entry.genericName);
       expect(medicine.reviewedContentKey).toBe(entry.reviewedContentKey);
-      expect(medicine.displayName).toMatch(/\(demo\)$/);
+      // Owner decision 2026-10-12: names carry no "(demo)" suffix; the fictional
+      // catalogue entry ("-demo" key) and "(demo label)" directions remain the proof.
+      expect(medicine.displayName).toBe(entry.displayName);
+      expect(medicine.catalogueKey).toMatch(/-demo$/);
+      expect(medicine.verbatimDirections).toMatch(/\(demo label\)$/);
     }
   });
 

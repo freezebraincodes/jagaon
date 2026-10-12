@@ -117,8 +117,8 @@ export async function seedSyntheticCarePlan(input: {
   });
 
   for (const [recordId, catalogueEntryKey, name] of [
-    [DEMO_NOCTURIN_MEDICATION_ID, "nocturin-pen-demo", "Nocturin pen (demo)"],
-    [DEMO_VELTORA_MEDICATION_ID, "veltora-pen-demo", "Veltora pen (demo)"],
+    [DEMO_NOCTURIN_MEDICATION_ID, "nocturin-pen-demo", "Nocturin pen"],
+    [DEMO_VELTORA_MEDICATION_ID, "veltora-pen-demo", "Veltora pen"],
   ] as const) {
     committed(
       await carePlan.registerMedication({
@@ -164,7 +164,7 @@ export async function seedSyntheticCarePlan(input: {
       seeded: true,
       patientConfirmed: true,
       payload: reminder({
-        label: { text: "Nocturin pen (demo)", language: "und" },
+        label: { text: "Nocturin pen", language: "und" },
         subject: { kind: "MEDICATION", target: { recordType: "PRESCRIPTION_VERSION", recordId: typo.recordId, revisionId: typo.revisionId } },
         schedule: { kind: "WEEKLY_LOCAL", daysOfWeek: [...EVERY_DAY], times: ["21:30" as never], timeZoneId: "Asia/Singapore" },
         state: "ACTIVE",

@@ -71,7 +71,7 @@ export async function createPacket8Harness(start: string = "2026-10-03T02:00:00.
     recordId: NOCTURIN_MEDICATION.recordId as RecordId,
     revisionId: NOCTURIN_MEDICATION.revisionId as RevisionId,
     payload: {
-      identity: { kind: "UNMAPPED", patientEnteredName: "Nocturin pen (demo)" },
+      identity: { kind: "UNMAPPED", patientEnteredName: "Nocturin pen" },
       doseForm: "INJECTION_SOLUTION",
       route: "SUBCUTANEOUS",
       deliveryDevice: "INSULIN_PEN",

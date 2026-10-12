@@ -44,10 +44,10 @@ describe("MyMedicinesScreen", () => {
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: en.shared.continue })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: en.onboarding.skipMedicines })).not.toBeInTheDocument();
-    expect(screen.getByText("Nocturin pen (demo)")).toBeInTheDocument();
+    expect(screen.getByText("Nocturin pen")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: en.onboarding.addAnother }));
     expect(showView).toHaveBeenCalledWith("add");
-    fireEvent.click(screen.getByRole("button", { name: en.onboarding.editNamed("Veltora pen (demo)") }));
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.editNamed("Veltora pen") }));
     expect(showView).toHaveBeenCalledWith("directions", prepared.medicines[1]!.id);
     fireEvent.click(screen.getByRole("button", { name: en.onboarding.medicineInformationLink }));
     expect(navigate).toHaveBeenCalledWith("MEDICATION_INFORMATION");
@@ -55,20 +55,20 @@ describe("MyMedicinesScreen", () => {
 
   it("removes a medicine only after confirmation", () => {
     const { save } = renderScreen();
-    fireEvent.click(screen.getByRole("button", { name: en.onboarding.removeNamed("Nocturin pen (demo)") }));
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.removeNamed("Nocturin pen") }));
     expect(save).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: en.onboarding.removeMedicine }));
-    expect(save.mock.calls[0]![0].medicines.map((m) => m.displayName)).toEqual(["Veltora pen (demo)"]);
+    expect(save.mock.calls[0]![0].medicines.map((m) => m.displayName)).toEqual(["Veltora pen"]);
   });
 
   it("adds a medicine and opens its directions; adding after a skip completes setup", () => {
     const skipped: DemoOnboardingStateV1 = { ...prepared, status: "SKIPPED", medicines: [] };
     const { save, showView } = renderScreen({ state: skipped, view: "add" });
-    fireEvent.click(screen.getByRole("radio", { name: /Glucotab \(demo\)/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Glucotab/ }));
     fireEvent.click(screen.getByRole("button", { name: en.shared.continue }));
     const saved = save.mock.calls[0]![0];
     expect(saved.status).toBe("COMPLETED");
-    expect(saved.medicines[0]).toMatchObject({ id: NEW_ID, displayName: "Glucotab (demo)", reviewedContentKey: null });
+    expect(saved.medicines[0]).toMatchObject({ id: NEW_ID, displayName: "Glucotab", reviewedContentKey: null });
     expect(showView).toHaveBeenCalledWith("directions", NEW_ID);
   });
 

@@ -48,7 +48,7 @@ const PREPARED_MEDICINES: readonly DemoOnboardingMedicine[] = Object.freeze([
   }),
 ]);
 
-export const PREPARED_PREFERRED_NAME = "Mdm Tan (demo)";
+export const PREPARED_PREFERRED_NAME = "Mdm Tan";
 
 export function createPreparedOnboardingState(
   locale: DemoOnboardingStateV1["locale"],

@@ -243,7 +243,9 @@ describe("NearbyFoodScreen on the provider-neutral port", () => {
     expect(screen.getByText(en.food.syntheticFallbackActive)).toBeInTheDocument();
     const list = screen.getByRole("list", { name: en.food.resultsCount(5) });
     for (const item of list.querySelectorAll<HTMLElement>(":scope > li")) {
-      expect(item).toHaveTextContent("(demo)");
+      // Owner decision 2026-10-12: names carry no "(demo)" suffix; the "(synthetic)"
+      // address still labels every fixture place.
+      expect(item).toHaveTextContent("(synthetic)");
       expect(item).toHaveTextContent(en.food.noGovernedAttribute);
     }
     expect(screen.getByText(en.food.syntheticDirectorySource)).toBeInTheDocument();

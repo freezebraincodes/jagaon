@@ -44,7 +44,7 @@ describe("onboarding accessibility", () => {
     click(en.onboarding.addMedicine);
     expectSingleHeading(en.onboarding.selectTitle);
     expectVisibleLabels();
-    fireEvent.click(screen.getByRole("radio", { name: /Nocturin pen \(demo\)/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Nocturin pen/ }));
     click(en.shared.continue);
     expectSingleHeading(en.onboarding.directionsTitle);
     expectVisibleLabels();

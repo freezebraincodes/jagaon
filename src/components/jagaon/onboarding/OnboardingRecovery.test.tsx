@@ -34,7 +34,7 @@ describe("frame 22 — required medicine name", () => {
     click(en.shared.continue);
     expect(screen.getByRole("alert")).toHaveTextContent(en.onboarding.nameRequired);
 
-    fireEvent.click(screen.getByRole("radio", { name: /Nocturin pen \(demo\)/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Nocturin pen/ }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     click(en.shared.continue);
     expect(heading(en.onboarding.directionsTitle)).toBeInTheDocument();
@@ -50,10 +50,10 @@ describe("frame 25 — removal confirmation", () => {
 
   it("opens an alert dialog on the safe action and cancels with Escape back to the card", () => {
     const { saves } = toList();
-    const remove = screen.getByRole("button", { name: en.onboarding.removeNamed("Nocturin pen (demo)") });
+    const remove = screen.getByRole("button", { name: en.onboarding.removeNamed("Nocturin pen") });
     fireEvent.click(remove);
     const dialog = screen.getByRole("alertdialog", { name: en.onboarding.removeTitle });
-    expect(dialog).toHaveTextContent(en.onboarding.removeBody("Nocturin pen (demo)"));
+    expect(dialog).toHaveTextContent(en.onboarding.removeBody("Nocturin pen"));
     expect(within(dialog).getByRole("button", { name: en.onboarding.keepIt })).toHaveFocus();
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
@@ -63,7 +63,7 @@ describe("frame 25 — removal confirmation", () => {
 
   it("removes only after confirmation and shows the empty list", () => {
     const { saves } = toList();
-    click(en.onboarding.removeNamed("Nocturin pen (demo)"));
+    click(en.onboarding.removeNamed("Nocturin pen"));
     click(en.onboarding.removeMedicine);
     expect(saves.at(-1)!.medicines).toEqual([]);
     expect(screen.getByText(en.onboarding.emptyTitle)).toBeInTheDocument();
@@ -76,14 +76,14 @@ describe("frames 26 and 30 — resume and restart", () => {
     expect(heading(en.onboarding.resumeTitle)).toBeInTheDocument();
     expect(screen.getByText(en.onboarding.resumeBody(4, en.onboarding.stepDirections))).toBeInTheDocument();
     const kept = screen.getByRole("region", { name: en.onboarding.kept });
-    expect(kept).toHaveTextContent("Preferred name: Mdm Tan (demo)");
-    expect(kept).toHaveTextContent("1 medicine: Nocturin pen (demo)");
-    expect(screen.getByText(en.onboarding.continueAtStep(en.onboarding.directionsFor("Nocturin pen (demo)"), 4))).toBeInTheDocument();
+    expect(kept).toHaveTextContent("Preferred name: Mdm Tan");
+    expect(kept).toHaveTextContent("1 medicine: Nocturin pen");
+    expect(screen.getByText(en.onboarding.continueAtStep(en.onboarding.directionsFor("Nocturin pen"), 4))).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(en.onboarding.resumedAnnouncement);
     click(en.onboarding.continueFromStep(4));
     expect(heading(en.onboarding.directionsTitle)).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: en.insulin.medicineLabel })).toHaveTextContent("Nocturin pen (demo)");
+    expect(screen.getByRole("textbox", { name: en.insulin.medicineLabel })).toHaveTextContent("Nocturin pen");
   });
 
   it("restart confirmation traps focus, cancels with Escape and returns focus", () => {
@@ -128,7 +128,7 @@ describe("frame 28 — local-storage failure", () => {
   it("does not advance or claim success, then retries the exact same write", () => {
     const { saves, attempts } = renderFlow({ failWrites: 1 });
     click(en.onboarding.startSetup);
-    fireEvent.change(screen.getByLabelText(/Preferred name/), { target: { value: "Mdm Tan (demo)" } });
+    fireEvent.change(screen.getByLabelText(/Preferred name/), { target: { value: "Mdm Tan" } });
     click(en.shared.continue);
 
     expect(heading(en.onboarding.failureTitle)).toBeInTheDocument();
@@ -140,7 +140,7 @@ describe("frame 28 — local-storage failure", () => {
     click(en.onboarding.tryAgain);
     expect(saves).toHaveLength(1);
     expect(attempts[1]).toEqual(attempts[0]);
-    expect(saves[0]!.preferredName).toBe("Mdm Tan (demo)");
+    expect(saves[0]!.preferredName).toBe("Mdm Tan");
     expect(heading(en.onboarding.medicinesTitle)).toBeInTheDocument();
   });
 
@@ -178,15 +178,15 @@ describe("frame 29 — language switched mid-setup", () => {
   it("persists the switch, announces it in the new language and keeps typed values verbatim", () => {
     const { saves } = renderFlow();
     click(en.onboarding.startSetup);
-    fireEvent.change(screen.getByLabelText(/Preferred name/), { target: { value: "Mdm Tan (demo)" } });
+    fireEvent.change(screen.getByLabelText(/Preferred name/), { target: { value: "Mdm Tan" } });
     fireEvent.click(screen.getByRole("radio", { name: en.settings.chinese }));
-    expect(saves.at(-1)).toMatchObject({ locale: "zh-SG", preferredName: "Mdm Tan (demo)", status: "IN_PROGRESS" });
+    expect(saves.at(-1)).toMatchObject({ locale: "zh-SG", preferredName: "Mdm Tan", status: "IN_PROGRESS" });
     expect(heading(zh.onboarding.profileTitle)).toBeInTheDocument();
     // Visible confirmation (frame 29) plus the polite live announcement.
     expect(screen.getAllByText(zh.onboarding.languageSwitched(zh.settings.chinese))).toHaveLength(2);
     expect(screen.getByText(zh.onboarding.notTranslated)).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(zh.onboarding.languageSwitched(zh.settings.chinese));
-    expect(screen.getByLabelText(/称呼/)).toHaveValue("Mdm Tan (demo)");
+    expect(screen.getByLabelText(/称呼/)).toHaveValue("Mdm Tan");
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "1");
   });
 
@@ -203,7 +203,7 @@ describe("frame 29 — language switched mid-setup", () => {
     fireEvent.click(screen.getByRole("radio", { name: en.settings.chinese }));
     click(zh.shared.continue);
     click(zh.shared.continue);
-    expect(screen.getByText("Nocturin pen (demo)")).toBeInTheDocument();
+    expect(screen.getByText("Nocturin pen")).toBeInTheDocument();
     expect(screen.getByText("Inject 12 units every night")).toBeInTheDocument();
   });
 });

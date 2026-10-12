@@ -84,11 +84,11 @@ describe("Medication schedule service", () => {
     expect(view.today).toBe("2026-10-04");
     expect(view.yesterday).toBe("2026-10-03");
     expect(view.occasions.map((entry) => [entry.section, entry.medicineName, entry.scheduledTime, entry.record])).toEqual([
-      ["YESTERDAY", "Nocturin pen (demo)", "21:00", null],
-      ["TODAY", "Nocturin pen (demo)", "21:00", null],
+      ["YESTERDAY", "Nocturin pen", "21:00", null],
+      ["TODAY", "Nocturin pen", "21:00", null],
     ]);
     // "With meals" has no fixed time and never becomes one.
-    expect(view.withoutFixedTime).toEqual([{ medicineName: "Veltora pen (demo)" }]);
+    expect(view.withoutFixedTime).toEqual([{ medicineName: "Veltora pen" }]);
     expect(view.window).toEqual({ startDate: "2026-09-21", endDate: "2026-10-04" });
     // Prefer not to say, Declined and Taken never count; distinct occasions only.
     expect(summary(view)).toEqual([
@@ -102,7 +102,7 @@ describe("Medication schedule service", () => {
     expect(view.reminders.map((reminder) => [reminder.label, reminder.state, reminder.times])).toEqual([
       ["Morning reading", "ACTIVE", ["07:00"]],
       ["Sunday foot check", "PAUSED", ["09:00"]],
-      ["Nocturin pen (demo)", "REVIEW_REQUIRED", ["21:30"]],
+      ["Nocturin pen", "REVIEW_REQUIRED", ["21:30"]],
     ]);
     expect(view.reminders.find((reminder) => reminder.state === "REVIEW_REQUIRED")?.currentPrescription?.times).toEqual(["21:00"]);
 
@@ -126,7 +126,7 @@ describe("Medication schedule service", () => {
     expect(view.withoutFixedTime).toEqual([]);
     const vel = await ready("en-SG", [DEMO_VELTORA_MEDICATION_ID]);
     expect(vel.occasions).toEqual([]);
-    expect(vel.withoutFixedTime).toEqual([{ medicineName: "Veltora pen (demo)" }]);
+    expect(vel.withoutFixedTime).toEqual([{ medicineName: "Veltora pen" }]);
   }, INTEGRATION_TIMEOUT_MS);
 
   it("offers the barrier question only after Skipped or Not sure, and counts an explicit answer", async () => {
@@ -215,7 +215,7 @@ describe("Medication schedule service", () => {
     const { schedule, ready } = await setup();
     const review = (await ready()).reminders.find((reminder) => reminder.state === "REVIEW_REQUIRED")!;
     expect(await schedule.saveReminder({ reminder: review, change: { kind: "CONFIRM_REVIEW" }, commandId: uuid() })).toEqual({ kind: "SAVED" });
-    const confirmed = (await ready()).reminders.find((reminder) => reminder.label === "Nocturin pen (demo)")!;
+    const confirmed = (await ready()).reminders.find((reminder) => reminder.label === "Nocturin pen")!;
     expect([confirmed.state, confirmed.times]).toEqual(["ACTIVE", ["21:00"]]);
 
     // A stale view cannot overwrite a newer reminder revision.

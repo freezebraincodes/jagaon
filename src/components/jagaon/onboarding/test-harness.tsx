@@ -88,13 +88,13 @@ export const persistedWithMedicine: DemoOnboardingStateV1 = {
   status: "IN_PROGRESS",
   lastCompletedStep: "ADD_MEDICINE",
   locale: "en-SG",
-  preferredName: "Mdm Tan (demo)",
+  preferredName: "Mdm Tan",
   medicines: [
     {
       id: "44444444-4444-4444-8444-444444444444",
       catalogueKey: "nocturin-pen-demo",
-      enteredName: "Nocturin pen (demo)",
-      displayName: "Nocturin pen (demo)",
+      enteredName: "Nocturin pen",
+      displayName: "Nocturin pen",
       genericName: "insulin glargine",
       form: null,
       strength: null,

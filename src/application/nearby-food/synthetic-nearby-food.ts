@@ -17,7 +17,7 @@ import {
 
 /**
  * Deterministic synthetic nearby-food adapter: the offline/test fallback.
- * Every place is invented, named "(demo)", carries no governed attribute and
+ * Every place is invented (owner decision 2026-10-12: names carry no "(demo)" suffix), carries no governed attribute and
  * is labelled as a synthetic fixture. It never masquerades as live data.
  */
 
@@ -39,11 +39,11 @@ type FixtureVenue = {
 };
 
 const FIXTURES: readonly FixtureVenue[] = Object.freeze([
-  { id: "venue-001", name: "Kampong Jelutong Food Centre (demo)", cuisine: "Chinese & Malay stalls", cuisineGroups: ["CHINESE", "MALAY"], venueType: "HAWKER_CENTRE", distanceMetres: 180, address: "Blk 18, Jelutong Estate (synthetic)" },
-  { id: "venue-002", name: "Blk 412 Coffee Shop (demo)", cuisine: "Chinese", cuisineGroups: ["CHINESE"], venueType: "COFFEE_SHOP", distanceMetres: 350, address: "Blk 412 Jalan Seroja (synthetic)" },
-  { id: "venue-003", name: "Tanjong Seroja Market (demo)", cuisine: "Malay & Indian", cuisineGroups: ["MALAY", "INDIAN"], venueType: "MARKET", distanceMetres: 620, address: "Tanjong Seroja (synthetic)" },
-  { id: "venue-004", name: "Seroja Lane Eating House (demo)", cuisine: "Indian", cuisineGroups: ["INDIAN"], venueType: "COFFEE_SHOP", distanceMetres: 760, address: "8 Seroja Lane (synthetic)" },
-  { id: "venue-005", name: "Jelutong Garden Food Court (demo)", cuisine: "Chinese & Western", cuisineGroups: ["CHINESE", "WESTERN"], venueType: "FOOD_COURT", distanceMetres: 1200, address: "Jelutong Garden (synthetic)" },
+  { id: "venue-001", name: "Kampong Jelutong Food Centre", cuisine: "Chinese & Malay stalls", cuisineGroups: ["CHINESE", "MALAY"], venueType: "HAWKER_CENTRE", distanceMetres: 180, address: "Blk 18, Jelutong Estate (synthetic)" },
+  { id: "venue-002", name: "Blk 412 Coffee Shop", cuisine: "Chinese", cuisineGroups: ["CHINESE"], venueType: "COFFEE_SHOP", distanceMetres: 350, address: "Blk 412 Jalan Seroja (synthetic)" },
+  { id: "venue-003", name: "Tanjong Seroja Market", cuisine: "Malay & Indian", cuisineGroups: ["MALAY", "INDIAN"], venueType: "MARKET", distanceMetres: 620, address: "Tanjong Seroja (synthetic)" },
+  { id: "venue-004", name: "Seroja Lane Eating House", cuisine: "Indian", cuisineGroups: ["INDIAN"], venueType: "COFFEE_SHOP", distanceMetres: 760, address: "8 Seroja Lane (synthetic)" },
+  { id: "venue-005", name: "Jelutong Garden Food Court", cuisine: "Chinese & Western", cuisineGroups: ["CHINESE", "WESTERN"], venueType: "FOOD_COURT", distanceMetres: 1200, address: "Jelutong Garden (synthetic)" },
 ]);
 
 /** Fixture places placed due north of the synthetic origin at their fixture distance. */
@@ -80,8 +80,8 @@ export function resolveSyntheticLocation(query: string): LocationResolution {
     return {
       kind: "AMBIGUOUS",
       candidates: [
-        { label: "Jelutong Estate (demo)", coordinates: SYNTHETIC_ORIGIN },
-        { label: "Seroja (demo)", coordinates: SYNTHETIC_ORIGIN },
+        { label: "Jelutong Estate", coordinates: SYNTHETIC_ORIGIN },
+        { label: "Seroja", coordinates: SYNTHETIC_ORIGIN },
       ],
     };
   }

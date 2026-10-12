@@ -12,8 +12,8 @@ import {
 const medicine: DemoOnboardingMedicine = {
   id: "11111111-1111-4111-8111-111111111111",
   catalogueKey: "nocturin-pen-demo",
-  enteredName: "Nocturin pen (demo)",
-  displayName: "Nocturin pen (demo)",
+  enteredName: "Nocturin pen",
+  displayName: "Nocturin pen",
   genericName: "insulin glargine",
   form: "Pre-filled pen",
   strength: null,
@@ -30,7 +30,7 @@ const valid: DemoOnboardingStateV1 = {
   status: "IN_PROGRESS",
   lastCompletedStep: "DIRECTIONS",
   locale: "en-SG",
-  preferredName: "Mdm Tan (demo)",
+  preferredName: "Mdm Tan",
   medicines: [medicine],
   updatedAt: "2026-10-02T08:00:00.000Z",
 };
