@@ -210,7 +210,7 @@ export type LocationResolution =
   | { kind: "UNAVAILABLE"; reason: "NOT_CONFIGURED" | "OFFLINE" | "REJECTED" | "RATE_LIMITED" | "UPSTREAM_ERROR" | "TIMEOUT" };
 
 export type GeocoderPort = {
-  readonly providerId: "ONEMAP" | "SNAPSHOT_POSTAL" | "SYNTHETIC";
+  readonly providerId: "ONEMAP" | "SNAPSHOT_POSTAL" | "SNAPSHOT_TEXT" | "SYNTHETIC";
   resolve(query: string, signal?: AbortSignal): Promise<LocationResolution>;
 };
 
@@ -258,10 +258,15 @@ export type VenueDirectoryPort = {
   findNearby(request: NearbyFoodSearchRequest, signal?: AbortSignal): Promise<NearbyFoodResult>;
 };
 
+/** The cuisine and venue-type choices a directory can answer (owner decision 2026-10-12); filters with no data are not offered. */
+export type NearbyFoodFilterOptions = Readonly<{ cuisineGroups: readonly CuisineGroup[]; venueTypes: readonly VenueType[] }>;
+
 export type NearbyFoodProfile = {
   geocoder: "ONEMAP_WITH_SNAPSHOT_POSTAL" | "SNAPSHOT_POSTAL" | "SYNTHETIC";
   map: MapProviderDescriptor;
   directory: "HPB_SNAPSHOT" | "SYNTHETIC";
+  /** Absent: every cuisine and venue type is offered. */
+  filterOptions?: NearbyFoodFilterOptions;
 };
 
 /** The one facade Screen 07 uses. */

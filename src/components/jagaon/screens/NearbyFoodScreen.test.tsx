@@ -95,6 +95,20 @@ const HPB_RESULTS: NearbyFoodResult = {
 const hybridProfile = { geocoder: "ONEMAP_WITH_SNAPSHOT_POSTAL" as const, map: ONEMAP_TILE_DESCRIPTOR, directory: "HPB_SNAPSHOT" as const };
 
 describe("NearbyFoodScreen on the provider-neutral port", () => {
+  it("offers only the cuisine and venue-type choices the directory can answer (owner decision 2026-10-12)", () => {
+    const base = createSyntheticNearbyFood().profile;
+    show(port({ profile: { ...base, filterOptions: { cuisineGroups: ["CHINESE", "WESTERN"], venueTypes: [] } } }));
+    const cuisine = screen.getByRole("group", { name: en.food.cuisineLabel });
+    expect(within(cuisine).getAllByRole("button").map((button) => button.textContent)).toEqual([en.food.cuisineAny, en.food.cuisineChinese, en.food.cuisineWestern]);
+    expect(screen.queryByRole("group", { name: en.food.venueTypeLabel })).toBeNull();
+    expect(screen.queryByText(en.food.venueHawker)).toBeNull();
+    cleanup();
+    // Without declared choices (the synthetic profile), every choice is offered.
+    show(port());
+    expect(within(screen.getByRole("group", { name: en.food.cuisineLabel })).getAllByRole("button")).toHaveLength(5);
+    expect(within(screen.getByRole("group", { name: en.food.venueTypeLabel })).getAllByRole("button")).toHaveLength(5);
+  });
+
   it("never asks for location before the person presses Continue", async () => {
     const discovery = port();
     show(discovery);

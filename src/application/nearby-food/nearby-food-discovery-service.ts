@@ -4,6 +4,7 @@ import {
   type LocationAcquisitionPort,
   type LocationResolution,
   type MapProviderDescriptor,
+  type NearbyFoodFilterOptions,
   type NearbyFoodDiscoveryPort,
   type NearbyFoodFilters,
   type NearbyFoodSearchRequest,
@@ -21,13 +22,21 @@ import { SYNTHETIC_ORIGIN, findSyntheticNearby } from "./synthetic-nearby-food";
 export function createNearbyFoodDiscoveryService(dependencies: {
   oneMapGeocoder: GeocoderPort;
   snapshotGeocoder: GeocoderPort;
+  /** Owner decision 2026-10-12: offline name and address search over the snapshot, after OneMap. */
+  snapshotTextGeocoder?: GeocoderPort;
+  filterOptions?: NearbyFoodFilterOptions;
   location: LocationAcquisitionPort;
   directory: VenueDirectoryPort;
   map: MapProviderDescriptor;
   online: () => boolean;
 }): NearbyFoodDiscoveryPort {
   return Object.freeze({
-    profile: Object.freeze({ geocoder: "ONEMAP_WITH_SNAPSHOT_POSTAL" as const, map: dependencies.map, directory: "HPB_SNAPSHOT" as const }),
+    profile: Object.freeze({
+      geocoder: "ONEMAP_WITH_SNAPSHOT_POSTAL" as const,
+      map: dependencies.map,
+      directory: "HPB_SNAPSHOT" as const,
+      ...(dependencies.filterOptions ? { filterOptions: dependencies.filterOptions } : {}),
+    }),
 
     async resolveManualLocation(query: string, signal?: AbortSignal): Promise<LocationResolution> {
       const trimmed = query.trim();
@@ -36,8 +45,11 @@ export function createNearbyFoodDiscoveryService(dependencies: {
         const local = await dependencies.snapshotGeocoder.resolve(trimmed, signal);
         if (local.kind === "RESOLVED") return local;
       }
-      if (!dependencies.online()) return { kind: "UNAVAILABLE", reason: "OFFLINE" };
-      return dependencies.oneMapGeocoder.resolve(trimmed, signal);
+      const remote: LocationResolution = dependencies.online() ? await dependencies.oneMapGeocoder.resolve(trimmed, signal) : { kind: "UNAVAILABLE", reason: "OFFLINE" };
+      if (remote.kind === "RESOLVED" || remote.kind === "AMBIGUOUS" || !dependencies.snapshotTextGeocoder || signal?.aborted) return remote;
+      // OneMap not configured, unavailable or with no match: the bundled places' names and addresses, offline.
+      const local = await dependencies.snapshotTextGeocoder.resolve(trimmed, signal);
+      return local.kind === "RESOLVED" || local.kind === "AMBIGUOUS" ? local : remote;
     },
 
     acquireCurrentLocation(signal?: AbortSignal) {

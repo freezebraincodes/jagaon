@@ -11,6 +11,7 @@ import {
   type DirectoryDescriptor,
   type FilterableFoodAttribute,
   type NearbyFoodDiscoveryPort,
+  type NearbyFoodFilterOptions,
   type NearbyFoodFilters,
   type NearbyFoodPlace,
   type VenueType,
@@ -74,9 +75,22 @@ function venueMeta(messages: AppMessages, place: NearbyFoodPlace): string | null
 
 // --- Section: Filters (user choices only; never health data) ---
 
-function FoodFilters({ messages, filters, onChange }: { messages: AppMessages; filters: NearbyFoodFilters; onChange: (filters: NearbyFoodFilters) => void }) {
+function FoodFilters({
+  messages,
+  filters,
+  onChange,
+  options,
+}: {
+  messages: AppMessages;
+  filters: NearbyFoodFilters;
+  onChange: (filters: NearbyFoodFilters) => void;
+  /** Owner decision 2026-10-12: only the choices the directory can answer; absent, every choice. */
+  options?: NearbyFoodFilterOptions;
+}) {
   const msg = messages.food;
   const ANY = "ANY" as const;
+  const cuisineOffered = (group: CuisineGroup) => !options || options.cuisineGroups.includes(group);
+  const venueOffered = (type: VenueType) => !options || options.venueTypes.includes(type);
   return (
     <section className="food-filters" aria-labelledby="food-filters-heading">
       <div className="food-filters-head">
@@ -116,32 +130,42 @@ function FoodFilters({ messages, filters, onChange }: { messages: AppMessages; f
         }
         options={[
           { value: ANY, label: msg.cuisineAny },
-          { value: "CHINESE", label: msg.cuisineChinese },
-          { value: "MALAY", label: msg.cuisineMalay },
-          { value: "INDIAN", label: msg.cuisineIndian },
-          { value: "WESTERN", label: msg.cuisineWestern },
+          ...(
+            [
+              { value: "CHINESE", label: msg.cuisineChinese },
+              { value: "MALAY", label: msg.cuisineMalay },
+              { value: "INDIAN", label: msg.cuisineIndian },
+              { value: "WESTERN", label: msg.cuisineWestern },
+            ] as const
+          ).filter((option) => cuisineOffered(option.value)),
         ]}
         selected={[filters.cuisine ?? ANY]}
         onToggle={(value) => onChange({ ...filters, cuisine: value === ANY ? null : value })}
       />
-      <ToggleChips<VenueType | typeof ANY>
-        label={msg.venueTypeLabel}
-        heading={
-          <p className="filter-heading">
-            <StoreIcon size={20} />
-            {msg.venueTypeLabel}
-          </p>
-        }
-        options={[
-          { value: ANY, label: msg.cuisineAny },
-          { value: "HAWKER_CENTRE", label: msg.venueHawker },
-          { value: "COFFEE_SHOP", label: msg.venueCoffeeShop },
-          { value: "MARKET", label: msg.venueMarket },
-          { value: "FOOD_COURT", label: msg.venueFoodCourt },
-        ]}
-        selected={[filters.venueType ?? ANY]}
-        onToggle={(value) => onChange({ ...filters, venueType: value === ANY ? null : value })}
-      />
+      {!options || options.venueTypes.length > 0 ? (
+        <ToggleChips<VenueType | typeof ANY>
+          label={msg.venueTypeLabel}
+          heading={
+            <p className="filter-heading">
+              <StoreIcon size={20} />
+              {msg.venueTypeLabel}
+            </p>
+          }
+          options={[
+            { value: ANY, label: msg.cuisineAny },
+            ...(
+              [
+                { value: "HAWKER_CENTRE", label: msg.venueHawker },
+                { value: "COFFEE_SHOP", label: msg.venueCoffeeShop },
+                { value: "MARKET", label: msg.venueMarket },
+                { value: "FOOD_COURT", label: msg.venueFoodCourt },
+              ] as const
+            ).filter((option) => venueOffered(option.value)),
+          ]}
+          selected={[filters.venueType ?? ANY]}
+          onToggle={(value) => onChange({ ...filters, venueType: value === ANY ? null : value })}
+        />
+      ) : null}
       <ToggleChips<FilterableFoodAttribute>
         label={msg.attributesLabel}
         heading={
@@ -231,7 +255,7 @@ export function NearbyFoodScreen({ messages, locale, discovery, navigate }: Near
         <p className="provenance-line">{msg.locationNotSaved}</p>
       </form>
 
-      <FoodFilters messages={messages} filters={filters} onChange={changeFilters} />
+      <FoodFilters messages={messages} filters={filters} onChange={changeFilters} options={port.profile.filterOptions} />
 
       <div className="food-state">
         <FoodStateView state={state} messages={messages} locale={locale} port={port} controller={controller} />

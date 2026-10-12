@@ -5,7 +5,7 @@ import {
   type NearbyFoodDiscoveryPort,
 } from "./nearby-food-contracts";
 import { ONEMAP_TILE_DESCRIPTOR } from "./browser-map-descriptor";
-import { HPB_SNAPSHOT_PATH, createHpbVenueDirectory, createSnapshotPostalGeocoder } from "./hpb-venue-directory";
+import { HPB_FILTER_OPTIONS, HPB_SNAPSHOT_PATH, createHpbVenueDirectory, createSnapshotPostalGeocoder, createSnapshotTextGeocoder } from "./hpb-venue-directory";
 import { createNearbyFoodDiscoveryService } from "./nearby-food-discovery-service";
 import { createOneMapGeocoder } from "./onemap-geocoder";
 
@@ -74,6 +74,8 @@ export function createBrowserNearbyFood(
   return createNearbyFoodDiscoveryService({
     oneMapGeocoder: createOneMapGeocoder((input, init) => fetcher(input, init), "/api/onemap/search"),
     snapshotGeocoder: createSnapshotPostalGeocoder(loadSnapshot),
+    snapshotTextGeocoder: createSnapshotTextGeocoder(loadSnapshot),
+    filterOptions: HPB_FILTER_OPTIONS,
     location: createBrowserGpsAdapter(options.geolocation ?? (() => (typeof navigator === "undefined" ? undefined : navigator.geolocation))),
     directory: createHpbVenueDirectory(loadSnapshot),
     map: ONEMAP_TILE_DESCRIPTOR,

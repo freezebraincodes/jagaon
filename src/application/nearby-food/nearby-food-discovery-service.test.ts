@@ -14,10 +14,11 @@ const directory = (): VenueDirectoryPort & { findNearby: ReturnType<typeof vi.fn
   findNearby: vi.fn(async () => ({ kind: "RESULTS" as const, places: [], directory: HPB_SNAPSHOT_DESCRIPTOR })),
 });
 
-function service(overrides: { oneMap?: GeocoderPort; postal?: GeocoderPort; online?: boolean; dir?: VenueDirectoryPort } = {}) {
+function service(overrides: { oneMap?: GeocoderPort; postal?: GeocoderPort; text?: GeocoderPort; online?: boolean; dir?: VenueDirectoryPort } = {}) {
   return createNearbyFoodDiscoveryService({
     oneMapGeocoder: overrides.oneMap ?? geocoder("ONEMAP", { kind: "UNAVAILABLE", reason: "NOT_CONFIGURED" }),
     snapshotGeocoder: overrides.postal ?? geocoder("SNAPSHOT_POSTAL", { kind: "NOT_FOUND" }),
+    ...(overrides.text ? { snapshotTextGeocoder: overrides.text } : {}),
     location: { acquireOnce: vi.fn(async () => ({ kind: "DENIED" as const })) },
     directory: overrides.dir ?? directory(),
     map: ONEMAP_TILE_DESCRIPTOR,
@@ -26,6 +27,30 @@ function service(overrides: { oneMap?: GeocoderPort; postal?: GeocoderPort; onli
 }
 
 describe("hybrid nearby-food discovery service", () => {
+  it("searches the bundled places' names and addresses when OneMap is not configured, unavailable, offline or finds nothing (owner decision 2026-10-12)", async () => {
+    const found: LocationResolution = { kind: "RESOLVED", location: { label: "Bishan", coordinates: ORIGIN } };
+    for (const [remote, online] of [
+      [{ kind: "UNAVAILABLE", reason: "NOT_CONFIGURED" }, true],
+      [{ kind: "UNAVAILABLE", reason: "UPSTREAM_ERROR" }, true],
+      [{ kind: "NOT_FOUND" }, true],
+      [{ kind: "NOT_FOUND" }, false],
+    ] as const) {
+      const text = geocoder("SNAPSHOT_TEXT", found);
+      const oneMap = geocoder("ONEMAP", remote);
+      expect(await service({ oneMap, text, online }).resolveManualLocation(" Bishan ")).toEqual(found);
+      expect(text.resolve).toHaveBeenCalledWith("Bishan", undefined);
+      expect(oneMap.resolve).toHaveBeenCalledTimes(online ? 1 : 0);
+    }
+    // OneMap's own answer wins; the snapshot is not searched.
+    const text = geocoder("SNAPSHOT_TEXT", found);
+    const live = geocoder("ONEMAP", { kind: "RESOLVED", location: { label: "BISHAN MRT", coordinates: ORIGIN } });
+    expect(await service({ oneMap: live, text }).resolveManualLocation("Bishan")).toMatchObject({ location: { label: "BISHAN MRT" } });
+    expect(text.resolve).not.toHaveBeenCalled();
+    // Nothing in the snapshot either: OneMap's honest answer stands.
+    expect(await service({ text: geocoder("SNAPSHOT_TEXT", { kind: "NOT_FOUND" }) }).resolveManualLocation("Nowhere")).toEqual({ kind: "UNAVAILABLE", reason: "NOT_CONFIGURED" });
+    expect(await service({ online: false, text: geocoder("SNAPSHOT_TEXT", { kind: "NOT_FOUND" }) }).resolveManualLocation("Nowhere")).toEqual({ kind: "UNAVAILABLE", reason: "OFFLINE" });
+  });
+
   it("describes the hybrid profile without exposing provider payloads", () => {
     expect(service().profile).toEqual({ geocoder: "ONEMAP_WITH_SNAPSHOT_POSTAL", map: ONEMAP_TILE_DESCRIPTOR, directory: "HPB_SNAPSHOT" });
   });
