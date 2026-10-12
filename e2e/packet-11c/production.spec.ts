@@ -133,6 +133,10 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
           await expect(dialog).toHaveAttribute("aria-modal", "true");
           await expect(dialog.getByLabel(m.aiAccess.passcodeLabel)).toHaveAttribute("type", "password");
           expect(tripwire.hits).toEqual([]);
+          // Integration (2026-10-12, deliberate): the disclosure check asked only the credential-free passcode probe (GET, no body);
+          // the tripwire aborted it, so the passcode stays required and the field is shown.
+          expect(tripwire.probes.length).toBeGreaterThanOrEqual(1);
+          expect(new Set(tripwire.probes)).toEqual(new Set([`GET ${PRODUCTION_URL}/api/ai/shell`]));
           await expectNoHorizontalOverflow(page);
           await captureState(page, testInfo, context, "history-disclosure-first", ["en-SG: the disclosure opens before any request", "aria-modal, named by the title", "passcode field shown (type=password)", "tripwire: no /api/ai/* request"], dialog);
           // Cancel (the safe action): the standard wording with the not-used line; nothing sent.
@@ -151,6 +155,10 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await expect(action).toHaveAttribute("aria-expanded", "true");
         expect(tripwire.hits).toEqual([]);
         await expectNoHorizontalOverflow(page);
+        // zh-SG: no disclosure, so not even the passcode probe.
+        if (!remoteOffered) expect(tripwire.probes).toEqual([]);
+        // No further probe may happen after the History step (the care section opens no disclosure).
+        const probesAfterHistory = tripwire.probes.length;
         await captureState(page, testInfo, context, "history-deterministic", [remoteOffered ? "after Cancel: no dialog, standard wording with the not-used line" : "zh-SG: no dialog, standard wording at once", "no passcode field", "role=status headline present", "no ai.demoTag / ai.resultCheck / AI group", "no horizontal overflow", "tripwire: no /api/ai/* request"], panel);
 
         // More/Settings: the "Keep wording on this device" setting (C2) is present and operable by keyboard.
@@ -194,7 +202,7 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await captureState(page, testInfo, context, "care-print-no-marking", [`approved deterministic preview printed once (window.print observed)`, "print media: no ai.demoTag / ai.resultCheck in the printed artifact (asserted)", "draft-notices heading printed (asserted)", browserName === "chromium" ? "printed PDF saved" : "PDF not available in this engine"], article);
         await page.emulateMedia({ media: null });
 
-        tripwire.assertUntouched();
+        tripwire.assertUntouched(probesAfterHistory);
       });
     });
   }

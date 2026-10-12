@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { AI_SHELL_ACCESS_HEADER } from "@/application/ai/ai-shell-route-contract";
 import {
   captureState,
   DETERMINISTIC_HEADLINE_PREFIX,
@@ -35,9 +36,14 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         const context: EvidenceContext = { target: "harness", locale, viewport: viewport.label, engine: browserName };
         planStates(testInfo, context, ["private-on-setting", "private-on-history", "private-on-care", "private-off-dialog-returns"]);
         const shell = await interceptShellRoute(page);
+        // Integration (2026-10-12, deliberate): recorded with method and body, so the credential-free passcode probe (GET, no body) can be
+        // told apart from a request that sends anything.
         const requests: string[] = [];
         page.on("request", (request) => {
-          if (/\/api\/ai\//.test(request.url())) requests.push(request.url());
+          if (/\/api\/ai\//.test(request.url())) {
+            const url = new URL(request.url());
+            requests.push(`${request.method()} ${url.pathname}${url.search}${request.postData() === null ? "" : " +body"}${request.headers()[AI_SHELL_ACCESS_HEADER] === undefined ? "" : " +passcode"}`);
+          }
         });
         const m = await startPreparedProfile(page, HARNESS_URL, locale);
 
@@ -68,10 +74,13 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         const dialog = page.getByRole("dialog", { name: m.ai.remoteTitle });
         await expect(dialog).toBeVisible();
         await expectNoHorizontalOverflow(page);
-        await captureState(page, testInfo, context, "private-off-dialog-returns", ["setting off: the next explicit request shows the disclosure again", "still 0 /api/ai requests (nothing accepted)"], dialog);
+        await captureState(page, testInfo, context, "private-off-dialog-returns", ["setting off: the next explicit request shows the disclosure again", "only the credential-free passcode probe (GET, no body); no POST (nothing accepted)"], dialog);
         await dialog.getByRole("button", { name: m.ai.cancel }).click();
         expect(shell.calls).toHaveLength(0);
-        expect(requests).toEqual([]);
+        // Setting off: the disclosure check asks the passcode probe (GET, no body) before the dialog; nothing else, and no POST.
+        expect(requests.length).toBeGreaterThanOrEqual(1);
+        expect(new Set(requests)).toEqual(new Set(["GET /api/ai/shell"]));
+        expect(shell.probes.length).toBe(requests.length);
       });
     });
   }

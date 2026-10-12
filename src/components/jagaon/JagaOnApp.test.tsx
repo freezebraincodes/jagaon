@@ -6,6 +6,7 @@ import { aiInvocationAuditRowSchema, shellTaskRequestSchema, slotToken, type AiI
 import { AI_ACTIVATION_MANIFEST, type AiActivationManifest } from "@/application/ai/ai-activation-manifest";
 import { createBrowserAiAssistance } from "@/application/ai/browser-history-explainer";
 import type { BrowserShellFetcher } from "@/application/ai/browser-shell-client";
+import { AI_SHELL_ROUTE_PATH } from "@/application/ai/ai-shell-route-contract";
 import { createAiInvocationAuditRepository } from "@/application/ai/ai-audit-persistence";
 import { closeCarePreparationHarnesses, createCarePreparationHarness, ENABLED_CARE_MANIFEST, exact, fakeModelCareShells, testIds } from "@/application/care-preparation/care-preparation-test-support";
 import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
@@ -1303,7 +1304,10 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
    * as a spy) over the prepared demo profile. en-SG: nothing at startup, history load or probing; the explicit action shows the
    * disclosure FIRST (nothing written or sent before the decision); Cancel keeps the standard wording, one REMOTE_USE_DECLINED row.
    */
-  it("shipped manifest and records (en-SG): no audit row or network call at startup, history load or probing; the explicit action shows the disclosure first; Cancel gives the deterministic explanation and sends nothing", async () => {
+  // Integration (shipped English activation + optional passcodes, 2026-10-12; deliberate): the explicit action's disclosure check asks
+  // the credential-free passcode probe (exactly one GET, no body, no passcode) before the dialog; that is the only network call. Nothing
+  // at startup, history load or local probing; no POST; Cancel sends nothing.
+  it("shipped manifest and records (en-SG): no audit row or network call at startup, history load or probing; the explicit action shows the disclosure first (only the passcode probe); Cancel gives the deterministic explanation and sends nothing", async () => {
     const en = getMessages("en-SG");
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
@@ -1322,11 +1326,15 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
     // Loading the screen and probing which comparison can be explained is local and writes no audit row.
     expect(probe).toHaveBeenCalledWith({ factId: "COMPARISON:BEFORE_BREAKFAST" });
     expect(runtime.aiAudit.append).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
 
     fireEvent.click(action);
     const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
     expect(runtime.aiAudit.append).not.toHaveBeenCalled();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    const passcodeProbeCall = [AI_SHELL_ROUTE_PATH, { method: "GET", cache: "no-store", redirect: "error", signal: expect.any(AbortSignal) }];
+    expect(fetchSpy.mock.calls).toEqual([passcodeProbeCall]);
+    // The probe failed (the spy answers nothing), so the passcode stays required: the field is shown (fail safe).
+    expect(within(dialog).getByLabelText(en.aiAccess.passcodeLabel)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: en.ai.cancel }));
     const panel = await screen.findByRole("region", { name: en.history.explanation.title });
     await waitFor(() => expect(within(panel).getByRole("status")).not.toBeEmptyDOMElement());
@@ -1336,7 +1344,8 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(rows).toHaveLength(1);
     expect(aiInvocationAuditRowSchema.parse(rows[0])).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcomeCode: "REMOTE_USE_DECLINED", providerModel: null, attempts: { count: 0 } });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // Still only the passcode probe: Cancel sent nothing.
+    expect(fetchSpy.mock.calls).toEqual([[AI_SHELL_ROUTE_PATH, { method: "GET", cache: "no-store", redirect: "error", signal: expect.any(AbortSignal) }]]);
   });
 
   it("shipped manifest and records (zh-SG): the class is PENDING: no disclosure, one deterministic local explanation, one REQUEST_CLASS_NOT_QUALIFIED row, no network call", async () => {

@@ -82,6 +82,12 @@ afterEach(async () => {
 // Packet 11C English activation: built on the pre-activation manifest, so it enables EXPLAIN_PATTERN only.
 const ENABLED: AiActivationManifest = testManifestEnabling("EXPLAIN_PATTERN");
 const USAGE = { inputTokens: 600, outputTokens: 80, costMicroUsd: 5 };
+/**
+ * Integration (shipped English activation + optional passcodes, 2026-10-12): with the activated shipped wiring, the ONLY network call
+ * allowed before an accepted request is the credential-free passcode probe, made when a disclosure is about to be required: exactly
+ * this GET (no body, no passcode header, its own timeout signal). Never a POST.
+ */
+const PASSCODE_PROBE_CALL = [AI_SHELL_ROUTE_PATH, { method: "GET", cache: "no-store", redirect: "error", signal: expect.any(AbortSignal) }] as const;
 
 /** Packet 11C Addendum C (C6): a row's usage basis (current rows only; the wiring never writes a legacy row). */
 const basisOf = (row: AiInvocationAuditRow) => ("usageBasis" in row ? row.usageBasis : "LEGACY");
@@ -142,7 +148,7 @@ describe("browser history explainer wiring (Packet 11C B2b)", () => {
   it.each([
     ["en-SG", true, "REMOTE_USE_NOT_ACCEPTED"],
     ["zh-SG", false, "REQUEST_CLASS_NOT_QUALIFIED"],
-  ] as const)("shipped (%s): a DETERMINISTIC explanation without a decision, one audit row, no network call", async (locale, disclosureRequired, outcomeCode) => {
+  ] as const)("shipped (%s): a DETERMINISTIC explanation without a decision, one audit row, no request sent (en-SG: only the passcode probe)", async (locale, disclosureRequired, outcomeCode) => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const { history } = await higherFixture();
@@ -151,7 +157,8 @@ describe("browser history explainer wiring (Packet 11C B2b)", () => {
     expect(await explainer.disclosureRequired({ factId: FACT, locale })).toBe(disclosureRequired);
     const result = await explainer.explain({ factId: FACT, locale });
     expect(result).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // Integration (2026-10-12, deliberate): the en-SG disclosure check asks the passcode probe (one GET); zh-SG asks nothing. No POST.
+    expect(fetchSpy.mock.calls).toEqual(disclosureRequired ? [PASSCODE_PROBE_CALL] : []);
     expect(log.rows).toHaveLength(1);
     expect(aiInvocationAuditRowSchema.safeParse(log.rows[0]).success).toBe(true);
     expect(log.rows[0]).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale, outcomeCode, providerModel: null, attempts: { count: 0 }, sourceRevisions: [] });
@@ -707,9 +714,12 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
     const care = await careSetup();
     const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, now: () => LATER }).careSummary!;
     expect(wording.available(care.payload)).toBe(true);
+    // Offering the action (render-time `available`) makes no network call at all.
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(await wording.disclosureRequired(care.payload)).toBe(true);
     expect(await care.audits.list()).toEqual([]);
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // Integration (2026-10-12, deliberate): the disclosure check asks only the credential-free passcode probe; nothing is POSTed.
+    expect(fetchSpy.mock.calls).toEqual([PASSCODE_PROBE_CALL]);
   });
 
   it("tested-shapes-only gate (override off), a preview outside the evaluated classes: never available, never a disclosure; an explicit request keeps the deterministic preview, one audit row, no POST", async () => {
@@ -1122,7 +1132,8 @@ describe("browser history explainer: one audit row per explicit request (Packet 
     await explainer.explain({ factId: FACT, locale: "en-SG" });
     // Packet 11C English activation (was TASK_DISABLED): the en-SG class is QUALIFIED; without the request's own decision nothing is sent.
     expect(log.rows.map((row) => row.outcomeCode)).toEqual(["REMOTE_USE_NOT_ACCEPTED"]);
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // Integration (2026-10-12, deliberate): the one disclosure check asked the passcode probe (one GET); no POST, no row from it.
+    expect(fetchSpy.mock.calls).toEqual([PASSCODE_PROBE_CALL]);
   });
 });
 
@@ -1252,15 +1263,17 @@ describe("browser AI assistance: optional passcode (Owner decision 2026-10-12, o
     }
   });
 
-  it("never asked when no disclosure is required: shipped manifest, private mode, offline, switch known off, unqualified class", async () => {
+  // Integration (2026-10-12, deliberate): the shipped manifest is now activated, so "not activated" uses the pre-activation manifest,
+  // and the unqualified class uses the all-PENDING test gate (the shipped gate now qualifies this en-SG class).
+  it("never asked when no disclosure is required: not activated, private mode, offline, switch known off, unqualified class", async () => {
     const { history } = await higherFixture();
     const passcodeProbe = vi.fn(async () => false);
     const variants = [
-      { manifest: AI_ACTIVATION_MANIFEST, requestClassGate: qualifiedTestRequestClassGate() },
+      { manifest: DETERMINISTIC_ONLY_TEST_MANIFEST, requestClassGate: qualifiedTestRequestClassGate() },
       { manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), privateMode: () => true },
       { manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), online: () => false },
       { manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteSwitchKnownOff: () => true },
-      { manifest: ENABLED },
+      { manifest: ENABLED, requestClassGate: pendingTestRequestClassGate() },
     ];
     for (const variant of variants) {
       const explainer = createBrowserHistoryExplainer({ history, audit: audit().port, fetcher: fakeRoute(), passcodeProbe, ...variant });

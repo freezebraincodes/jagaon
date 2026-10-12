@@ -496,8 +496,10 @@ describe("optional AI passcode (Owner decision 2026-10-12, optional passcodes)",
       ["switch off", { environment: { ...env, JAGAON_REMOTE_AI: "off" } }, noHeader, refused("REMOTE_AI_DISABLED")],
       ["foreign origin", { environment: env }, { ...noHeader, Origin: "https://elsewhere.example" }, refused("ORIGIN_REJECTED")],
       ["cross-site", { environment: env }, { ...noHeader, "Sec-Fetch-Site": "cross-site" }, refused("ORIGIN_REJECTED")],
-      ["not activated (shipped manifest)", { environment: env, activationManifest: AI_ACTIVATION_MANIFEST }, noHeader, { kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true }],
-      ["not qualified (shipped records)", { environment: env, requestClassGate: undefined }, noHeader, refused("REQUEST_CLASS_NOT_QUALIFIED")],
+      // Integration (2026-10-12, deliberate): the shipped manifest is now activated, so "not activated" injects the pre-activation one.
+      ["not activated (pre-activation manifest)", { environment: env, activationManifest: DETERMINISTIC_ONLY_TEST_MANIFEST }, noHeader, { kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true }],
+      // Integration (2026-10-12, deliberate): the shipped records now qualify en-SG classes, so "not qualified" injects the PENDING gate.
+      ["not qualified (all-PENDING gate)", { environment: env, requestClassGate: pendingTestRequestClassGate() }, noHeader, refused("REQUEST_CLASS_NOT_QUALIFIED")],
       ["no daily limit", { environment: { ...env, JAGAON_AI_DAILY_SPEND_LIMIT_USD: undefined } }, noHeader, refused("SPEND_NOT_CONFIGURED")],
       ["daily limit reached", { environment: { ...env, JAGAON_AI_DAILY_SPEND_LIMIT_USD: usd(UPPER - 1) } }, noHeader, refused("SPEND_CEILING_REACHED")],
     ];

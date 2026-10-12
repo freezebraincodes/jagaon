@@ -316,16 +316,43 @@ export async function interceptShellRoute(page: Page, options: { requirePasscode
 /**
  * Production tripwire: any request to /api/ai/* fails the test (recorded and aborted). `assertUntouched()` is called at the end.
  */
-export async function shellTripwire(page: Page): Promise<{ hits: string[]; assertUntouched(): void }> {
+/**
+ * Integration (shipped English activation + optional passcodes, 2026-10-12): the ONE request allowed before an accepted request is the
+ * credential-free passcode probe, `GET /api/ai/shell` with no body (made when a disclosure is about to be shown). It is recorded in
+ * `probes` (never in `hits`) and aborted like everything else, so the app treats the answer as unknown and keeps the passcode field
+ * (fail safe). Any other /api/ai/* request, including any POST, is a hit.
+ */
+const isPasscodeProbe = (request: Request) => {
+  const url = new URL(request.url());
+  // No body, no query and no passcode header: anything that could carry data is a hit, never a probe.
+  return request.method() === "GET" && url.pathname === "/api/ai/shell" && url.search === "" && request.postData() === null && request.headers()[AI_SHELL_ACCESS_HEADER] === undefined;
+};
+
+export async function shellTripwire(page: Page): Promise<{ hits: string[]; probes: string[]; assertUntouched(expectedProbes?: number): void }> {
   const hits: string[] = [];
+  const probes: string[] = [];
+  const seen = new WeakSet<Request>();
+  const record = (request: Request) => {
+    if (seen.has(request)) return;
+    seen.add(request);
+    (isPasscodeProbe(request) ? probes : hits).push(`${request.method()} ${request.url()}`);
+  };
   await page.route("**/api/ai/**", async (route) => {
-    hits.push(`${route.request().method()} ${route.request().url()}`);
+    record(route.request());
     await route.abort();
   });
   page.on("request", (request) => {
-    if (/\/api\/ai\//.test(request.url()) && !hits.includes(`${request.method()} ${request.url()}`)) hits.push(`${request.method()} ${request.url()}`);
+    if (/\/api\/ai\//.test(request.url())) record(request);
   });
-  return { hits, assertUntouched: () => expect(hits, "the production app must never call /api/ai/*").toEqual([]) };
+  return {
+    hits,
+    probes,
+    // No hit ever, and exactly `expectedProbes` passcode probes so far (default: none; a stray probe also fails).
+    assertUntouched: (expectedProbes = 0) => {
+      expect(hits, "the production app must never call /api/ai/* (other than the passcode probe GET)").toEqual([]);
+      expect(probes, "passcode probes made so far").toHaveLength(expectedProbes);
+    },
+  };
 }
 
 // ---- Accessibility helpers (Playwright role queries and aria snapshots only) ---------------------------------------------------
