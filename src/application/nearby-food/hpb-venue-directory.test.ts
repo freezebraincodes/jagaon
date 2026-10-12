@@ -112,22 +112,37 @@ describe("snapshot name and address search (owner decision 2026-10-12; no networ
     expect(nearby.kind === "RESULTS" && nearby.places.length).toBeGreaterThan(0);
   });
 
-  it("offers up to five separated places to choose from when the matches are spread out", async () => {
-    const result = await geocoder().resolve("Tampines");
+  it("resolves a spread-out area or street straight to its densest part, labelled with the query (owner decision 2026-10-12)", async () => {
+    const directory = createHpbVenueDirectory(async () => SNAPSHOT_TEXT);
+    for (const [query, expected] of [
+      ["ang mo kio", "AMK Hub"],
+      ["Tampines", "Tampines"],
+    ] as const) {
+      const result = await geocoder().resolve(query);
+      if (result.kind !== "RESOLVED") throw new Error(`${query}: ${result.kind}`);
+      expect(result.location.label).toBe(query);
+      const nearby = await directory.findNearby({ origin: result.location.coordinates, radiusMetres: 2000, filters: NO_FILTERS });
+      if (nearby.kind !== "RESULTS") throw new Error("results");
+      expect(nearby.places.length).toBe(40);
+      expect(nearby.places.slice(0, 5).some((place) => place.name.includes(expected))).toBe(true);
+    }
+    expect(AREA_RADIUS_METRES).toBe(1500);
+  });
+
+  it("offers up to five separated places to choose from for a name found far apart (a chain)", async () => {
+    const result = await geocoder().resolve("Subway");
     if (result.kind !== "AMBIGUOUS") throw new Error(result.kind);
     expect(result.candidates.length).toBeGreaterThan(1);
     expect(result.candidates.length).toBeLessThanOrEqual(5);
-    for (const candidate of result.candidates) expect(candidate.label).toMatch(/Tampines.*Singapore \d{6}$/);
+    for (const candidate of result.candidates) expect(candidate.label).toMatch(/Singapore \d{6}$/);
     for (const [index, a] of result.candidates.entries()) {
       for (const b of result.candidates.slice(index + 1)) expect(distanceBetweenMetres(a.coordinates, b.coordinates)).toBeGreaterThanOrEqual(1000);
     }
-    expect(AREA_RADIUS_METRES).toBe(1500);
   });
 
   it("reads common address abbreviations the same way in the query and the data, and matches outlet names", async () => {
     expect((await geocoder().resolve("Jalan Tepong")).kind).toBe("RESOLVED");
     expect((await geocoder().resolve("Jln Tepong")).kind).toBe("RESOLVED");
-    expect((await geocoder().resolve("Subway")).kind).toBe("AMBIGUOUS");
   });
 
   it("finds nothing for unknown or too-short text, or when the snapshot is unavailable", async () => {

@@ -295,7 +295,13 @@ describe("NearbyFoodScreen on the provider-neutral port", () => {
     expect(within(details).getByText(en.food.checkAvailability)).toBeInTheDocument();
     expect(within(details).queryByText(en.food.directionsUnavailable)).not.toBeInTheDocument();
     expect(within(details).getByText(en.food.oneMapAttribution)).toBeInTheDocument();
-    fireEvent.click(within(details).getByRole("button", { name: en.food.viewList }));
+    // A typed search opens on the map (owner decision 2026-10-12), so the details open under it and Close returns to it.
+    fireEvent.click(within(details).getByRole("button", { name: en.shared.close }));
+    expect(screen.getByRole("list", { name: en.food.resultsCount(2) })).toBeInTheDocument();
+    // From the List view, a place's details open on their own with the List button.
+    fireEvent.click(screen.getByRole("button", { name: en.food.viewList }));
+    fireEvent.click(screen.getByRole("button", { name: "View details: Cafe One - Demo Mall" }));
+    fireEvent.click(within(screen.getByRole("article")).getByRole("button", { name: en.food.viewList }));
     expect(screen.getByRole("list", { name: en.food.resultsCount(2) })).toBeInTheDocument();
   });
 

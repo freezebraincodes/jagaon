@@ -120,7 +120,8 @@ export function createNearbyFoodController(port: NearbyFoodDiscoveryPort): Nearb
           if (signal.aborted) return;
           switch (resolution.kind) {
             case "RESOLVED":
-              await runSearch(resolution.location.coordinates, "list", signal);
+              // Owner decision 2026-10-12: a typed search opens on the map, like a current-location search; the list follows it.
+              await runSearch(resolution.location.coordinates, "map", signal);
               return;
             case "AMBIGUOUS":
               set({ kind: "AMBIGUOUS", query, candidates: resolution.candidates });
@@ -170,7 +171,7 @@ export function createNearbyFoodController(port: NearbyFoodDiscoveryPort): Nearb
     chooseCandidate(location: ResolvedLocation) {
       const signal = begin();
       set({ kind: "LOCATING", via: "MANUAL" });
-      void runSearch(location.coordinates, "list", signal);
+      void runSearch(location.coordinates, "map", signal);
     },
 
     setFilters(next: NearbyFoodFilters) {

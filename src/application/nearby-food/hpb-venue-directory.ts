@@ -131,7 +131,9 @@ export const HPB_FILTER_OPTIONS: NearbyFoodFilterOptions = Object.freeze({
 
 /** Places whose matches lie within this distance of their centre are one area, searched from that centre. */
 export const AREA_RADIUS_METRES = 1500;
-/** Separate choices offered for a spread-out match are at least this far apart. */
+/** A spread-out area is searched from its densest part: the matches within this distance of its busiest place. */
+const CLUSTER_RADIUS_METRES = 1000;
+/** Separate choices offered for a spread-out name match are at least this far apart. */
 const CANDIDATE_SEPARATION_METRES = 1000;
 const MAX_CANDIDATES = 5;
 const MIN_QUERY_LENGTH = 3;
@@ -176,7 +178,8 @@ const addressLabel = (address: string) => address.replace(UNIT, " ").replace(/\s
  * Owner decision 2026-10-12: offline name and address search over the same verified snapshot, used when OneMap is not configured,
  * unavailable or finds nothing. A query matches the venues whose address (or, failing that, name or address) contains every query
  * word. Matches at one postal code resolve to that place; matches within AREA_RADIUS_METRES of their centre resolve to that centre
- * as an area; anything more spread out offers up to five separated places to choose from. Nothing is sent anywhere.
+ * as an area; a more spread-out area or street resolves to its densest part, and a name found in many separate places (a chain)
+ * offers up to five of them to choose from. Nothing is sent anywhere.
  */
 export function createSnapshotTextGeocoder(loadText: () => Promise<string>): GeocoderPort {
   const load = createSnapshotSource(loadText);
@@ -193,7 +196,8 @@ export function createSnapshotTextGeocoder(loadText: () => Promise<string>): Geo
         return { venue, address, nameAndAddress: [...words(venue.name), ...address] };
       });
       let matched = index.filter((entry) => matchesAll(queryWords, entry.address));
-      if (matched.length === 0) matched = index.filter((entry) => matchesAll(queryWords, entry.nameAndAddress));
+      const byAddress = matched.length > 0;
+      if (!byAddress) matched = index.filter((entry) => matchesAll(queryWords, entry.nameAndAddress));
       if (matched.length === 0) return { kind: "NOT_FOUND" };
 
       // One group per postal code (or per point, for an address without one), in dataset order.
@@ -211,9 +215,26 @@ export function createSnapshotTextGeocoder(loadText: () => Promise<string>): Geo
         latitude: matched.reduce((sum, entry) => sum + entry.venue.latitude, 0) / matched.length,
         longitude: matched.reduce((sum, entry) => sum + entry.venue.longitude, 0) / matched.length,
       };
+      const areaLabel = query.trim().replace(/\s+/g, " ");
       if (all.every((group) => distanceBetweenMetres(centre, group.coordinates) <= AREA_RADIUS_METRES)) {
-        return { kind: "RESOLVED", location: { label: query.trim().replace(/\s+/g, " "), coordinates: centre } };
+        return { kind: "RESOLVED", location: { label: areaLabel, coordinates: centre } };
       }
+      // Owner decision 2026-10-12: an area or street (an address match) goes straight to results, searched from where most of its
+      // places are: the place with the most matches within CLUSTER_RADIUS_METRES, and the centre of those matches.
+      if (byAddress) {
+        const near = (group: (typeof all)[number]) => all.filter((other) => distanceBetweenMetres(group.coordinates, other.coordinates) <= CLUSTER_RADIUS_METRES);
+        const weight = (groups: typeof all) => groups.reduce((sum, group) => sum + group.count, 0);
+        let densest = all[0]!;
+        for (const group of all) if (weight(near(group)) > weight(near(densest))) densest = group;
+        const cluster = near(densest);
+        const total = weight(cluster);
+        const clusterCentre: Coordinates = {
+          latitude: cluster.reduce((sum, group) => sum + group.coordinates.latitude * group.count, 0) / total,
+          longitude: cluster.reduce((sum, group) => sum + group.coordinates.longitude * group.count, 0) / total,
+        };
+        return { kind: "RESOLVED", location: { label: areaLabel, coordinates: clusterCentre } };
+      }
+      // A name found in many separate places (a chain such as "Subway"): offer up to five of them to choose from.
       const chosen: typeof all = [];
       for (const group of [...all].sort((a, b) => b.count - a.count)) {
         if (chosen.length === MAX_CANDIDATES) break;
