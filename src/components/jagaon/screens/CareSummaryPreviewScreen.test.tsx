@@ -1004,3 +1004,148 @@ describe("Care-summary preview: accepted AI wording (Packet 11C B4b; injected te
 function printableCareSummaryText(payload: Parameters<typeof printableCareSummary>[0]): string {
   return printableCareSummary(payload).lines.map((line) => line.text).join("");
 }
+
+/**
+ * Owner decision 2026-10-12 (AI credit dialog): a request kept on the standard wording because the demo's AI credit is used up
+ * (`KEPT_DETERMINISTIC` with `remoteUse: "CREDIT_LIMIT_REACHED"`) shows the credit dialog; OK closes it, focus moves to the AI state
+ * line, and the standard wording stays with the existing fallback line and no retry (the credit is used up for today). Nothing else is
+ * sent. No other outcome shows the dialog.
+ */
+describe("Care-summary preview: AI credit limit (Owner decision 2026-10-12, AI credit dialog)", () => {
+  it("shows the dialog with the exact wording; OK closes it; the standard wording stays; no retry; nothing else is sent", async () => {
+    const { h, recordId } = await prepared();
+    const { port, calls } = fakeWording();
+    renderAi(h, recordId, port);
+    const before = (await screen.findByRole("article")).textContent;
+    fireEvent.click(await aiAction());
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+    act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "PROVIDER_REJECTED", remoteUse: "CREDIT_LIMIT_REACHED" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveAccessibleName("AI credit limit reached");
+    expect(dialog).toHaveAccessibleDescription("This demo has used up its AI credit for today. Your summary uses the standard wording instead.");
+    expect(within(dialog).getAllByRole("button").map((button) => button.textContent)).toEqual(["OK"]);
+    expect(within(dialog).getByRole("button", { name: "OK" })).toHaveFocus();
+    fireEvent.click(within(dialog).getByRole("button", { name: "OK" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    const line = screen.getByText(`${en.ai.unavailable} ${en.ai.careSummary.fallback}`);
+    expect(line).toHaveFocus();
+    expect(screen.getByRole("article").textContent).toBe(before);
+    expect(screen.queryByRole("button", { name: en.ai.retry })).toBeNull();
+    expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).toBeNull();
+    expect(document.body.textContent).not.toMatch(/CREDIT_LIMIT_REACHED|PROVIDER_|SPEND_|OPERATIONAL_/);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    expect(port.compose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect((screen.getByRole("button", { name: en.careSummary.approveAction }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("Escape closes it the same way", async () => {
+    const { h, recordId } = await prepared();
+    const { port, calls } = fakeWording();
+    renderAi(h, recordId, port);
+    fireEvent.click(await aiAction());
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+    act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "OPERATIONAL_SPEND_LOCKED", remoteUse: "CREDIT_LIMIT_REACHED" }));
+    fireEvent.keyDown(await screen.findByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText(`${en.ai.unavailable} ${en.ai.careSummary.fallback}`)).toBeTruthy();
+  });
+
+  it("no dialog for any other outcome (other fallbacks, not eligible, stale, cancelled, unavailable)", async () => {
+    const outcomes: CareSummaryAiWordingOutcome[] = [
+      { kind: "KEPT_DETERMINISTIC", reason: "PROVIDER_REJECTED" },
+      { kind: "KEPT_DETERMINISTIC", reason: "OPERATIONAL_SPEND_LOCKED" },
+      { kind: "KEPT_DETERMINISTIC", reason: "REMOTE_AI_DISABLED" },
+      { kind: "NOT_ELIGIBLE", reason: "NOTHING_TO_PHRASE" },
+      { kind: "UNAVAILABLE" },
+    ];
+    for (const outcome of outcomes) {
+      const { h, recordId } = await prepared();
+      const { port, calls } = fakeWording();
+      renderAi(h, recordId, port);
+      fireEvent.click(await aiAction());
+      await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+      act(() => calls[0]!.resolve(outcome));
+      await act(async () => undefined);
+      expect(screen.queryByRole("dialog"), JSON.stringify(outcome)).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("a declined disclosure never shows it, even with the marker (nothing was sent)", async () => {
+    const { h, recordId } = await prepared();
+    const { port, calls } = fakeWording({ required: true });
+    renderAi(h, recordId, port);
+    fireEvent.click(await aiAction());
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: en.ai.cancel }));
+    await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
+    act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "REMOTE_USE_DECLINED", remoteUse: "CREDIT_LIMIT_REACHED" }));
+    await act(async () => undefined);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(await screen.findByText(en.ai.remoteNotAccepted)).toBeTruthy();
+  });
+});
+
+/**
+ * Owner decision 2026-10-12 (optional passcodes and AI credit dialog), over the real browser wiring (injected test manifest, test-only
+ * qualified records and a fake route; never a live provider): with no passcode required, the disclosure shows no passcode field and the
+ * POST carries no passcode header; a used-up AI credit answered by the route shows the credit dialog, then the standard wording.
+ */
+describe("Care-summary preview over the real wiring: optional passcode and AI credit limit (Owner decision 2026-10-12)", () => {
+  const LATER = "2026-10-04T02:05:00.000Z" as Instant;
+  async function wired(respond: () => Response, passcodeRequired: boolean | null) {
+    const { h, recordId } = await aiPrepared("en-SG");
+    const commands = createCarePreparationService(h.database, { now: () => LATER, ids: testIds, projectAiCareSummary: projectValidatedAiCareSummary });
+    const fetcher = vi.fn<BrowserShellFetcher>(async () => respond());
+    const passcodeProbe = vi.fn(async () => passcodeRequired);
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands }, audit: createAiInvocationAuditRepository(h.database), manifest: ENABLED_CARE_MANIFEST, requestClassGate: qualifiedTestRequestClassGate(), fetcher, passcodeProbe, now: () => LATER }).careSummary!;
+    renderAi(h, recordId, wording, { commands });
+    return { fetcher, passcodeProbe };
+  }
+  const refusal = (reason: string) => () => new Response(JSON.stringify({ kind: "REFUSED", reason, notSentToProvider: true }), { status: 403, headers: { "content-type": "application/json" } });
+
+  it("no passcode required: the disclosure has no passcode field, its primary action is enabled, the POST has no passcode header", async () => {
+    const { fetcher, passcodeProbe } = await wired(refusal("SPEND_NOT_CONFIGURED"), false);
+    fireEvent.click(await aiAction());
+    const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    expect(within(dialog).queryByLabelText(en.aiAccess.passcodeLabel)).toBeNull();
+    const confirm = within(dialog).getByRole("button", { name: en.ai.careSummary.confirm });
+    expect(confirm).not.toBeDisabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    expect(fetcher.mock.calls[0]![1].headers).toEqual({ "content-type": "application/json" });
+    expect(passcodeProbe).toHaveBeenCalledTimes(1);
+    // SPEND_NOT_CONFIGURED is not a used-up credit: the ordinary fallback, no credit dialog.
+    expect(await screen.findByText(`${en.ai.unavailable} ${en.ai.careSummary.fallback}`)).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("a passcode required (or unknown): the field is shown as before and Accept waits for it", async () => {
+    for (const answer of [true, null]) {
+      await wired(refusal("SPEND_NOT_CONFIGURED"), answer);
+      fireEvent.click(await aiAction());
+      const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+      expect(within(dialog).getByLabelText(en.aiAccess.passcodeLabel)).toBeTruthy();
+      expect(within(dialog).getByRole("button", { name: en.ai.careSummary.confirm })).toBeDisabled();
+      cleanup();
+    }
+  });
+
+  it.each([
+    ["the daily limit (403 SPEND_CEILING_REACHED)", refusal("SPEND_CEILING_REACHED")],
+    ["the DeepSeek balance (FAILED OPERATIONAL_SPEND_LOCKED)", () => new Response(JSON.stringify({ kind: "FAILED", reason: "OPERATIONAL_SPEND_LOCKED", usage: { inputTokens: 1, outputTokens: 1, costMicroUsd: 1, basis: "UPPER_BOUND" } }), { headers: { "content-type": "application/json" } })],
+  ])("%s: the credit dialog, then the standard wording; one POST only", async (_label, respond) => {
+    const { fetcher } = await wired(respond, false);
+    const before = (await screen.findByRole("article")).textContent;
+    fireEvent.click(await aiAction());
+    fireEvent.click(within(await screen.findByRole("dialog", { name: en.ai.remoteTitle })).getByRole("button", { name: en.ai.careSummary.confirm }));
+    const credit = await screen.findByRole("dialog", { name: en.aiCreditLimit.title });
+    expect(credit).toHaveAccessibleDescription(en.aiCreditLimit.careSummaryBody);
+    fireEvent.click(within(credit).getByRole("button", { name: en.aiCreditLimit.ok }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText(`${en.ai.unavailable} ${en.ai.careSummary.fallback}`)).toBeTruthy();
+    expect(screen.getByRole("article").textContent).toBe(before);
+    expect(screen.queryByRole("button", { name: en.ai.retry })).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+

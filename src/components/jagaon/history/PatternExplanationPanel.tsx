@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { ExplainablePatternView, PeriodBoundary, SupportingReading } from "@/application/history/recorded-history-contracts";
 import { careSummaryLocalePack } from "@/application/care-preparation/care-summary-locale-pack";
 import { InfoIcon } from "../primitives/Icons";
+import { AiCreditLimitDialog } from "../ai/AiCreditLimitDialog";
 
 /**
  * Packet 11C Task 7: the explanation of one explainable comparison, shown under the unchanged 7A card text.
@@ -25,6 +26,11 @@ import { InfoIcon } from "../primitives/Icons";
  *
  * Packet 11C Addendum C, Task C4: an AI-sourced explanation shows the approved rows ai.demoTag (labelling the region that wraps the
  * generated text) and ai.resultCheck; a deterministic one shows neither. Human acceptance pending for placement and appearance.
+ *
+ * Owner decision 2026-10-12 (AI credit dialog): an explanation marked `remoteUse: "CREDIT_LIMIT_REACHED"` (its POSTed request was refused
+ * because the demo's AI credit is used up) shows the credit dialog (AiCreditLimitDialog, history wording) over the standard wording;
+ * OK or Escape closes it and focus goes back to the panel heading. The standard wording stays, without U12's line (the dialog has said
+ * why; the two never show together). A new result shows the dialog again only when it carries the marker.
  */
 export type PatternExplanationResult =
   | {
@@ -38,8 +44,10 @@ export type PatternExplanationResult =
        * Packet 11C B3: "NOT_ACCEPTED" only when the remote-use disclosure was not accepted (the deterministic explanation; nothing sent).
        * Owner UI decision U12: "UNAVAILABLE_AFTER_REQUEST" only when a remote request was actually POSTed and then failed or was refused
        * (the deterministic explanation with the owner's fallback line).
+       * Owner decision 2026-10-12 (AI credit dialog): "CREDIT_LIMIT_REACHED" only when that POSTed request was refused because the AI
+       * credit is used up (the deterministic explanation after the credit dialog).
        */
-      remoteUse?: "NOT_ACCEPTED" | "UNAVAILABLE_AFTER_REQUEST";
+      remoteUse?: "NOT_ACCEPTED" | "UNAVAILABLE_AFTER_REQUEST" | "CREDIT_LIMIT_REACHED";
     }
   | { kind: "UNAVAILABLE"; reason: string };
 
@@ -183,14 +191,18 @@ export function PatternExplanationPanel({ messages, locale, explanation, panelId
   const t = messages.history.explanation;
   const headingRef = useRef<HTMLHeadingElement>(null);
 
-  // Keyboard: the heading takes focus once, when the panel opens.
-  useEffect(() => {
+  // Keyboard: the heading takes focus once, when the panel opens. A layout effect (Owner decision 2026-10-12, AI credit dialog), so a
+  // credit dialog opening in the same commit takes focus after it and returns it to the heading.
+  useLayoutEffect(() => {
     headingRef.current?.focus();
   }, []);
 
   const explained = explanation?.kind === "EXPLAINED" ? explanation : null;
   const text = explained ? explainText(explained.composition) : null;
   const shown = explained && text ? { ...explained, text } : null;
+  // Owner decision 2026-10-12 (AI credit dialog): the result whose credit dialog was closed (one dialog per result).
+  const [creditClosedFor, setCreditClosedFor] = useState<PatternExplanationResult | null>(null);
+  const creditDialog = shown?.remoteUse === "CREDIT_LIMIT_REACHED" && creditClosedFor !== explanation;
   // The live region exists from the start and receives one message per outcome: the headline, or why there is none.
   const statusText =
     explanation === null ? "" : shown ? shown.text.headline : explanation.kind === "UNAVAILABLE" && explanation.reason === "STALE_RESULT" ? t.stale : t.unavailable;
@@ -229,7 +241,8 @@ export function PatternExplanationPanel({ messages, locale, explanation, panelId
         {shown ? (
           <>
             {shown.remoteUse === "NOT_ACCEPTED" ? <p className="history-explanation-notice history-explanation-remote-use">{messages.ai.remoteNotAccepted}</p> : null}
-            {/* Owner UI decision U12: only after a remote request was actually attempted and then failed or was refused. */}
+            {/* Owner UI decision U12: only after a remote request was actually attempted and then failed or was refused (never with the
+                credit dialog's marker: Owner decision 2026-10-12, AI credit dialog). */}
             {shown.remoteUse === "UNAVAILABLE_AFTER_REQUEST" ? <p className="history-explanation-notice history-explanation-remote-use">{messages.aiHistoryFallback.unavailableAfterRequest}</p> : null}
             <p className="history-explanation-text">{shown.text.observation}</p>
             <p className="history-explanation-text">{shown.text.evidence}</p>
@@ -249,6 +262,7 @@ export function PatternExplanationPanel({ messages, locale, explanation, panelId
           <SupportingReadings messages={messages} locale={locale} view={shown.view} panelId={panelId} />
         </>
       ) : null}
+      {creditDialog ? <AiCreditLimitDialog messages={messages} flow="PATTERN" onClose={() => setCreditClosedFor(explanation)} /> : null}
     </section>
   );
 }

@@ -982,6 +982,19 @@ export type AiHistoryFallbackMessages = {
   unavailableAfterRequest: string;
 };
 
+/**
+ * Owner decision 2026-10-12 (AI credit dialog): the dialog shown when an AI wording request was refused because the demo's AI credit is
+ * used up (the daily spend limit or the DeepSeek balance). en-SG: the owner's wording (the history line's "explanation" is the owner's
+ * allowed edit). zh-SG: drafts, Chinese acceptance deferred (zh-SG requests are never sent to the provider, so it is never shown).
+ * Kept outside the approved groups.
+ */
+export type AiCreditLimitMessages = {
+  title: string;
+  careSummaryBody: string;
+  historyBody: string;
+  ok: string;
+};
+
 /** Voice transcription slice copy (voice-copy.13s.1). Every row is human acceptance pending. */
 export type VoiceMessages = {
   entry: string;
@@ -1019,6 +1032,8 @@ export type AppMessages = {
   aiWording: AiWordingMessages;
   /** Owner UI decision U12: the history fallback line after an attempted remote request (ai-history-fallback.11c.1). */
   aiHistoryFallback: AiHistoryFallbackMessages;
+  /** Owner decision 2026-10-12 (AI credit dialog): the used-up AI credit dialog (en owner wording; zh drafts, acceptance deferred). */
+  aiCreditLimit: AiCreditLimitMessages;
   /** Voice transcription slice (voice-copy.13s.1; human acceptance pending). */
   voice: VoiceMessages;
   shared: SharedMessages;

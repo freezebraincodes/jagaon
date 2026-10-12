@@ -46,6 +46,15 @@ export const AI_SHELL_ROUTE_PATH = "/api/ai/shell";
  * persisted). The route compares it in constant time with the configured one; it is never echoed, logged or stored. Not model-facing.
  */
 export const AI_SHELL_ACCESS_HEADER = "x-jagaon-demo-passcode";
+/**
+ * Owner decision 2026-10-12 (optional passcodes): `GET /api/ai/shell` answers only whether the deployment requires the demo passcode
+ * (`{ passcodeRequired }`, a boolean; never a value, and nothing about the switch, origins, limit or activation). The browser asks it
+ * only when a disclosure could be shown, so the dialog shows its passcode field only when one is required. Any failure counts as
+ * required (the field is shown; the route still decides).
+ */
+export const aiShellAccessProbeResponseSchema = z.strictObject({ passcodeRequired: z.boolean() });
+export type AiShellAccessProbeResponse = z.infer<typeof aiShellAccessProbeResponseSchema>;
+
 /** The request body cap in UTF-8 bytes. The largest approved shell request (32 slots, 8 sections) stays well below it. */
 export const AI_SHELL_MAX_BODY_BYTES = 16_384;
 

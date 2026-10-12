@@ -52,7 +52,8 @@ describe("browser shell client: identity and module surface", () => {
   // Packet 11C Addendum C, C3 (deliberate retarget): the per-request decisions replace the B3 session disclosure.
   // CL3 contract re-freeze (Task RF, deliberate): plus the label of the per-request disclosure policy (a string; pinned by the freeze).
   it("exports exactly the client factory, the frozen route identity, the interim fail-closed disclosure and the per-request decisions (C3)", () => {
-    expect(Object.keys(client).sort()).toEqual(["AI_DISCLOSURE_POLICY_VERSION", "BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createAiRemoteUseDecisions", "createBrowserShellClient"]);
+    // Owner decision 2026-10-12 (optional passcodes; deliberate change): plus the passcode probe client (the same one network site).
+    expect(Object.keys(client).sort()).toEqual(["AI_DISCLOSURE_POLICY_VERSION", "BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createAiRemoteUseDecisions", "createBrowserShellClient", "fetchAiPasscodeRequirement"]);
     expect(client.AI_DISCLOSURE_POLICY_VERSION).toBe("ai-disclosure-policy.11c.2-per-request");
   });
 
@@ -804,3 +805,115 @@ describe("U12: the POST observer", () => {
     expect(result.kind).toBe("COMPLETED");
   });
 });
+
+/** Owner decision 2026-10-12 (optional passcodes): the passcode probe, GET /api/ai/shell, `{ passcodeRequired }` only. */
+describe("the AI passcode probe (Owner decision 2026-10-12, optional passcodes)", () => {
+  it("one same-origin GET with no body and no passcode; the route's boolean; anything else is unknown (null)", async () => {
+    const fetcher = answering(() => json({ passcodeRequired: false }));
+    expect(await client.fetchAiPasscodeRequirement({ fetcher })).toBe(false);
+    expect(fetcher).toHaveBeenCalledWith(AI_SHELL_ROUTE_PATH, { method: "GET", cache: "no-store", redirect: "error", signal: expect.any(AbortSignal) });
+    expect(await client.fetchAiPasscodeRequirement({ fetcher: answering(() => json({ passcodeRequired: true })) })).toBe(true);
+    for (const answer of [
+      () => json({ passcodeRequired: false }, 429),
+      () => json({ passcodeRequired: false }, 500),
+      () => json({ passcodeRequired: "no" }),
+      () => json({ passcodeRequired: false, extra: 1 }),
+      () => json({}),
+      () => json("not json", 200, "text/plain"),
+      () => json({ passcodeRequired: false }, 200, "text/html"),
+      () => json("x".repeat(70_000)),
+      () => {
+        throw new TypeError(SENTINEL);
+      },
+    ]) {
+      expect(await client.fetchAiPasscodeRequirement({ fetcher: answering(answer) })).toBeNull();
+    }
+    // A stalled probe is abandoned after its time limit: unknown (null), so the AI action never hangs.
+    vi.useFakeTimers();
+    try {
+      const stalled: BrowserShellFetcher = (_input, init) => new Promise((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(new DOMException("timeout", "TimeoutError"))));
+      const pending = client.fetchAiPasscodeRequirement({ fetcher: stalled });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await pending).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("against the real route handler: false with no passcode configured, true with one; no credential read, no provider call", async () => {
+    for (const [environment, expected] of [[{ ...TEST_DEPLOYMENT_ENVIRONMENT, JAGAON_AI_DEMO_PASSCODE: undefined }, false], [TEST_DEPLOYMENT_ENVIRONMENT, true]] as const) {
+      const reads: string[] = [];
+      const provider = vi.fn();
+      const handle = createAiShellHandler({ environment: new Proxy({ ...environment, DEEPSEEK_API_KEY: "SENTINEL-key" } as Record<string, string | undefined>, { get: (target, key) => (reads.push(String(key)), target[String(key)]) }), fetcher: provider });
+      const fetcher = vi.fn<BrowserShellFetcher>(async (url, init) => handle(new Request(`${TEST_ORIGIN}${url}`, { ...init, headers: { "Sec-Fetch-Site": "same-origin" } })));
+      expect(await client.fetchAiPasscodeRequirement({ fetcher })).toBe(expected);
+      expect(reads).not.toContain("DEEPSEEK_API_KEY");
+      expect(provider).not.toHaveBeenCalled();
+    }
+  });
+});
+
+/**
+ * Owner decision 2026-10-12 (AI credit dialog): the wiring is told (with the request's decision token) when the route answered that the
+ * AI credit is used up: the daily spend limit (REFUSED SPEND_CEILING_REACHED) or the provider's balance (FAILED OPERATIONAL_SPEND_LOCKED,
+ * which the shared Responses adapter maps from DeepSeek's HTTP 402). Closed codes only; no provider detail reaches the browser.
+ */
+describe("the AI credit-limit signal (Owner decision 2026-10-12, AI credit dialog)", () => {
+  it("is told the decision token for SPEND_CEILING_REACHED and for OPERATIONAL_SPEND_LOCKED; the results are unchanged", async () => {
+    const onCreditLimit = vi.fn();
+    const token = signal();
+    const ceiling = await createBrowserShellClient({ disclosure: ACCEPTED, fetcher: answering(() => json({ kind: "REFUSED", reason: "SPEND_CEILING_REACHED", notSentToProvider: true }, 403)), onCreditLimit }).invoke(REQUEST(), signal(), token);
+    expect(ceiling).toEqual({ kind: "FAILED", reason: "PROVIDER_REJECTED", refusal: "SPEND_CEILING_REACHED", notSentToProvider: true });
+    const usage = { ...USAGE, basis: "UPPER_BOUND" as const };
+    const balance = await createBrowserShellClient({ disclosure: ACCEPTED, fetcher: answering(() => json({ kind: "FAILED", reason: "OPERATIONAL_SPEND_LOCKED", usage })), onCreditLimit }).invoke(REQUEST(), signal(), token);
+    expect(balance).toEqual({ kind: "FAILED", reason: "OPERATIONAL_SPEND_LOCKED", usage });
+    expect(onCreditLimit.mock.calls).toEqual([[token], [token]]);
+    // Without a decision token, the per-call signal is the token (as for onPost).
+    const callSignal = signal();
+    const plain = vi.fn();
+    await createBrowserShellClient({ disclosure: ACCEPTED, fetcher: answering(() => json({ kind: "REFUSED", reason: "SPEND_CEILING_REACHED", notSentToProvider: true }, 403)), onCreditLimit: plain }).invoke(REQUEST(), callSignal);
+    expect(plain.mock.calls).toEqual([[callSignal]]);
+  });
+
+  it("is not told for any other answer (other refusals, other failures, a candidate, an unreadable answer); a throwing listener changes nothing", async () => {
+    const onCreditLimit = vi.fn();
+    const answers = [
+      ...AI_SHELL_ROUTE_REFUSAL_REASONS.filter((reason) => reason !== "SPEND_CEILING_REACHED").map((reason) => () => json({ kind: "REFUSED", reason, notSentToProvider: true }, 403)),
+      () => json({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { ...USAGE, basis: "REPORTED" } }),
+      () => json({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED", notSentToProvider: true }),
+      () => json({ kind: "FAILED", reason: "MISSING_CONFIGURATION", notSentToProvider: true }),
+      () => json({ kind: "CANDIDATE", candidate: VALID, retention: "CONFIRMED_NOT_STORED", usage: USAGE }),
+      () => json({ kind: "REFUSED", reason: "SPEND_CEILING_REACHED", notSentToProvider: true }, 200),
+      () => json(SENTINEL, 402, "text/plain"),
+      () => json({ kind: "FAILED", reason: "OPERATIONAL_SPEND_LOCKED" }, 402),
+    ];
+    for (const answer of answers) await createBrowserShellClient({ disclosure: ACCEPTED, fetcher: answering(answer), onCreditLimit }).invoke(REQUEST(), signal(), signal());
+    // Nothing POSTed at all.
+    await createBrowserShellClient({ disclosure: INTERIM_FAIL_CLOSED_DISCLOSURE, fetcher: answering(() => json({ kind: "REFUSED", reason: "SPEND_CEILING_REACHED", notSentToProvider: true }, 403)), onCreditLimit }).invoke(REQUEST(), signal(), signal());
+    expect(onCreditLimit).not.toHaveBeenCalled();
+    const throwing = () => {
+      throw new Error(SENTINEL);
+    };
+    expect(await createBrowserShellClient({ disclosure: ACCEPTED, fetcher: answering(() => json({ kind: "REFUSED", reason: "SPEND_CEILING_REACHED", notSentToProvider: true }, 403)), onCreditLimit: throwing }).invoke(REQUEST(), signal())).toMatchObject({ refusal: "SPEND_CEILING_REACHED" });
+  });
+
+  it("end to end with the real route over a fake DeepSeek transport: HTTP 402 Insufficient Balance arrives as OPERATIONAL_SPEND_LOCKED, with no provider text", async () => {
+    const insufficient = vi.fn(async () => new Response(JSON.stringify({ error: { message: `Insufficient Balance ${SENTINEL}`, type: "unknown_error" } }), { status: 402, headers: { "content-type": "application/json" } }));
+    const handle = createAiShellHandler({ environment: { ...TEST_DEPLOYMENT_ENVIRONMENT, DEEPSEEK_API_KEY: "SENTINEL-key" }, fetcher: insufficient, activationManifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate() });
+    const seen: string[] = [];
+    const fetcher = vi.fn<BrowserShellFetcher>(async (url, init) => {
+      const response = await handle(new Request(`${TEST_ORIGIN}${url}`, { ...init, headers: { ...(init.headers as Record<string, string>), Origin: TEST_ORIGIN, "Sec-Fetch-Site": "same-origin" } }));
+      const text = await response.text();
+      seen.push(text);
+      return new Response(text, { status: response.status, headers: response.headers });
+    });
+    const onCreditLimit = vi.fn();
+    const token = signal();
+    const result = await createBrowserShellClient({ disclosure: ACCEPTED, fetcher, accessPasscode: () => TEST_PASSCODE, onCreditLimit }).invoke(REQUEST(), signal(), token);
+    expect(insufficient).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ kind: "FAILED", reason: "OPERATIONAL_SPEND_LOCKED" });
+    expect(onCreditLimit.mock.calls).toEqual([[token]]);
+    expect(seen.join("")).not.toMatch(/Insufficient|SENTINEL|unknown_error/);
+  });
+});
+

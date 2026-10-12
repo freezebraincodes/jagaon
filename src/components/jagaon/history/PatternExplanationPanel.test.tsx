@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import Dexie from "dexie";
 import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
@@ -530,3 +530,55 @@ describe("PatternExplanationPanel: foreign-offset readings and Singapore time (P
     expect(text).not.toMatch(/UNAVAILABLE_AFTER_REQUEST|ACCESS_DENIED|PROVIDER_|REFUSED|FAILED/);
   });
 });
+
+/**
+ * Owner decision 2026-10-12 (AI credit dialog): an explanation whose POSTed request was refused because the AI credit is used up
+ * (`remoteUse: "CREDIT_LIMIT_REACHED"`) shows the credit dialog over the standard wording; OK closes it and the standard wording stays,
+ * with no U12 line (the dialog already said why). No other explanation shows the dialog.
+ */
+describe("PatternExplanationPanel: AI credit limit (Owner decision 2026-10-12, AI credit dialog)", () => {
+  it("shows the dialog with the exact wording and focus on OK; OK closes it; the standard wording stays without U12's line", async () => {
+    const { history } = await higherFixture();
+    const explanation = await explain(history, "en-SG");
+    const messages = getMessages("en-SG");
+    renderPanel("en-SG", { ...explanation, remoteUse: "CREDIT_LIMIT_REACHED" });
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAccessibleName("AI credit limit reached");
+    expect(dialog).toHaveAccessibleDescription("This demo has used up its AI credit for today. The explanation uses the standard wording instead.");
+    const ok = within(dialog).getByRole("button", { name: "OK" });
+    expect(ok).toHaveFocus();
+    fireEvent.click(ok);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Focus returns to the panel heading.
+    expect(screen.getByRole("heading", { level: 3, name: messages.history.explanation.title })).toHaveFocus();
+    const region = screen.getByRole("region", { name: messages.history.explanation.title });
+    const { headline, observation } = payloadOf(explanation);
+    expect(within(region).getByText(observation.text)).toBeInTheDocument();
+    expect(region.textContent).toContain(headline.text);
+    expect(within(region).queryByText(messages.aiHistoryFallback.unavailableAfterRequest)).not.toBeInTheDocument();
+    expect(region.textContent).not.toMatch(/CREDIT_LIMIT_REACHED|SPEND_|OPERATIONAL_|DeepSeek/);
+  });
+
+  it("Escape closes it too; a new explanation result shows it again only when it carries the marker", async () => {
+    const { history } = await higherFixture();
+    const explanation = await explain(history, "en-SG");
+    const view = renderPanel("en-SG", { ...explanation, remoteUse: "CREDIT_LIMIT_REACHED" });
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    view.rerender(<PatternExplanationPanel messages={getMessages("en-SG")} locale="en-SG" explanation={{ ...explanation }} panelId="panel-test" />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    view.rerender(<PatternExplanationPanel messages={getMessages("en-SG")} locale="en-SG" explanation={{ ...explanation, remoteUse: "CREDIT_LIMIT_REACHED" }} panelId="panel-test" />);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("no dialog for any other explanation (ordinary, not accepted, U12 fallback, AI-sourced, unavailable)", async () => {
+    const { history } = await higherFixture();
+    const explanation = await explain(history, "en-SG");
+    for (const variant of [explanation, { ...explanation, remoteUse: "NOT_ACCEPTED" as const }, { ...explanation, remoteUse: "UNAVAILABLE_AFTER_REQUEST" as const }, { ...explanation, source: "AI" as const }, { kind: "UNAVAILABLE" as const, reason: "STALE_RESULT" }, null]) {
+      renderPanel("en-SG", variant);
+      expect(screen.queryByRole("dialog")).toBeNull();
+      cleanup();
+    }
+  });
+});
+

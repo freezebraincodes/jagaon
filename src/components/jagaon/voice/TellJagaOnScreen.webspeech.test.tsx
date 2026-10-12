@@ -158,7 +158,8 @@ describe("Tell JagaOn with Web Speech (draft copy pending owner approval)", () =
       expect(context.loadTranscriber).toHaveBeenCalledTimes(round);
       await accept(context);
       await listening(context);
-      expect(context.loadTranscriber).toHaveBeenLastCalledWith(expect.any(Function), "WEB_SPEECH");
+      // Owner decision 2026-10-12 (optional passcodes; deliberate change): the loader also learns whether a passcode is required.
+      expect(context.loadTranscriber).toHaveBeenLastCalledWith(expect.any(Function), "WEB_SPEECH", { passcodeRequired: true });
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.state.stop }));
       await screen.findByRole("button", { name: context.pending.card.save });
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
@@ -175,7 +176,7 @@ describe("Tell JagaOn with Web Speech (draft copy pending owner approval)", () =
     expect(within(dialog).queryByText(web.consentTitle)).toBeNull();
     await accept(context);
     await listening(context);
-    expect(context.loadTranscriber).toHaveBeenCalledWith(expect.any(Function), "TRTC");
+    expect(context.loadTranscriber).toHaveBeenCalledWith(expect.any(Function), "TRTC", { passcodeRequired: true });
   });
 
   it("a browser-initiated end shows the early-end notice over what was captured; nothing restarts; the notice goes once something is saved", async () => {
@@ -608,5 +609,96 @@ describe("Web Speech with the real adapter and loader (mock recognizer, stubbed 
     expect(requestCredential).not.toHaveBeenCalled();
     expect(loadSdk).not.toHaveBeenCalled();
     expect(store.get(JAGAON_PROVIDER_TASK_MARKERS_KEY)).toBe(marker);
+  });
+});
+
+// Owner decision 2026-10-12 (optional passcodes): when the probe says no passcode is required, the flow is consent → microphone: the
+// consent shows no passcode field, its primary action is enabled at once, and the loader is told no passcode is required (the getter
+// holds nothing). When one is required (or the answer does not say), the flow is unchanged.
+describe("optional passcode in Tell JagaOn (Owner decision 2026-10-12, optional passcodes)", () => {
+  function noPasscodeSetup(provider: VoiceProviderId, extra: Setup = {}) {
+    const fake = createFakeVoiceTranscriber({ providerStop: { kind: "NOT_APPLICABLE" }, segmentsOnStart: [{ kind: "FINAL", segmentId: "s1", text: "My sugar was 6.8 mmol" }] });
+    const held: Array<string | null> = [];
+    const loadTranscriber = vi.fn(async (passcode: () => string | null, chosen: VoiceProviderId, access?: Readonly<{ passcodeRequired: boolean }>) => {
+      held.push(passcode());
+      void chosen;
+      void access;
+      return extra.transcriber ? extra.transcriber() : fake;
+    });
+    const resolveProvider = vi.fn(async (): Promise<VoiceProviderResolution> => ({ kind: "AVAILABLE", provider, passcodeRequired: false }));
+    return { ...setup({ provider, resolveProvider, loadTranscriber, ...extra }), loadTranscriber, resolveProvider, held };
+  }
+
+  for (const provider of ["WEB_SPEECH", "TRTC"] as const) {
+    it(`${provider}: no passcode field; Accept is enabled at once; the loader is told none is required, on every start`, async () => {
+      const context = noPasscodeSetup(provider);
+      for (let round = 0; round < 2; round += 1) {
+        const dialog = await screen.findByRole("dialog");
+        expect(within(dialog).queryByLabelText(context.messages.aiAccess.passcodeLabel)).toBeNull();
+        expect(dialog.querySelector("input")).toBeNull();
+        const acceptButton = within(dialog).getByRole("button", { name: context.messages.voice.disclosure.accept });
+        expect(acceptButton).not.toBeDisabled();
+        // The safe action still takes the initial focus.
+        expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: context.messages.voice.disclosure.decline }));
+        fireEvent.click(acceptButton);
+        await listening(context);
+        expect(context.loadTranscriber).toHaveBeenLastCalledWith(expect.any(Function), provider, { passcodeRequired: false });
+        expect(context.held.at(-1)).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: context.messages.voice.state.stop }));
+        await screen.findByRole("button", { name: context.pending.card.save });
+        fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
+        fireEvent.click(await screen.findByRole("button", { name: context.messages.voice.entry }));
+      }
+      expect(context.loadTranscriber).toHaveBeenCalledTimes(2);
+    });
+  }
+
+  it("declining the consent still starts nothing", async () => {
+    const context = noPasscodeSetup("WEB_SPEECH");
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: context.messages.voice.disclosure.decline }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(context.loadTranscriber).not.toHaveBeenCalled();
+  });
+
+  it("required, or an answer that does not say: the passcode field is shown and Accept waits for it (unchanged)", async () => {
+    for (const resolution of [{ kind: "AVAILABLE", provider: "WEB_SPEECH", passcodeRequired: true }, { kind: "AVAILABLE", provider: "WEB_SPEECH" }] as const) {
+      const context = setup({ resolveProvider: async () => resolution });
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByLabelText(context.messages.aiAccess.passcodeLabel)).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: context.messages.voice.disclosure.accept })).toBeDisabled();
+      await accept(context);
+      await listening(context);
+      expect(context.loadTranscriber).toHaveBeenLastCalledWith(expect.any(Function), "WEB_SPEECH", { passcodeRequired: true });
+      cleanup();
+    }
+  });
+
+  it("the legacy availability check may also say no passcode is required", async () => {
+    const fake = createFakeVoiceTranscriber({ providerStop: { kind: "NOT_APPLICABLE" } });
+    const loadTranscriber = vi.fn(async () => fake);
+    const messages = getMessages("en-SG");
+    render(<TellJagaOnScreen messages={messages} locale="en-SG" checkAvailability={async () => ({ available: true, passcodeRequired: false })} loadTranscriber={loadTranscriber} terminology={terminology()} glucoseEntryUnit={null} onSaveFacts={vi.fn()} onManualEntry={vi.fn()} onClose={vi.fn()} />);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByLabelText(messages.aiAccess.passcodeLabel)).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: messages.voice.disclosure.accept }));
+    await waitFor(() => expect(loadTranscriber).toHaveBeenCalledWith(expect.any(Function), "TRTC", { passcodeRequired: false }));
+  });
+
+  it("the real Web Speech loader sends the access POST without any passcode header", async () => {
+    vi.stubGlobal("webkitSpeechRecognition", MockRecognition);
+    const fetcher = vi.fn(async (input: string, init: RequestInit) => {
+      expect(input).toBe("/api/voice/access");
+      void init;
+      return new Response(JSON.stringify({ kind: "GRANTED", maxSessionSeconds: 45 }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const context = noPasscodeSetup("WEB_SPEECH", { loadTranscriber: (passcode, _provider, access) => loadWebSpeechTranscriber(passcode, access) });
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: context.messages.voice.disclosure.accept }));
+    await waitFor(() => expect(MockRecognition.instances).toHaveLength(1));
+    await listening(context);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0]![1].headers).toEqual({ "content-type": "application/json" });
   });
 });

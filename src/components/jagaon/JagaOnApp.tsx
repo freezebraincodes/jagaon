@@ -29,10 +29,19 @@ import { FoodGeneralInfoScreen } from "./screens/FoodGeneralInfoScreen";
 import { MoreScreen } from "./screens/MoreScreen";
 import { HelpScreen } from "./screens/HelpScreen";
 import { TellJagaOnScreen } from "./voice/TellJagaOnScreen";
-import { browserWebSpeechSupported, checkVoiceProviderAnswer, checkVoiceProviders, VOICE_PROVIDER_LOADERS, type VoiceTranscriberLoader } from "./voice/voice-provider-wiring";
+import { browserWebSpeechSupported, checkVoiceAccess, checkVoiceProviderAnswer, VOICE_PROVIDER_LOADERS, type VoiceTranscriberLoader } from "./voice/voice-provider-wiring";
 import { VoiceProviderSettingsSection } from "./voice/VoiceProviderSettingsSection";
 import { DEV_SETTINGS_ENABLED } from "./dev-settings-flag";
-import { readVoiceProviderPreference, resolveVoiceProvider as resolveVoiceProviderChoice, writeVoiceProviderPreference, type VoiceProviderId, type VoiceProviderProbeAnswer, type VoiceProviderResolution } from "@/application/voice/voice-provider-selection";
+import {
+  readVoiceProviderPreference,
+  resolveVoiceProvider as resolveVoiceProviderChoice,
+  writeVoiceProviderPreference,
+  type VoiceAccessCheck,
+  type VoiceAccessMode,
+  type VoiceProviderId,
+  type VoiceProviderProbeAnswer,
+  type VoiceProviderResolution,
+} from "@/application/voice/voice-provider-selection";
 import { createVoiceJournalSave, createVoiceSaveWithRefresh } from "./voice/voice-journal-save";
 import type { VoiceTranscriberPort } from "@/application/voice/voice-transcriber-port";
 import {
@@ -134,19 +143,24 @@ type JagaOnAppProps = {
    * harness (a scripted fake there; never a production default). Web Speech: when this or `voiceAvailabilityProbe` is injected, the
    * screen runs the single-provider (TRTC-labelled) path as before; otherwise the production provider choice below applies.
    */
-  voiceTranscriberLoader?: (accessPasscode: () => string | null) => Promise<VoiceTranscriberPort>;
+  voiceTranscriberLoader?: (accessPasscode: () => string | null, access?: VoiceAccessMode) => Promise<VoiceTranscriberPort>;
   /**
    * Review I-5: the credential-free voice availability probe, called when Tell JagaOn opens (before its disclosure). Injected in tests
-   * and the isolated e2e harness (see `voiceTranscriberLoader`).
+   * and the isolated e2e harness (see `voiceTranscriberLoader`). Owner decision 2026-10-12 (optional passcodes): it may also answer
+   * `{ available, passcodeRequired }` (absent flag: required).
    */
-  voiceAvailabilityProbe?: () => Promise<boolean>;
+  voiceAvailabilityProbe?: () => Promise<boolean | Readonly<{ available: boolean; passcodeRequired?: boolean }>>;
   /**
    * Web Speech (owner-approved scope 2026-10-11; draft): the production provider choice. The deployment-enabled providers (default: the
    * credential-free probe), one loader per provider (default: TRTC and Web Speech by dynamic import), the browser's speech-recognition
    * support (default: feature detection), the build-time developer-settings flag (default: `DEV_SETTINGS_ENABLED`, dev-settings-flag.ts) and
    * the per-browser storage of the developer's choice (default: the browser storage port). Injected in tests.
    */
-  voiceProvidersProbe?: () => Promise<readonly VoiceProviderId[]>;
+  /**
+   * Owner decision 2026-10-12 (optional passcodes): the probe may also say whether the demo passcode is required (`VoiceAccessCheck`;
+   * a bare provider list means required). Default: `checkVoiceAccess` (one probe call for both).
+   */
+  voiceProvidersProbe?: () => Promise<readonly VoiceProviderId[] | VoiceAccessCheck>;
   /** Round 6: the panel's probe telling a failed check apart (default: the production answer check, or `voiceProvidersProbe` when injected). */
   voiceProviderAnswerProbe?: () => Promise<VoiceProviderProbeAnswer>;
   voiceProviderLoaders?: Readonly<Partial<Record<VoiceProviderId, VoiceTranscriberLoader>>>;
@@ -181,6 +195,18 @@ type Phase =
 
 function browserOnboardingRepository(): DemoOnboardingRepository {
   return createDemoOnboardingRepository(createBrowserOnboardingStorage());
+}
+
+/**
+ * Owner decision 2026-10-12 (optional passcodes): a provider probe's answer as providers plus whether the demo passcode is required. A
+ * bare list (an injected test probe) or anything unreadable keeps the passcode required (fail safe); unreadable enables nothing.
+ */
+function voiceAccessOf(probed: unknown): VoiceAccessCheck {
+  if (Array.isArray(probed)) return { providers: probed as VoiceProviderId[], passcodeRequired: true };
+  if (probed && typeof probed === "object" && Array.isArray((probed as VoiceAccessCheck).providers)) {
+    return { providers: (probed as VoiceAccessCheck).providers, passcodeRequired: (probed as VoiceAccessCheck).passcodeRequired !== false };
+  }
+  return { providers: [], passcodeRequired: true };
 }
 
 /** Packet 13 slice: a runtime without the voice ports (older test runtimes) shows voice as unavailable; nothing is read or stored. */
@@ -238,8 +264,12 @@ export function JagaOnApp({
     [locale],
   );
 
-  const voiceProvidersProbe = injectedProvidersProbe ?? checkVoiceProviders;
-  const panelProbe = voiceProviderAnswerProbe ?? injectedProvidersProbe ?? checkVoiceProviderAnswer;
+  const voiceProvidersProbe = injectedProvidersProbe ?? checkVoiceAccess;
+  // Owner decision 2026-10-12 (optional passcodes): the panel needs only the providers of an injected probe (one stable function).
+  const panelProbe = useMemo(
+    () => voiceProviderAnswerProbe ?? (injectedProvidersProbe ? async () => voiceAccessOf(await injectedProvidersProbe()).providers : checkVoiceProviderAnswer),
+    [voiceProviderAnswerProbe, injectedProvidersProbe],
+  );
   /**
    * Web Speech (owner-approved scope 2026-10-11; draft): the voice provider choice. The developer's stored choice (read once on mount,
    * applied only while the developer-settings flag is on), the session activity that locks the selector, and the resolver the Tell
@@ -286,28 +316,35 @@ export function JagaOnApp({
   const legacyVoice = voiceTranscriberLoader !== undefined || voiceAvailabilityProbe !== undefined;
   const voiceLanguage = locale === "zh-SG" ? "zh" : "en";
   const resolveVoiceProvider = useCallback(async (): Promise<VoiceProviderResolution> => {
-    const enabled = await voiceProvidersProbe();
+    const { providers: enabled, passcodeRequired } = voiceAccessOf(await voiceProvidersProbe());
     let supported = false;
     try {
       supported = webSpeechSupported() === true;
     } catch {
       supported = false;
     }
-    const resolution = resolveVoiceProviderChoice({ enabled: Array.isArray(enabled) ? enabled : [], webSpeechSupported: supported, language: voiceLanguage }, { devSettingsEnabled, stored: voicePreferenceRef.current });
+    const resolution = resolveVoiceProviderChoice({ enabled, webSpeechSupported: supported, language: voiceLanguage }, { devSettingsEnabled, stored: voicePreferenceRef.current });
     // No loader for the resolved provider: unavailable (never another provider).
-    return resolution.kind === "AVAILABLE" && !voiceProviderLoaders[resolution.provider] ? { kind: "UNAVAILABLE" } : resolution;
+    if (resolution.kind === "AVAILABLE" && !voiceProviderLoaders[resolution.provider]) return { kind: "UNAVAILABLE" };
+    // Owner decision 2026-10-12 (optional passcodes): the screen skips its passcode step only when the probe said none is required.
+    return resolution.kind === "AVAILABLE" ? { ...resolution, passcodeRequired } : resolution;
   }, [voiceProvidersProbe, webSpeechSupported, voiceLanguage, devSettingsEnabled, voiceProviderLoaders]);
   const loadProviderTranscriber = useCallback(
-    (accessPasscode: () => string | null, provider: VoiceProviderId): Promise<VoiceTranscriberPort> => {
+    (accessPasscode: () => string | null, provider: VoiceProviderId, access: VoiceAccessMode): Promise<VoiceTranscriberPort> => {
       const load = voiceProviderLoaders[provider];
-      return load ? load(accessPasscode) : Promise.reject(new Error("VOICE_PROVIDER_UNAVAILABLE"));
+      return load ? load(accessPasscode, access) : Promise.reject(new Error("VOICE_PROVIDER_UNAVAILABLE"));
     },
     [voiceProviderLoaders],
   );
   const loadLegacyTranscriber = useCallback(
-    (accessPasscode: () => string | null): Promise<VoiceTranscriberPort> => (voiceTranscriberLoader ?? VOICE_PROVIDER_LOADERS.TRTC)(accessPasscode),
+    (accessPasscode: () => string | null, _provider: VoiceProviderId, access: VoiceAccessMode): Promise<VoiceTranscriberPort> => (voiceTranscriberLoader ?? VOICE_PROVIDER_LOADERS.TRTC)(accessPasscode, access),
     [voiceTranscriberLoader],
   );
+  const legacyAvailability = useCallback(async () => {
+    if (voiceAvailabilityProbe) return voiceAvailabilityProbe();
+    const { providers, passcodeRequired } = voiceAccessOf(await voiceProvidersProbe());
+    return { available: providers.includes("TRTC"), passcodeRequired };
+  }, [voiceAvailabilityProbe, voiceProvidersProbe]);
 
   const [stack, setStack] = useState<NavigationEntry[]>([
     { screen: "TODAY" },
@@ -1064,7 +1101,7 @@ export function JagaOnApp({
             locale={locale}
             voiceAvailable={voice !== undefined}
             // Web Speech: the production provider choice, or the injected single-provider path (tests, harness).
-            checkAvailability={legacyVoice ? (voiceAvailabilityProbe ?? (async () => (await voiceProvidersProbe()).includes("TRTC"))) : undefined}
+            checkAvailability={legacyVoice ? legacyAvailability : undefined}
             resolveProvider={legacyVoice ? undefined : resolveVoiceProvider}
             loadTranscriber={legacyVoice ? loadLegacyTranscriber : loadProviderTranscriber}
             onSessionActivity={setVoiceSessionActive}

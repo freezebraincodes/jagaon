@@ -283,6 +283,7 @@
             "src/components/demo/demo-boundary-placement.test.ts",
             "src/components/jagaon/JagaOnApp.restore-marker.test.tsx",
             "src/components/jagaon/JagaOnApp.test.tsx",
+            "src/components/jagaon/ai/AiCreditLimitDialog.test.tsx",
             "src/components/jagaon/ai/AiDisclosureDialog.test.tsx",
             "src/components/jagaon/data/DataBackupScreen.test.tsx",
             "src/components/jagaon/data/RestoreBackupPanel.test.tsx",

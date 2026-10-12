@@ -14,6 +14,9 @@ import { clientBucket, createPasscodeThrottle, readLimited, VOICE_PASSCODE_THROT
  *   5. the per-instance request rate (RATE_LIMITED);
  *   6. GRANTED with the server's maximum session length (`JAGAON_VOICE_MAX_SESSION_SECONDS`; the client controller enforces it).
  * The passcode is never echoed or logged. Responses are `no-store` and `nosniff`.
+ * Owner decision 2026-10-12 (optional passcodes): with no `JAGAON_VOICE_DEMO_PASSCODE` configured (missing, empty or whitespace-only),
+ * step 4 grants without a passcode (`voiceAccessGranted`; no failure is recorded). Steps 1-3, 5 and 6 are unchanged; a configured
+ * passcode is checked exactly as before.
  */
 export type VoiceAccessHandlerOptions = Readonly<{
   environment: Readonly<Record<string, string | undefined>>;

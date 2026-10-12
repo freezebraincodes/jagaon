@@ -115,8 +115,10 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await expect(article).not.toContainText(m.ai.demoTag);
         await captureState(page, testInfo, context, "care-declined", ["Escape declined: line ai.remoteNotAccepted in a polite live region", `focus returned to the invoking button (one move: ${afterEscape.join(" > ")}; the same element reads 'Organise with AI' once settled)`, "preview unchanged, 0 POSTs"], page.locator(".care-summary-ai"));
 
-        // A refusal (fake 403 SPEND_CEILING_REACHED): the deterministic preview stays, with the non-technical fallback line and Retry.
-        shell.answer({ kind: "REFUSED", reason: "SPEND_CEILING_REACHED" });
+        // A refusal (fake 403 SPEND_LEDGER_UNAVAILABLE): the deterministic preview stays, with the non-technical fallback line and Retry.
+        // Owner decision 2026-10-12 (AI credit dialog; deliberate change): was SPEND_CEILING_REACHED, which now shows the credit dialog
+        // without a retry (covered in its own test below); a ledger fault is not a used-up credit.
+        shell.answer({ kind: "REFUSED", reason: "SPEND_LEDGER_UNAVAILABLE" });
         let open = await openCareDisclosure(page, m);
         await open.getByLabel(m.aiAccess.passcodeLabel).fill(SYNTHETIC_PASSCODE);
         await open.getByRole("button", { name: m.ai.careSummary.confirm }).click();
@@ -124,8 +126,8 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await expect(page.getByRole("button", { name: m.ai.retry })).toBeVisible();
         await expect(article).not.toContainText(m.ai.demoTag);
         await expectNoTechnicalText(page);
-        expect(shell.calls.map((call) => call.answered)).toEqual(["REFUSED:SPEND_CEILING_REACHED"]);
-        await captureState(page, testInfo, context, "care-refused", ["fake 403 REFUSED SPEND_CEILING_REACHED", "line: ai.unavailable + ai.careSummary.fallback", "Retry offered", "preview unchanged, no closed code shown"], page.locator(".care-summary-ai"));
+        expect(shell.calls.map((call) => call.answered)).toEqual(["REFUSED:SPEND_LEDGER_UNAVAILABLE"]);
+        await captureState(page, testInfo, context, "care-refused", ["fake 403 REFUSED SPEND_LEDGER_UNAVAILABLE", "line: ai.unavailable + ai.careSummary.fallback", "Retry offered", "preview unchanged, no closed code shown"], page.locator(".care-summary-ai"));
 
         // Retry asks again (per request). A failure after a provider call (fake FAILED PROVIDER_TIMEOUT): the same fallback.
         shell.answer({ kind: "FAILED", reason: "PROVIDER_TIMEOUT" });
@@ -188,6 +190,68 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         if (browserName === "chromium") await page.pdf({ path: `${evidencePath(context, "care-ai-print")}.pdf`, printBackground: true });
         await captureState(page, testInfo, context, "care-ai-print", ["approved AI-assisted snapshot printed once (window.print observed)", "print media: AI_MARKING block (ai.demoTag + ai.resultCheck) and the draft notices section printed", browserName === "chromium" ? "printed PDF saved" : "PDF not available in this engine"], article);
         await page.emulateMedia({ media: null });
+      });
+
+      // Owner decision 2026-10-12 (optional passcodes and AI credit dialog): a deployment with no JAGAON_AI_DEMO_PASSCODE (the fake probe
+      // answers passcodeRequired: false): the care disclosure has no passcode field and the POST no passcode header. A used-up AI credit
+      // (the daily limit: 403 SPEND_CEILING_REACHED; the DeepSeek balance: FAILED OPERATIONAL_SPEND_LOCKED) shows the credit dialog;
+      // after OK the standard wording stays with the fallback line and no retry.
+      test(`no passcode configured, and the AI credit dialog (${locale}, ${viewport.label})${smoke}`, async ({ page, browserName }, testInfo) => {
+        const context: EvidenceContext = { target: "harness", locale, viewport: viewport.label, engine: browserName };
+        planStates(testInfo, context, ["care-no-passcode-dialog", "care-credit-limit-dialog", "care-credit-limit-after-ok"]);
+        const shell = await interceptShellRoute(page, { requirePasscode: false });
+        const m = await startPreparedProfile(page, HARNESS_URL, locale);
+        const article = await openCarePreview(page, m, "insulinRecords");
+        const before = await article.innerText();
+        await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toBeEnabled();
+        shell.answer({ kind: "REFUSED", reason: "SPEND_CEILING_REACHED" });
+        const dialog = await openCareDisclosure(page, m);
+        await expect(dialog.getByLabel(m.aiAccess.passcodeLabel)).toHaveCount(0);
+        await expect(dialog.locator("input")).toHaveCount(0);
+        await expect(dialog.getByRole("button", { name: m.ai.careSummary.confirm })).toBeEnabled();
+        expect(shell.probes.length).toBeGreaterThanOrEqual(1);
+        await captureState(page, testInfo, context, "care-no-passcode-dialog", ["passcode probe answered passcodeRequired: false", "care disclosure without a passcode field; primary action enabled at once", "0 POSTs"], dialog);
+        await dialog.getByRole("button", { name: m.ai.careSummary.confirm }).click();
+        const credit = page.getByRole("dialog", { name: m.aiCreditLimit.title });
+        await expect(credit).toBeVisible();
+        await expect(credit).toContainText(m.aiCreditLimit.careSummaryBody);
+        await expect(credit.getByRole("button", { name: m.aiCreditLimit.ok })).toBeFocused();
+        await expectNoHorizontalOverflow(page);
+        await captureState(page, testInfo, context, "care-credit-limit-dialog", ["fake 403 REFUSED SPEND_CEILING_REACHED", "credit dialog: aiCreditLimit.title and careSummaryBody, one OK action, focus on OK"], credit);
+        await credit.getByRole("button", { name: m.aiCreditLimit.ok }).click();
+        await expect(credit).toHaveCount(0);
+        await expect(aiLine(page)).toHaveText(joined(locale, m.ai.unavailable, m.ai.careSummary.fallback));
+        await expect(aiLine(page)).toBeFocused();
+        await expect(page.getByRole("button", { name: m.ai.retry })).toHaveCount(0);
+        expect(await article.innerText()).toBe(before);
+        await expectNoTechnicalText(page);
+        expect(shell.calls.map((call) => [call.answered, call.passcodeHeader])).toEqual([["REFUSED:SPEND_CEILING_REACHED", null]]);
+        await captureState(page, testInfo, context, "care-credit-limit-after-ok", ["OK closed the dialog; focus on the AI state line", "standard wording unchanged with the fallback line", "no Retry (the credit is used up for today)", "one POST, no passcode header"], page.locator(".care-summary-ai"));
+
+      });
+
+      // Owner decision 2026-10-12 (AI credit dialog): the DeepSeek balance (the route's FAILED OPERATIONAL_SPEND_LOCKED for HTTP 402)
+      // shows the same dialog; Escape closes it like OK. A passcode is required here (the default fake probe), so it is entered first.
+      test(`the AI credit dialog for the DeepSeek balance (${locale}, ${viewport.label})`, async ({ page, browserName }, testInfo) => {
+        const context: EvidenceContext = { target: "harness", locale, viewport: viewport.label, engine: browserName };
+        planStates(testInfo, context, ["care-credit-limit-balance"]);
+        const shell = await interceptShellRoute(page);
+        const m = await startPreparedProfile(page, HARNESS_URL, locale);
+        await openCarePreview(page, m, "insulinRecords");
+        await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toBeEnabled();
+        shell.answer({ kind: "FAILED", reason: "OPERATIONAL_SPEND_LOCKED" });
+        const dialog = await openCareDisclosure(page, m);
+        await dialog.getByLabel(m.aiAccess.passcodeLabel).fill(SYNTHETIC_PASSCODE);
+        await dialog.getByRole("button", { name: m.ai.careSummary.confirm }).click();
+        const balance = page.getByRole("dialog", { name: m.aiCreditLimit.title });
+        await expect(balance).toBeVisible();
+        await expect(balance).toContainText(m.aiCreditLimit.careSummaryBody);
+        await captureState(page, testInfo, context, "care-credit-limit-balance", ["fake FAILED OPERATIONAL_SPEND_LOCKED (DeepSeek balance)", "the same credit dialog"], balance);
+        await page.keyboard.press("Escape");
+        await expect(balance).toHaveCount(0);
+        await expect(aiLine(page)).toHaveText(joined(locale, m.ai.unavailable, m.ai.careSummary.fallback));
+        await expect(page.getByRole("button", { name: m.ai.retry })).toHaveCount(0);
+        expect(shell.calls.map((call) => [call.answered, call.passcodeHeader])).toEqual([["FAILED:OPERATIONAL_SPEND_LOCKED", SYNTHETIC_PASSCODE]]);
       });
 
       test(`not qualified (shipped all-PENDING records under the test manifest): no disclosure, no care AI action, nothing sent (${locale}, ${viewport.label})`, async ({ page, browserName }, testInfo) => {

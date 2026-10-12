@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import Dexie from "dexie";
 import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
 import type { Instant } from "@/domain/shared/time";
@@ -53,6 +53,21 @@ afterAll(() => {
   Dexie.dependencies.indexedDB = originalIndexedDB;
   Dexie.dependencies.IDBKeyRange = originalIDBKeyRange;
 });
+/**
+ * Owner decision 2026-10-12 (optional passcodes): without an injected test fetcher, the wiring's production passcode probe (GET
+ * /api/ai/shell through the browser's fetch) is asked whenever a disclosure is required. By default this file answers it as unknown (a
+ * 503, so the passcode stays required, as before) and refuses anything else loudly; nothing leaves the test. A test that stubs fetch
+ * itself replaces this.
+ */
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (input === AI_SHELL_ROUTE_PATH && init?.method === "GET") return new Response("{}", { status: 503, headers: { "content-type": "application/json" } });
+      throw new Error(`UNEXPECTED_NETWORK ${String(input)}`);
+    }),
+  );
+});
 afterEach(async () => {
   vi.unstubAllGlobals();
   for (const database of databases) database.close();
@@ -93,7 +108,8 @@ describe("browser history explainer wiring (Packet 11C B2b)", () => {
     expect(source).toMatch(/const decisions = createAiRemoteUseDecisions\(\);/);
     // Packet 11C Addendum C (C6, deliberate): plus the in-memory passcode reader and the route-refusal listener (no acceptance seam).
     // Owner UI decision U12 (deliberate): plus the POST observer (it only records that this request's POST left the browser).
-    expect(source).toMatch(/createBrowserShellClient\(\{ disclosure: decisions\.disclosure, fetcher: dependencies\.fetcher, accessPasscode: passcode\.read, onRefusal, onPost: notePost \}\)/);
+    // Owner decision 2026-10-12 (AI credit dialog; deliberate): plus the credit-limit observer (it only records the request's token).
+    expect(source).toMatch(/createBrowserShellClient\(\{ disclosure: decisions\.disclosure, fetcher: dependencies\.fetcher, accessPasscode: passcode\.read, onRefusal, onPost: notePost, onCreditLimit: noteCreditLimit \}\)/);
     expect(source).not.toMatch(/AiRemoteUseSession|createAiRemoteUseSession|dependencies\.disclosure|dependencies\.remoteUse|acceptDisclosure/);
   });
 
@@ -217,8 +233,10 @@ describe("browser history explainer: per-request disclosure (Packet 11C Addendum
     expect(log.rows.map((row) => row.outcomeCode)).toEqual(["TASK_DISABLED"]);
   });
 
-  it("activated: required for every request (asking twice answers twice); asking reads only the comparison, writes and sends nothing", async () => {
-    const fetchSpy = vi.fn();
+  // Owner decision 2026-10-12 (optional passcodes; deliberate change): a required disclosure also asks the credential-free passcode
+  // probe once per runtime (GET, no body, no passcode): the only request it makes; no request data is ever sent by asking.
+  it("activated: required for every request (asking twice answers twice); asking reads only the comparison, writes and sends no request data", async () => {
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ passcodeRequired: true }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchSpy);
     const { history } = await higherFixture();
     const probe = vi.fn((request: { factId: string }) => history.loadExplainablePattern(request));
@@ -231,7 +249,7 @@ describe("browser history explainer: per-request disclosure (Packet 11C Addendum
     expect(probe).toHaveBeenCalledWith({ factId: FACT });
     expect(load).not.toHaveBeenCalled();
     expect(log.port.append).not.toHaveBeenCalled();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(fetchSpy.mock.calls).toEqual([[AI_SHELL_ROUTE_PATH, { method: "GET", cache: "no-store", redirect: "error", signal: expect.any(AbortSignal) }]]);
     // A comparison that is not explainable, or a read that fails, needs no disclosure (nothing could be sent).
     const ineligible = createBrowserHistoryExplainer({ history: { load, loadExplainablePattern: async () => ({ kind: "INELIGIBLE" as const, reason: "STALE_SOURCE" as const }) }, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate() });
     expect(await ineligible.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
@@ -1076,7 +1094,10 @@ describe("browser history explainer: fallback after an attempted remote request 
   it.each([
     ["FAILED after a provider call", failedAfterCall],
     ["FAILED before a provider call (notSentToProvider, but POSTed)", failedBeforeCall],
-    ["REFUSED SPEND_CEILING_REACHED (403)", () => refused("SPEND_CEILING_REACHED")],
+    // Owner decision 2026-10-12 (AI credit dialog; deliberate change): SPEND_CEILING_REACHED now carries the credit-limit marker
+    // instead (see "AI credit limit" below); the other refusals keep U12's marker.
+    ["REFUSED SPEND_NOT_CONFIGURED (403)", () => refused("SPEND_NOT_CONFIGURED")],
+    ["REFUSED SPEND_LEDGER_UNAVAILABLE (403)", () => refused("SPEND_LEDGER_UNAVAILABLE")],
     ["REFUSED ACCESS_DENIED (403)", () => refused("ACCESS_DENIED")],
     ["REFUSED REMOTE_AI_DISABLED (403)", () => refused("REMOTE_AI_DISABLED")],
     ["an HTTP 500", serverError],
@@ -1127,3 +1148,172 @@ describe("browser history explainer: fallback after an attempted remote request 
     expect(second).not.toHaveProperty("remoteUse");
   });
 });
+
+/**
+ * Owner decision 2026-10-12 (optional passcodes): the disclosure asks for the demo passcode only when the deployment requires one. The
+ * runtime learns that from the passcode probe (`GET /api/ai/shell`), asked only when a disclosure is about to be required (never with
+ * the shipped manifest, private mode, offline or an unqualified class), once per runtime; an unknown answer keeps asking for it.
+ */
+describe("browser AI assistance: optional passcode (Owner decision 2026-10-12, optional passcodes)", () => {
+  const headerOf = (fetcher: ReturnType<typeof vi.fn<BrowserShellFetcher>>, call = 0) => (fetcher.mock.calls[call]![1].headers as Record<string, string>)[AI_SHELL_ACCESS_HEADER];
+
+  it("not required: after the disclosure check the entry is not needed; the accepted request is POSTed without a passcode header; the probe is asked once", async () => {
+    const { history } = await higherFixture();
+    const fetcher = fakeRoute();
+    const passcodeProbe = vi.fn(async () => false);
+    const assistance = createBrowserAiAssistance({ history, audit: audit().port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher, passcodeProbe });
+    const entry = assistance.history.accessPasscode;
+    // Unknown until asked: needed (fail safe).
+    expect(entry.needed()).toBe(true);
+    expect(await assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+    expect(entry.needed()).toBe(false);
+    expect(await assistance.history.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).toMatchObject({ source: "AI" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(headerOf(fetcher)).toBeUndefined();
+    expect(await assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+    expect(passcodeProbe).toHaveBeenCalledTimes(1);
+  });
+
+  it("required, unknown (null) or a failing probe: the entry stays needed; an unknown answer is asked again next time", async () => {
+    const { history } = await higherFixture();
+    for (const [answer, calls] of [[async () => true, 1], [async () => null, 2], [async () => Promise.reject(new Error("offline")), 2]] as const) {
+      const passcodeProbe = vi.fn(answer);
+      const explainer = createBrowserHistoryExplainer({ history, audit: audit().port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher: fakeRoute(), passcodeProbe });
+      expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+      expect(explainer.accessPasscode.needed()).toBe(true);
+      expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+      expect(passcodeProbe).toHaveBeenCalledTimes(calls);
+    }
+  });
+
+  it("never asked when no disclosure is required: shipped manifest, private mode, offline, switch known off, unqualified class", async () => {
+    const { history } = await higherFixture();
+    const passcodeProbe = vi.fn(async () => false);
+    const variants = [
+      { manifest: AI_ACTIVATION_MANIFEST, requestClassGate: qualifiedTestRequestClassGate() },
+      { manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), privateMode: () => true },
+      { manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), online: () => false },
+      { manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), remoteSwitchKnownOff: () => true },
+      { manifest: ENABLED },
+    ];
+    for (const variant of variants) {
+      const explainer = createBrowserHistoryExplainer({ history, audit: audit().port, fetcher: fakeRoute(), passcodeProbe, ...variant });
+      expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
+      expect(explainer.accessPasscode.needed()).toBe(true);
+    }
+    expect(passcodeProbe).not.toHaveBeenCalled();
+  });
+
+  it("a route ACCESS_DENIED after 'not required' makes the passcode required again (the next disclosure asks for it)", async () => {
+    const { history } = await higherFixture();
+    const fetcher = vi.fn<BrowserShellFetcher>(async () => new Response(JSON.stringify({ kind: "REFUSED", reason: "ACCESS_DENIED", notSentToProvider: true }), { status: 403, headers: { "content-type": "application/json" } }));
+    const passcodeProbe = vi.fn(async () => false);
+    const explainer = createBrowserHistoryExplainer({ history, audit: audit().port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher, passcodeProbe });
+    await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" });
+    expect(explainer.accessPasscode.needed()).toBe(false);
+    await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+    expect(explainer.accessPasscode.needed()).toBe(true);
+    await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" });
+    expect(explainer.accessPasscode.needed()).toBe(true);
+    expect(passcodeProbe).toHaveBeenCalledTimes(1);
+  });
+
+  it("the default probe is the same-origin GET through the browser's fetch (no injected fetcher); a test fetcher without a probe is never probed", async () => {
+    const { history } = await higherFixture();
+    const globalFetch = vi.fn(async () => new Response(JSON.stringify({ passcodeRequired: false }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", globalFetch);
+    const production = createBrowserHistoryExplainer({ history, audit: audit().port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate() });
+    expect(globalFetch).not.toHaveBeenCalled();
+    expect(await production.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+    expect(globalFetch).toHaveBeenCalledTimes(1);
+    expect(globalFetch).toHaveBeenCalledWith(AI_SHELL_ROUTE_PATH, { method: "GET", cache: "no-store", redirect: "error", signal: expect.any(AbortSignal) });
+    expect(production.accessPasscode.needed()).toBe(false);
+    const fetcher = fakeRoute();
+    const seeded = createBrowserHistoryExplainer({ history, audit: audit().port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
+    expect(await seeded.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
+    expect(seeded.accessPasscode.needed()).toBe(true);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(globalFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("the care flow learns it the same way (one entry and one probe for both flows)", async () => {
+    const h = await createCarePreparationHarness();
+    try {
+      const passcodeProbe = vi.fn(async () => false);
+      const assistance = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands: createCarePreparationService(h.database, { now: () => NOW, ids: testIds, projectAiCareSummary: projectValidatedAiCareSummary }) }, audit: audit().port, manifest: ENABLED_CARE_MANIFEST, requestClassGate: qualifiedTestRequestClassGate(), fetcher: fakeRoute(), passcodeProbe });
+      expect(assistance.careSummary!.accessPasscode).toBe(assistance.history.accessPasscode);
+      // A preview that could not be sent asks nothing.
+      expect(await assistance.careSummary!.disclosureRequired({} as never)).toBe(false);
+      expect(passcodeProbe).not.toHaveBeenCalled();
+    } finally {
+      await closeCarePreparationHarnesses();
+    }
+  });
+});
+
+/**
+ * Owner decision 2026-10-12 (AI credit dialog): when an accepted request was refused because the daily AI limit is used up
+ * (SPEND_CEILING_REACHED) or the provider's balance is (OPERATIONAL_SPEND_LOCKED), the standard wording comes back marked
+ * "CREDIT_LIMIT_REACHED" (the screens then show the credit dialog instead of U12's line); no other outcome carries it.
+ */
+describe("browser AI assistance: AI credit limit (Owner decision 2026-10-12, AI credit dialog)", () => {
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const ceiling = () => vi.fn<BrowserShellFetcher>(async () => json({ kind: "REFUSED", reason: "SPEND_CEILING_REACHED", notSentToProvider: true }, 403));
+  const balance = () => vi.fn<BrowserShellFetcher>(async () => json({ kind: "FAILED", reason: "OPERATIONAL_SPEND_LOCKED", usage: { ...USAGE, basis: "UPPER_BOUND" } }));
+
+  it.each([
+    ["the daily limit (REFUSED SPEND_CEILING_REACHED)", ceiling, "SPEND_CEILING_REACHED"],
+    ["the DeepSeek balance (FAILED OPERATIONAL_SPEND_LOCKED)", balance, "OPERATIONAL_SPEND_LOCKED"],
+  ] as const)("history: %s → the standard wording marked CREDIT_LIMIT_REACHED; audited with its own code", async (_label, make, code) => {
+    const { history } = await higherFixture();
+    const log = audit();
+    const fetcher = make();
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
+    explainer.accessPasscode.provide("TEST-ONLY-passcode-value");
+    const result = await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+    expect(result).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC", remoteUse: "CREDIT_LIMIT_REACHED" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(log.rows.map((row) => row.outcomeCode)).toEqual([code]);
+    // Per request: the next request that is not POSTed carries no marker.
+    const next = await explainer.explain({ factId: FACT, locale: "en-SG" }, new AbortController().signal);
+    expect(next).not.toMatchObject({ remoteUse: "CREDIT_LIMIT_REACHED" });
+  });
+
+  it("history: no marker for other refusals, failures or a successful AI explanation", async () => {
+    const { history } = await higherFixture();
+    for (const fetcher of [
+      vi.fn<BrowserShellFetcher>(async () => json({ kind: "REFUSED", reason: "SPEND_NOT_CONFIGURED", notSentToProvider: true }, 403)),
+      vi.fn<BrowserShellFetcher>(async () => json({ kind: "REFUSED", reason: "ORIGIN_REJECTED", notSentToProvider: true }, 403)),
+      vi.fn<BrowserShellFetcher>(async () => json({ kind: "FAILED", reason: "PROVIDER_FAILED", usage: { ...USAGE, basis: "UPPER_BOUND" } })),
+      fakeRoute(),
+    ]) {
+      const explainer = createBrowserHistoryExplainer({ history, audit: audit().port, manifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), fetcher });
+      explainer.accessPasscode.provide("TEST-ONLY-passcode-value");
+      expect(await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal)).not.toMatchObject({ remoteUse: "CREDIT_LIMIT_REACHED" });
+    }
+  });
+
+  it.each([
+    ["the daily limit", ceiling],
+    ["the DeepSeek balance", balance],
+  ] as const)("care: %s → KEPT_DETERMINISTIC marked CREDIT_LIMIT_REACHED; no replacement", async (_label, make) => {
+    const h = await createCarePreparationHarness();
+    try {
+      const LATER = "2026-10-04T02:05:00.000Z" as Instant;
+      const commands = createCarePreparationService(h.database, { now: () => LATER, ids: testIds, projectAiCareSummary: projectValidatedAiCareSummary });
+      const reading = await h.journal.recordGlucose({ payload: { measurement: { enteredValue: "6.6" as never, enteredUnit: "MMOL_L", normalization: null }, measurementMethod: "FINGERSTICK_METER", context: { kind: "PATIENT_SELECTED_SLOT", slot: "BEDTIME" } }, temporal: { kind: "POINT", occurrence: exact("2026-10-03T13:00:00.000Z") }, recordedAt: LATER });
+      if (reading.kind !== "COMMITTED") throw new Error("fixture");
+      const prepared = await commands.prepare(await h.selection());
+      if (prepared.kind !== "COMMITTED") throw new Error(JSON.stringify(prepared));
+      const fetcher = make();
+      const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands }, audit: audit().port, manifest: ENABLED_CARE_MANIFEST, requestClassGate: qualifiedTestRequestClassGate(), fetcher, now: () => LATER }).careSummary!;
+      wording.accessPasscode.provide("TEST-ONLY-passcode-value");
+      const outcome = await wording.compose({ snapshotRef: { recordId: prepared.recordId, expectedRevisionId: prepared.revisionId, expectedRevisionNumber: prepared.revisionNumber }, locale: "en-SG", disclosure: "ACCEPTED" }, new AbortController().signal);
+      expect(outcome).toMatchObject({ kind: "KEPT_DETERMINISTIC", remoteUse: "CREDIT_LIMIT_REACHED" });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      await closeCarePreparationHarnesses();
+    }
+  });
+});
+

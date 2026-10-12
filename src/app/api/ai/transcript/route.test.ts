@@ -250,3 +250,47 @@ describe("Packet 13 /api/ai/transcript: one bounded call (test-only activation a
     for (const spy of logs) expect(spy).not.toHaveBeenCalled();
   });
 });
+
+// Owner decision 2026-10-12 (optional passcodes): the transcript route shares the shell's access logic. With no JAGAON_AI_DEMO_PASSCODE
+// configured it grants without a passcode, and the route stays refused by its own switch and by the shipped activation and PENDING
+// qualification; a configured passcode is still required.
+describe("Packet 13 /api/ai/transcript: optional passcode (Owner decision 2026-10-12, optional passcodes)", () => {
+  const noPasscode = { JAGAON_AI_DEMO_PASSCODE: undefined };
+  const noHeader = { "x-jagaon-demo-passcode": "" };
+  const withoutHeader = (body: unknown) => {
+    const built = post(body);
+    const headers = new Headers(built.headers);
+    headers.delete("x-jagaon-demo-passcode");
+    return new Request(built.url, { method: "POST", headers, body: JSON.stringify(body) });
+  };
+
+  it("shipped state, no passcode configured: still refused (TASK_NOT_ACTIVATED; activated: EXTRACTION_NOT_QUALIFIED), never ACCESS_DENIED", async () => {
+    const shipped = setup({ activationManifest: undefined, gate: undefined, environment: noPasscode });
+    expect((await read(await shipped.handle(withoutHeader(request())))).body).toEqual({ kind: "REFUSED", reason: "TASK_NOT_ACTIVATED", notSentToProvider: true });
+    const pending = setup({ gate: undefined, environment: noPasscode });
+    expect((await read(await pending.handle(withoutHeader(request())))).body).toEqual({ kind: "REFUSED", reason: "EXTRACTION_NOT_QUALIFIED", notSentToProvider: true });
+    for (const run of [shipped, pending]) {
+      expect(run.reads).not.toContain("DEEPSEEK_API_KEY");
+      expect(run.calls).toHaveLength(0);
+    }
+  });
+
+  it("no passcode configured: its own switch, the shared switch and origin still refuse first", async () => {
+    const cases: Array<[Record<string, string | undefined>, Record<string, string>, string]> = [
+      [{ ...noPasscode, JAGAON_AI_TRANSCRIPT_EXTRACTION: "" }, noHeader, "EXTRACTION_DISABLED"],
+      [{ ...noPasscode, JAGAON_REMOTE_AI: "off" }, noHeader, "REMOTE_AI_DISABLED"],
+      [noPasscode, { ...noHeader, origin: "https://elsewhere.example" }, "ORIGIN_REJECTED"],
+    ];
+    for (const [environment, headers, reason] of cases) {
+      const { handle, calls } = setup({ environment });
+      expect((await read(await handle(post(request(), headers)))).body, reason).toEqual({ kind: "REFUSED", reason, notSentToProvider: true });
+      expect(calls).toHaveLength(0);
+    }
+  });
+
+  it("a configured passcode is still required; a present but invalid one refuses every request", async () => {
+    expect((await read(await setup().handle(withoutHeader(request())))).body).toEqual({ kind: "REFUSED", reason: "ACCESS_DENIED", notSentToProvider: true });
+    expect((await read(await setup({ environment: { JAGAON_AI_DEMO_PASSCODE: "short" } }).handle(post(request(), { "x-jagaon-demo-passcode": "short" })))).body).toEqual({ kind: "REFUSED", reason: "ACCESS_DENIED", notSentToProvider: true });
+  });
+});
+

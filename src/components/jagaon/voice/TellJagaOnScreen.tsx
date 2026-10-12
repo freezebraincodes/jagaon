@@ -5,7 +5,7 @@ import { reviewVoiceCandidates, type VoiceFactDecision, type VoiceSaveIntent } f
 import { VOICE_DISCLOSURE_INITIAL_STATE, voiceDisclosureReducer } from "@/application/voice/voice-cloud-disclosure";
 import { createVoiceSessionController, type VoiceSessionController, type VoiceSessionSnapshot, type VoiceTimers } from "@/application/voice/voice-session-controller";
 import type { VoiceTranscriberPort } from "@/application/voice/voice-transcriber-port";
-import type { VoiceProviderId, VoiceProviderResolution } from "@/application/voice/voice-provider-selection";
+import type { VoiceAccessMode, VoiceProviderId, VoiceProviderResolution } from "@/application/voice/voice-provider-selection";
 import { analyseTranscript, type VoiceMedicineDirectory } from "@/domain/voice/voice-candidate-extractor";
 import type { VoiceAnalysis, VoiceCandidate, VoiceFactCandidate, VoiceLanguage, VoiceMedicationRef, VoiceRedirectCategory } from "@/domain/voice/voice-contracts";
 import { gateRemoteTranscriptExtraction } from "@/domain/voice/voice-remote-extraction-gate";
@@ -51,6 +51,10 @@ import { voiceScreenCopy } from "./voice-screen-copy";
  *   until something is saved. REVIEW and REDIRECT display the transcript below the notice: the "captured" variant. The nothing-understood
  *   end state shows no transcript: the "empty" variant when nothing was captured, and the round-6 "not shown" variant (owner-approved)
  *   when text was captured but cannot be shown (e.g. too long, no words).
+ * - Owner decision 2026-10-12 (optional passcodes): the availability answer resolved at idle says whether the deployment requires the
+ *   demo passcode (`passcodeRequired`; absent means required, fail safe). Not required: the disclosure shows no passcode field, its
+ *   primary action is enabled at once (consent → microphone), nothing is held in memory and the loader is told `{ passcodeRequired:
+ *   false }`, so the clients send no passcode header. Required: unchanged. The server checks either way.
  */
 export type VoiceRememberedTerm = Readonly<{ recordId: string; revisionId: string; language: VoiceLanguage; phrase: string; medication: VoiceMedicationRef | null }>;
 export type VoiceTerminologyPort = Readonly<{
@@ -78,15 +82,19 @@ export type TellJagaOnScreenProps = Readonly<{
   /**
    * Review I-5: the credential-free availability probe (production: `checkTrtcVoiceAvailability`). Called when the screen opens and on
    * restart; false or a rejection shows "unavailable" plus manual entry before any disclosure. Absent: only `voiceAvailable` applies.
+   * Owner decision 2026-10-12 (optional passcodes): it may also answer `{ available, passcodeRequired }` (absent flag: required).
    */
-  checkAvailability?: () => Promise<boolean>;
+  checkAvailability?: () => Promise<boolean | Readonly<{ available: boolean; passcodeRequired?: boolean }>>;
   /**
    * Web Speech: resolves the session's provider at idle (production: the probe's enabled providers ∩ this browser's support, plus the
    * developer choice). Takes precedence over `checkAvailability`. Absent: the provider is TRTC (the existing behaviour).
    */
   resolveProvider?: () => Promise<VoiceProviderResolution>;
-  /** Called only after the disclosure is accepted, with the session's fixed provider (the production loaders use dynamic imports). */
-  loadTranscriber: (accessPasscode: () => string | null, provider: VoiceProviderId) => Promise<VoiceTranscriberPort>;
+  /**
+   * Called only after the disclosure is accepted, with the session's fixed provider (the production loaders use dynamic imports).
+   * Owner decision 2026-10-12 (optional passcodes): and whether the passcode is required for this session (`access`).
+   */
+  loadTranscriber: (accessPasscode: () => string | null, provider: VoiceProviderId, access: VoiceAccessMode) => Promise<VoiceTranscriberPort>;
   /** True while a session is starting, listening or stopping (also during the cancel after an unmount); false otherwise. */
   onSessionActivity?: (active: boolean) => void;
   terminology: VoiceTerminologyPort;
@@ -145,6 +153,8 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
   const [phase, setPhase] = useState<Phase>(() => (!voiceAvailable ? { kind: "ENDED", reason: "UNAVAILABLE" } : props.resolveProvider || props.checkAvailability ? { kind: "CHECKING" } : { kind: "DISCLOSURE" }));
   // Web Speech: the provider resolved at idle; fixed for the session that the next accepted disclosure starts.
   const [provider, setProvider] = useState<VoiceProviderId>("TRTC");
+  // Owner decision 2026-10-12 (optional passcodes): resolved at idle with the provider; true unless the answer says false.
+  const [passcodeRequired, setPasscodeRequired] = useState(true);
   // How the last session ended when it needs a notice: the browser ended it, or it reached the 60 s limit; `captured` when it produced
   // transcript text.
   const [endNotice, setEndNotice] = useState<Readonly<{ kind: "PROVIDER" | "LIMIT"; captured: boolean }> | null>(null);
@@ -174,13 +184,17 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
           () => ({ kind: "UNAVAILABLE" as const }),
         )
       : checkAvailability!().then(
-          (available) => (available === true ? { kind: "AVAILABLE" as const, provider: "TRTC" as const } : { kind: "UNAVAILABLE" as const }),
+          (available) =>
+            available === true || (typeof available === "object" && available !== null && available.available === true)
+              ? { kind: "AVAILABLE" as const, provider: "TRTC" as const, passcodeRequired: typeof available === "object" && available.passcodeRequired === false ? false : true }
+              : { kind: "UNAVAILABLE" as const },
           () => ({ kind: "UNAVAILABLE" as const }),
         );
     void resolution.then((result) => {
       if (!current || !mounted.current) return;
       if (result.kind === "AVAILABLE") {
         setProvider(result.provider);
+        setPasscodeRequired(result.passcodeRequired !== false);
         setPhase({ kind: "DISCLOSURE" });
       } else setPhase({ kind: "ENDED", reason: result.kind === "UNSUPPORTED" ? "UNSUPPORTED" : "UNAVAILABLE" });
     });
@@ -260,8 +274,10 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
   );
 
   async function accept() {
-    if (disclosure.kind !== "SHOWN" || entered.trim().length === 0) return;
-    passcode.current = entered;
+    if (disclosure.kind !== "SHOWN" || (passcodeRequired && entered.trim().length === 0)) return;
+    // Owner decision 2026-10-12 (optional passcodes): nothing is held when no passcode is required.
+    const sessionAccess: VoiceAccessMode = Object.freeze({ passcodeRequired });
+    passcode.current = passcodeRequired ? entered : null;
     setEntered("");
     // The accepted disclosure's one-shot grant is used for exactly this start; the model then returns to IDLE (shown again next time).
     const accepted = voiceDisclosureReducer(disclosure, { type: "ACCEPT" });
@@ -276,7 +292,7 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
     const sessionProvider = provider;
     let transcriber: VoiceTranscriberPort;
     try {
-      transcriber = await loadTranscriber(() => passcode.current, sessionProvider);
+      transcriber = await loadTranscriber(() => passcode.current, sessionProvider, sessionAccess);
     } catch {
       dispatchDisclosure({ type: "RESET" });
       if (mounted.current) setPhase({ kind: "ENDED", reason: "UNAVAILABLE" });
@@ -606,7 +622,7 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
           initialFocusSelector="[data-voice-disclosure-safe]"
           actions={
             <>
-              <button type="button" className="btn btn-primary btn-wide" disabled={entered.trim().length === 0} onClick={() => void accept()}>
+              <button type="button" className="btn btn-primary btn-wide" disabled={passcodeRequired && entered.trim().length === 0} onClick={() => void accept()}>
                 {copy.disclosure.accept}
               </button>
               <button type="button" className="btn btn-outline btn-wide" data-voice-disclosure-safe="" onClick={decline}>
@@ -615,12 +631,15 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
             </>
           }
         >
-          <div className="field">
-            <label className="field-label" htmlFor={passcodeId}>
-              {copy.passcodeLabel}
-            </label>
-            <input id={passcodeId} className="input" type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} value={entered} onChange={(event) => setEntered(event.target.value)} />
-          </div>
+          {/* Owner decision 2026-10-12 (optional passcodes): the field only when the deployment requires a passcode. */}
+          {passcodeRequired ? (
+            <div className="field">
+              <label className="field-label" htmlFor={passcodeId}>
+                {copy.passcodeLabel}
+              </label>
+              <input id={passcodeId} className="input" type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} value={entered} onChange={(event) => setEntered(event.target.value)} />
+            </div>
+          ) : null}
         </ModalDialog>
       ) : null}
     </div>

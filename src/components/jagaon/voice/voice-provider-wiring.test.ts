@@ -32,4 +32,12 @@ describe("voice provider wiring and the Tencent build-time exclusion", () => {
     expect(await createVoiceProviderAnswerCheck(async () => ({ kind: "FAILED" }), true)()).toEqual({ kind: "FAILED", notEnabled: ["TRTC"] });
     expect(await createVoiceProviderAnswerCheck(async () => Promise.reject(new Error("offline")), false)()).toEqual({ kind: "FAILED", notEnabled: [] });
   });
+
+  // Owner decision 2026-10-12 (optional passcodes).
+  it("the answer check passes on the probe's passcodeRequired flag (also in an excluded build); the loaders take the access mode", async () => {
+    expect(await createVoiceProviderAnswerCheck(async () => ({ kind: "ANSWERED", providers: ["TRTC"], passcodeRequired: false }), false)()).toEqual({ kind: "ANSWERED", providers: ["TRTC"], passcodeRequired: false });
+    expect(await createVoiceProviderAnswerCheck(async () => ({ kind: "ANSWERED", providers: ["TRTC", "WEB_SPEECH"], passcodeRequired: true }), true)()).toEqual({ kind: "ANSWERED", providers: ["WEB_SPEECH"], passcodeRequired: true });
+    await expect(createVoiceProviderLoaders(true).TRTC(() => null, { passcodeRequired: false })).rejects.toThrow("TRTC_EXCLUDED_AT_BUILD");
+  });
 });
+

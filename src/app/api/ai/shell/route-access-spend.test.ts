@@ -80,7 +80,8 @@ describe("C6 deployment configuration: one parsed, validated object; missing or 
   });
 
   it("an empty environment: switch off, no origins, no passcode, no daily limit", () => {
-    expect(parseAiShellDeploymentConfig({})).toEqual({ remoteAiEnabled: false, allowedOrigins: null, passcodeDigest: null, dailySpendLimitMicroUsd: null });
+    // Owner decision 2026-10-12 (optional passcodes; deliberate change): no passcode configured means none is required.
+    expect(parseAiShellDeploymentConfig({})).toEqual({ remoteAiEnabled: false, allowedOrigins: null, passcodeRequired: false, passcodeDigest: null, dailySpendLimitMicroUsd: null });
   });
 
   it("the switch is on only for the exact value `on`", () => {
@@ -120,7 +121,7 @@ describe("C6 deployment configuration: one parsed, validated object; missing or 
 
   it("a throwing environment read is a missing value (fail closed)", () => {
     const hostile = new Proxy({}, { get: () => { throw new Error("unreadable"); } });
-    expect(parseAiShellDeploymentConfig(hostile)).toEqual({ remoteAiEnabled: false, allowedOrigins: null, passcodeDigest: null, dailySpendLimitMicroUsd: null });
+    expect(parseAiShellDeploymentConfig(hostile)).toEqual({ remoteAiEnabled: false, allowedOrigins: null, passcodeRequired: false, passcodeDigest: null, dailySpendLimitMicroUsd: null });
   });
 });
 
@@ -138,8 +139,10 @@ describe("C6 route order: every refusal happens before the credential read and b
     ["Sec-Fetch-Site same-site", { headers: { ...testBrowserHeaders(), "Sec-Fetch-Site": "same-site" } }, "ORIGIN_REJECTED"],
     ["Sec-Fetch-Site none", { headers: { ...testBrowserHeaders(), "Sec-Fetch-Site": "none" } }, "ORIGIN_REJECTED"],
     ["no Sec-Fetch-Site header", { headers: { origin: TEST_ORIGIN, [AI_SHELL_ACCESS_HEADER]: TEST_PASSCODE } }, "ORIGIN_REJECTED"],
-    ["no passcode configured", { env: { JAGAON_AI_DEMO_PASSCODE: undefined } }, "ACCESS_DENIED"],
+    // Owner decision 2026-10-12 (optional passcodes; deliberate change): "no passcode configured" is no longer a refusal (it grants
+    // access without a passcode; see "optional AI passcode" below). A present but invalid one still refuses every request.
     ["an invalid configured passcode", { env: { JAGAON_AI_DEMO_PASSCODE: "short" } }, "ACCESS_DENIED"],
+    ["an invalid configured passcode, with a header", { env: { JAGAON_AI_DEMO_PASSCODE: "has space inside" }, headers: testBrowserHeaders("has space inside") }, "ACCESS_DENIED"],
     ["no passcode header", { headers: testBrowserHeaders(null) }, "ACCESS_DENIED"],
     ["a wrong passcode of the same length", { headers: testBrowserHeaders(TEST_PASSCODE.replace(/.$/, "X")) }, "ACCESS_DENIED"],
     ["a wrong passcode of another length", { headers: testBrowserHeaders("TEST-ONLY") }, "ACCESS_DENIED"],
@@ -369,7 +372,8 @@ describe("C6 fix round 1: pre-call FAILED answers are marked not sent to the pro
     ["a missing credential", () => handler({ environment: { ...TEST_DEPLOYMENT_ENVIRONMENT } })(post()), 200, "MISSING_CONFIGURATION"],
     ["a request cancelled before the call", () => { const c = new AbortController(); c.abort(); return handler({ fetcher: deepseek() })(post(testBrowserHeaders(), shellRequest(), c.signal)); }, 200, "REQUEST_CANCELLED"],
     ["a malformed body", () => handler()(post(testBrowserHeaders(), { nope: true })), 400, "PAYLOAD_INVALID"],
-    ["a GET", () => handler()(new Request("http://localhost/api/ai/shell", { method: "GET" })), 405, "PAYLOAD_INVALID"],
+    // Owner decision 2026-10-12 (optional passcodes; deliberate change): GET is now the passcode probe; another method stays 405.
+    ["a DELETE", () => handler()(new Request("http://localhost/api/ai/shell", { method: "DELETE" })), 405, "PAYLOAD_INVALID"],
   ])("%s: FAILED with the not-sent marker and no usage", async (_label, run, status, reason) => {
     const response = await run();
     const body = await response.json();
@@ -443,3 +447,127 @@ describe("C6 passcode and rate limit", () => {
     expect(fetcher).toHaveBeenCalledTimes(10);
   });
 });
+
+/**
+ * Owner decision 2026-10-12 (optional passcodes): "when JAGAON_AI_DEMO_PASSCODE or JAGAON_VOICE_DEMO_PASSCODE is empty or missing, no
+ * passcode is asked". With none configured (missing, empty or whitespace-only) access is granted without a passcode; the switch, origin,
+ * activation, qualification, spend reservation, rate limit and the order of checks are unchanged. A present but invalid passcode keeps
+ * the fail-closed behaviour (ACCESS_DENIED for every request).
+ */
+describe("optional AI passcode (Owner decision 2026-10-12, optional passcodes)", () => {
+  const NONE = [undefined, "", " ", "  \t "];
+
+  it("configuration: missing, empty or whitespace-only → not required; valid → required with its digest; invalid → required, no digest", () => {
+    for (const value of NONE) expect(parseAiShellDeploymentConfig({ JAGAON_AI_DEMO_PASSCODE: value }), JSON.stringify(value)).toMatchObject({ passcodeRequired: false, passcodeDigest: null });
+    const valid = parseAiShellDeploymentConfig({ JAGAON_AI_DEMO_PASSCODE: TEST_PASSCODE });
+    expect(valid.passcodeRequired).toBe(true);
+    expect(valid.passcodeDigest?.byteLength).toBe(32);
+    for (const value of ["short7c", "has space inside", " padded-passcode", "x".repeat(129), "pässcode-unicode"]) {
+      expect(parseAiShellDeploymentConfig({ JAGAON_AI_DEMO_PASSCODE: value }), value).toMatchObject({ passcodeRequired: true, passcodeDigest: null });
+    }
+    expect(Object.isFrozen(parseAiShellDeploymentConfig({}))).toBe(true);
+  });
+
+  it("no passcode configured: a request without the header reaches the provider; one call, the reservation first, the credential read last", async () => {
+    for (const value of NONE) {
+      const fetcher = deepseek();
+      const spy = spyLedger();
+      const { environment, reads } = recordingEnvironment({ ...ENV, JAGAON_AI_DEMO_PASSCODE: value });
+      const response = await handler({ environment, fetcher, spendLedger: spy.ledger })(post(testBrowserHeaders(null)));
+      expect(await response.json(), JSON.stringify(value)).toMatchObject({ kind: "CANDIDATE" });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(spy.log[0]).toEqual(["reserve", UPPER]);
+      expect(reads.indexOf("DEEPSEEK_API_KEY")).toBe(reads.length - 1);
+    }
+    // A stray header is not needed, not compared and never echoed.
+    const stray = await handler({ environment: { ...ENV, JAGAON_AI_DEMO_PASSCODE: undefined }, fetcher: deepseek() })(post(testBrowserHeaders("STRAY-header-sentinel")));
+    expect(await stray.text()).not.toContain("STRAY-header-sentinel");
+  });
+
+  it("no passcode configured: switch, origin, activation, class, spend and rate limit still refuse in the same order, before the credential read", async () => {
+    const env = { ...ENV, JAGAON_AI_DEMO_PASSCODE: undefined };
+    const noHeader = testBrowserHeaders(null);
+    const cases: Array<[string, Options, Record<string, string>, unknown]> = [
+      ["switch off", { environment: { ...env, JAGAON_REMOTE_AI: "off" } }, noHeader, refused("REMOTE_AI_DISABLED")],
+      ["foreign origin", { environment: env }, { ...noHeader, Origin: "https://elsewhere.example" }, refused("ORIGIN_REJECTED")],
+      ["cross-site", { environment: env }, { ...noHeader, "Sec-Fetch-Site": "cross-site" }, refused("ORIGIN_REJECTED")],
+      ["not activated (shipped manifest)", { environment: env, activationManifest: AI_ACTIVATION_MANIFEST }, noHeader, { kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true }],
+      ["not qualified (shipped records)", { environment: env, requestClassGate: undefined }, noHeader, refused("REQUEST_CLASS_NOT_QUALIFIED")],
+      ["no daily limit", { environment: { ...env, JAGAON_AI_DAILY_SPEND_LIMIT_USD: undefined } }, noHeader, refused("SPEND_NOT_CONFIGURED")],
+      ["daily limit reached", { environment: { ...env, JAGAON_AI_DAILY_SPEND_LIMIT_USD: usd(UPPER - 1) } }, noHeader, refused("SPEND_CEILING_REACHED")],
+    ];
+    for (const [label, options, headers, expected] of cases) {
+      const fetcher = deepseek();
+      const { environment, reads } = recordingEnvironment((options.environment ?? env) as Record<string, string | undefined>);
+      const response = await handler({ ...options, environment, fetcher })(post(headers));
+      expect(await response.json(), label).toEqual(expected);
+      expect(reads, label).not.toContain("DEEPSEEK_API_KEY");
+      expect(fetcher, label).not.toHaveBeenCalled();
+    }
+    // The rate limit is unchanged.
+    const fetcher = deepseek();
+    const handle = handler({ environment: env, fetcher, now: () => new Date("2026-10-12T01:00:00.000Z") });
+    const bodies = [];
+    for (let index = 0; index < 11; index += 1) bodies.push(await (await handle(post(noHeader))).json());
+    expect(bodies[10]).toEqual({ kind: "FAILED", reason: "PROVIDER_RATE_LIMITED", notSentToProvider: true });
+    expect(fetcher).toHaveBeenCalledTimes(10);
+  });
+
+  it("a configured passcode is still required (none or a wrong one: ACCESS_DENIED, nothing read or sent)", async () => {
+    for (const headers of [testBrowserHeaders(null), testBrowserHeaders("TEST-ONLY-wrong")]) {
+      const fetcher = deepseek();
+      const { environment, reads } = recordingEnvironment(ENV);
+      expect(await (await handler({ environment, fetcher })(post(headers))).json()).toEqual(refused("ACCESS_DENIED"));
+      expect(reads).not.toContain("DEEPSEEK_API_KEY");
+      expect(fetcher).not.toHaveBeenCalled();
+    }
+  });
+
+  describe("GET /api/ai/shell: the passcode probe ({ passcodeRequired } only)", () => {
+    const probe = (headers: Record<string, string> = { "Sec-Fetch-Site": "same-origin" }) => new Request("http://localhost/api/ai/shell", { method: "GET", headers });
+    const answer = async (response: Response) => {
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      return [response.status, await response.json()] as const;
+    };
+
+    it("answers whether a passcode is required, reading only the passcode variable (never the credential, nothing else)", async () => {
+      for (const value of NONE) {
+        const { environment, reads } = recordingEnvironment({ ...ENV, JAGAON_AI_DEMO_PASSCODE: value });
+        const fetcher = deepseek();
+        expect(await answer(await handler({ environment, fetcher })(probe())), JSON.stringify(value)).toEqual([200, { passcodeRequired: false }]);
+        expect(reads).not.toContain("DEEPSEEK_API_KEY");
+        expect(fetcher).not.toHaveBeenCalled();
+      }
+      const configured = await handler()(probe({}));
+      const text = await configured.clone().text();
+      expect(await answer(configured)).toEqual([200, { passcodeRequired: true }]);
+      expect(text).not.toContain(TEST_PASSCODE);
+      expect(text).not.toContain(TOKEN);
+      // A present but invalid passcode: required (every request is refused anyway).
+      expect(await answer(await handler({ environment: { ...ENV, JAGAON_AI_DEMO_PASSCODE: "short" } })(probe()))).toEqual([200, { passcodeRequired: true }]);
+      // Nothing else is revealed: the switch, origins, limit or activation do not change the answer's shape.
+      expect(await answer(await handler({ environment: { JAGAON_AI_DEMO_PASSCODE: undefined }, activationManifest: AI_ACTIVATION_MANIFEST })(probe()))).toEqual([200, { passcodeRequired: false }]);
+    });
+
+    it("a request the browser marks cross-site gets the conservative answer; its own per-instance window (429); other methods unchanged", async () => {
+      const env = { ...ENV, JAGAON_AI_DEMO_PASSCODE: undefined };
+      expect(await answer(await handler({ environment: env })(probe({ "Sec-Fetch-Site": "cross-site" })))).toEqual([200, { passcodeRequired: true }]);
+      const rated = handler({ environment: env, rateLimit: { maxRequests: 2, windowMs: 60_000 }, fetcher: deepseek() });
+      expect((await answer(await rated(probe())))[0]).toBe(200);
+      expect((await answer(await rated(probe())))[0]).toBe(200);
+      expect(await answer(await rated(probe()))).toEqual([429, { passcodeRequired: true }]);
+      // The probe does not use the provider-call window: a POST is still answered.
+      expect(await (await rated(post(testBrowserHeaders(null)))).json()).toMatchObject({ kind: "CANDIDATE" });
+      const put = await handler()(new Request("http://localhost/api/ai/shell", { method: "PUT" }));
+      expect([put.status, await put.json()]).toEqual([405, { kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true }]);
+    });
+
+    it("the route module exports GET (the probe) next to POST", () => {
+      const source = readFileSync(join(process.cwd(), "src/app/api/ai/shell/route.ts"), "utf8");
+      expect(source).toMatch(/export async function GET\(request: Request\)/);
+      expect(source).toMatch(/export async function POST\(request: Request\)/);
+    });
+  });
+});
+

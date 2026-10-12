@@ -10,7 +10,7 @@ import {
   type VoiceUserSigRefusalReason,
   type VoiceUserSigResponse,
 } from "@/voice/trtc/trtc-usersig-contract";
-import { parseVoiceUserSigConfig, readTrtcSecretKey, type VoiceConfigBuildOptions, voiceAccessGranted, voiceOriginAllowed, voiceProbeSiteAllowed, type VoiceUserSigConfig } from "./voice-usersig-config";
+import { parseVoiceUserSigConfig, readTrtcSecretKey, type VoiceConfigBuildOptions, voiceAccessGranted, voiceOriginAllowed, voicePasscodeRequired, voiceProbeSiteAllowed, type VoiceUserSigConfig } from "./voice-usersig-config";
 import { InMemoryDailyMinuteLedger, voiceSessionMinutes, type VoiceMinuteLedger, type VoiceMinuteReservation } from "./voice-minute-ledger";
 
 /**
@@ -39,6 +39,11 @@ import { InMemoryDailyMinuteLedger, voiceSessionMinutes, type VoiceMinuteLedger,
  * when it is not, the answer stays `{ available: false }`. Step 2 refuses VOICE_DISABLED when `trtc` is not an enabled provider, so a
  * Web Speech-only deployment issues no Tencent credential and needs no TRTC value. The Web Speech passcode check is its own route
  * (`/api/voice/access`), which reuses the throttle and bucket helpers exported below.
+ *
+ * Owner decision 2026-10-12 (optional passcodes): an available answer also carries `passcodeRequired` (false only when the deployment
+ * configures no `JAGAON_VOICE_DEMO_PASSCODE`; a boolean, never a value), so the client skips its passcode step. Step 4 then grants
+ * without a passcode (`voiceAccessGranted`); no failure is ever recorded, so the throttle never blocks. Every other step, the order and
+ * the secret read last are unchanged; a configured passcode is checked exactly as before.
  */
 export const VOICE_USERSIG_RATE_LIMIT = Object.freeze({ maxRequests: 10, windowMs: 60_000 });
 
@@ -158,7 +163,7 @@ export function createVoiceUserSigHandler(options: VoiceUserSigHandlerOptions): 
       probed.push(at);
       if (!voiceProbeSiteAllowed(request.headers)) return reply({ available: false }, 200);
       const parsed = (config ??= parseVoiceUserSigConfig(options.environment, options.build));
-      return reply(parsed.voiceEnabled ? { available: true, providers: [...parsed.providers] } : { available: false }, 200);
+      return reply(parsed.voiceEnabled ? { available: true, providers: [...parsed.providers], passcodeRequired: voicePasscodeRequired(parsed) } : { available: false }, 200);
     }
     // 1. Request checks.
     if (request.method !== "POST") return invalid(405);

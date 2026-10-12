@@ -101,12 +101,12 @@
   "routes": {
     "app": [
       { "path": "/", "kind": "PAGE", "note": "The bilingual journal app" },
-      { "path": "/api/ai/shell", "kind": "API", "note": "Remote wording route; refuses unless JAGAON_REMOTE_AI and access checks pass (off for the candidate)" },
+      { "path": "/api/ai/shell", "kind": "API", "note": "Remote wording route; POST refuses unless JAGAON_REMOTE_AI and access checks pass (off for the candidate). GET is the credential-free passcode probe: it answers only { passcodeRequired } (true for a cross-site request or above its own per-instance window), reads no secret and reserves nothing (owner decision 2026-10-12, optional passcodes)" },
       { "path": "/api/ai/task", "kind": "RETIRED_REFUSES", "note": "Retired legacy route; refuses every request" },
       { "path": "/api/ai/transcript", "kind": "API", "note": "Packet 13 transcript extraction; refuses unless both switches, its own spend limit, activation and its own qualification pass (disabled for the candidate)" },
       { "path": "/api/onemap/search", "kind": "API", "note": "Server-side OneMap search proxy" },
       { "path": "/api/voice/access", "kind": "API", "note": "Web Speech demo-passcode check (draft, pending owner review). POST only; issues no credential and calls no provider; refuses VOICE_DISABLED unless JAGAON_VOICE_CLOUD is on, the shared voice configuration is valid and JAGAON_VOICE_PROVIDERS includes webspeech; same origin rule, failed-passcode throttle and request rate as the credential route (disabled for the candidate)" },
-      { "path": "/api/voice/usersig", "kind": "API", "note": "Packet 13 TRTC UserSig. POST issues the short-lived credential and refuses without the voice configuration (and with VOICE_DISABLED when JAGAON_VOICE_PROVIDERS does not include trtc). GET is the credential-free availability probe: it answers { available } (plus, when available, the enabled provider ids only) (false unless the switch is on and the configuration is valid; false for a cross-site request; 429 with false above its own per-instance window), and reads no passcode or secret, reserves nothing and signs nothing. Any other method is 405 (disabled for the candidate)" }
+      { "path": "/api/voice/usersig", "kind": "API", "note": "Packet 13 TRTC UserSig. POST issues the short-lived credential and refuses without the voice configuration (and with VOICE_DISABLED when JAGAON_VOICE_PROVIDERS does not include trtc). GET is the credential-free availability probe: it answers { available } (plus, when available, the enabled provider ids and passcodeRequired only; owner decision 2026-10-12, optional passcodes) (false unless the switch is on and the configuration is valid; false for a cross-site request; 429 with false above its own per-instance window), and reads no passcode or secret, reserves nothing and signs nothing. Any other method is 405 (disabled for the candidate)" }
     ],
     "framework": ["/_global-error", "/_not-found"]
   },

@@ -7,7 +7,7 @@ import { shellTaskRequestSchema, slotToken, type ShellFieldPath, type ShellTaskR
 import { shellPlanView } from "@/application/ai/language/shell-projector";
 import { AI_LANGUAGE_COPY } from "@/application/ai/language/ai-language-copy";
 import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
-import { AI_SHELL_ACCESS_HEADER, aiShellRouteResponseSchema, type AiShellRouteRefusalReason, type AiShellRouteResponse } from "@/application/ai/ai-shell-route-contract";
+import { AI_SHELL_ACCESS_HEADER, aiShellAccessProbeResponseSchema, aiShellRouteResponseSchema, type AiShellRouteRefusalReason, type AiShellRouteResponse } from "@/application/ai/ai-shell-route-contract";
 import { expectNoHorizontalOverflow } from "../packet-10/support";
 
 /**
@@ -136,7 +136,8 @@ export type FakeShellAnswer =
   /** STRUCTURALLY_REJECTED with a reason that is never repaired. */
   | Readonly<{ kind: "REJECT_UNREPAIRABLE" }>
   /** FAILED after a provider call (with its upper-bound usage), or before one (`notSentToProvider`). */
-  | Readonly<{ kind: "FAILED"; reason: "PROVIDER_FAILED" | "PROVIDER_TIMEOUT" | "MISSING_CONFIGURATION"; notSent?: boolean }>
+  /** Owner decision 2026-10-12 (AI credit dialog): OPERATIONAL_SPEND_LOCKED is the route's answer to DeepSeek's HTTP 402 (balance used up). */
+  | Readonly<{ kind: "FAILED"; reason: "PROVIDER_FAILED" | "PROVIDER_TIMEOUT" | "MISSING_CONFIGURATION" | "OPERATIONAL_SPEND_LOCKED"; notSent?: boolean }>
   /** A 403 REFUSED with its closed reason (switch, origin, access, spend). */
   | Readonly<{ kind: "REFUSED"; reason: AiShellRouteRefusalReason }>
   /** Held until `release()` (or the browser aborts it), then ACCEPT. */
@@ -196,6 +197,8 @@ function candidateFor(request: ShellTaskRequest): AiShellRouteResponse {
 
 export type FakeShellRoute = Readonly<{
   calls: ShellCall[];
+  /** Owner decision 2026-10-12 (optional passcodes): the passcode probes (GET /api/ai/shell) answered, never counted in `calls`. */
+  probes: number[];
   /** Answers the browser no longer waited for (it aborted the request first). */
   aborted: string[];
   /** Sets the answer for the following calls (default ACCEPT). */
@@ -209,10 +212,13 @@ export type FakeShellRoute = Readonly<{
 /**
  * Intercepts every POST /api/ai/shell of this page with a fake, contract-checked answer. Like the real route, a request without the
  * synthetic passcode header is refused ACCESS_DENIED (403) when `requirePasscode` is set (the default). Nothing reaches a server.
+ * Owner decision 2026-10-12 (optional passcodes): the passcode probe (GET /api/ai/shell) is answered `{ passcodeRequired }` with the
+ * same option, so `requirePasscode: false` plays a deployment with no JAGAON_AI_DEMO_PASSCODE (no passcode field, no header sent).
  */
 export async function interceptShellRoute(page: Page, options: { requirePasscode?: boolean } = {}): Promise<FakeShellRoute> {
   const requirePasscode = options.requirePasscode ?? true;
   const calls: ShellCall[] = [];
+  const probes: number[] = [];
   const aborted: string[] = [];
   let next: FakeShellAnswer = { kind: "ACCEPT" };
   let repairPending = false;
@@ -240,6 +246,16 @@ export async function interceptShellRoute(page: Page, options: { requirePasscode
     if (/\/api\/ai\/shell$/.test(new URL(request.url()).pathname)) aborted.push(request.failure()?.errorText ?? "failed");
   });
   await page.route("**/api/ai/shell", async (route: Route, request: Request) => {
+    if (request.method() === "GET") {
+      probes.push(Date.now());
+      const probe = aiShellAccessProbeResponseSchema.parse({ passcodeRequired: requirePasscode });
+      try {
+        await route.fulfill({ status: 200, contentType: "application/json; charset=utf-8", headers: { "cache-control": "no-store" }, body: JSON.stringify(probe) });
+      } catch {
+        // The page went away: nothing to answer.
+      }
+      return;
+    }
     const body = request.postData() ?? "";
     const parsed = shellTaskRequestSchema.parse(JSON.parse(body));
     const passcodeHeader = (await request.allHeaders())[AI_SHELL_ACCESS_HEADER] ?? null;
@@ -279,6 +295,7 @@ export async function interceptShellRoute(page: Page, options: { requirePasscode
   });
   return {
     calls,
+    probes,
     aborted,
     answer: (value) => {
       next = value;

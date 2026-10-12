@@ -26,9 +26,10 @@ afterEach(async () => {
   for (const name of names.splice(0)) await Dexie.delete(name);
 });
 
-type Options = { devSettings: boolean; enabled: VoiceProviderId[]; supported?: boolean; stored?: string; script?: FakeVoiceTranscriberScript };
+/** `passcodeRequired` (Owner decision 2026-10-12, optional passcodes): when given, the probe answers `{ providers, passcodeRequired }`. */
+type Options = { devSettings: boolean; enabled: VoiceProviderId[]; supported?: boolean; stored?: string; script?: FakeVoiceTranscriberScript; passcodeRequired?: boolean };
 
-async function mountApp({ devSettings, enabled, supported = true, stored, script = { providerStop: { kind: "NOT_APPLICABLE" } } }: Options) {
+async function mountApp({ devSettings, enabled, supported = true, stored, script = { providerStop: { kind: "NOT_APPLICABLE" } }, passcodeRequired }: Options) {
   const { name, runtime } = await createPopulatedDataset();
   names.push(name);
   runtime.close();
@@ -45,7 +46,7 @@ async function mountApp({ devSettings, enabled, supported = true, stored, script
       return fake;
     });
   const loaders = { TRTC: load("TRTC"), WEB_SPEECH: load("WEB_SPEECH") };
-  const probe = vi.fn(async () => control.enabled);
+  const probe = vi.fn(async () => (passcodeRequired === undefined ? control.enabled : { providers: control.enabled, passcodeRequired }));
   render(
     <JagaOnApp
       runtimeFactory={(_name?: string, options?: BrowserJournalRuntimeOptions) => createBrowserJournalRuntime(name, { ...options, now: () => PACKET10_NOW })}
@@ -214,6 +215,49 @@ describe("Web Speech provider choice in the app (developer settings; draft copy 
       expect(app.loaders.WEB_SPEECH).toHaveBeenCalledTimes(1);
       expect(app.loaders.TRTC).not.toHaveBeenCalled();
       expect(app.fakes).toHaveLength(1);
+    },
+    TIMEOUT,
+  );
+});
+
+// Owner decision 2026-10-12 (optional passcodes): the app passes the probe's `passcodeRequired` to the screen (consent → microphone)
+// and to the provider's loader; the System settings panel still lists the providers from the same probe.
+describe("optional voice passcode in the app (Owner decision 2026-10-12, optional passcodes)", () => {
+  it(
+    "no passcode required: the consent has no passcode field, Accept starts the session, the loader is told; the panel still lists the providers",
+    async () => {
+      const app = await mountApp({ devSettings: true, enabled: ["WEB_SPEECH", "TRTC"], passcodeRequired: false });
+      await openMore();
+      await waitFor(() => expect(radio("WEB_SPEECH").checked).toBe(true));
+      expect(radio("TRTC").disabled).toBe(false);
+      await openVoice();
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByText(web.consentTitle)).toBeInTheDocument();
+      expect(within(dialog).queryByLabelText(m.aiAccess.passcodeLabel)).toBeNull();
+      fireEvent.click(within(dialog).getByRole("button", { name: m.voice.disclosure.accept }));
+      await waitFor(() => expect(app.loaders.WEB_SPEECH).toHaveBeenCalledTimes(1));
+      expect(app.loaders.WEB_SPEECH).toHaveBeenCalledWith(expect.any(Function), { passcodeRequired: false });
+      expect((app.loaders.WEB_SPEECH.mock.calls[0] as unknown as [() => string | null])[0]()).toBeNull();
+      expect(app.loaders.TRTC).not.toHaveBeenCalled();
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "passcode required (or a bare provider list): the passcode field is shown and the loader is told it is required",
+    async () => {
+      for (const passcodeRequired of [true, undefined]) {
+        const app = await mountApp({ devSettings: false, enabled: ["TRTC"], passcodeRequired });
+        await openVoice();
+        const dialog = await screen.findByRole("dialog");
+        expect(within(dialog).getByRole("button", { name: m.voice.disclosure.accept })).toBeDisabled();
+        fireEvent.change(within(dialog).getByLabelText(m.aiAccess.passcodeLabel), { target: { value: "TEST-ONLY-voice-passcode" } });
+        fireEvent.click(within(dialog).getByRole("button", { name: m.voice.disclosure.accept }));
+        await waitFor(() => expect(app.loaders.TRTC).toHaveBeenCalledTimes(1));
+        expect(app.loaders.TRTC).toHaveBeenCalledWith(expect.any(Function), { passcodeRequired: true });
+        expect((app.loaders.TRTC.mock.calls[0] as unknown as [() => string | null])[0]()).toBe("TEST-ONLY-voice-passcode");
+        cleanup();
+      }
     },
     TIMEOUT,
   );

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { DARK_PEN, LOCALES, SCRIPTS, VIEWPORTS, expectNoHorizontalOverflow, openTab, pending, savedText, speak, startPreparedProfile, HARNESS_URL } from "./support";
+import { DARK_PEN, LOCALES, SCRIPTS, VIEWPORTS, expectNoHorizontalOverflow, openTab, pending, savedText, speak, speakWith, startPreparedProfile, HARNESS_URL } from "./support";
 
 /**
  * Packet 13 demo interactions (owner): TRTC transcription (scripted fake here) → multi-fact extraction → unknown-term clarification →
@@ -51,6 +51,19 @@ for (const locale of LOCALES) {
         await expect(bookletProgress, step).toHaveText(progressBefore ?? "");
         await expect(page.locator(".insulin-list"), step).toContainText(unknownTime);
       }
+    });
+
+    // Owner decision 2026-10-12 (optional passcodes): a deployment with no JAGAON_VOICE_DEMO_PASSCODE: consent → microphone, with no
+    // passcode step; the rest of the flow is unchanged.
+    test("no passcode configured: the consent has no passcode field; Accept starts the session; a fact is reviewed and saved", async ({ page }) => {
+      const m = await startPreparedProfile(page, HARNESS_URL, locale);
+      const copy = pending(locale).card;
+      await speakWith(page, m, SCRIPTS[locale].demo, { passcode: "none" });
+      const cards = page.getByRole("article");
+      await expect(cards).toHaveCount(3);
+      await cards.nth(0).getByRole("button", { name: copy.save }).click();
+      await expect(cards.nth(0).getByText(savedText(locale))).toBeVisible();
+      await expectNoHorizontalOverflow(page);
     });
 
     test("demo 2: after a reload the remembered term is reused with no question; the fact still needs its own Save", async ({ page }) => {

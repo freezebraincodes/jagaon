@@ -235,8 +235,9 @@ describe("POST /api/voice/usersig handler", () => {
     };
     const on = harness();
     // Web Speech (deliberate change, 2026-10-11): an available answer also lists the enabled providers (unset → TRTC only).
-    expect(await answer(on, probe())).toEqual({ status: 200, body: { available: true, providers: ["TRTC"] } });
-    expect(await answer(on, probe({}))).toEqual({ status: 200, body: { available: true, providers: ["TRTC"] } });
+    // Owner decision 2026-10-12 (optional passcodes; deliberate change): and whether a demo passcode is required (never its value).
+    expect(await answer(on, probe())).toEqual({ status: 200, body: { available: true, providers: ["TRTC"], passcodeRequired: true } });
+    expect(await answer(on, probe({}))).toEqual({ status: 200, body: { available: true, providers: ["TRTC"], passcodeRequired: true } });
     expect(on.events.filter((event) => event === `env:${VOICE_USERSIG_ENV.secretKey}` || event.startsWith("reserve") || event === "sign")).toEqual([]);
     expect(on.events).not.toContain(`env:${VOICE_USERSIG_ENV.demoPasscode}x`);
     expect(on.signer).not.toHaveBeenCalled();
@@ -257,8 +258,8 @@ describe("POST /api/voice/usersig handler", () => {
   it("Web Speech: the probe lists only the enabled providers in order (no credential); the TRTC POST refuses VOICE_DISABLED without TRTC values", async () => {
     const probe = new Request(URL_, { method: "GET", headers: { "Sec-Fetch-Site": "same-origin" } });
     const json = async (response: Response) => JSON.parse(await response.text()) as unknown;
-    expect(await json(await harness({ env: { [VOICE_PROVIDERS_ENV]: "webspeech,trtc" } }).handle(probe.clone()))).toEqual({ available: true, providers: ["WEB_SPEECH", "TRTC"] });
-    expect(await json(await harness({ env: { [VOICE_PROVIDERS_ENV]: "trtc,webspeech" } }).handle(probe.clone()))).toEqual({ available: true, providers: ["TRTC", "WEB_SPEECH"] });
+    expect(await json(await harness({ env: { [VOICE_PROVIDERS_ENV]: "webspeech,trtc" } }).handle(probe.clone()))).toEqual({ available: true, providers: ["WEB_SPEECH", "TRTC"], passcodeRequired: true });
+    expect(await json(await harness({ env: { [VOICE_PROVIDERS_ENV]: "trtc,webspeech" } }).handle(probe.clone()))).toEqual({ available: true, providers: ["TRTC", "WEB_SPEECH"], passcodeRequired: true });
     expect(await json(await harness({ env: { [VOICE_PROVIDERS_ENV]: "bogus" } }).handle(probe.clone()))).toEqual({ available: false });
     expect(await json(await harness({ env: { [VOICE_PROVIDERS_ENV]: "webspeech", [VOICE_USERSIG_ENV.voiceCloud]: "off" } }).handle(probe.clone()))).toEqual({ available: false });
 
@@ -266,8 +267,11 @@ describe("POST /api/voice/usersig handler", () => {
     const webOnly = { [VOICE_PROVIDERS_ENV]: "webspeech", [VOICE_USERSIG_ENV.userSigTtlSeconds]: undefined, [VOICE_USERSIG_ENV.dailyMinutesLimit]: undefined, [VOICE_USERSIG_ENV.sdkAppId]: undefined, [VOICE_USERSIG_ENV.secretKey]: undefined };
     const web = harness({ env: webOnly });
     const probeBody = await json(await web.handle(probe.clone()));
-    expect(probeBody).toEqual({ available: true, providers: ["WEB_SPEECH"] });
-    expect(JSON.stringify(probeBody)).not.toMatch(/sdkAppId|userSig|passcode|secret|1400000001/i);
+    expect(probeBody).toEqual({ available: true, providers: ["WEB_SPEECH"], passcodeRequired: true });
+    // Owner decision 2026-10-12 (optional passcodes): the `passcodeRequired` flag is the only passcode-related field; never a value.
+    expect(JSON.stringify(probeBody)).not.toMatch(/sdkAppId|userSig|secret|1400000001/i);
+    expect(JSON.stringify(probeBody)).not.toContain(TEST_VOICE_PASSCODE);
+    expect(Object.keys(probeBody as object).sort()).toEqual(["available", "passcodeRequired", "providers"]);
     const refusedPost = await web.handle(post());
     expect(refusedPost.status).toBe(403);
     expect(await body(refusedPost)).toEqual({ kind: "REFUSED", reason: "VOICE_DISABLED" });
@@ -287,7 +291,7 @@ describe("POST /api/voice/usersig handler", () => {
     const probe = () => new Request(URL_, { method: "GET", headers: { "Sec-Fetch-Site": "same-origin" } });
     const json = async (response: Response) => JSON.parse(await response.text()) as unknown;
     const excluded = harness({ env: { [VOICE_PROVIDERS_ENV]: "trtc,webspeech" }, build: { trtcExcludedAtBuild: true } });
-    expect(await json(await excluded.handle(probe()))).toEqual({ available: true, providers: ["WEB_SPEECH"] });
+    expect(await json(await excluded.handle(probe()))).toEqual({ available: true, providers: ["WEB_SPEECH"], passcodeRequired: true });
     const refusedPost = await excluded.handle(post());
     expect(refusedPost.status).toBe(403);
     expect(await body(refusedPost)).toEqual({ kind: "REFUSED", reason: "VOICE_DISABLED" });
@@ -299,5 +303,68 @@ describe("POST /api/voice/usersig handler", () => {
     expect(await body(await trtcOnly.handle(post()))).toEqual({ kind: "REFUSED", reason: "VOICE_DISABLED" });
     // A normal build is unchanged.
     expect(await body(await harness({ env: { [VOICE_PROVIDERS_ENV]: "trtc,webspeech" } }).handle(post()))).toMatchObject({ kind: "ISSUED" });
+  });
+});
+
+// Owner decision 2026-10-12 (optional passcodes): with no JAGAON_VOICE_DEMO_PASSCODE (missing, empty or whitespace-only) the probe says
+// no passcode is required and the credential is issued without one; origin, rate, minutes, the secret-read order and the "never echoed"
+// guarantees are unchanged. A configured passcode keeps today's behaviour.
+describe("optional voice passcode (Owner decision 2026-10-12, optional passcodes)", () => {
+  const probe = () => new Request(URL_, { method: "GET", headers: { "Sec-Fetch-Site": "same-origin" } });
+  const json = async (response: Response) => JSON.parse(await response.text()) as unknown;
+
+  it("the probe reports passcodeRequired false when none is configured, true when one is (never the value)", async () => {
+    for (const value of [undefined, "", "   "]) {
+      expect(await json(await harness({ env: { [VOICE_USERSIG_ENV.demoPasscode]: value } }).handle(probe())), JSON.stringify(value)).toEqual({ available: true, providers: ["TRTC"], passcodeRequired: false });
+    }
+    const configured = await json(await harness().handle(probe()));
+    expect(configured).toEqual({ available: true, providers: ["TRTC"], passcodeRequired: true });
+    expect(JSON.stringify(configured)).not.toContain(TEST_VOICE_PASSCODE);
+    // A present but invalid passcode: voice is off, nothing else is said.
+    expect(await json(await harness({ env: { [VOICE_USERSIG_ENV.demoPasscode]: "short" } }).handle(probe()))).toEqual({ available: false });
+  });
+
+  it("no passcode configured: issues the credential without a passcode header, in the same order (secret read last)", async () => {
+    const { handle, events, signer } = harness({ env: { [VOICE_USERSIG_ENV.demoPasscode]: "" } });
+    const response = await handle(post({ headers: testVoiceHeaders(null) }));
+    expect(response.status).toBe(200);
+    expect(await body(response)).toMatchObject({ kind: "ISSUED", sdkAppId: 1400000001, userSig: SYNTHETIC_SIG });
+    const secretRead = events.indexOf(`env:${VOICE_USERSIG_ENV.secretKey}`);
+    expect(secretRead).toBeGreaterThan(events.indexOf("reserve:2"));
+    expect(events.indexOf("sign")).toBeGreaterThan(secretRead);
+    expect(signer).toHaveBeenCalledTimes(1);
+    // A stray presented value is neither needed nor echoed.
+    const stray = await harness({ env: { [VOICE_USERSIG_ENV.demoPasscode]: "" } }).handle(post({ headers: testVoiceHeaders("TEST-ONLY-stray-value") }));
+    const text = await stray.text();
+    expect(stray.status).toBe(200);
+    expect(text).not.toContain("TEST-ONLY-stray-value");
+  });
+
+  it("no passcode configured: origin, the switch, the request rate and the daily minutes still refuse, before any secret read", async () => {
+    const env = { [VOICE_USERSIG_ENV.demoPasscode]: undefined };
+    const origin = harness({ env });
+    expect(await body(await origin.handle(post({ headers: { ...testVoiceHeaders(null), Origin: "http://evil.example" } })))).toEqual({ kind: "REFUSED", reason: "ORIGIN_REJECTED" });
+    expect(await body(await origin.handle(post({ headers: { ...testVoiceHeaders(null), "Sec-Fetch-Site": "cross-site" } })))).toEqual({ kind: "REFUSED", reason: "ORIGIN_REJECTED" });
+    expect(await body(await harness({ env: { ...env, [VOICE_USERSIG_ENV.voiceCloud]: "off" } }).handle(post({ headers: testVoiceHeaders(null) })))).toEqual({ kind: "REFUSED", reason: "VOICE_DISABLED" });
+    const rated = harness({ env, rateLimit: { maxRequests: 1, windowMs: 60_000 } });
+    expect((await rated.handle(post({ headers: testVoiceHeaders(null) }))).status).toBe(200);
+    const limited = await rated.handle(post({ headers: testVoiceHeaders(null) }));
+    expect(limited.status).toBe(429);
+    expect(await body(limited)).toEqual({ kind: "REFUSED", reason: "RATE_LIMITED" });
+    for (const h of [origin]) expect(h.events.filter((event) => event === `env:${VOICE_USERSIG_ENV.secretKey}` || event.startsWith("reserve") || event === "sign")).toEqual([]);
+    // The daily minutes (10 minutes, 2 per 90-second session): the sixth session is refused before the secret read.
+    const minutes = harness({ env });
+    for (let i = 0; i < 5; i += 1) expect((await minutes.handle(post({ headers: testVoiceHeaders(null) }))).status).toBe(200);
+    const exhausted = await minutes.handle(post({ headers: testVoiceHeaders(null) }));
+    expect(await body(exhausted)).toEqual({ kind: "REFUSED", reason: "MINUTES_EXHAUSTED" });
+    expect(minutes.events.filter((event) => event === `env:${VOICE_USERSIG_ENV.secretKey}`)).toHaveLength(5);
+  });
+
+  it("a configured passcode is still required (missing or wrong: ACCESS_DENIED, nothing reserved or read)", async () => {
+    const { handle, events, signer } = harness();
+    expect(await body(await handle(post({ headers: testVoiceHeaders(null) })))).toEqual({ kind: "REFUSED", reason: "ACCESS_DENIED" });
+    expect(await body(await handle(post({ headers: testVoiceHeaders("TEST-ONLY-wrong-passcode") })))).toEqual({ kind: "REFUSED", reason: "ACCESS_DENIED" });
+    expect(events.filter((event) => event === `env:${VOICE_USERSIG_ENV.secretKey}` || event.startsWith("reserve") || event === "sign")).toEqual([]);
+    expect(signer).not.toHaveBeenCalled();
   });
 });

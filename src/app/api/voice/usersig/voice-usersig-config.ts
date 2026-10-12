@@ -15,6 +15,10 @@ import { VOICE_ACCESS_HEADER } from "@/voice/trtc/trtc-usersig-contract";
  * - `JAGAON_VOICE_ALLOWED_ORIGINS`: exact origins, comma separated (`scheme://host[:port]`, http or https, no path, no wildcard); any
  *   invalid entry invalidates the list. Origin protection, not authentication.
  * - `JAGAON_VOICE_DEMO_PASSCODE`: 8 to 128 visible ASCII characters; only its SHA-256 digest is kept, compared in constant time.
+ *   Owner decision 2026-10-12 (optional passcodes: "when JAGAON_AI_DEMO_PASSCODE or JAGAON_VOICE_DEMO_PASSCODE is empty or missing, no
+ *   passcode is asked"): OPTIONAL. Missing, empty or whitespace-only means NO passcode is required (`passcodeDigest: null`; voice is
+ *   otherwise configured as before and every other check is unchanged). A value that is present but invalid still means voice off
+ *   (fail closed, as before). The probe reports only whether one is required (`passcodeRequired`), never a value.
  * - `JAGAON_VOICE_USERSIG_TTL_SECONDS`: integer 60 to 3600 (UserSig lifetime).
  * - `JAGAON_VOICE_MAX_SESSION_SECONDS`: integer 10 to 900 (maximum microphone session, enforced by the client controller).
  * - `JAGAON_VOICE_DAILY_MINUTES_LIMIT`: integer 1 to 10000 (best-effort per-instance daily guard, voice-minute-ledger.ts).
@@ -29,8 +33,9 @@ import { VOICE_ACCESS_HEADER } from "@/voice/trtc/trtc-usersig-contract";
  * Web Speech (owner-approved scope 2026-10-11; draft, pending owner review): `JAGAON_VOICE_PROVIDERS` (VOICE_PROVIDERS_ENV) names the
  * enabled providers, comma separated, in order: `trtc`, `webspeech` (exact lower case, surrounding spaces trimmed, duplicates kept once).
  * Unset means `trtc` (today's behaviour). Any other value (an unknown or empty entry, an empty list) means voice off. `JAGAON_VOICE_CLOUD`
- * stays the master switch. The origins, the passcode and the maximum session are required for every provider; the TTL, the daily
- * minutes and `TRTC_SDK_APP_ID` (and, at signing time, the secret) are required ONLY when `trtc` is enabled: with `webspeech` alone
+ * stays the master switch. The origins and the maximum session are required for every provider (the passcode is optional: Owner
+ * decision 2026-10-12, optional passcodes); the TTL, the daily minutes and `TRTC_SDK_APP_ID` (and, at signing time, the secret) are
+ * required ONLY when `trtc` is enabled: with `webspeech` alone
  * they are not read, and the TRTC credential POST refuses VOICE_DISABLED. When `trtc` is enabled and any of them is missing or invalid,
  * voice is off (for every provider, as a misconfiguration).
  *
@@ -70,7 +75,8 @@ type VoiceCommonConfig = Readonly<{
   /** The enabled providers, in the deployment's order (never empty). */
   providers: readonly VoiceDeploymentProvider[];
   allowedOrigins: readonly string[];
-  passcodeDigest: Uint8Array;
+  /** Owner decision 2026-10-12 (optional passcodes): the configured passcode's digest, or null when none is configured (not required). */
+  passcodeDigest: Uint8Array | null;
   maxSessionSeconds: number;
   /** Optional, off by default: whether the failed-passcode throttle may key by the Vercel platform client address. */
   trustVercelClientIp: boolean;
@@ -144,11 +150,13 @@ export function parseVoiceUserSigConfig(environment: Environment, build: VoiceCo
   const remaining = listed === null ? null : excluded ? listed.filter((id) => id !== VOICE_PROVIDER_SETTING_IDS.trtc) : listed;
   const providers = remaining === null || remaining.length === 0 ? null : Object.freeze([...remaining]);
   const allowedOrigins = parseOrigins(read(environment, VOICE_USERSIG_ENV.allowedOrigins));
+  // Owner decision 2026-10-12 (optional passcodes): missing, empty or whitespace-only → none required; present but invalid → voice off.
   const passcode = read(environment, VOICE_USERSIG_ENV.demoPasscode);
+  const passcodeConfigured = passcode !== undefined && passcode.trim().length > 0;
   const maxSessionSeconds = integerIn(read(environment, VOICE_USERSIG_ENV.maxSessionSeconds), VOICE_USERSIG_BOUNDS.maxSessionSeconds);
-  if (providers === null || allowedOrigins === null || passcode === undefined || !PASSCODE.test(passcode) || maxSessionSeconds === null) return VOICE_OFF;
+  if (providers === null || allowedOrigins === null || (passcodeConfigured && !PASSCODE.test(passcode)) || maxSessionSeconds === null) return VOICE_OFF;
   const trustVercelClientIp = read(environment, VOICE_USERSIG_ENV.trustVercelClientIp) === "on";
-  const common = { voiceEnabled: true as const, providers, allowedOrigins, passcodeDigest: digest(passcode), maxSessionSeconds, trustVercelClientIp };
+  const common = { voiceEnabled: true as const, providers, allowedOrigins, passcodeDigest: passcodeConfigured ? digest(passcode) : null, maxSessionSeconds, trustVercelClientIp };
   // Web Speech alone: no TRTC value is read or required.
   if (!providers.includes(VOICE_PROVIDER_SETTING_IDS.trtc)) return Object.freeze({ ...common, trtcEnabled: false as const });
   const userSigTtlSeconds = integerIn(read(environment, VOICE_USERSIG_ENV.userSigTtlSeconds), VOICE_USERSIG_BOUNDS.userSigTtlSeconds);
@@ -177,9 +185,23 @@ export function voiceProbeSiteAllowed(headers: Headers): boolean {
   return site === null || site === "same-origin";
 }
 
-/** Access: the presented passcode's SHA-256 digest equals the configured one (constant-time comparison of equal-length digests). */
+/**
+ * Owner decision 2026-10-12 (optional passcodes): whether a demo passcode is required. True unless voice is on with no passcode
+ * configured (a configuration that is off answers true: nothing is granted there anyway). The only passcode fact the probe reports.
+ */
+export function voicePasscodeRequired(config: VoiceUserSigConfig): boolean {
+  return !config.voiceEnabled || config.passcodeDigest !== null;
+}
+
+/**
+ * Access: the presented passcode's SHA-256 digest equals the configured one (constant-time comparison of equal-length digests).
+ * Owner decision 2026-10-12 (optional passcodes): with no passcode configured, access is granted (whatever is presented; nothing is
+ * compared or echoed). Voice off is never granted. The switch, origin, throttle, rate and minute checks around it are unchanged.
+ */
 export function voiceAccessGranted(config: VoiceUserSigConfig, headers: Headers): boolean {
+  if (!config.voiceEnabled) return false;
+  if (config.passcodeDigest === null) return true;
   const presented = headers.get(VOICE_ACCESS_HEADER);
-  if (!config.voiceEnabled || presented === null || presented.length === 0 || presented.length > MAX_PRESENTED_PASSCODE_CHARS) return false;
+  if (presented === null || presented.length === 0 || presented.length > MAX_PRESENTED_PASSCODE_CHARS) return false;
   return timingSafeEqual(digest(presented), config.passcodeDigest);
 }

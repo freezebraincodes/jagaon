@@ -133,8 +133,10 @@ describe("TRTC credential client", () => {
   });
 
   it("round 6: the probe answer tells a failed or rate-limited check apart from an answer (voice off is an answer)", async () => {
-    expect(await fetchVoiceProvidersAnswer({ fetcher: async () => json({ available: true, providers: ["WEB_SPEECH", "TRTC"] }) })).toEqual({ kind: "ANSWERED", providers: ["WEB_SPEECH", "TRTC"] });
-    expect(await fetchVoiceProvidersAnswer({ fetcher: async () => json({ available: false }) })).toEqual({ kind: "ANSWERED", providers: [] });
+    // Owner decision 2026-10-12 (optional passcodes; deliberate change): an answer also says whether the passcode is required (an answer
+    // without the flag, or voice off, counts as required).
+    expect(await fetchVoiceProvidersAnswer({ fetcher: async () => json({ available: true, providers: ["WEB_SPEECH", "TRTC"] }) })).toEqual({ kind: "ANSWERED", providers: ["WEB_SPEECH", "TRTC"], passcodeRequired: true });
+    expect(await fetchVoiceProvidersAnswer({ fetcher: async () => json({ available: false }) })).toEqual({ kind: "ANSWERED", providers: [], passcodeRequired: true });
     for (const answer of [
       async () => json({ available: false }, 429),
       async () => json({ available: true, providers: ["WEB_SPEECH"] }, 500),
@@ -147,5 +149,46 @@ describe("TRTC credential client", () => {
     ]) {
       expect(await fetchVoiceProvidersAnswer({ fetcher: answer })).toEqual({ kind: "FAILED" });
     }
+  });
+
+  // Owner decision 2026-10-12 (optional passcodes): the probe's `passcodeRequired`, and both POSTs without the passcode header when the
+  // deployment requires none. With a passcode required, nothing changes (no passcode: nothing is sent).
+  describe("optional passcode (Owner decision 2026-10-12, optional passcodes)", () => {
+    it("the probe answer carries passcodeRequired: false only when the server says so; anything else is required", async () => {
+      expect(await fetchVoiceProvidersAnswer({ fetcher: async () => json({ available: true, providers: ["TRTC"], passcodeRequired: false }) })).toEqual({ kind: "ANSWERED", providers: ["TRTC"], passcodeRequired: false });
+      expect(await fetchVoiceProvidersAnswer({ fetcher: async () => json({ available: true, providers: ["TRTC"], passcodeRequired: true }) })).toEqual({ kind: "ANSWERED", providers: ["TRTC"], passcodeRequired: true });
+      expect(await fetchVoiceProvidersAnswer({ fetcher: async () => json({ available: true, providers: ["TRTC"], passcodeRequired: "no" }) })).toEqual({ kind: "FAILED" });
+      expect(await fetchVoiceProvidersAnswer({ fetcher: async () => json({ available: false, passcodeRequired: false }) })).toEqual({ kind: "ANSWERED", providers: [], passcodeRequired: true });
+      expect(await fetchVoiceAvailability({ fetcher: async () => json({ available: true, providers: ["TRTC"], passcodeRequired: false }) })).toBe(true);
+    });
+
+    it("not required: both POSTs go out without the passcode header and never read the passcode", async () => {
+      const signal = new AbortController().signal;
+      const read = vi.fn(() => PASSCODE);
+      const credential = vi.fn<VoiceCredentialFetcher>(async () => json(ISSUED));
+      expect(await createTrtcCredentialClient({ accessPasscode: read, passcodeRequired: false, fetcher: credential })(signal)).toMatchObject({ kind: "ISSUED" });
+      expect(credential).toHaveBeenCalledWith("/api/voice/usersig", { method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal, cache: "no-store", redirect: "error" });
+      const access = vi.fn<VoiceCredentialFetcher>(async () => json({ kind: "GRANTED", maxSessionSeconds: 45 }));
+      expect(await createVoiceAccessClient({ accessPasscode: read, passcodeRequired: false, fetcher: access })(signal)).toEqual({ kind: "GRANTED", maxSessionSeconds: 45 });
+      expect(access).toHaveBeenCalledWith("/api/voice/access", { method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal, cache: "no-store", redirect: "error" });
+      expect(read).not.toHaveBeenCalled();
+      // The server is still the judge: a refusal is passed on as before.
+      expect(await createVoiceAccessClient({ accessPasscode: () => null, passcodeRequired: false, fetcher: async () => json({ kind: "REFUSED", reason: "ACCESS_DENIED" }, 403) })(signal)).toEqual({ kind: "REFUSED", reason: "ACCESS_DENIED" });
+      // An already-aborted signal still sends nothing.
+      const aborted = new AbortController();
+      aborted.abort();
+      const silent = vi.fn<VoiceCredentialFetcher>();
+      expect(await createTrtcCredentialClient({ accessPasscode: () => null, passcodeRequired: false, fetcher: silent })(aborted.signal)).toEqual({ kind: "FAILED", reason: "NETWORK_FAILURE" });
+      expect(silent).not.toHaveBeenCalled();
+    });
+
+    it("required (explicitly or by default): no passcode, nothing is sent", async () => {
+      const silent = vi.fn<VoiceCredentialFetcher>();
+      for (const passcodeRequired of [true, undefined]) {
+        expect(await createTrtcCredentialClient({ accessPasscode: () => null, passcodeRequired, fetcher: silent })(new AbortController().signal)).toEqual({ kind: "REFUSED", reason: "ACCESS_DENIED" });
+        expect(await createVoiceAccessClient({ accessPasscode: () => "", passcodeRequired, fetcher: silent })(new AbortController().signal)).toEqual({ kind: "REFUSED", reason: "ACCESS_DENIED" });
+      }
+      expect(silent).not.toHaveBeenCalled();
+    });
   });
 });

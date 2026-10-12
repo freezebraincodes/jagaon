@@ -21,6 +21,8 @@
  * Parameters (query string, read when the transcriber is loaded, i.e. after the disclosure is accepted)
  *   - `say`: the text the fake "hears" as one FINAL segment (omit for silence: Stop stays available, nothing is heard).
  *   - `fail`: a closed start failure (PERMISSION_DENIED, UNSUPPORTED_BROWSER, PROVIDER_FAILURE, CREDENTIAL_REFUSED+ACCESS_DENIED).
+ *   - `passcode=none` (Owner decision 2026-10-12, optional passcodes): the availability answer says no demo passcode is required (a
+ *     deployment without JAGAON_VOICE_DEMO_PASSCODE): the disclosure shows no passcode field. Absent: a passcode is required (as before).
  *
  * How to build and run (ONLY in a clean copy without `.env*`)
  *   npx next build && npx next build e2e/packet-13/harness && npx playwright test -c internal-docs/testing/playwright/configs/playwright.packet-13.config.ts
@@ -45,9 +47,13 @@ function scriptFromUrl(): FakeVoiceTranscriberScript {
   return { segmentsOnStart: say ? [{ kind: "FINAL", segmentId: "harness-1", text: say }] : [] };
 }
 
-/** Review I-5: the harness has no voice route; the scripted fake is "available" unless the URL asks for `?voice=off`. */
-async function harnessAvailability(): Promise<boolean> {
-  return new URLSearchParams(window.location.search).get("voice") !== "off";
+/**
+ * Review I-5: the harness has no voice route; the scripted fake is "available" unless the URL asks for `?voice=off`. Owner decision
+ * 2026-10-12 (optional passcodes): `?passcode=none` answers that no passcode is required.
+ */
+async function harnessAvailability(): Promise<Readonly<{ available: boolean; passcodeRequired: boolean }>> {
+  const params = new URLSearchParams(window.location.search);
+  return { available: params.get("voice") !== "off", passcodeRequired: params.get("passcode") !== "none" };
 }
 
 async function harnessTranscriber(): Promise<VoiceTranscriberPort> {

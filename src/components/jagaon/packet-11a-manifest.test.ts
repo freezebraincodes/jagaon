@@ -133,6 +133,9 @@ const BROWSER_SHELL_CLIENT = "src/application/ai/browser-shell-client.ts";
 /** Packet 11C B3: the shared AI disclosure dialog, an AI-free presentation component (no AI module in its import graph). */
 const AI_DISCLOSURE_DIALOG = "src/components/jagaon/ai/AiDisclosureDialog.tsx";
 const AI_DISCLOSURE_DIALOG_TEST = "src/components/jagaon/ai/AiDisclosureDialog.test.tsx";
+/** Owner decision 2026-10-12 (AI credit dialog): the second AI-free AI-path component (pinned like the disclosure dialog). */
+const AI_CREDIT_LIMIT_DIALOG = "src/components/jagaon/ai/AiCreditLimitDialog.tsx";
+const AI_CREDIT_LIMIT_DIALOG_TEST = "src/components/jagaon/ai/AiCreditLimitDialog.test.tsx";
 const DETACHED_PROJECTOR = "src/application/ai/detached-payload-projector.ts";
 
 describe("Packet 11A scope", () => {
@@ -258,6 +261,8 @@ describe("Packet 11A scope", () => {
       "AI_SHELL_ROUTE_POST_CALL_FAILURE_REASONS",
       // Packet 11C Addendum C, C1 (deliberate): the route's closed REFUSED reasons (REQUEST_CLASS_NOT_QUALIFIED).
       "AI_SHELL_ROUTE_REFUSAL_REASONS",
+      // Owner decision 2026-10-12 (optional passcodes; deliberate): the passcode probe's answer, `{ passcodeRequired }` (a boolean only).
+      "aiShellAccessProbeResponseSchema",
       "aiShellRouteResponseSchema",
       "shellCallUpperBound",
       "shellRouteCallUpperBound",
@@ -267,7 +272,8 @@ describe("Packet 11A scope", () => {
     // the disclosure dialog's primary action does (pinned below).
     // CL3 contract re-freeze (Task RF, deliberate): plus the label of that per-request disclosure policy (a string only; pinned by the
     // contract freeze with the behaviour).
-    expect(exportsOf(browserShellClient)).toEqual(["AI_DISCLOSURE_POLICY_VERSION", "BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createAiRemoteUseDecisions", "createBrowserShellClient"]);
+    // Owner decision 2026-10-12 (optional passcodes; deliberate): plus the credential-free passcode probe (a boolean answer only).
+    expect(exportsOf(browserShellClient)).toEqual(["AI_DISCLOSURE_POLICY_VERSION", "BROWSER_SHELL_CLIENT_PROVIDER_MODEL", "INTERIM_FAIL_CLOSED_DISCLOSURE", "createAiRemoteUseDecisions", "createBrowserShellClient", "fetchAiPasscodeRequirement"]);
     // Packet 11C B4b (deliberate): the one AI wiring of both flows (history explanation and care-summary wording) over one hybrid service.
     expect(exportsOf(browserHistoryExplainer)).toEqual(["createBrowserAiAssistance", "createBrowserHistoryExplainer"]);
     expect(exportsOf(persistence)).toEqual(["createAiInvocationAuditRepository"]);
@@ -337,12 +343,13 @@ describe("Packet 11A scope", () => {
   it("adds no AI route, screen or control and keeps provider modules out of the runtime", () => {
     expect([...ALL_SCREENS].filter((screen) => /AI_|ASSIST/.test(screen))).toEqual([]);
     // Packet 11C B3 (deliberate retarget): exactly one AI component, the shared disclosure dialog, which is AI-free (pinned below).
-    expect(walk("src/components").filter((file) => /(^|\/)ai(\/|-)/i.test(file))).toEqual([AI_DISCLOSURE_DIALOG_TEST, AI_DISCLOSURE_DIALOG]);
+    // Owner decision 2026-10-12 (AI credit dialog; deliberate): plus the AI-free credit-limit dialog (pinned below like the disclosure).
+    expect(walk("src/components").filter((file) => /(^|\/)ai(\/|-)/i.test(file))).toEqual([AI_CREDIT_LIMIT_DIALOG_TEST, AI_CREDIT_LIMIT_DIALOG, AI_DISCLOSURE_DIALOG_TEST, AI_DISCLOSURE_DIALOG]);
     // Packet 11A: only the local audit row and its Packet 10 reconciliation entered the client runtime. Packet 11C B2b (D1, deliberate
     // retarget): the client graph's AI modules are now exactly the enumerated B2b closure, and nothing under src/ai or src/app/api.
     // Packet 11C B3: the path filter also matches the AI-free disclosure dialog component (no AI application module was added).
     // Packet 11C B4b (deliberate): and the two `ai-` care-preparation modules of the enumerated care closure below.
-    expect(CLIENT_GRAPH.filter((file) => /(^|\/)ai(\/|-)/.test(file))).toEqual([...CLIENT_AI_FILES, AI_DISCLOSURE_DIALOG, ...CLIENT_CARE_AI_FILES.filter((file) => /\/ai-/.test(file))].sort());
+    expect(CLIENT_GRAPH.filter((file) => /(^|\/)ai(\/|-)/.test(file))).toEqual([...CLIENT_AI_FILES, AI_CREDIT_LIMIT_DIALOG, AI_DISCLOSURE_DIALOG, ...CLIENT_CARE_AI_FILES.filter((file) => /\/ai-/.test(file))].sort());
     expect(CLIENT_GRAPH.filter((file) => /^src\/(application|domain)\/ai\//.test(file))).toEqual(CLIENT_AI_FILES);
     // Packet 11C B4b: the care-preparation modules of the browser graph that import an AI module are exactly the B1a notice renderer and
     // the enumerated care closure; every AI module they import is in CLIENT_AI_FILES.
@@ -354,6 +361,9 @@ describe("Packet 11A scope", () => {
     // The dialog imports no AI module, reads no storage and sends nothing.
     expect(importGraph([AI_DISCLOSURE_DIALOG]).filter((file) => /^src\/(ai|app|application|domain\/ai)\//.test(file))).toEqual([]);
     expect(strip(readFileSync(join(ROOT, AI_DISCLOSURE_DIALOG), "utf8"))).not.toMatch(/\bfetch\b|XMLHttpRequest|sendBeacon|localStorage|sessionStorage|indexedDB/);
+    // Owner decision 2026-10-12 (AI credit dialog): so does the credit-limit dialog.
+    expect(importGraph([AI_CREDIT_LIMIT_DIALOG]).filter((file) => /^src\/(ai|app|application|domain\/ai)\//.test(file))).toEqual([]);
+    expect(strip(readFileSync(join(ROOT, AI_CREDIT_LIMIT_DIALOG), "utf8"))).not.toMatch(/\bfetch\b|XMLHttpRequest|sendBeacon|localStorage|sessionStorage|indexedDB/);
     // Packet 11B: the provider adapters are reachable only from the server AI route. Packet 11C B2a (deliberate retarget): that route is
     // now the value-blind POST /api/ai/shell; the retired POST /api/ai/task reaches no provider adapter, AI service or credential reader.
     expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/ai/") && !importGraph(["src/app/api/ai/shell/route.ts", "src/app/api/ai/transcript/route.ts"]).includes(file))).toEqual([]);
@@ -486,8 +496,9 @@ describe("Packet 11C Checkpoint 2 guards", () => {
     // Packet 11C B4b (deliberate): so does the care-summary preview screen.
     const aiImports = (file: string) => [...readFileSync(join(ROOT, file), "utf8").matchAll(IMPORT)].map((match) => match[1] ?? match[2]!).filter((specifier) => /\/ai\/|\/ai-|-ai$/.test(specifier));
     expect(aiImports("src/components/jagaon/screens/RecordedHistoryScreen.tsx")).toEqual(["../ai/AiDisclosureDialog"]);
-    expect(aiImports("src/components/jagaon/history/PatternExplanationPanel.tsx")).toEqual([]);
-    expect(aiImports("src/components/jagaon/screens/CareSummaryPreviewScreen.tsx")).toEqual(["../ai/AiDisclosureDialog"]);
+    // Owner decision 2026-10-12 (AI credit dialog; deliberate): the panel and the care preview also import the AI-free credit dialog.
+    expect(aiImports("src/components/jagaon/history/PatternExplanationPanel.tsx")).toEqual(["../ai/AiCreditLimitDialog"]);
+    expect(aiImports("src/components/jagaon/screens/CareSummaryPreviewScreen.tsx")).toEqual(["../ai/AiDisclosureDialog", "../ai/AiCreditLimitDialog"]);
     // Only the dialog's primary action accepts remote use. Packet 11C Addendum C, C3 (deliberate retarget of the B3/B4b session pins):
     // there is no accept() call anywhere in the app graph any more; the "ACCEPTED" decision is created in exactly one place per flow, the
     // dialog's onConfirm handler, and travels with that one request.

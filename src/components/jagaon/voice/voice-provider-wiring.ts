@@ -1,4 +1,4 @@
-import type { VoiceProviderId, VoiceProviderProbeAnswer } from "@/application/voice/voice-provider-selection";
+import type { VoiceAccessCheck, VoiceAccessMode, VoiceProviderId, VoiceProviderProbeAnswer } from "@/application/voice/voice-provider-selection";
 import type { VoiceTranscriberPort } from "@/application/voice/voice-transcriber-port";
 import { TRTC_EXCLUDED_AT_BUILD } from "@/config/build-exclusions";
 import { isWebSpeechSupported } from "@/voice/web-speech/web-speech-support";
@@ -17,6 +17,9 @@ import { loadWebSpeechTranscriber } from "./load-web-speech-transcriber";
  *   loader module is never called.
  * - Round 6: `checkVoiceProviderAnswer` tells a failed or rate-limited check apart from an answer, so the panel can say the deployment
  *   could not be checked instead of "not enabled" (in an excluded build TRTC is known not enabled either way).
+ * - Owner decision 2026-10-12 (optional passcodes): the answer check passes on the probe's `passcodeRequired`, `checkVoiceAccess` gives
+ *   the Tell JagaOn resolver the providers and that flag from ONE probe call (a failed check: none, required), and each loader takes
+ *   the session's `VoiceAccessMode`.
  */
 export function createVoiceProvidersCheck(fetchProviders: () => Promise<readonly VoiceProviderId[]>, trtcExcluded: boolean = TRTC_EXCLUDED_AT_BUILD): () => Promise<readonly VoiceProviderId[]> {
   return async () => {
@@ -30,7 +33,7 @@ export function createVoiceProvidersCheck(fetchProviders: () => Promise<readonly
 }
 
 export function createVoiceProviderAnswerCheck(
-  fetchAnswer: () => Promise<Readonly<{ kind: "ANSWERED"; providers: readonly VoiceProviderId[] }> | Readonly<{ kind: "FAILED" }>>,
+  fetchAnswer: () => Promise<Readonly<{ kind: "ANSWERED"; providers: readonly VoiceProviderId[]; passcodeRequired?: boolean }> | Readonly<{ kind: "FAILED" }>>,
   trtcExcluded: boolean = TRTC_EXCLUDED_AT_BUILD,
 ): () => Promise<VoiceProviderProbeAnswer> {
   const notEnabled: readonly VoiceProviderId[] = Object.freeze(trtcExcluded ? ["TRTC"] : []);
@@ -39,7 +42,8 @@ export function createVoiceProviderAnswerCheck(
     try {
       const answer = await fetchAnswer();
       if (answer?.kind !== "ANSWERED" || !Array.isArray(answer.providers)) return failed;
-      return Object.freeze({ kind: "ANSWERED", providers: Object.freeze(answer.providers.filter((provider) => !notEnabled.includes(provider))) });
+      const providers = Object.freeze(answer.providers.filter((provider) => !notEnabled.includes(provider)));
+      return Object.freeze(typeof answer.passcodeRequired === "boolean" ? { kind: "ANSWERED" as const, providers, passcodeRequired: answer.passcodeRequired } : { kind: "ANSWERED" as const, providers });
     } catch {
       return failed;
     }
@@ -51,15 +55,18 @@ export const checkVoiceProviderAnswer = createVoiceProviderAnswerCheck(async () 
   return fetchVoiceProvidersAnswer();
 });
 
-/** The enabled providers for the screen's resolver: none when the check failed (fail closed, as before). */
-export const checkVoiceProviders = async (): Promise<readonly VoiceProviderId[]> => {
+/**
+ * The enabled providers for the screen's resolver: none when the check failed (fail closed, as before). Owner decision 2026-10-12
+ * (optional passcodes): with whether the passcode is required (required unless the answer says false; a failed check is required).
+ */
+export const checkVoiceAccess = async (): Promise<VoiceAccessCheck> => {
   const answer = await checkVoiceProviderAnswer();
-  return answer.kind === "ANSWERED" ? answer.providers : [];
+  return answer.kind === "ANSWERED" ? Object.freeze({ providers: answer.providers, passcodeRequired: answer.passcodeRequired !== false }) : Object.freeze({ providers: [], passcodeRequired: true });
 };
 
 export const browserWebSpeechSupported = (): boolean => isWebSpeechSupported(typeof window === "undefined" ? null : window);
 
-export type VoiceTranscriberLoader = (accessPasscode: () => string | null) => Promise<VoiceTranscriberPort>;
+export type VoiceTranscriberLoader = (accessPasscode: () => string | null, access?: VoiceAccessMode) => Promise<VoiceTranscriberPort>;
 
 /** Tencent build-time exclusion: the TRTC loader refuses in an excluded build (never loads the adapter or the SDK stub). */
 export const refuseExcludedTrtc: VoiceTranscriberLoader = () => Promise.reject(new Error("TRTC_EXCLUDED_AT_BUILD"));

@@ -196,7 +196,7 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
 
       test(`decline, repair, fallback, refusals, superseded request, switch off (${locale}, ${viewport.label})`, async ({ page, browserName }, testInfo) => {
         const context: EvidenceContext = { target: "harness", locale, viewport: viewport.label, engine: browserName };
-        planStates(testInfo, context, ["history-declined", "history-repair-accepted", "history-fallback-failed", "history-fallback-rejected", "history-refused-spend", "history-refused-access-denied", "history-passcode-asked-again", "history-superseded", "history-refused-switch-off", "history-switch-off-no-dialog", "history-moot-locale-switch"]);
+        planStates(testInfo, context, ["history-declined", "history-repair-accepted", "history-fallback-failed", "history-fallback-rejected", "history-refused-spend", "history-credit-limit-dialog", "history-credit-limit-balance", "history-refused-access-denied", "history-passcode-asked-again", "history-superseded", "history-refused-switch-off", "history-switch-off-no-dialog", "history-moot-locale-switch"]);
         await installFocusProbe(page);
         const shell = await interceptShellRoute(page);
         const m = await startPreparedProfile(page, HARNESS_URL, locale);
@@ -221,10 +221,12 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await captureState(page, testInfo, context, "history-repair-accepted", ["one dialog for the request", "2 POSTs: STRUCTURALLY_REJECTED (SCHEMA_INVALID, repairable) then the repair's CANDIDATE", "accepted wording with ai.demoTag and ai.resultCheck"], panelOf(page, m));
 
         // Failures fall back to the standard wording (no tag, no technical text). The passcode is held: no field any more.
+        // Owner decision 2026-10-12 (AI credit dialog; deliberate change): "history-refused-spend" is now a spend refusal that is NOT a
+        // used-up credit (SPEND_LEDGER_UNAVAILABLE, U12's line); SPEND_CEILING_REACHED shows the credit dialog (below).
         const fallbacks = [
           ["history-fallback-failed", { kind: "FAILED", reason: "PROVIDER_FAILED" }, "FAILED:PROVIDER_FAILED"],
           ["history-fallback-rejected", { kind: "REJECT_UNREPAIRABLE" }, "STRUCTURALLY_REJECTED:CLINICAL_MEANING_VIOLATION"],
-          ["history-refused-spend", { kind: "REFUSED", reason: "SPEND_CEILING_REACHED" }, "REFUSED:SPEND_CEILING_REACHED"],
+          ["history-refused-spend", { kind: "REFUSED", reason: "SPEND_LEDGER_UNAVAILABLE" }, "REFUSED:SPEND_LEDGER_UNAVAILABLE"],
         ] as const;
         for (const [state, answer, answered] of fallbacks) {
           const before = shell.calls.length;
@@ -235,6 +237,31 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
           expect(shell.calls.slice(before).map((call) => call.answered)).toEqual([answered]);
           await expectNoHorizontalOverflow(page);
           await captureState(page, testInfo, context, state, [`fake answer ${answered}`, "one POST, no repair", "standard wording, no AI tag, no closed code shown", "U12: the owner's fallback line (aiHistoryFallback) shown after the attempted POST; no ai.remoteNotAccepted"], panelOf(page, m));
+        }
+
+        // Owner decision 2026-10-12 (AI credit dialog): the daily limit (403 SPEND_CEILING_REACHED) and the DeepSeek balance (FAILED
+        // OPERATIONAL_SPEND_LOCKED, the route's answer to HTTP 402) show the credit dialog (focus on OK); OK closes it and the standard
+        // wording stays, without U12's line.
+        const credits = [
+          ["history-credit-limit-dialog", { kind: "REFUSED", reason: "SPEND_CEILING_REACHED" }, "REFUSED:SPEND_CEILING_REACHED"],
+          ["history-credit-limit-balance", { kind: "FAILED", reason: "OPERATIONAL_SPEND_LOCKED" }, "FAILED:OPERATIONAL_SPEND_LOCKED"],
+        ] as const;
+        for (const [state, answer, answered] of credits) {
+          const before = shell.calls.length;
+          shell.answer(answer);
+          await requestExplanation(page, m, action);
+          await acceptDisclosure(page, m, { passcode: false });
+          const credit = page.getByRole("dialog", { name: m.aiCreditLimit.title });
+          await expect(credit).toBeVisible();
+          await expect(credit).toContainText(m.aiCreditLimit.historyBody);
+          const ok = credit.getByRole("button", { name: m.aiCreditLimit.ok });
+          await expect(ok).toBeFocused();
+          await expectNoHorizontalOverflow(page);
+          await captureState(page, testInfo, context, state, [`fake answer ${answered}`, "credit dialog: aiCreditLimit.title and historyBody, one OK action, focus on OK", "one POST, no repair"], credit);
+          await ok.click();
+          await expect(credit).toHaveCount(0);
+          await expectDeterministic(page, m, locale, { declinedLine: false, attemptedLine: false });
+          expect(shell.calls.slice(before).map((call) => call.answered)).toEqual([answered]);
         }
 
         // ACCESS_DENIED: standard wording, and the passcode is forgotten, so the next disclosure asks for it again.
@@ -290,6 +317,32 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
           "history-moot-locale-switch",
           "Not reachable through the real UI: the disclosure is modal (backdrop over the app, focus trapped) and the language control is on the More screen, so a locale switch with the dialog open cannot be performed by a user in one tab. Covered offline by RecordedHistoryScreen/JagaOnApp component tests (DISCLOSURE_CLOSED_MOOT).",
         );
+      });
+
+      // Owner decision 2026-10-12 (optional passcodes): a deployment with no JAGAON_AI_DEMO_PASSCODE (the fake probe answers
+      // passcodeRequired: false): the disclosure stays, without the passcode field; the POST carries no passcode header.
+      test(`no passcode configured: the disclosure without a passcode field; no passcode header (${locale}, ${viewport.label})${smoke}`, async ({ page, browserName }, testInfo) => {
+        const context: EvidenceContext = { target: "harness", locale, viewport: viewport.label, engine: browserName };
+        planStates(testInfo, context, ["history-no-passcode-dialog", "history-no-passcode-accepted"]);
+        const shell = await interceptShellRoute(page, { requirePasscode: false });
+        const m = await startPreparedProfile(page, HARNESS_URL, locale);
+        const action = await openHistory(page, m);
+        await requestExplanation(page, m, action);
+        const dialog = page.getByRole("dialog", { name: m.ai.remoteTitle });
+        await expect(dialog).toBeVisible();
+        await expect(dialog.getByLabel(m.aiAccess.passcodeLabel)).toHaveCount(0);
+        await expect(dialog.locator("input")).toHaveCount(0);
+        await expect(dialog.getByRole("button", { name: m.ai.cancel })).toBeFocused();
+        const confirm = dialog.getByRole("button", { name: m.ai.pattern.confirm });
+        await expect(confirm).toBeEnabled();
+        expect(shell.calls).toHaveLength(0);
+        expect(shell.probes.length).toBeGreaterThanOrEqual(1);
+        await expectNoHorizontalOverflow(page);
+        await captureState(page, testInfo, context, "history-no-passcode-dialog", ["passcode probe answered passcodeRequired: false", "disclosure shown before the request, no passcode field", "primary action enabled at once; initial focus on Cancel", "0 POSTs"], dialog);
+        await confirm.click();
+        await expectAccepted(page, m, locale);
+        expect(shell.calls.map((call) => [call.answered, call.passcodeHeader])).toEqual([["CANDIDATE", null]]);
+        await captureState(page, testInfo, context, "history-no-passcode-accepted", ["one POST without the passcode header", "accepted wording with ai.demoTag and ai.resultCheck"], panelOf(page, m));
       });
     });
   }

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { VOICE_PROVIDERS_ENV, VOICE_USERSIG_ENV, parseVoiceProviders, parseVoiceUserSigConfig, readTrtcSecretKey, voiceAccessGranted, voiceOriginAllowed } from "./voice-usersig-config";
+import { VOICE_PROVIDERS_ENV, VOICE_USERSIG_ENV, parseVoiceProviders, parseVoiceUserSigConfig, readTrtcSecretKey, voiceAccessGranted, voiceOriginAllowed, voicePasscodeRequired } from "./voice-usersig-config";
 import { TEST_VOICE_ENVIRONMENT, TEST_VOICE_PASSCODE, TEST_VOICE_SECRET, testVoiceHeaders } from "./voice-usersig-test-support";
 
 const without = (name: string) => Object.fromEntries(Object.entries(TEST_VOICE_ENVIRONMENT).filter(([key]) => key !== name));
@@ -32,8 +32,10 @@ describe("voice UserSig deployment configuration", () => {
   });
 
   it("missing any value means voice off", () => {
-    // The client-address trust flag is optional (off when missing); every other value is required.
-    for (const name of Object.values(VOICE_USERSIG_ENV).filter((name) => name !== VOICE_USERSIG_ENV.secretKey && name !== VOICE_USERSIG_ENV.trustVercelClientIp)) {
+    // The client-address trust flag is optional (off when missing); Owner decision 2026-10-12 (optional passcodes): so is the demo
+    // passcode (missing means none is asked; see below). Every other value is required.
+    const optional: readonly string[] = [VOICE_USERSIG_ENV.secretKey, VOICE_USERSIG_ENV.trustVercelClientIp, VOICE_USERSIG_ENV.demoPasscode];
+    for (const name of Object.values(VOICE_USERSIG_ENV).filter((name) => !optional.includes(name))) {
       expect(parseVoiceUserSigConfig(without(name)), name).toEqual({ voiceEnabled: false });
     }
     expect(parseVoiceUserSigConfig({})).toEqual({ voiceEnabled: false });
@@ -89,8 +91,8 @@ describe("voice UserSig deployment configuration", () => {
     for (const name of trtcNames) expect(reads, name).not.toContain(name);
     // Invalid TRTC values are irrelevant with Web Speech alone.
     expect(parseVoiceUserSigConfig({ ...webOnly, [VOICE_USERSIG_ENV.sdkAppId]: "abc" })).toMatchObject({ voiceEnabled: true, trtcEnabled: false });
-    // The shared values stay required.
-    for (const name of [VOICE_USERSIG_ENV.allowedOrigins, VOICE_USERSIG_ENV.demoPasscode, VOICE_USERSIG_ENV.maxSessionSeconds]) {
+    // The shared values stay required (the passcode is optional: Owner decision 2026-10-12, optional passcodes).
+    for (const name of [VOICE_USERSIG_ENV.allowedOrigins, VOICE_USERSIG_ENV.maxSessionSeconds]) {
       expect(parseVoiceUserSigConfig(Object.fromEntries(Object.entries(webOnly).filter(([key]) => key !== name))), name).toEqual({ voiceEnabled: false });
     }
     // Both enabled: a missing TRTC value means voice off for every provider (misconfiguration).
@@ -126,5 +128,42 @@ describe("voice UserSig deployment configuration", () => {
     // A normal build is unchanged (the default, and an explicit false).
     expect(parseVoiceUserSigConfig({ ...TEST_VOICE_ENVIRONMENT, [VOICE_PROVIDERS_ENV]: "trtc,webspeech" })).toMatchObject({ providers: ["TRTC", "WEB_SPEECH"], trtcEnabled: true });
     expect(parseVoiceUserSigConfig({ ...TEST_VOICE_ENVIRONMENT, [VOICE_PROVIDERS_ENV]: "trtc,webspeech" }, { trtcExcludedAtBuild: false })).toMatchObject({ providers: ["TRTC", "WEB_SPEECH"], trtcEnabled: true });
+  });
+
+  // Owner decision 2026-10-12 (optional passcodes): "when JAGAON_AI_DEMO_PASSCODE or JAGAON_VOICE_DEMO_PASSCODE is empty or missing, no
+  // passcode is asked". Missing, empty or whitespace-only: no passcode is required and voice is otherwise configured as before. A value
+  // that is present but invalid keeps the fail-closed behaviour (voice off).
+  describe("optional demo passcode (Owner decision 2026-10-12, optional passcodes)", () => {
+    const withPasscode = (value: string | undefined) => ({ ...TEST_VOICE_ENVIRONMENT, [VOICE_USERSIG_ENV.demoPasscode]: value });
+
+    it("missing, empty or whitespace-only: voice stays on, with no passcode required", () => {
+      for (const value of [undefined, "", " ", "   ", "\t", " \n "]) {
+        const config = parseVoiceUserSigConfig(withPasscode(value));
+        expect(config, JSON.stringify(value)).toMatchObject({ voiceEnabled: true, providers: ["TRTC"], trtcEnabled: true, maxSessionSeconds: 90, sdkAppId: 1400000001 });
+        expect(voicePasscodeRequired(config), JSON.stringify(value)).toBe(false);
+        expect(Object.isFrozen(config)).toBe(true);
+      }
+      expect(parseVoiceUserSigConfig(without(VOICE_USERSIG_ENV.demoPasscode))).toMatchObject({ voiceEnabled: true });
+      // Web Speech alone, too.
+      expect(parseVoiceUserSigConfig({ ...withPasscode(undefined), [VOICE_PROVIDERS_ENV]: "webspeech" })).toMatchObject({ voiceEnabled: true, providers: ["WEB_SPEECH"], trtcEnabled: false });
+    });
+
+    it("a valid passcode is required; a present but invalid one keeps voice off (fail closed)", () => {
+      expect(voicePasscodeRequired(parseVoiceUserSigConfig(TEST_VOICE_ENVIRONMENT))).toBe(true);
+      for (const value of ["short", "has space inside", " TEST-ONLY-voice-passcode", "TEST-ONLY-voice-passcode ", "x".repeat(129), "pässcode-unicode"]) {
+        expect(parseVoiceUserSigConfig(withPasscode(value)), value).toEqual({ voiceEnabled: false });
+      }
+      expect(voicePasscodeRequired({ voiceEnabled: false })).toBe(true);
+    });
+
+    it("no passcode configured: access is granted with or without a presented value; every other check is unchanged", () => {
+      const config = parseVoiceUserSigConfig(withPasscode(""));
+      expect(voiceAccessGranted(config, new Headers(testVoiceHeaders(null)))).toBe(true);
+      expect(voiceAccessGranted(config, new Headers(testVoiceHeaders("anything-at-all")))).toBe(true);
+      expect(voiceOriginAllowed(config, new Headers({ ...testVoiceHeaders(null), Origin: "http://evil.example" }))).toBe(false);
+      expect(voiceOriginAllowed(config, new Headers({ ...testVoiceHeaders(null), "Sec-Fetch-Site": "cross-site" }))).toBe(false);
+      // Voice off still refuses access.
+      expect(voiceAccessGranted(parseVoiceUserSigConfig({ ...withPasscode(""), [VOICE_USERSIG_ENV.voiceCloud]: "off" }), new Headers(testVoiceHeaders(null)))).toBe(false);
+    });
   });
 });

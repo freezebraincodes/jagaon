@@ -12,6 +12,11 @@ import type { TrtcCredentialRequest, TrtcCredentialResult } from "./trtc-transcr
  * Web Speech (owner-approved scope 2026-10-11; draft): the same single fetch site also serves the provider list of the availability probe
  * (`fetchVoiceProviders`) and the passcode-only access check (`createVoiceAccessClient`, POST /api/voice/access: no credential). They
  * live here so the voice stream keeps ONE browser network call site; nothing in them is TRTC-specific.
+ *
+ * Owner decision 2026-10-12 (optional passcodes): the probe answer also says whether the deployment requires the demo passcode
+ * (`passcodeRequired`; an answer without the flag, or voice off, counts as required). Both POST clients take `passcodeRequired`
+ * (default true: exactly today's behaviour, no passcode means nothing is sent). When it is false they send the POST without the passcode
+ * header and never read the passcode; the server still decides (a deployment that now requires one answers ACCESS_DENIED).
  */
 export type VoiceCredentialFetcher = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -43,7 +48,7 @@ export async function fetchVoiceAvailability(options: Readonly<{ fetcher?: Voice
  * enabled providers in the deployment's order; none when voice is not available). FAILED: a network error, any other status (e.g.
  * 429 rate-limited) or an invalid body — the deployment could not be checked.
  */
-export type VoiceProvidersAnswer = Readonly<{ kind: "ANSWERED"; providers: ReadonlyArray<"TRTC" | "WEB_SPEECH"> }> | Readonly<{ kind: "FAILED" }>;
+export type VoiceProvidersAnswer = Readonly<{ kind: "ANSWERED"; providers: ReadonlyArray<"TRTC" | "WEB_SPEECH">; passcodeRequired: boolean }> | Readonly<{ kind: "FAILED" }>;
 const PROBE_FAILED: VoiceProvidersAnswer = Object.freeze({ kind: "FAILED" });
 
 export async function fetchVoiceProvidersAnswer(options: Readonly<{ fetcher?: VoiceCredentialFetcher; signal?: AbortSignal }> = {}): Promise<VoiceProvidersAnswer> {
@@ -54,7 +59,9 @@ export async function fetchVoiceProvidersAnswer(options: Readonly<{ fetcher?: Vo
     if (text.length > MAX_RESPONSE_CHARS) return PROBE_FAILED;
     const parsed = voiceAvailabilityResponseSchema.safeParse(JSON.parse(text));
     if (!parsed.success) return PROBE_FAILED;
-    return Object.freeze({ kind: "ANSWERED", providers: parsed.data.available === true ? Object.freeze([...new Set(parsed.data.providers ?? [])]) : Object.freeze([]) });
+    const available = parsed.data.available === true;
+    // Owner decision 2026-10-12 (optional passcodes): only an available answer that explicitly says false skips the passcode.
+    return Object.freeze({ kind: "ANSWERED", providers: available ? Object.freeze([...new Set(parsed.data.providers ?? [])]) : Object.freeze([]), passcodeRequired: !(available && parsed.data.passcodeRequired === false) });
   } catch {
     return PROBE_FAILED;
   }
@@ -75,22 +82,35 @@ export type VoiceAccessResult =
   | Readonly<{ kind: "FAILED"; reason: "NETWORK_FAILURE" }>;
 export type VoiceAccessRequest = (signal: AbortSignal) => Promise<VoiceAccessResult>;
 
-/** Web Speech: the passcode-only access check (no credential). No passcode: nothing is sent (REFUSED ACCESS_DENIED). */
-export function createVoiceAccessClient(options: Readonly<{ accessPasscode: () => string | null; fetcher?: VoiceCredentialFetcher }>): VoiceAccessRequest {
+/**
+ * The request headers of one POST: the JSON content type, plus the passcode header when the deployment requires a passcode. Null when a
+ * passcode is required but none is held (nothing is sent). Owner decision 2026-10-12 (optional passcodes): not required, the passcode is
+ * never read and no passcode header is sent.
+ */
+type PasscodeOptions = Readonly<{ accessPasscode: () => string | null; passcodeRequired?: boolean; fetcher?: VoiceCredentialFetcher }>;
+function postHeaders(options: PasscodeOptions): Record<string, string> | null {
+  if (options.passcodeRequired === false) return { "content-type": "application/json" };
+  let passcode: string | null = null;
+  try {
+    passcode = options.accessPasscode();
+  } catch {
+    passcode = null;
+  }
+  if (typeof passcode !== "string" || passcode.length === 0) return null;
+  return { "content-type": "application/json", [VOICE_ACCESS_HEADER]: passcode };
+}
+
+/** Web Speech: the passcode-only access check (no credential). A required passcode not held: nothing is sent (REFUSED ACCESS_DENIED). */
+export function createVoiceAccessClient(options: PasscodeOptions): VoiceAccessRequest {
   const fetcher: VoiceCredentialFetcher = options.fetcher ?? defaultFetcher;
   return async function requestAccess(signal: AbortSignal): Promise<VoiceAccessResult> {
-    let passcode: string | null = null;
-    try {
-      passcode = options.accessPasscode();
-    } catch {
-      passcode = null;
-    }
-    if (typeof passcode !== "string" || passcode.length === 0) return Object.freeze({ kind: "REFUSED", reason: "ACCESS_DENIED" });
+    const headers = postHeaders(options);
+    if (headers === null) return Object.freeze({ kind: "REFUSED", reason: "ACCESS_DENIED" });
     if (signal.aborted) return Object.freeze({ kind: "FAILED", reason: "NETWORK_FAILURE" });
     let parsed: ReturnType<typeof voiceAccessResponseSchema.safeParse>;
     let status: number;
     try {
-      const response = await fetcher(VOICE_ACCESS_ROUTE_PATH, { method: "POST", headers: { "content-type": "application/json", [VOICE_ACCESS_HEADER]: passcode }, body: "{}", signal, cache: "no-store", redirect: "error" });
+      const response = await fetcher(VOICE_ACCESS_ROUTE_PATH, { method: "POST", headers, body: "{}", signal, cache: "no-store", redirect: "error" });
       status = response.status;
       const text = await response.text();
       if (text.length > MAX_RESPONSE_CHARS) return Object.freeze({ kind: "FAILED", reason: "NETWORK_FAILURE" });
@@ -107,21 +127,16 @@ export function createVoiceAccessClient(options: Readonly<{ accessPasscode: () =
   };
 }
 
-export function createTrtcCredentialClient(options: Readonly<{ accessPasscode: () => string | null; fetcher?: VoiceCredentialFetcher }>): TrtcCredentialRequest {
+export function createTrtcCredentialClient(options: PasscodeOptions): TrtcCredentialRequest {
   const fetcher: VoiceCredentialFetcher = options.fetcher ?? defaultFetcher;
   return async function requestCredential(signal: AbortSignal): Promise<TrtcCredentialResult> {
-    let passcode: string | null = null;
-    try {
-      passcode = options.accessPasscode();
-    } catch {
-      passcode = null;
-    }
-    if (typeof passcode !== "string" || passcode.length === 0) return Object.freeze({ kind: "REFUSED", reason: "ACCESS_DENIED" });
+    const headers = postHeaders(options);
+    if (headers === null) return Object.freeze({ kind: "REFUSED", reason: "ACCESS_DENIED" });
     if (signal.aborted) return NETWORK_FAILURE;
     let parsed: ReturnType<typeof voiceUserSigResponseSchema.safeParse>;
     let status: number;
     try {
-      const response = await fetcher(VOICE_USERSIG_ROUTE_PATH, { method: "POST", headers: { "content-type": "application/json", [VOICE_ACCESS_HEADER]: passcode }, body: "{}", signal, cache: "no-store", redirect: "error" });
+      const response = await fetcher(VOICE_USERSIG_ROUTE_PATH, { method: "POST", headers, body: "{}", signal, cache: "no-store", redirect: "error" });
       status = response.status;
       const text = await response.text();
       if (text.length > MAX_RESPONSE_CHARS) return NETWORK_FAILURE;

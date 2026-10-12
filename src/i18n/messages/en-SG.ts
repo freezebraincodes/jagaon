@@ -51,6 +51,14 @@ export const enSGMessages: AppMessages = {
   aiHistoryFallback: {
     unavailableAfterRequest: "AI wording is unavailable. Your records are unchanged; standard wording is shown.",
   },
+  // Owner decision 2026-10-12 (AI credit dialog): owner wording, verbatim; the history body is the owner's allowed edit ("The explanation"
+  // for "Your summary"). Not an APPROVED_PACKET_11 row.
+  aiCreditLimit: {
+    title: "AI credit limit reached",
+    careSummaryBody: "This demo has used up its AI credit for today. Your summary uses the standard wording instead.",
+    historyBody: "This demo has used up its AI credit for today. The explanation uses the standard wording instead.",
+    ok: "OK",
+  },
   // voice-copy.13s.1: voice transcription slice. Every row is human acceptance pending; not an approved row.
   voice: {
     entry: "Tell JagaOn",

@@ -13,7 +13,7 @@ import { projectShellTaskRequest } from "./language/shell-projector";
 import { planSlots } from "./language/slot-planner";
 import { SHIPPED_REQUEST_CLASS_GATE, type AiRequestClassGate } from "./request-class-qualification";
 import type { AiLocale, AiTaskRequest, ShellTask } from "@/domain/ai";
-import { createAiRemoteUseDecisions, createBrowserShellClient, type AiRemoteUseRequestDecision, type BrowserShellFetcher } from "./browser-shell-client";
+import { createAiRemoteUseDecisions, createBrowserShellClient, fetchAiPasscodeRequirement, type AiRemoteUseRequestDecision, type BrowserShellFetcher } from "./browser-shell-client";
 import type { AiShellRouteRefusalReason } from "./ai-shell-route-contract";
 import { buildSourceBackedExplainRequest } from "./explain-pattern-request";
 import { createPatternExplainer, type PatternExplanation } from "./explain-pattern";
@@ -66,6 +66,17 @@ import { createPatternExplainer, type PatternExplanation } from "./explain-patte
  *   REMOTE_AI_DISABLED without a send; `remoteSwitchKnownOff` stays an additional pluggable check. The route remains the enforcement
  *   point for the switch, origin, access and spend; every route refusal is audited with its own code and no attempt.
  *
+ * Owner decision 2026-10-12 (optional passcodes): the passcode entry is `needed()` only while a passcode is held by nobody AND the
+ * deployment is not known to require none. The runtime learns that from the passcode probe (`passcodeProbe`; production: the route's
+ * `GET /api/ai/shell`, `fetchAiPasscodeRequirement`), asked only when a disclosure is about to be required for an explicit request
+ * (never with the shipped manifest, in private mode, offline, with the switch known off or for an unqualified class) and once per
+ * runtime: "not required" is kept; an unknown answer (a failure) keeps the field and is asked again next time. A route ACCESS_DENIED
+ * makes the passcode required again (the deployment changed). The route still decides every request.
+ * Owner decision 2026-10-12 (AI credit dialog): an accepted request the route refused because the AI credit is used up (the daily
+ * spend limit, SPEND_CEILING_REACHED, or the DeepSeek balance, OPERATIONAL_SPEND_LOCKED; told by the client's `onCreditLimit`) comes
+ * back with the standard wording marked `remoteUse: "CREDIT_LIMIT_REACHED"` (history: instead of U12's marker; care: on its
+ * KEPT_DETERMINISTIC outcome), so the screens show the credit dialog. Nothing else changes: the audit row keeps its own code.
+ *
  * Packet 11C Addendum C, Task C2 (hybrid spec D11): the patient's "Keep wording on this device" setting (`privateMode`, read per
  * request) is passed to the one hybrid service and is the first condition of "a remote attempt could happen": while it is on, no
  * disclosure, passcode field or care AI action is offered, and each explicit request is composed in the browser and audited
@@ -92,6 +103,17 @@ export type BrowserHistoryExplainerDependencies = Readonly<{
    */
   remoteSwitchKnownOff?: () => boolean;
   /**
+   * Owner decision 2026-10-12 (optional passcodes): the passcode entry is `needed()` only while a passcode is held by nobody AND the
+   * deployment is not known to require none. The runtime learns that from the passcode probe (`passcodeProbe`; production: the route's
+   * `GET /api/ai/shell`, `fetchAiPasscodeRequirement`), asked only when a disclosure is about to be required for an explicit request
+   * (never with the shipped manifest, in private mode, offline, with the switch known off or for an unqualified class) and once per
+   * runtime: "not required" is kept; an unknown answer (a failure) keeps the field and is asked again next time. A route ACCESS_DENIED
+   * makes the passcode required again (the deployment changed). The route still decides every request.
+   * Owner decision 2026-10-12 (AI credit dialog): an accepted request the route refused because the AI credit is used up (the daily
+   * spend limit, SPEND_CEILING_REACHED, or the DeepSeek balance, OPERATIONAL_SPEND_LOCKED; told by the client's `onCreditLimit`) comes
+   * back with the standard wording marked `remoteUse: "CREDIT_LIMIT_REACHED"` (history: instead of U12's marker; care: on its
+   * KEPT_DETERMINISTIC outcome), so the screens show the credit dialog. Nothing else changes: the audit row keeps its own code.
+   *
    * Packet 11C Addendum C, Task C2 (hybrid spec D11): the patient's "Keep wording on this device" setting. The shipped app passes a
    * function over the stored setting; it is read per request (a change applies from the next request, no rebuild). True: no AI action or
    * disclosure is offered (so no passcode field), and every explicit request of either flow composes deterministically in the browser,
@@ -107,6 +129,13 @@ export type BrowserHistoryExplainerDependencies = Readonly<{
    * `privateMode` answer is used. A hint that throws counts as on.
    */
   privateModeHint?: () => boolean;
+  /**
+   * Owner decision 2026-10-12 (optional passcodes): whether the deployment requires the demo passcode (true / false), or null when
+   * unknown. Absent: the production probe (`GET /api/ai/shell` through the browser's fetch) when no test `fetcher` is injected; with
+   * an injected `fetcher` and no probe, nothing is probed and the passcode stays required (today's behaviour; the fetcher sees POSTs
+   * only). Asked only when a disclosure is about to be required.
+   */
+  passcodeProbe?: () => Promise<boolean | null>;
 }>;
 
 /** Packet 11C B4b: the runtime's care-preparation ports the care-summary wording reads and replaces through. */
@@ -126,11 +155,17 @@ export type BrowserAiAssistanceDependencies = BrowserHistoryExplainerDependencie
  *   REMOTE_USE_DECLINED (C5); absent, the request is never sent (REMOTE_USE_NOT_ACCEPTED once it reaches the remote decision).
  * - `disclosureClosed(...)` (C5): the moot disclosure's one DISCLOSURE_CLOSED_MOOT row.
  */
+/**
+ * Owner decision 2026-10-12 (AI credit dialog): the care outcome, whose KEPT_DETERMINISTIC carries `remoteUse: "CREDIT_LIMIT_REACHED"`
+ * when the route said the AI credit is used up for that request.
+ */
+export type BrowserCareSummaryOutcome = CareSummaryAiOutcome | Readonly<{ kind: "KEPT_DETERMINISTIC"; reason: Extract<CareSummaryAiOutcome, { kind: "KEPT_DETERMINISTIC" }>["reason"]; remoteUse: "CREDIT_LIMIT_REACHED" }>;
+
 export type BrowserCareSummaryWording = Readonly<{
   available(current: CareSummarySnapshotPayload): boolean;
   /** C2 fix round 1 (I-1): asynchronous, so it can await the stored "Keep wording on this device" setting; never rejects. */
   disclosureRequired(current: CareSummarySnapshotPayload): Promise<boolean>;
-  compose(input: { snapshotRef: ExpectedHead; locale: AiLocale; disclosure?: AiRemoteUseRequestDecision }, signal?: AbortSignal): Promise<CareSummaryAiOutcome>;
+  compose(input: { snapshotRef: ExpectedHead; locale: AiLocale; disclosure?: AiRemoteUseRequestDecision }, signal?: AbortSignal): Promise<BrowserCareSummaryOutcome>;
   /**
    * Packet 11C Addendum C (C5): the disclosure shown for an explicit request closed without the patient's decision (locale or preview
    * change, or the screen closed), so that request is moot: one zero-attempt DISCLOSURE_CLOSED_MOOT audit row; nothing is sent.
@@ -191,12 +226,17 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
   const decisions = createAiRemoteUseDecisions();
   const requestClassGate = dependencies.requestClassGate ?? SHIPPED_REQUEST_CLASS_GATE;
   // Packet 11C Addendum C (C6): the demo passcode of this runtime (in memory only) and the server switch learned from the route.
-  const passcode = createPasscodeEntry();
+  // Owner decision 2026-10-12 (optional passcodes): the production probe unless a test seam stands in (see `passcodeProbe`).
+  const passcodeProbe = dependencies.passcodeProbe ?? (dependencies.fetcher ? null : () => fetchAiPasscodeRequirement());
+  const passcode = createPasscodeEntry(passcodeProbe);
   let switchOffAtRoute = false;
   const onRefusal = (reason: AiShellRouteRefusalReason) => {
     if (reason === "REMOTE_AI_DISABLED") switchOffAtRoute = true;
-    if (reason === "ACCESS_DENIED") passcode.forget();
+    if (reason === "ACCESS_DENIED") passcode.denied();
   };
+  // Owner decision 2026-10-12 (AI credit dialog): the explicit requests (by decision token) the route refused for a used-up AI credit.
+  const creditLimited = new WeakSet<AbortSignal>();
+  const noteCreditLimit = (token: AbortSignal) => void creditLimited.add(token);
   // Packet 11C B4a: never while offline either (the service would not send, so there is nothing to disclose). Packet 11C Addendum C
   // (C3): nor while the server-side remote switch is known to be off (pluggable; a throwing check counts as off). C6: known off also
   // once the route itself refused with REMOTE_AI_DISABLED in this runtime (boolean only; the route stays the enforcement point).
@@ -243,7 +283,7 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
     now,
     monotonicMs: dependencies.monotonicMs ?? deviceMonotonicMs,
     manifest,
-    provider: createBrowserShellClient({ disclosure: decisions.disclosure, fetcher: dependencies.fetcher, accessPasscode: passcode.read, onRefusal, onPost: notePost }),
+    provider: createBrowserShellClient({ disclosure: decisions.disclosure, fetcher: dependencies.fetcher, accessPasscode: passcode.read, onRefusal, onPost: notePost, onCreditLimit: noteCreditLimit }),
     privateMode: keepWordingOnDevice,
     online,
     requestClassGate,
@@ -288,7 +328,10 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
       const loaded = await dependencies.history.loadExplainablePattern({ factId: input.factId });
       if (loaded.kind !== "EXPLAINABLE") return false;
       const request = buildSourceBackedExplainRequest({ view: loaded.view, locale: input.locale, requestId: requestId(), requestedAt: now() });
-      return requestAdmissible(request) && remoteEnabled("EXPLAIN_PATTERN") && !(await keepWordingOnDevice());
+      const required = requestAdmissible(request) && remoteEnabled("EXPLAIN_PATTERN") && !(await keepWordingOnDevice());
+      // Owner decision 2026-10-12 (optional passcodes): learn whether the dialog needs the passcode field (never rejects).
+      if (required) await passcode.learn();
+      return required;
     } catch {
       return false;
     }
@@ -308,7 +351,9 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
         // panel shows the owner's fallback line. Never for a request that was not POSTed (deterministic use, private mode, not
         // qualified, switch known off, offline, declined or no decision) and never for an AI result.
         const attempted = token !== undefined && postedRequests.has(token);
-        return attempted && result.kind === "EXPLAINED" && result.source === "DETERMINISTIC" && result.remoteUse === undefined ? { ...result, remoteUse: "UNAVAILABLE_AFTER_REQUEST" as const } : result;
+        if (!attempted || result.kind !== "EXPLAINED" || result.source !== "DETERMINISTIC" || result.remoteUse !== undefined) return result;
+        // Owner decision 2026-10-12 (AI credit dialog): a used-up AI credit is its own marker (the panel shows the credit dialog).
+        return { ...result, remoteUse: creditLimited.has(token) ? ("CREDIT_LIMIT_REACHED" as const) : ("UNAVAILABLE_AFTER_REQUEST" as const) };
       }),
     disclosureRequired: historyRequestAdmissible,
     disclosureClosed: moot("EXPLAIN_PATTERN"),
@@ -324,9 +369,18 @@ export function createBrowserAiAssistance(dependencies: BrowserAiAssistanceDepen
     available: careAvailable,
     // Every explicit request needs its own decision (C3), so the disclosure is required exactly when the request could be sent.
     // C2 fix round 1 (I-1): with the awaited setting (another tab may have turned it on); never rejects.
-    disclosureRequired: async (current: CareSummarySnapshotPayload) => careAvailable(current) && !(await keepWordingOnDevice()),
+    // Owner decision 2026-10-12 (optional passcodes): when it is required, the dialog's passcode need is learned first (never rejects).
+    disclosureRequired: async (current: CareSummarySnapshotPayload) => {
+      const required = careAvailable(current) && !(await keepWordingOnDevice());
+      if (required) await passcode.learn();
+      return required;
+    },
     compose: (input: { snapshotRef: ExpectedHead; locale: AiLocale; disclosure?: AiRemoteUseRequestDecision }, signal?: AbortSignal) =>
-      decisions.run(input.disclosure, signal, (token) => composer.composeCareSummaryWithAi({ snapshotRef: input.snapshotRef, locale: input.locale }, token)),
+      decisions.run(input.disclosure, signal, async (token): Promise<BrowserCareSummaryOutcome> => {
+        const outcome = await composer.composeCareSummaryWithAi({ snapshotRef: input.snapshotRef, locale: input.locale }, token);
+        // Owner decision 2026-10-12 (AI credit dialog): the standard wording kept because the AI credit is used up.
+        return outcome.kind === "KEPT_DETERMINISTIC" && token !== undefined && creditLimited.has(token) ? { ...outcome, remoteUse: "CREDIT_LIMIT_REACHED" as const } : outcome;
+      }),
     disclosureClosed: moot("DRAFT_CARE_PREPARATION_SUMMARY"),
     accessPasscode: passcode.entry,
   });
@@ -339,16 +393,40 @@ const SENDABLE_PASSCODE = /^[\x21-\x7e]{1,128}$/;
 /**
  * Packet 11C Addendum C (C6): the demo passcode of one runtime. Held in this closure only: never written to storage, a backup, settings,
  * an audit row or a log, and gone when the runtime (the app session) ends. The disclosure dialog asks for it while `needed()`.
+ * Owner decision 2026-10-12 (optional passcodes): `learn()` asks the probe (at most one at a time; never rejects) until it answers;
+ * "not required" makes `needed()` false while nothing is held. `denied()` (a route ACCESS_DENIED) forgets the value and marks the
+ * passcode required again. No answer, a failure or no probe: required (the field is shown, as before).
  */
-function createPasscodeEntry() {
+function createPasscodeEntry(probe: (() => Promise<boolean | null>) | null) {
   let value: string | null = null;
+  let requirement: "UNKNOWN" | "REQUIRED" | "NOT_REQUIRED" = "UNKNOWN";
+  let asking: Promise<void> | null = null;
+  const learn = (): Promise<void> => {
+    if (requirement !== "UNKNOWN" || probe === null) return Promise.resolve();
+    asking ??= Promise.resolve()
+      .then(probe)
+      .then(
+        (answer) => {
+          if (requirement === "UNKNOWN" && typeof answer === "boolean") requirement = answer ? "REQUIRED" : "NOT_REQUIRED";
+        },
+        () => undefined,
+      )
+      .finally(() => {
+        asking = null;
+      });
+    return asking;
+  };
   const entry: AiAccessPasscodeEntry = Object.freeze({
-    needed: () => value === null,
+    needed: () => value === null && requirement !== "NOT_REQUIRED",
     provide: (passcode: string) => {
       if (typeof passcode !== "string" || !SENDABLE_PASSCODE.test(passcode)) return false;
       value = passcode;
       return true;
     },
   });
-  return Object.freeze({ entry, read: () => value, forget: () => void (value = null) });
+  const denied = () => {
+    value = null;
+    requirement = "REQUIRED";
+  };
+  return Object.freeze({ entry, read: () => value, denied, learn });
 }

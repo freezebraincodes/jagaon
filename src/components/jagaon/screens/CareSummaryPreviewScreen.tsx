@@ -15,14 +15,18 @@ import type { PrintPort } from "../care-preparation/PrintPort";
 import { useCareLoad } from "../care-organisation/use-care-load";
 import { formatPointTime, localDateOfPoint, formatLocalDate } from "../care-organisation/care-format";
 import { AiDisclosureDialog, type AiDisclosurePasscodeEntry } from "../ai/AiDisclosureDialog";
+import { AiCreditLimitDialog } from "../ai/AiCreditLimitDialog";
 
 /**
  * Packet 11C Addendum B, Task B4b: the outcome of one care-summary AI wording request (structurally the `composeCareSummaryWithAi`
  * outcome; this screen imports no AI module). Reasons are closed codes and are never shown.
+ * Owner decision 2026-10-12 (AI credit dialog): `remoteUse: "CREDIT_LIMIT_REACHED"` on KEPT_DETERMINISTIC (set by the browser wiring)
+ * means the request was refused because the demo's AI credit is used up: the credit dialog is shown, then the standard wording with the
+ * existing fallback line and no retry.
  */
 export type CareSummaryAiWordingOutcome =
   | Readonly<{ kind: "REPLACED"; recordId: RecordId }>
-  | Readonly<{ kind: "KEPT_DETERMINISTIC"; reason: string }>
+  | Readonly<{ kind: "KEPT_DETERMINISTIC"; reason: string; remoteUse?: "CREDIT_LIMIT_REACHED" }>
   | Readonly<{ kind: "NOT_ELIGIBLE"; reason: string }>
   | Readonly<{ kind: "STALE" }>
   | Readonly<{ kind: "CANCELLED" }>
@@ -82,7 +86,8 @@ type AiPhase =
   | { kind: "LOADING"; locale: SupportedLocale }
   | { kind: "CANCELLED" }
   | { kind: "NOT_ACCEPTED" }
-  | { kind: "FALLBACK"; retry: boolean }
+  /** `creditLimit` (Owner decision 2026-10-12, AI credit dialog): the credit dialog is open over this fallback until OK. */
+  | { kind: "FALLBACK"; retry: boolean; creditLimit?: true }
   | { kind: "NOT_ELIGIBLE" }
   | { kind: "STALE" };
 
@@ -108,7 +113,10 @@ const RETRYABLE_REASONS: ReadonlySet<string> = new Set([
 function aiPhaseFor(outcome: Exclude<CareSummaryAiWordingOutcome, { kind: "REPLACED" }>, declined: boolean): AiPhase {
   switch (outcome.kind) {
     case "KEPT_DETERMINISTIC":
-      return declined ? { kind: "NOT_ACCEPTED" } : { kind: "FALLBACK", retry: RETRYABLE_REASONS.has(outcome.reason) };
+      if (declined) return { kind: "NOT_ACCEPTED" };
+      // Owner decision 2026-10-12 (AI credit dialog): the credit is used up for today, so no retry is offered.
+      if (outcome.remoteUse === "CREDIT_LIMIT_REACHED") return { kind: "FALLBACK", retry: false, creditLimit: true };
+      return { kind: "FALLBACK", retry: RETRYABLE_REASONS.has(outcome.reason) };
     case "NOT_ELIGIBLE":
       return { kind: "NOT_ELIGIBLE" };
     case "STALE":
@@ -165,6 +173,9 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
   const [aiPhase, setAiPhase] = useState<AiPhase>(IDLE);
   const aiRequest = useRef<{ controller: AbortController } | null>(null);
   const aiResultRef = useRef<HTMLElement | null>(null);
+  // Owner decision 2026-10-12 (AI credit dialog): the AI state line takes focus once the credit dialog closes.
+  const aiLineRef = useRef<HTMLParagraphElement | null>(null);
+  const focusAiLine = useRef(false);
   const focusResultOf = useRef<RecordId | null>(null);
   // Fix round 1: requests whose compose has not settled yet, including one the patient cancelled while its replacement command was
   // already running (B1b: that command may still commit). No new request starts, and Approve waits, until every one has settled.
@@ -249,6 +260,18 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
     };
   }, [aiPhase, aiWording]);
   const aiResult = ready !== null && ready.payload.composition.method === "AI_ASSISTED";
+
+  // Owner decision 2026-10-12 (AI credit dialog): after OK (or Escape), focus moves to the AI state line (the standard wording's notice),
+  // after the dialog's own focus return.
+  useEffect(() => {
+    if (!focusAiLine.current || (aiPhase.kind === "FALLBACK" && aiPhase.creditLimit)) return;
+    focusAiLine.current = false;
+    aiLineRef.current?.focus();
+  }, [aiPhase]);
+  function closeCreditDialog() {
+    focusAiLine.current = true;
+    setAiPhase({ kind: "FALLBACK", retry: false });
+  }
 
   // After an accepted replacement, focus moves to the new preview's AI label once it is shown.
   useEffect(() => {
@@ -511,7 +534,7 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
           {aiWording !== null && (aiOffered || aiPhase.kind !== "IDLE") ? (
             <div className="care-summary-ai">
               {/* The state line is its own polite live region, so it is not repeated in the shared announcement. */}
-              <p className="care-summary-ai-line" aria-live="polite">
+              <p className="care-summary-ai-line" aria-live="polite" tabIndex={-1} ref={aiLineRef}>
                 {aiLine(aiPhase) ?? ""}
               </p>
               {aiLoading ? (
@@ -578,6 +601,7 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
         </>
       ) : null}
       {aiPhase.kind === "DISCLOSURE" ? <AiDisclosureDialog messages={messages} flow="CARE_SUMMARY" passcode={aiWording?.accessPasscode ?? null} onConfirm={acceptAiDisclosure} onCancel={declineAiDisclosure} /> : null}
+      {aiPhase.kind === "FALLBACK" && aiPhase.creditLimit ? <AiCreditLimitDialog messages={messages} flow="CARE_SUMMARY" onClose={closeCreditDialog} /> : null}
     </div>
   );
 }

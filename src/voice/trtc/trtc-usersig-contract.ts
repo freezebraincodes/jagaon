@@ -6,7 +6,8 @@ import { z } from "zod";
  *
  * - Request: exactly `{}` (strict), JSON, at most VOICE_USERSIG_MAX_BODY_BYTES bytes, with the demo passcode in the
  *   `x-jagaon-demo-passcode` header (its own constant, the same literal as the AI wording route's header; the VALUES are configured
- *   separately, owner decision "Voice access" 2026-10-09).
+ *   separately, owner decision "Voice access" 2026-10-09). Owner decision 2026-10-12 (optional passcodes): when the deployment
+ *   configures no passcode, the header is not sent (the probe says `passcodeRequired: false`).
  * - ISSUED: the TRTC application id, a random per-session user id and room id (no patient identity), the short-lived UserSig, its expiry
  *   (ISO instant) and the server's maximum session length. The secret key is never part of any response.
  * - REFUSED: one closed reason, issued nothing. FAILED: the request itself was malformed.
@@ -55,8 +56,13 @@ export const VOICE_PROBE_PROVIDERS = ["TRTC", "WEB_SPEECH"] as const;
  * Web Speech (owner-approved scope 2026-10-11; draft): when available, the probe also lists the deployment-enabled providers in the
  * deployment's order (`providers`, ids only). An answer without `providers` (voice off) enables nothing.
  */
+/**
+ * Owner decision 2026-10-12 (optional passcodes): when available, the probe also says whether the demo passcode is required
+ * (`passcodeRequired`, a boolean only; never a value). An available answer without it (an older server) counts as required, so the
+ * client keeps asking (fail safe).
+ */
 export const voiceAvailabilityResponseSchema = z
-  .object({ available: z.boolean(), providers: z.array(z.enum(VOICE_PROBE_PROVIDERS)).min(1).max(VOICE_PROBE_PROVIDERS.length).optional() })
+  .object({ available: z.boolean(), providers: z.array(z.enum(VOICE_PROBE_PROVIDERS)).min(1).max(VOICE_PROBE_PROVIDERS.length).optional(), passcodeRequired: z.boolean().optional() })
   .strict();
 export type VoiceAvailabilityResponse = z.infer<typeof voiceAvailabilityResponseSchema>;
 

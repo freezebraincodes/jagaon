@@ -1,3 +1,4 @@
+import type { VoiceAccessMode } from "@/application/voice/voice-provider-selection";
 import type { VoiceTranscriberPort } from "@/application/voice/voice-transcriber-port";
 
 /**
@@ -18,10 +19,11 @@ export async function checkTrtcVoiceAvailability(): Promise<boolean> {
   }
 }
 
-export async function loadTrtcTranscriber(accessPasscode: () => string | null): Promise<VoiceTranscriberPort> {
+/** Owner decision 2026-10-12 (optional passcodes): `access.passcodeRequired === false` sends no passcode header (absent: required). */
+export async function loadTrtcTranscriber(accessPasscode: () => string | null, access?: VoiceAccessMode): Promise<VoiceTranscriberPort> {
   const [{ createTrtcTranscriberAdapter, installVoiceRecoveryHelper }, { createTrtcCredentialClient }] = await Promise.all([import("@/voice/trtc/trtc-transcriber-adapter"), import("@/voice/trtc/trtc-credential-client")]);
   // Owner decision I-2: the DevTools recovery helper (`window.jagaonVoiceRecovery`), installed once, in the browser only, and only
   // where cloud voice is composed. Not a security boundary and not proof of provider shutdown (see the adapter).
   if (typeof window !== "undefined") installVoiceRecoveryHelper(window);
-  return createTrtcTranscriberAdapter({ requestCredential: createTrtcCredentialClient({ accessPasscode }) });
+  return createTrtcTranscriberAdapter({ requestCredential: createTrtcCredentialClient({ accessPasscode, passcodeRequired: access?.passcodeRequired !== false }) });
 }

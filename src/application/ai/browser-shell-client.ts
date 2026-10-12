@@ -2,7 +2,7 @@ import { parseStrictJson, toPlainData } from "@/backup/strict-json";
 import { shellTaskRequestSchema, type ShellTaskRequest } from "@/domain/ai";
 import { decideRemoteUse } from "./ai-call-support";
 import { PROVIDER_FAILURE_REASONS, type AiRemoteUseDecision, type AiRemoteUseDisclosure, type AiShellProviderPort, type ProviderFailureReason, type ProviderInvocationResult, type ProviderUsage } from "./ai-provider-port";
-import { AI_SHELL_ACCESS_HEADER, AI_SHELL_MAX_BODY_BYTES, AI_SHELL_ROUTE_PATH, aiShellRouteResponseSchema, shellRouteCallUpperBound, type AiShellRouteRefusalReason } from "./ai-shell-route-contract";
+import { AI_SHELL_ACCESS_HEADER, AI_SHELL_MAX_BODY_BYTES, AI_SHELL_ROUTE_PATH, aiShellAccessProbeResponseSchema, aiShellRouteResponseSchema, shellRouteCallUpperBound, type AiShellRouteRefusalReason } from "./ai-shell-route-contract";
 import { isApprovedShellTaskRequest } from "./language/shell-projector";
 
 export type { AiRemoteUseDecision, AiRemoteUseDisclosure };
@@ -35,6 +35,15 @@ export type { AiRemoteUseDecision, AiRemoteUseDisclosure };
  *    Packet 11C Addendum C (C6): the same for every route refusal (switch, origin, access, spend), passed on with the route's
  *    `notSentToProvider` marker so the service never counts the refused call as an attempt. The POST carries the entered demo passcode
  *    as one request header (`accessPasscode`; in memory only, never in the body); the browser adds Origin and Sec-Fetch-Site itself.
+ *
+ * Owner decision 2026-10-12 (optional passcodes): `fetchAiPasscodeRequirement` is the same route's credential-free GET probe (one
+ * same-origin GET, no body, no passcode): the route's `passcodeRequired` boolean, or null for anything else (unknown: the caller keeps
+ * asking for a passcode). It lives here so the AI wording keeps ONE browser network site.
+ * Owner decision 2026-10-12 (AI credit dialog): `onCreditLimit` is told the request's decision token when the route answers that the AI
+ * credit is used up: the daily spend limit (a 403 REFUSED SPEND_CEILING_REACHED) or the provider's account balance (a FAILED
+ * OPERATIONAL_SPEND_LOCKED, which the shared Responses adapter maps from DeepSeek's HTTP 402; the route passes only that closed code,
+ * never provider text). The results themselves are unchanged. SPEND_NOT_CONFIGURED and SPEND_LEDGER_UNAVAILABLE are not a used-up
+ * credit (a configuration or ledger fault) and are deliberately not reported.
  *
  * The client never retries (the hybrid service owns the single structural repair) and carries no credential, endpoint, provider
  * setting or caller-chosen model. `providerModel` names the D2 route identity for the local audit only; it is not a runtime-bundle
@@ -108,6 +117,8 @@ export function createAiRemoteUseDecisions(): AiRemoteUseDecisions {
 }
 
 export type BrowserShellFetcher = (input: string, init: RequestInit) => Promise<Response>;
+/** The global network primitive, bound lazily per call (nothing is sent at construction): the module's one fetch site. */
+const globalFetcher: BrowserShellFetcher = (input, init) => fetch(input, init);
 
 /** The closed reason for a call ended because remote use was not accepted (no send happened). */
 const NOT_ACCEPTED_REASON: ProviderFailureReason = "MISSING_CONFIGURATION";
@@ -134,7 +145,7 @@ function statusReason(status: number): ProviderFailureReason {
  * readable `REFUSED` body names its closed refusal (REQUEST_CLASS_NOT_QUALIFIED), which the hybrid service audits; anything else is the
  * plain closed refusal.
  */
-async function refusedByRoute(response: Response, onRefusal: ((reason: AiShellRouteRefusalReason) => void) | undefined): Promise<ProviderInvocationResult> {
+async function refusedByRoute(response: Response, onRefusal: ((reason: AiShellRouteRefusalReason) => void) | undefined, onCreditLimit?: () => void): Promise<ProviderInvocationResult> {
   try {
     if (!/^application\/json(\s*;|$)/i.test(response.headers.get("content-type") ?? "")) return notSent(REFUSED_REASON);
     const text = await response.text();
@@ -148,6 +159,8 @@ async function refusedByRoute(response: Response, onRefusal: ((reason: AiShellRo
     } catch {
       // ignored
     }
+    // Owner decision 2026-10-12 (AI credit dialog): the daily spend limit is used up.
+    if (refusal === "SPEND_CEILING_REACHED") onCreditLimit?.();
     return { kind: "FAILED", reason: REFUSED_REASON, refusal, notSentToProvider: true };
   } catch {
     return notSent(REFUSED_REASON);
@@ -175,9 +188,41 @@ function passcodeHeader(read: (() => string | null) | undefined): Record<string,
  * request it belongs to (the same token for its single repair), so the wiring knows a remote request was actually attempted. It never
  * sees or changes the request; a throwing listener changes nothing.
  */
-export function createBrowserShellClient(options: { disclosure: AiRemoteUseDisclosure; fetcher?: BrowserShellFetcher; accessPasscode?: () => string | null; onRefusal?: (reason: AiShellRouteRefusalReason) => void; onPost?: (decisionToken: AbortSignal) => void }): AiShellProviderPort {
+/**
+ * Owner decision 2026-10-12 (optional passcodes): whether the deployment requires the demo passcode, from `GET /api/ai/shell`. True or
+ * false only for a 200 JSON answer that is exactly `{ passcodeRequired: boolean }`; null for anything else (network error, other status,
+ * other body, or no answer within PASSCODE_PROBE_TIMEOUT_MS, so a stalled probe never hangs the AI action). It sends no passcode and no
+ * body, and reads nothing else.
+ */
+const PASSCODE_PROBE_TIMEOUT_MS = 5_000;
+export async function fetchAiPasscodeRequirement(options: Readonly<{ fetcher?: BrowserShellFetcher }> = {}): Promise<boolean | null> {
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), PASSCODE_PROBE_TIMEOUT_MS);
+  try {
+    const response = await (options.fetcher ?? globalFetcher)(AI_SHELL_ROUTE_PATH, { method: "GET", cache: "no-store", redirect: "error", signal: timeout.signal });
+    if (response.status !== 200 || !/^application\/json(\s*;|$)/i.test(response.headers.get("content-type") ?? "")) return null;
+    const text = await response.text();
+    if (text.length > MAX_RESPONSE_CHARS) return null;
+    const answer = aiShellAccessProbeResponseSchema.safeParse(toPlainData(parseStrictJson(text, { maxDepth: 4, maxLength: MAX_RESPONSE_CHARS })));
+    return answer.success ? answer.data.passcodeRequired : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function createBrowserShellClient(options: {
+  disclosure: AiRemoteUseDisclosure;
+  fetcher?: BrowserShellFetcher;
+  accessPasscode?: () => string | null;
+  onRefusal?: (reason: AiShellRouteRefusalReason) => void;
+  onPost?: (decisionToken: AbortSignal) => void;
+  /** Owner decision 2026-10-12 (AI credit dialog): the request's decision token, when the route said the AI credit is used up. */
+  onCreditLimit?: (decisionToken: AbortSignal) => void;
+}): AiShellProviderPort {
   // The global network primitive is bound lazily, per call; nothing is sent at construction.
-  const fetcher: BrowserShellFetcher = options.fetcher ?? ((input, init) => fetch(input, init));
+  const fetcher: BrowserShellFetcher = options.fetcher ?? globalFetcher;
   return Object.freeze({
     providerModel: BROWSER_SHELL_CLIENT_PROVIDER_MODEL,
     // Task B3: decided by the hybrid service before the first attempt (and re-checked below before each send).
@@ -208,7 +253,15 @@ export function createBrowserShellClient(options: { disclosure: AiRemoteUseDiscl
       } catch {
         return unreadable("TRANSPORT_FAILED");
       }
-      if (response.status === 403) return refusedByRoute(response, options.onRefusal);
+      // Owner decision 2026-10-12 (AI credit dialog): a throwing listener changes nothing.
+      const creditLimit = () => {
+        try {
+          options.onCreditLimit?.(token);
+        } catch {
+          // ignored: the listener only observes
+        }
+      };
+      if (response.status === 403) return refusedByRoute(response, options.onRefusal, creditLimit);
       // C6 fix round 1: a 4xx is a refusal before any provider call (marked not sent); a 5xx may follow a call (the upper bound counts).
       if (!response.ok) return response.status >= 400 && response.status < 500 ? notSent(statusReason(response.status)) : unreadable(statusReason(response.status));
       if (!/^application\/json(\s*;|$)/i.test(response.headers.get("content-type") ?? "")) return unreadable("PROVIDER_FAILED");
@@ -233,6 +286,8 @@ export function createBrowserShellClient(options: { disclosure: AiRemoteUseDiscl
       // Packet 11C Addendum C (C1): REFUSED is a 403 answer only; with any other status it is a non-conforming answer after the POST.
       if (route.kind === "REFUSED") return unreadable("PROVIDER_FAILED");
       const reason = (PROVIDER_FAILURE_REASONS as readonly string[]).includes(route.reason) ? (route.reason as ProviderFailureReason) : "PROVIDER_FAILED";
+      // Owner decision 2026-10-12 (AI credit dialog): the provider's account balance is used up (DeepSeek HTTP 402).
+      if (reason === "OPERATIONAL_SPEND_LOCKED") creditLimit();
       // C6 fix round 1: the route's own not-sent marker is passed on (the contract never pairs it with usage).
       if (route.notSentToProvider === true && route.usage === undefined) return notSent(reason);
       return failed(reason, route.usage);

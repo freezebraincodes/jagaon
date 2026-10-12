@@ -16,6 +16,11 @@ import { AI_SHELL_ACCESS_HEADER } from "@/application/ai/ai-shell-route-contract
  * - `JAGAON_AI_DEMO_PASSCODE`: the demo passcode (8 to 128 visible ASCII characters, so it travels as an HTTP header). Only its SHA-256
  *   digest is kept; the passcode is never returned, logged or stored. The browser sends the passcode the person entered in the
  *   `x-jagaon-demo-passcode` header; the route compares the two digests in constant time.
+ *   Owner decision 2026-10-12 (optional passcodes: "when JAGAON_AI_DEMO_PASSCODE or JAGAON_VOICE_DEMO_PASSCODE is empty or missing, no
+ *   passcode is asked"): OPTIONAL. Missing, empty or whitespace-only means no passcode is required (`passcodeRequired: false`) and
+ *   access authorization grants without one; every other check and the order are unchanged. A value that is present but invalid keeps
+ *   the fail-closed behaviour (`passcodeRequired: true` with no digest: every request is refused ACCESS_DENIED). The browser learns
+ *   only the boolean, from `GET /api/ai/shell` (ai-shell-handler.ts).
  * - `JAGAON_AI_DAILY_SPEND_LIMIT_USD`: the daily spend limit in USD (a positive decimal with at most 6 decimals, below 1,000,000), held as
  *   whole micro-USD for the per-instance spend ledger (ai-spend-ledger.ts). The owner's target is entered here at deployment.
  */
@@ -37,6 +42,11 @@ export type AiShellDeploymentConfig = Readonly<{
   remoteAiEnabled: boolean;
   /** The exact allowed origins, or null when missing or invalid (every request is refused). */
   allowedOrigins: readonly string[] | null;
+  /**
+   * Owner decision 2026-10-12 (optional passcodes): false only when no passcode is configured (missing, empty or whitespace-only); a
+   * present value, valid or not, is required.
+   */
+  passcodeRequired: boolean;
   /** The SHA-256 digest of the configured passcode (never the passcode), or null when missing or invalid. */
   passcodeDigest: Uint8Array | null;
   /** The daily spend limit in whole micro-USD, or null when missing or invalid. */
@@ -86,10 +96,13 @@ function parseMicroUsd(value: string | undefined): number | null {
 /** The one parsed, validated deployment configuration (a throwing read is a missing value). */
 export function parseAiShellDeploymentConfig(environment: Readonly<Record<string, string | undefined>>): AiShellDeploymentConfig {
   const passcode = read(environment, AI_SHELL_DEPLOYMENT_ENV.demoPasscode);
+  // Owner decision 2026-10-12 (optional passcodes): only a missing, empty or whitespace-only value means "none required".
+  const passcodeRequired = passcode !== undefined && passcode.trim().length > 0;
   return Object.freeze({
     remoteAiEnabled: read(environment, AI_SHELL_DEPLOYMENT_ENV.remoteAi) === "on",
     allowedOrigins: parseOrigins(read(environment, AI_SHELL_DEPLOYMENT_ENV.allowedOrigins)),
-    passcodeDigest: passcode !== undefined && PASSCODE.test(passcode) ? digest(passcode) : null,
+    passcodeRequired,
+    passcodeDigest: passcodeRequired && PASSCODE.test(passcode) ? digest(passcode) : null,
     dailySpendLimitMicroUsd: parseMicroUsd(read(environment, AI_SHELL_DEPLOYMENT_ENV.dailySpendLimitUsd)),
   });
 }
@@ -105,9 +118,12 @@ export function originAllowed(config: AiShellDeploymentConfig, headers: Headers)
 
 /**
  * Access authorization: the presented demo passcode (the `x-jagaon-demo-passcode` header) matches the configured one. Both are hashed to
- * equal-length SHA-256 digests and compared in constant time. No configured passcode refuses every request.
+ * equal-length SHA-256 digests and compared in constant time. An invalid configured passcode refuses every request.
+ * Owner decision 2026-10-12 (optional passcodes): no passcode configured (`passcodeRequired: false`) grants access without one (a
+ * presented header is neither compared nor echoed). The switch and origin checks before it, and everything after it, are unchanged.
  */
 export function accessGranted(config: AiShellDeploymentConfig, headers: Headers): boolean {
+  if (!config.passcodeRequired) return true;
   const presented = headers.get(AI_SHELL_ACCESS_HEADER);
   if (config.passcodeDigest === null || presented === null || presented.length === 0 || presented.length > MAX_PRESENTED_PASSCODE_CHARS) return false;
   return timingSafeEqual(digest(presented), config.passcodeDigest);

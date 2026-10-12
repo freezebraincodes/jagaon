@@ -52,6 +52,14 @@ export const zhSGMessages: AppMessages = {
   aiHistoryFallback: {
     unavailableAfterRequest: "AI 措辞暂时无法使用。您的记录没有改变；现显示标准措辞。",
   },
+  // Owner decision 2026-10-12 (AI credit dialog): draft, Chinese acceptance deferred (zh-SG requests are never sent to the provider, so
+  // this dialog is not shown in Chinese). Full-width punctuation. Not an APPROVED_PACKET_11 row.
+  aiCreditLimit: {
+    title: "AI 额度已用完",
+    careSummaryBody: "此演示今天的 AI 额度已用完。您的摘要改用标准措辞。",
+    historyBody: "此演示今天的 AI 额度已用完。说明改用标准措辞。",
+    ok: "好",
+  },
   // voice-copy.13s.1: voice transcription slice. Every row is human acceptance pending; not an approved row.
   voice: {
     entry: "告诉 JagaOn",

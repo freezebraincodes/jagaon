@@ -64,7 +64,9 @@ describe("POST /api/voice/access (Web Speech passcode check; no credential)", ()
   it("refuses VOICE_DISABLED when voice is off, misconfigured, or Web Speech is not an enabled provider", async () => {
     for (const env of <Array<Record<string, string | undefined>>>[
       { ...WEB_ONLY, [VOICE_USERSIG_ENV.voiceCloud]: "off" },
-      { ...WEB_ONLY, [VOICE_USERSIG_ENV.demoPasscode]: undefined },
+      // Owner decision 2026-10-12 (optional passcodes; deliberate change): a MISSING passcode no longer misconfigures voice (none is
+      // required, covered below); a present but invalid one still does.
+      { ...WEB_ONLY, [VOICE_USERSIG_ENV.demoPasscode]: "short" },
       { ...WEB_ONLY, [VOICE_PROVIDERS_ENV]: "bogus" },
       { ...TEST_VOICE_ENVIRONMENT },
       { ...TEST_VOICE_ENVIRONMENT, [VOICE_PROVIDERS_ENV]: "trtc" },
@@ -108,5 +110,36 @@ describe("POST /api/voice/access (Web Speech passcode check; no credential)", ()
   it("Tencent build-time exclusion: the Web Speech access check still works when run-time settings also (mistakenly) enable TRTC", async () => {
     const env = { ...TEST_VOICE_ENVIRONMENT, [VOICE_PROVIDERS_ENV]: "trtc,webspeech", [VOICE_USERSIG_ENV.secretKey]: undefined };
     expect(await answer(await harness(env, { build: { trtcExcludedAtBuild: true } }).handle(post()))).toEqual({ status: 200, body: { kind: "GRANTED", maxSessionSeconds: 90 } });
+  });
+});
+
+// Owner decision 2026-10-12 (optional passcodes): with no JAGAON_VOICE_DEMO_PASSCODE (missing, empty or whitespace-only) access is granted
+// without a passcode; the switch, the provider, the origin and the request rate still refuse. A configured passcode is unchanged.
+describe("optional voice passcode on /api/voice/access (Owner decision 2026-10-12, optional passcodes)", () => {
+  const NO_PASSCODE = { ...WEB_ONLY, [VOICE_USERSIG_ENV.demoPasscode]: undefined };
+
+  it("no passcode configured: GRANTED without a passcode header; a stray value is not needed and not echoed", async () => {
+    for (const env of [NO_PASSCODE, { ...WEB_ONLY, [VOICE_USERSIG_ENV.demoPasscode]: "" }, { ...WEB_ONLY, [VOICE_USERSIG_ENV.demoPasscode]: "  " }]) {
+      expect(await answer(await harness(env).handle(post({ headers: testVoiceHeaders(null) })))).toEqual({ status: 200, body: { kind: "GRANTED", maxSessionSeconds: 90 } });
+    }
+    const stray = await harness(NO_PASSCODE).handle(post({ headers: testVoiceHeaders("TEST-ONLY-stray-value") }));
+    expect(stray.status).toBe(200);
+    expect(await stray.text()).not.toContain("TEST-ONLY-stray-value");
+  });
+
+  it("no passcode configured: the switch, the provider, the origin and the request rate still refuse", async () => {
+    const refusedWith = async (env: Record<string, string | undefined>, headers: Record<string, string>) => (await answer(await harness(env).handle(post({ headers })))).body;
+    expect(await refusedWith({ ...NO_PASSCODE, [VOICE_USERSIG_ENV.voiceCloud]: "off" }, testVoiceHeaders(null))).toEqual({ kind: "REFUSED", reason: "VOICE_DISABLED" });
+    expect(await refusedWith({ ...NO_PASSCODE, [VOICE_PROVIDERS_ENV]: "trtc" }, testVoiceHeaders(null))).toEqual({ kind: "REFUSED", reason: "VOICE_DISABLED" });
+    expect(await refusedWith(NO_PASSCODE, { ...testVoiceHeaders(null), Origin: "http://evil.example" })).toEqual({ kind: "REFUSED", reason: "ORIGIN_REJECTED" });
+    expect(await refusedWith(NO_PASSCODE, { ...testVoiceHeaders(null), "Sec-Fetch-Site": "cross-site" })).toEqual({ kind: "REFUSED", reason: "ORIGIN_REJECTED" });
+    const { handle } = harness(NO_PASSCODE, { rateLimit: { maxRequests: 1, windowMs: 60_000 } });
+    expect((await answer(await handle(post({ headers: testVoiceHeaders(null) })))).status).toBe(200);
+    expect(await answer(await handle(post({ headers: testVoiceHeaders(null) })))).toEqual({ status: 429, body: { kind: "REFUSED", reason: "RATE_LIMITED" } });
+  });
+
+  it("a present but invalid passcode keeps voice off (fail closed); a configured one is still required", async () => {
+    expect((await answer(await harness({ ...WEB_ONLY, [VOICE_USERSIG_ENV.demoPasscode]: "short" }).handle(post({ headers: testVoiceHeaders(null) })))).body).toEqual({ kind: "REFUSED", reason: "VOICE_DISABLED" });
+    expect((await answer(await harness().handle(post({ headers: testVoiceHeaders(null) })))).body).toEqual({ kind: "REFUSED", reason: "ACCESS_DENIED" });
   });
 });

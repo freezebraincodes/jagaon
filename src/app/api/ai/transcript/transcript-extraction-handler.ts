@@ -38,7 +38,9 @@ import { InMemoryDailySpendLedger, type SpendLedger, type SpendReservationToken 
  *   2. the voice slice's frozen gate `gateRemoteTranscriptExtraction` plus this task's redirect check over the WHOLE transcript
  *      (REDIRECT_REQUIRED: a dose, treatment or health question never reaches the model; another withheld transcript is invalid);
  *   3. the shared remote-AI switch `JAGAON_REMOTE_AI` AND this task's own switch `JAGAON_AI_TRANSCRIPT_EXTRACTION` (both exactly `on`);
- *   4. origin protection and 5. the demo passcode (the shared C6 deployment configuration, read-only reuse);
+ *   4. origin protection and 5. the demo passcode (the shared C6 deployment configuration, read-only reuse; Owner decision 2026-10-12,
+ *      optional passcodes: with no `JAGAON_AI_DEMO_PASSCODE` configured it grants without one, as the shell route does; the steps
+ *      around it, this task's own switch and the shipped PENDING qualification still refuse);
  *   6. server activation of EXTRACT_VOICE_FACTS (NOT_REGISTERED / DETERMINISTIC_ONLY refuse: the shipped state);
  *   7. this task's own qualification gate over the extraction contract digest (shipped PENDING: refuses);
  *   8. the spend reservation of this exact body's upper bound against THIS route's own per-instance daily ledger, whose limit is this

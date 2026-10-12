@@ -1,7 +1,7 @@
 import { AI_ACTIVATION_MANIFEST, resolveAiTaskActivation, type AiActivationManifest } from "@/application/ai/ai-activation-manifest";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "@/application/ai/ai-hybrid-runtime-bundles";
 import { PROVIDER_FAILURE_REASONS, type ProviderInvocationResult, type ProviderUsage, type ShellStructuralRejectionReason } from "@/application/ai/ai-provider-port";
-import { AI_SHELL_MAX_BODY_BYTES, aiShellRouteResponseSchema, shellRouteCallUpperBound, type AiShellRouteRefusalReason, type AiShellRouteResponse } from "@/application/ai/ai-shell-route-contract";
+import { AI_SHELL_MAX_BODY_BYTES, aiShellRouteResponseSchema, shellRouteCallUpperBound, type AiShellAccessProbeResponse, type AiShellRouteRefusalReason, type AiShellRouteResponse } from "@/application/ai/ai-shell-route-contract";
 import { isApprovedShellTaskRequest, shellPlanView } from "@/application/ai/language/shell-projector";
 import { validateShellCandidate, type ShellValidationReason } from "@/application/ai/language/shell-validator";
 import { FIXED_FIELD_BUDGETS, type FieldKind } from "@/application/ai/language/slot-planner";
@@ -58,6 +58,11 @@ import { InMemoryDailySpendLedger, type SpendLedger, type SpendReservationToken 
  * C6 fix round 1: every closed FAILED decided before the provider call (steps 1, 5 and 8 before the invoke: request checks, activation,
  * missing credential or model, the rate limit, a cancellation before the call, an adapter failure reported as not transmitted) also
  * carries `notSentToProvider: true` and no usage; a FAILED after the call may have started carries usage and no marker (C5).
+ * Owner decision 2026-10-12 (optional passcodes): step 4 grants without a passcode when the deployment configures none
+ * (`accessGranted`); the order and every other step are unchanged. `GET` on the same route is the passcode probe: it answers
+ * `{ passcodeRequired }` only (the parsed configuration's boolean). It reads no body, never the credential, reserves nothing and calls
+ * no provider; a request the browser marks cross-site gets the conservative `true`; it has its own per-instance window with the POST's
+ * limit (429, `true`). Any other method stays 405.
  */
 
 const DEFAULT_RATE_LIMIT = Object.freeze({ maxRequests: 10, windowMs: 60_000 });
@@ -87,7 +92,7 @@ export type AiShellHandlerOptions = {
   spendLedger?: SpendLedger;
 };
 
-function reply(body: AiShellRouteResponse, status = 200): Response {
+function reply(body: AiShellRouteResponse | AiShellAccessProbeResponse, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 }
 /** C6 fix round 1: a FAILED decided before the provider call: the closed reason with the explicit "not sent to provider" marker. */
@@ -148,6 +153,8 @@ export function createAiShellHandler(options: AiShellHandlerOptions): (request: 
   const limit = options.rateLimit ?? DEFAULT_RATE_LIMIT;
   const requestClassGate = options.requestClassGate ?? SHIPPED_REQUEST_CLASS_GATE;
   const admitted: number[] = [];
+  // Owner decision 2026-10-12 (optional passcodes): the passcode probe's own per-instance window (never the provider-call window).
+  const probed: number[] = [];
   // Packet 11C Addendum C (C6): the deployment configuration is parsed once, when the first request passes the request checks (the
   // deployment environment does not change while an instance runs); the shipped ledger is created once over the configured daily limit.
   let config: AiShellDeploymentConfig | null = null;
@@ -156,6 +163,16 @@ export function createAiShellHandler(options: AiShellHandlerOptions): (request: 
   const spendLedger = (dailyLimitMicroUsd: number): SpendLedger => options.spendLedger ?? (instanceLedger ??= new InMemoryDailySpendLedger({ dailyLimitMicroUsd }));
 
   async function handle(request: Request): Promise<Response> {
+    // Owner decision 2026-10-12 (optional passcodes): the passcode probe (no body, no credential, no reservation, no provider call).
+    if (request.method === "GET") {
+      const at = now().getTime();
+      while (probed.length > 0 && probed[0]! <= at - limit.windowMs) probed.shift();
+      if (probed.length >= limit.maxRequests) return reply({ passcodeRequired: true }, 429);
+      probed.push(at);
+      const site = request.headers.get("Sec-Fetch-Site");
+      if (site !== null && site !== "same-origin") return reply({ passcodeRequired: true });
+      return reply({ passcodeRequired: deploymentConfig().passcodeRequired });
+    }
     if (request.method !== "POST") return failed("PAYLOAD_INVALID", 405);
     if (!/^application\/json(\s*;|$)/i.test(request.headers.get("content-type") ?? "")) return failed("PAYLOAD_INVALID", 415);
     const declared = Number(request.headers.get("content-length") ?? "0");

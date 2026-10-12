@@ -93,9 +93,10 @@ afterEach(() => {
 });
 
 describe("route module", () => {
-  it("exports only a force-dynamic POST handler that reads the server environment", () => {
+  // Owner decision 2026-10-12 (optional passcodes; deliberate change): GET is the passcode probe ({ passcodeRequired } only).
+  it("exports only force-dynamic POST and GET (the passcode probe) handlers that read the server environment", () => {
     expect(route.dynamic).toBe("force-dynamic");
-    expect(Object.keys(route).sort()).toEqual(["POST", "dynamic"]);
+    expect(Object.keys(route).sort()).toEqual(["GET", "POST", "dynamic"]);
     const source = readFileSync(join(process.cwd(), "src/app/api/ai/shell/route.ts"), "utf8");
     expect(source).toContain("process.env");
     expect(source).not.toMatch(/NEXT_PUBLIC_/);
@@ -153,13 +154,17 @@ describe("route module", () => {
         ["raw facts", () => post({ ...shellRequest(), facts: [] }), 400, { kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true }],
         ["the internal source-backed request", () => post(sourceBackedRequest()), 400, { kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true }],
         ["malformed JSON", () => post(undefined, { raw: "{not json" }), 400, { kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true }],
-        ["a GET", () => post(undefined, { method: "GET" }), 405, { kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true }],
+        // Owner decision 2026-10-12 (optional passcodes; deliberate change): GET is the passcode probe; another method stays 405.
+        ["a DELETE", () => post(undefined, { method: "DELETE" }), 405, { kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true }],
       ];
       for (const [label, request, status, body] of make) {
         const response = await fresh.POST(request());
         expect(response.status, label).toBe(status);
         expect(await response.json(), label).toEqual(body);
       }
+      // The probe through the exported GET: the configured passcode's boolean only (none configured without the configuration).
+      const probe = await fresh.GET(new Request("http://localhost/api/ai/shell", { method: "GET", headers: { "Sec-Fetch-Site": "same-origin" } }));
+      expect([probe.status, await probe.json()]).toEqual([200, { passcodeRequired: AI_SHELL_DEPLOYMENT_ENV.demoPasscode in deployment }]);
       expect(reads).toEqual([]);
       // Positive control: the installed probe records a credential read.
       void process.env.DEEPSEEK_API_KEY;
@@ -325,7 +330,8 @@ describe("request admission: only an approved value-blind ShellTaskRequest, refu
   });
 
   it.each<[string, () => Request, number, string]>([
-    ["a GET", () => post(undefined, { method: "GET" }), 405, "PAYLOAD_INVALID"],
+    // Owner decision 2026-10-12 (optional passcodes; deliberate change): GET is the passcode probe (tested in route-access-spend).
+    ["a DELETE", () => post(shellRequest(), { method: "DELETE" }), 405, "PAYLOAD_INVALID"],
     ["a PUT", () => post(shellRequest(), { method: "PUT" }), 405, "PAYLOAD_INVALID"],
     ["a text/plain body", () => post(shellRequest(), { headers: { "content-type": "text/plain" } }), 415, "PAYLOAD_INVALID"],
     ["a missing content type", () => new Request("http://localhost/api/ai/shell", { method: "POST", body: new Blob([JSON.stringify(shellRequest())]) }), 415, "PAYLOAD_INVALID"],
@@ -484,7 +490,7 @@ describe("provider outcomes", () => {
     const aborted = new AbortController();
     aborted.abort();
     const beforeCall: Array<[string, () => Promise<{ body: unknown }>]> = [
-      ["a GET", () => call(post(undefined, { method: "GET" }), { fetcher: deepseek() })],
+      ["a DELETE", () => call(post(undefined, { method: "DELETE" }), { fetcher: deepseek() })],
       ["a non-JSON content type", () => call(post(shellRequest(), { headers: { "content-type": "text/plain" } }), { fetcher: deepseek() })],
       ["an oversized body", () => call(post(undefined, { raw: "x".repeat(AI_SHELL_MAX_BODY_BYTES + 1) }), { fetcher: deepseek() })],
       ["malformed JSON", () => call(post(undefined, { raw: "{not json" }), { fetcher: deepseek() })],

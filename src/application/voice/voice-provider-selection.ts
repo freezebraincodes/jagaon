@@ -26,7 +26,23 @@ export type VoiceProviderStatus = "AVAILABLE" | "NOT_ENABLED" | "NOT_SUPPORTED" 
  * could not be checked (network error, rate limit, invalid answer); `notEnabled` lists providers known not to be enabled regardless
  * (TRTC in a Tencent-excluded build).
  */
-export type VoiceProviderProbeAnswer = Readonly<{ kind: "ANSWERED"; providers: readonly VoiceProviderId[] }> | Readonly<{ kind: "FAILED"; notEnabled: readonly VoiceProviderId[] }>;
+export type VoiceProviderProbeAnswer =
+  | Readonly<{
+      kind: "ANSWERED";
+      providers: readonly VoiceProviderId[];
+      /** Owner decision 2026-10-12 (optional passcodes): false only when the deployment requires no demo passcode; absent = required. */
+      passcodeRequired?: boolean;
+    }>
+  | Readonly<{ kind: "FAILED"; notEnabled: readonly VoiceProviderId[] }>;
+
+/**
+ * Owner decision 2026-10-12 (optional passcodes): what the Tell JagaOn resolver needs from the probe: the enabled providers and whether
+ * the demo passcode is required (a failed check: none enabled, required).
+ */
+export type VoiceAccessCheck = Readonly<{ providers: readonly VoiceProviderId[]; passcodeRequired: boolean }>;
+
+/** Owner decision 2026-10-12 (optional passcodes): what a transcriber loader is told about the session's access (no value). */
+export type VoiceAccessMode = Readonly<{ passcodeRequired: boolean }>;
 
 export type VoiceProviderEnvironment = Readonly<{
   /** The deployment-enabled providers, in the deployment's order (from the probe). */
@@ -54,7 +70,11 @@ export function voiceProviderStatuses(environment: VoiceProviderEnvironment): Re
 }
 
 export type VoiceProviderResolution =
-  | Readonly<{ kind: "AVAILABLE"; provider: VoiceProviderId }>
+  /**
+   * Owner decision 2026-10-12 (optional passcodes): `passcodeRequired: false` (from the probe, added by the app) skips the screen's
+   * passcode step; absent or true keeps it (fail safe).
+   */
+  | Readonly<{ kind: "AVAILABLE"; provider: VoiceProviderId; passcodeRequired?: boolean }>
   /** Enabled providers exist, but none can run in this browser (the existing "not available in this browser" path). */
   | Readonly<{ kind: "UNSUPPORTED" }>
   /** Voice is off, nothing is enabled, or only a provider not offered in this language is enabled (the existing "unavailable" path). */

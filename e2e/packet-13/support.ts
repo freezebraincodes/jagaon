@@ -68,7 +68,11 @@ export const DARK_PEN: Record<Locale, string> = { "en-SG": "dark pen", "zh-SG": 
 /** The reported amount exactly as the extractor keeps it from SCRIPTS.amountTaken / amountSkipped (13s.3). */
 export const REPORTED_AMOUNT: Record<Locale, string> = { "en-SG": "10 units", "zh-SG": "10 个单位" };
 
-/** Opens Tell JagaOn from Today with the harness "hearing" `say` (or a scripted start failure), accepts the disclosure. */
+/**
+ * Opens Tell JagaOn from Today with the harness "hearing" `say` (or a scripted start failure), accepts the disclosure. Owner decision
+ * 2026-10-12 (optional passcodes): with `passcode: "none"` in the query the deployment requires no passcode, so the disclosure must show
+ * no passcode field and Accept is enabled at once (consent → microphone); otherwise the passcode is entered first, as before.
+ */
 export async function startVoice(page: Page, m: AppMessages, query: Record<string, string>): Promise<void> {
   await page.goto(`${HARNESS_URL}/?${new URLSearchParams(query).toString()}`);
   const entry = page.getByRole("button", { name: m.voice.entry });
@@ -76,8 +80,23 @@ export async function startVoice(page: Page, m: AppMessages, query: Record<strin
   await entry.click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText(m.voice.disclosure.title);
-  await dialog.getByLabel(m.aiAccess.passcodeLabel).fill(SYNTHETIC_PASSCODE);
-  await dialog.getByRole("button", { name: m.voice.disclosure.accept }).click();
+  const accept = dialog.getByRole("button", { name: m.voice.disclosure.accept });
+  if (query.passcode === "none") {
+    await expect(dialog.getByLabel(m.aiAccess.passcodeLabel)).toHaveCount(0);
+    await expect(accept).toBeEnabled();
+  } else {
+    await expect(accept).toBeDisabled();
+    await dialog.getByLabel(m.aiAccess.passcodeLabel).fill(SYNTHETIC_PASSCODE);
+  }
+  await accept.click();
+}
+
+/** Speaks `say` through the harness fake and stops, with the given extra query (Owner decision 2026-10-12: e.g. `passcode: "none"`). */
+export async function speakWith(page: Page, m: AppMessages, say: string, extra: Record<string, string>): Promise<void> {
+  await startVoice(page, m, { say, ...extra });
+  const stop = page.getByRole("button", { name: m.voice.state.stop });
+  await expect(stop).toBeEnabled();
+  await stop.click();
 }
 
 /** Speaks `say` through the harness fake and stops; resolves once the review (or an end state) is shown. */
