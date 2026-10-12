@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { ExplainablePatternView, PeriodBoundary, SupportingReading } from "@/application/history/recorded-history-contracts";
 import { careSummaryLocalePack } from "@/application/care-preparation/care-summary-locale-pack";
@@ -191,18 +191,27 @@ export function PatternExplanationPanel({ messages, locale, explanation, panelId
   const t = messages.history.explanation;
   const headingRef = useRef<HTMLHeadingElement>(null);
 
-  // Keyboard: the heading takes focus once, when the panel opens. A layout effect (Owner decision 2026-10-12, AI credit dialog), so a
-  // credit dialog opening in the same commit takes focus after it and returns it to the heading.
-  useLayoutEffect(() => {
-    headingRef.current?.focus();
-  }, []);
-
   const explained = explanation?.kind === "EXPLAINED" ? explanation : null;
   const text = explained ? explainText(explained.composition) : null;
   const shown = explained && text ? { ...explained, text } : null;
   // Owner decision 2026-10-12 (AI credit dialog): the result whose credit dialog was closed (one dialog per result).
   const [creditClosedFor, setCreditClosedFor] = useState<PatternExplanationResult | null>(null);
   const creditDialog = shown?.remoteUse === "CREDIT_LIMIT_REACHED" && creditClosedFor !== explanation;
+
+  // Keyboard: the heading takes focus once, when the panel opens. A passive effect, so it runs after a closing dialog's own focus return
+  // (the disclosure returns focus to its opener first; the panel opened by that request then takes it). Integration fix (2026-10-12):
+  // the earlier layout effect let the disclosure's return win, leaving focus on the action button.
+  // Owner decision 2026-10-12 (AI credit dialog): when a credit dialog opens in the same commit, it keeps the focus (on OK); the heading
+  // takes it once the dialog closes (below).
+  const creditAtMount = useRef(creditDialog);
+  useEffect(() => {
+    if (!creditAtMount.current) headingRef.current?.focus();
+  }, []);
+  const creditWasOpen = useRef(creditDialog);
+  useEffect(() => {
+    if (creditWasOpen.current && !creditDialog) headingRef.current?.focus();
+    creditWasOpen.current = creditDialog;
+  }, [creditDialog]);
   // The live region exists from the start and receives one message per outcome: the headline, or why there is none.
   const statusText =
     explanation === null ? "" : shown ? shown.text.headline : explanation.kind === "UNAVAILABLE" && explanation.reason === "STALE_RESULT" ? t.stale : t.unavailable;

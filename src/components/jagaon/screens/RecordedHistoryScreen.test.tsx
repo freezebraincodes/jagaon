@@ -777,6 +777,25 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     return action;
   }
 
+  // Integration fix (2026-10-12): with the action itself focused (as a keyboard user has it), the dialog returns focus to the action
+  // first and the panel that then opens takes it: focus ends on the panel heading, never on the action (the C7 browser order).
+  it.each([
+    ["Cancel", () => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.cancel }))],
+    ["Escape", () => fireEvent.keyDown(dialogOf(), { key: "Escape" })],
+  ])("%s from a focused action: focus ends on the opened panel's heading", async (_label, cancel) => {
+    const run = await wired();
+    render(screenElement("en-SG", run.history, run.explainer));
+    const action = await screen.findByRole("button", { name: en.history.explanation.action });
+    action.focus();
+    fireEvent.click(action);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeNull());
+    expect(within(dialogOf()).getByRole("button", { name: en.ai.cancel })).toHaveFocus();
+    act(() => cancel());
+    const panel = screen.getByRole("region", { name: en.history.explanation.title });
+    await waitFor(() => expect(within(panel).getByRole("heading", { level: 3 })).toHaveFocus());
+    expect(action).not.toHaveFocus();
+  });
+
   it("activated: the action opens the disclosure first, asked for THIS request; nothing is explained, audited or sent", async () => {
     const run = await wired();
     render(screenElement("en-SG", run.history, run.explainer));
