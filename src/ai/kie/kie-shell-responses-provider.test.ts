@@ -302,7 +302,7 @@ describe("per-task hybrid shell output caps ai-shell-request.11b.10 (EXPLAIN 512
     const fetcher = reply(documented(VALID, { status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, usage: { input_tokens: 600, output_tokens: cap } }));
     const rows: AiInvocationAuditRow[] = [];
     const manifest = { ...AI_ACTIVATION_MANIFEST, tasks: { ...AI_ACTIVATION_MANIFEST.tasks, [task]: "SYNTHETIC_REMOTE_ENABLED" } } as typeof AI_ACTIVATION_MANIFEST;
-    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (independent of the shipped records).
     const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", manifest, provider: createDeepSeekShellResponsesProvider({ token: TOKEN, model: MODEL, fetcher }), audit: { append: async (row) => void rows.push(row) }, now: () => "2026-10-06T01:00:00.000Z", monotonicMs: () => 0, requestClassGate: qualifiedTestRequestClassGate() });
     const result = await service.execute(fixture.request);
     expect(result).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "REMOTE_AI", reason: "PROVIDER_FAILED" });

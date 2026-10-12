@@ -108,7 +108,8 @@ const CLIENT_AI_FILES = [
   "src/application/ai/language/shell-validator.ts",
   "src/application/ai/language/slot-planner.ts",
   // Packet 11C Addendum C, Task C1 (deliberate, exactly these two): the generated request-class definitions (plain data) and the
-  // qualification records with the class rule and gate (all PENDING), used by the hybrid service and the wiring before any disclosure or
+  // qualification records with the class rule and gate (Packet 11C English activation: six en-SG QUALIFIED, six zh-SG PENDING), used by
+  // the hybrid service and the wiring before any disclosure or
   // send. Neither imports evaluation, prompt, provider or credential code; the test-only support module stays out (pinned below).
   "src/application/ai/request-class-definitions.ts",
   "src/application/ai/request-class-qualification.ts",
@@ -219,7 +220,8 @@ describe("Packet 11A scope", () => {
         "src/application/ai/browser-history-explainer.test.ts",
         "src/application/ai/browser-history-explainer.ts",
         // Packet 11C Addendum C, Task C1 (owner decision C1): the generated, immutable request-class definitions (plain data, bound to the
-        // frozen contract digest), the separate qualification records (all PENDING) with the class rule and gate, its test, and the
+        // frozen contract digest), the separate qualification records (Packet 11C English activation: six en-SG QUALIFIED, six zh-SG
+        // PENDING) with the class rule and gate, its test, and the
         // test-only support that injects test-only QUALIFIED records (never in a production graph; pinned below).
         "src/application/ai/request-class-definitions.ts",
         "src/application/ai/request-class-qualification.test.ts",
@@ -232,7 +234,8 @@ describe("Packet 11A scope", () => {
   });
 
   it("exports exactly the planned AI contracts", () => {
-    expect(exportsOf(activation)).toEqual(["AI_ACTIVATION_MANIFEST", "AI_ACTIVATION_STATES", "resolveAiTaskActivation"]);
+    // Packet 11C English activation (I-8 follow-up, deliberate): plus the production deterministic-only manifest, the legacy service's default.
+    expect(exportsOf(activation)).toEqual(["AI_ACTIVATION_MANIFEST", "AI_ACTIVATION_STATES", "AI_DETERMINISTIC_ONLY_MANIFEST", "resolveAiTaskActivation"]);
     expect(exportsOf(bundles)).toEqual(["AI_BUNDLE_VERSION", "AI_TASK_RUNTIME_BUNDLES", "resolveAiTaskBundle"]);
     expect(exportsOf(fallbacks)).toEqual(["AI_REASON_CODES", "aiFallbackPresentationSchema", "aiFallbackResultSchema", "aiReasonCodeSchema", "createDeterministicFallback"]);
     expect(exportsOf(projector)).toEqual(["AI_FIELD_ALLOWLISTS", "REDACTION_TOKEN", "projectProviderTaskPayload", "redactSelectedText"]);
@@ -283,11 +286,15 @@ describe("Packet 11A scope", () => {
     }
   });
 
-  it("registers exactly six tasks, every one deterministic-only under the shipped manifest", () => {
+  // Packet 11C English activation (owner decisions Q and A, 2026-10-12; was: every task deterministic-only): exactly EXPLAIN_PATTERN and
+  // DRAFT_CARE_PREPARATION_SUMMARY are remote-enabled under HACKATHON_DEMO (the hybrid shell path); the legacy 11A bundles are unchanged.
+  it("registers exactly six tasks; under the shipped manifest only the two hybrid shell tasks are remote-enabled, the other four deterministic-only", () => {
     expect(AI_TASK_TYPES).toEqual(["EXTRACT_CANDIDATE_FACTS", "EXPLAIN_PATTERN", "DRAFT_NEUTRAL_INQUIRY", "ANSWER_BOUNDED_RECORD_QUERY", "DRAFT_CARE_PREPARATION_SUMMARY", "PHRASE_NON_CLINICAL_RESPONSE"]);
-    expect(Object.values(activation.AI_ACTIVATION_MANIFEST.tasks)).toEqual(Array(6).fill("DETERMINISTIC_ONLY"));
+    expect(Object.values(activation.AI_ACTIVATION_MANIFEST.tasks)).toEqual(["DETERMINISTIC_ONLY", "SYNTHETIC_REMOTE_ENABLED", "DETERMINISTIC_ONLY", "DETERMINISTIC_ONLY", "SYNTHETIC_REMOTE_ENABLED", "DETERMINISTIC_ONLY"]);
     for (const taskType of AI_TASK_TYPES) {
-      expect(activation.resolveAiTaskActivation(taskType, "HACKATHON_DEMO")).toEqual({ state: "DETERMINISTIC_ONLY", reason: "TASK_DISABLED" });
+      expect(activation.resolveAiTaskActivation(taskType, "HACKATHON_DEMO"), taskType).toEqual(
+        taskType === "EXPLAIN_PATTERN" || taskType === "DRAFT_CARE_PREPARATION_SUMMARY" ? { state: "SYNTHETIC_REMOTE_ENABLED" } : { state: "DETERMINISTIC_ONLY", reason: "TASK_DISABLED" },
+      );
       const bundle = bundles.AI_TASK_RUNTIME_BUNDLES[taskType];
       expect(bundle).toMatchObject({ routeProfile: "deterministic-only.11a.1", modelSnapshot: null, executionBudget: { monetaryCeilingUsd: null } });
       expect(bundle.promptTemplate.version).toBe("11a.1-absent");
@@ -295,10 +302,13 @@ describe("Packet 11A scope", () => {
   });
 
   it("works offline: every shipped task falls back without touching a provider", async () => {
+    // Packet 11C English activation (I-8 follow-up): restored to the 11A assertion. The legacy service defaults to
+    // AI_DETERMINISTIC_ONLY_MANIFEST, not the shipped (activated) manifest, so with a provider every task still falls back.
     const invoke = vi.fn();
     const ai = service.createAiTaskService({ releaseProfile: "HACKATHON_DEMO", provider: { providerModel: { providerKey: "never", modelSnapshot: "never" }, invoke }, audit: { append: async () => undefined }, now: () => FIXTURE_NOW, monotonicMs: () => 0 });
     for (const taskType of AI_TASK_TYPES) expect(await ai.execute(requestFixture(taskType))).toMatchObject({ kind: "FALLBACK", fallback: { reason: "TASK_DISABLED" } });
     expect(invoke).not.toHaveBeenCalled();
+    expect(readFileSync(join(ROOT, "src/application/ai/ai-task-service.ts"), "utf8")).toMatch(/const manifest = dependencies\.manifest \?\? AI_DETERMINISTIC_ONLY_MANIFEST;/);
   });
 
   it("has no provider endpoint, network call, credential, environment read or browser secret", () => {
@@ -439,9 +449,14 @@ const BROWSER_ENV_READS: Readonly<Record<string, string>> = { [DEV_SETTINGS_FLAG
 const PROVIDER_KEY_NAME = /KIE_API_KEY|DEEPSEEK_API_KEY|ONEMAP_ACCESS_TOKEN|TRTC_SDK_SECRET_KEY/;
 
 describe("Packet 11C Checkpoint 2 guards", () => {
-  it("activates nothing: every task stays DETERMINISTIC_ONLY under HACKATHON_DEMO and none is SYNTHETIC_REMOTE_ENABLED", () => {
+  // Packet 11C English activation (owner decisions Q and A, 2026-10-12; was: "activates nothing"): exactly the two owner-approved tasks.
+  it("activates exactly EXPLAIN_PATTERN and DRAFT_CARE_PREPARATION_SUMMARY under HACKATHON_DEMO; every other task stays DETERMINISTIC_ONLY", () => {
     expect(activation.AI_ACTIVATION_MANIFEST.profile).toBe("HACKATHON_DEMO");
-    expect(Object.entries(activation.AI_ACTIVATION_MANIFEST.tasks).filter(([, state]) => state !== "DETERMINISTIC_ONLY")).toEqual([]);
+    expect(activation.AI_ACTIVATION_MANIFEST.manifestVersion).toBe("ai-activation.11c.1");
+    expect(Object.entries(activation.AI_ACTIVATION_MANIFEST.tasks).filter(([, state]) => state !== "DETERMINISTIC_ONLY")).toEqual([
+      ["EXPLAIN_PATTERN", "SYNTHETIC_REMOTE_ENABLED"],
+      ["DRAFT_CARE_PREPARATION_SUMMARY", "SYNTHETIC_REMOTE_ENABLED"],
+    ]);
   });
 
   it("detects a network call site (positive control for the scan below)", () => {

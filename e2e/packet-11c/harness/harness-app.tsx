@@ -31,8 +31,12 @@
  * Parameters
  *   - Locale and viewport: chosen by the test (e2e/packet-11c/support.ts: `LOCALES`, `VIEWPORTS`, `startPreparedProfile(page, locale)`);
  *     the app's own Welcome language choice sets the locale, the Playwright context sets the viewport and scale.
- *   - Query `?records=shipped`: the harness keeps the test manifest but uses the SHIPPED all-PENDING records (no class qualified), to
- *     show that the care AI action and the disclosure appear only for a qualified request.
+ *   - Query `?records=pending`: the harness keeps the test manifest but uses an all-PENDING gate over the shipped definitions
+ *     (`pendingTestRequestClassGate`: no class qualified, the pre-activation state), to show that the care AI action and the disclosure
+ *     appear only for a qualified request.
+ *   - Query `?records=shipped`: the harness keeps the test manifest but uses the SHIPPED records. Since the Packet 11C English
+ *     activation (owner decisions Q and A, 2026-10-12) they qualify the six en-SG classes and keep the six zh-SG classes PENDING, so
+ *     an en-SG history request is offered the disclosure and a zh-SG one is not.
  *
  * Reuse (Packet 12): add a spec under e2e/packet-11c/ (or a sibling folder with its own config) and reuse `support.ts`; keep the
  * harness free of product logic. Data is synthetic only: the prepared demo profile and the runtime's synthetic seed.
@@ -44,30 +48,37 @@ import { CURRENT_RELEASE_PROFILE } from "@/config/release-profile";
 import { JagaOnApp, type AiAssistanceFactory } from "@/components/jagaon/JagaOnApp";
 import { AI_ACTIVATION_MANIFEST, type AiActivationManifest } from "@/application/ai/ai-activation-manifest";
 import { createBrowserAiAssistance } from "@/application/ai/browser-history-explainer";
-import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
+import { pendingTestRequestClassGate, qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 
 /** Searched for in the production build output by e2e/packet-11c/isolation.spec.ts (it must never be there). */
 export const C7_HARNESS_MARKER = "JAGAON-C7-ISOLATED-TEST-HARNESS";
 
-/** TEST-ONLY activation: the two shell tasks remote-enabled. The shipped manifest stays all DETERMINISTIC_ONLY. */
+/**
+ * TEST-ONLY activation: the two shell tasks remote-enabled. Packet 11C English activation (owner decisions Q and A): the shipped manifest
+ * now enables the same two tasks; the harness keeps its own explicit test manifest so its behaviour does not depend on the shipped one.
+ */
 const HARNESS_TEST_MANIFEST: AiActivationManifest = {
   ...AI_ACTIVATION_MANIFEST,
   tasks: { ...AI_ACTIVATION_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED", DRAFT_CARE_PREPARATION_SUMMARY: "SYNTHETIC_REMOTE_ENABLED" },
 };
 
-type HarnessRecords = "test-qualified" | "shipped";
+type HarnessRecords = "test-qualified" | "pending" | "shipped";
 
 function factoryFor(records: HarnessRecords): AiAssistanceFactory {
   return (ports) =>
     createBrowserAiAssistance({
       ...ports,
       manifest: HARNESS_TEST_MANIFEST,
-      ...(records === "test-qualified" ? { requestClassGate: qualifiedTestRequestClassGate() } : {}),
+      // "shipped": no gate injected, so the wiring uses the shipped records.
+      ...(records === "test-qualified" ? { requestClassGate: qualifiedTestRequestClassGate() } : records === "pending" ? { requestClassGate: pendingTestRequestClassGate() } : {}),
     });
 }
 
 const noSubscription = () => () => undefined;
-const readRecords = (): HarnessRecords => (new URLSearchParams(window.location.search).get("records") === "shipped" ? "shipped" : "test-qualified");
+const readRecords = (): HarnessRecords => {
+  const records = new URLSearchParams(window.location.search).get("records");
+  return records === "shipped" || records === "pending" ? records : "test-qualified";
+};
 
 export function HarnessApp() {
   // Read from the URL in the browser only (null while prerendering and hydrating), before the app and its runtime mount; the factory

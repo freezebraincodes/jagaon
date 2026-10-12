@@ -15,9 +15,14 @@ import {
   SHIPPED_REQUEST_CLASS_GATE,
   SHIPPED_REQUEST_CLASS_REGISTRY,
 } from "./request-class-qualification";
-import { qualifiedTestRequestClassGate, testDefinition, testQualifiedRecord, TEST_ONLY_QUALIFICATION } from "./request-class-test-support";
+import { pendingTestRequestClassGate, qualifiedTestRequestClassGate, testDefinition, testQualifiedRecord, TEST_ONLY_QUALIFICATION } from "./request-class-test-support";
 
-/** Packet 11C Addendum C, Task C1: separate, all-PENDING qualification records and the qualification rule. Offline; no provider. */
+/**
+ * Packet 11C Addendum C, Task C1: separate qualification records and the qualification rule. Offline; no provider.
+ * Packet 11C English activation (owner decisions Q and A, 2026-10-12): the shipped records QUALIFY exactly the six en-SG classes (owner
+ * sign-off under the revised English demo protocol: a waiver of the manual review, not a completed human-review PASS); the six zh-SG
+ * classes stay PENDING with no evidence and no sign-off. The rule and the gate are unchanged.
+ */
 
 const ORDINARY = projectShellTaskRequest(plannedFixture("p11.explain-pattern.en-sg.ordinary").plan);
 const CARE = projectShellTaskRequest(plannedFixture("p11.draft-care-preparation-summary.zh-sg.ordinary").plan);
@@ -25,17 +30,44 @@ const OTHER_CONTRACT = "0".repeat(64);
 const definitionOf = (classId: string) => AI_REQUEST_CLASS_DEFINITIONS.find((definition) => definition.classId === classId);
 const qualified = (classId: string, contractDigest = AI_REQUEST_CLASS_CONTRACT.digest) => ({ classId, contractDigest, status: "QUALIFIED", evidenceRef: "evidence/run-1", signedOffBy: "owner", signedOffAt: "2026-10-09T00:00:00.000Z" });
 const pending = (classId: string) => ({ classId, contractDigest: AI_REQUEST_CLASS_CONTRACT.digest, status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null });
+/** The owner's sign-off (decision Q): exactly these six en-SG classes, with exactly these fields. */
+const EN_QUALIFIED_CLASS_IDS = [
+  "a00d8ad562619f605ca03fe406c18abe095410db4d6f53cca02f68601104910d",
+  "0c43de4a6cfb9eb6ec40c2ae13404c8f7664b127e864724452dbf0dc3f40a1f7",
+  "38ad0280e6382f4e3b314613b464bef0438ea6f6cc19cae2f41a10e0550e320d",
+  "5d0c75cef363c190e726f5cb055f4f9b6b265b76b7f8779b612467203ac6adca",
+  "37f7e95a9ff5436dbaab17b1bfefa57d132aaf7f407157c9d3cd2e3a39c9154f",
+  "8c3203f88db4567aa82a51d86967b845960f8f7f226591416c476c2ea670ec6b",
+];
+const OWNER_SIGN_OFF = { evidenceRef: "internal-docs/superpowers/reviews/2026-10-12-11c-en-demo-protocol.md", signedOffBy: "JagaOn owner", signedOffAt: "2026-10-11T18:13:14Z" };
+/** The first sample fixture's projected request of a definition (every sample of a class projects to the same request). */
+const sampleRequest = (classId: string) => projectShellTaskRequest(plannedFixture(definitionOf(classId)!.sampleFixtureIds[0]!).plan);
+const ALL_PENDING_RECORDS = AI_REQUEST_CLASS_DEFINITIONS.map((definition) => pending(definition.classId));
 
-describe("Packet 11C C1 qualification records (separate from the immutable definitions; shipped all PENDING)", () => {
-  it("ships exactly one schema-valid PENDING record per definition, bound to the current contract, with no evidence or sign-off", () => {
+describe("Packet 11C C1 qualification records (separate from the immutable definitions; shipped: six en-SG QUALIFIED, six zh-SG PENDING)", () => {
+  it("ships exactly one schema-valid record per definition, bound to the current contract: the six en-SG classes QUALIFIED by the owner's sign-off, the six zh-SG classes PENDING with no evidence or sign-off", () => {
+    expect(AI_REQUEST_CLASS_CONTRACT.digest).toBe("4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1");
     expect(AI_REQUEST_CLASS_QUALIFICATION_RECORDS).toHaveLength(AI_REQUEST_CLASS_DEFINITIONS.length);
     expect(AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => record.classId)).toEqual(AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.classId));
     for (const record of AI_REQUEST_CLASS_QUALIFICATION_RECORDS) {
       expect(aiRequestClassQualificationRecordSchema.parse(record)).toEqual(record);
-      expect(record).toEqual({ classId: record.classId, contractDigest: AI_REQUEST_CLASS_CONTRACT.digest, status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null });
+      const definition = definitionOf(record.classId)!;
+      if (definition.locale === "en-SG") {
+        expect(record).toEqual({ classId: record.classId, contractDigest: AI_REQUEST_CLASS_CONTRACT.digest, status: "QUALIFIED", ...OWNER_SIGN_OFF });
+      } else {
+        expect(definition.locale).toBe("zh-SG");
+        expect(record).toEqual({ classId: record.classId, contractDigest: AI_REQUEST_CLASS_CONTRACT.digest, status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null });
+      }
       expect(Object.isFrozen(record)).toBe(true);
     }
-    expect(AI_REQUEST_CLASS_QUALIFICATION_RECORDS.filter((record) => record.status !== "PENDING")).toEqual([]);
+    // Exactly the six owner-signed en-SG classes (three per task) are QUALIFIED; every zh-SG class is PENDING.
+    const qualifiedRecords = AI_REQUEST_CLASS_QUALIFICATION_RECORDS.filter((record) => record.status === "QUALIFIED");
+    expect(qualifiedRecords.map((record) => record.classId)).toEqual(EN_QUALIFIED_CLASS_IDS);
+    expect(qualifiedRecords.map((record) => [definitionOf(record.classId)!.taskType, definitionOf(record.classId)!.locale])).toEqual([
+      ["EXPLAIN_PATTERN", "en-SG"], ["EXPLAIN_PATTERN", "en-SG"], ["EXPLAIN_PATTERN", "en-SG"],
+      ["DRAFT_CARE_PREPARATION_SUMMARY", "en-SG"], ["DRAFT_CARE_PREPARATION_SUMMARY", "en-SG"], ["DRAFT_CARE_PREPARATION_SUMMARY", "en-SG"],
+    ]);
+    expect(AI_REQUEST_CLASS_QUALIFICATION_RECORDS.filter((record) => record.status === "PENDING").map((record) => definitionOf(record.classId)!.locale)).toEqual(Array(6).fill("zh-SG"));
     expect(Object.isFrozen(AI_REQUEST_CLASS_QUALIFICATION_RECORDS)).toBe(true);
     expect(SHIPPED_REQUEST_CLASS_REGISTRY).toEqual({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS });
     expect(AI_REMOTE_ELIGIBILITY_POLICY_VERSION).toBe("ai-remote-eligibility.11c.1");
@@ -82,13 +114,23 @@ describe("Packet 11C C1 qualification records (separate from the immutable defin
     expect(requestClassQualification({ ...identity, contractDigest: OTHER_CONTRACT }, definition, [qualified(identity.classId)])).toEqual({ status: "NOT_QUALIFIED", reason: "CONTRACT_MISMATCH" });
   });
 
-  it("the shipped gate admits no request of any defined class and reports no admissible task (nothing to disclose)", () => {
-    for (const request of [ORDINARY, CARE]) {
-      const admission = SHIPPED_REQUEST_CLASS_GATE.admit(request);
-      expect(admission).toEqual({ admitted: false, classId: requestClassIdentity(request).classId, reason: "PENDING" });
+  it("the shipped gate admits a request of each en-SG class and of no zh-SG class (PENDING); both tasks are admissible", () => {
+    for (const definition of AI_REQUEST_CLASS_DEFINITIONS) {
+      const request = sampleRequest(definition.classId);
+      expect(requestClassIdentity(request).classId).toBe(definition.classId);
+      expect(SHIPPED_REQUEST_CLASS_GATE.admit(request), definition.classId).toEqual(
+        definition.locale === "en-SG" ? { admitted: true, classId: definition.classId } : { admitted: false, classId: definition.classId, reason: "PENDING" },
+      );
     }
-    expect(SHIPPED_REQUEST_CLASS_GATE.anyAdmissible("EXPLAIN_PATTERN")).toBe(false);
-    expect(SHIPPED_REQUEST_CLASS_GATE.anyAdmissible("DRAFT_CARE_PREPARATION_SUMMARY")).toBe(false);
+    expect(SHIPPED_REQUEST_CLASS_GATE.admit(ORDINARY)).toEqual({ admitted: true, classId: EN_QUALIFIED_CLASS_IDS[0] });
+    expect(SHIPPED_REQUEST_CLASS_GATE.admit(CARE)).toEqual({ admitted: false, classId: requestClassIdentity(CARE).classId, reason: "PENDING" });
+    expect(SHIPPED_REQUEST_CLASS_GATE.anyAdmissible("EXPLAIN_PATTERN")).toBe(true);
+    expect(SHIPPED_REQUEST_CLASS_GATE.anyAdmissible("DRAFT_CARE_PREPARATION_SUMMARY")).toBe(true);
+    // The pre-activation state (every record PENDING) admits nothing and reports no admissible task.
+    const pendingGate = pendingTestRequestClassGate();
+    for (const request of [ORDINARY, CARE]) expect(pendingGate.admit(request)).toEqual({ admitted: false, classId: requestClassIdentity(request).classId, reason: "PENDING" });
+    expect(pendingGate.anyAdmissible("EXPLAIN_PATTERN")).toBe(false);
+    expect(pendingGate.anyAdmissible("DRAFT_CARE_PREPARATION_SUMMARY")).toBe(false);
     // An undefined class (e.g. a care request whose section counts differ from every evaluated class) is never admitted.
     const unseen = { ...CARE, fields: CARE.fields.slice(0, -1) };
     expect(SHIPPED_REQUEST_CLASS_GATE.admit(unseen)).toMatchObject({ admitted: false, reason: "NO_DEFINITION" });
@@ -98,12 +140,13 @@ describe("Packet 11C C1 qualification records (separate from the immutable defin
 
   it("a registry with an owner QUALIFIED record admits exactly that class (and makes its task admissible)", () => {
     const id = requestClassIdentity(ORDINARY).classId;
-    const gate = createRequestClassGate({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => (record.classId === id ? qualified(id) : record)) });
+    // Over the pre-activation records (all PENDING), so that the one owner record is the only QUALIFIED one.
+    const gate = createRequestClassGate({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: ALL_PENDING_RECORDS.map((record) => (record.classId === id ? qualified(id) : record)) });
     expect(gate.admit(ORDINARY)).toEqual({ admitted: true, classId: id });
     expect(gate.admit(CARE)).toMatchObject({ admitted: false, reason: "PENDING" });
     expect(gate.anyAdmissible("EXPLAIN_PATTERN")).toBe(true);
     expect(gate.anyAdmissible("DRAFT_CARE_PREPARATION_SUMMARY")).toBe(false);
-    const stale = createRequestClassGate({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => (record.classId === id ? qualified(id, OTHER_CONTRACT) : record)) });
+    const stale = createRequestClassGate({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: ALL_PENDING_RECORDS.map((record) => (record.classId === id ? qualified(id, OTHER_CONTRACT) : record)) });
     expect(stale.admit(ORDINARY)).toMatchObject({ admitted: false, reason: "CONTRACT_MISMATCH" });
     expect(stale.anyAdmissible("EXPLAIN_PATTERN")).toBe(false);
   });
@@ -129,11 +172,15 @@ describe("Packet 11C C1 qualification records (separate from the immutable defin
     const code = (file: string) => readFileSync(join(process.cwd(), file), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     expect(sources.filter((file) => /["']QUALIFIED["']/.test(code(file)))).toEqual(["src/application/ai/request-class-qualification.ts", "src/application/ai/request-class-test-support.ts"]);
     // In the product module, QUALIFIED appears only in the status list, the record schema and the rule (its result type and
-    // comparisons), never in the shipped records literal.
+    // comparisons), and in the shipped records literal on exactly the six owner-signed en-SG records (Packet 11C English activation,
+    // owner decisions Q and A); it is never computed.
     const product = code("src/application/ai/request-class-qualification.ts");
     const records = product.slice(product.indexOf("export const AI_REQUEST_CLASS_QUALIFICATION_RECORDS"), product.indexOf("export const SHIPPED_REQUEST_CLASS_REGISTRY"));
-    expect(records).toMatch(/"PENDING"/);
-    expect(records).not.toMatch(/QUALIFIED["']/);
+    expect(records.match(/"PENDING"/g)).toHaveLength(6);
+    expect(records.match(/QUALIFIED["']/g)).toHaveLength(6);
+    expect(records.split("\n").filter((line) => /"QUALIFIED"/.test(line)).map((line) => /classId: "([0-9a-f]{64})"/.exec(line)?.[1])).toEqual(EN_QUALIFIED_CLASS_IDS);
+    // Outside the literal: the same seven occurrences as before the activation (status list, schema, rule); the rule is unchanged.
+    expect(product.replace(records, "").match(/["']QUALIFIED["']/g)).toHaveLength(7);
     // Only other test-support modules (themselves never in a production graph) may build on it.
     expect(sources.filter((file) => /request-class-test-support/.test(code(file)) && !/test-support\.ts$/.test(file))).toEqual([]);
     expect(sources.filter((file) => /request-class-test-support/.test(code(file)))).toEqual(["src/application/care-preparation/care-preparation-test-support.ts"]);

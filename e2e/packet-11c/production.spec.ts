@@ -22,8 +22,12 @@ import {
 } from "./support";
 
 /**
- * Packet 11C C7, target 1: the PRODUCTION build as is (shipped manifest: every task DETERMINISTIC_ONLY; every request class PENDING).
- * A tripwire fails the test if /api/ai/* is ever requested. Synthetic data only. Technical evidence, not owner approval.
+ * Packet 11C C7, target 1: the PRODUCTION build as is. Packet 11C English activation (owner decisions Q and A, 2026-10-12): the shipped
+ * manifest remote-enables the history explanation and the care-summary wording, and the shipped request-class records qualify the six
+ * en-SG classes only (the six zh-SG classes stay PENDING). So in en-SG the History explanation asks the per-request disclosure first,
+ * and in zh-SG it explains with the standard wording at once; the seeded care previews map to no qualified class, so no care AI action
+ * appears in either locale. No test here accepts a disclosure: a tripwire fails the test if /api/ai/* is ever requested. Synthetic
+ * data only. Technical evidence, not owner approval.
  */
 
 test.afterEach(async ({}, testInfo) => recordTestResult(testInfo));
@@ -80,7 +84,7 @@ for (const locale of LOCALES) {
       await expect(article.getByRole("heading", { level: 2, name: m.careSummary.questionsHeading })).toBeVisible();
       await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(0);
       await expectNoHorizontalOverflow(page);
-      await captureState(page, testInfo, context, "care-question-preview", ["patient-authored question saved with 'Add my own question' (READY_TO_ASK) and ticked", "preview shows it under the questions heading, in the patient's own words", "no AI action (shipped build)"], article);
+      await captureState(page, testInfo, context, "care-question-preview", ["patient-authored question saved with 'Add my own question' (READY_TO_ASK) and ticked", "preview shows it under the questions heading, in the patient's own words", "no AI action (shipped build: this preview's request is not a qualified class)"], article);
       await page.getByRole("button", { name: m.careSummary.approveAction }).click();
       await page.getByRole("button", { name: m.careSummary.printAction }).click();
       await expect.poll(() => page.evaluate(() => (window as unknown as { __c7PrintCalls?: number }).__c7PrintCalls ?? 0)).toBe(1);
@@ -104,30 +108,48 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
       test.use({ viewport: viewport.viewport, deviceScaleFactor: viewport.deviceScaleFactor });
       const smoke = viewportKey === "mobile" ? " @smoke" : "";
 
-      test(`deterministic only: no disclosure, passcode or care AI action; no AI marking; private-mode setting present (${locale}, ${viewport.label})${smoke}`, async ({ page, browserName }, testInfo) => {
+      // Packet 11C English activation (owner decisions Q and A; deliberate; was "deterministic only: no disclosure …" in both locales):
+      // en-SG asks the disclosure first and Cancel keeps the standard wording; zh-SG never shows a dialog. Nothing is ever sent.
+      const remoteOffered = locale === "en-SG";
+      test(`shipped activation: ${remoteOffered ? "History disclosure first, Cancel keeps the standard wording" : "no History disclosure (class PENDING)"}; no care AI action on the seeded data; no AI marking; private-mode setting present; nothing sent (${locale}, ${viewport.label})${smoke}`, async ({ page, browserName }, testInfo) => {
         const context: EvidenceContext = { target: "production", locale, viewport: viewport.label, engine: browserName };
-        planStates(testInfo, context, ["history-deterministic", "settings-private-toggle", "care-preview-no-ai-action", "care-print-no-marking"]);
+        planStates(testInfo, context, [...(remoteOffered ? ["history-disclosure-first"] : []), "history-deterministic", "settings-private-toggle", "care-preview-no-ai-action", "care-print-no-marking"]);
         const tripwire = await shellTripwire(page);
         await installFocusProbe(page);
         await stubWindowPrint(page);
         const m = await startPreparedProfile(page, PRODUCTION_URL, locale);
 
-        // History: the explicit action explains deterministically at once (no dialog, no passcode field, no AI tags).
         const action = await openHistory(page, m);
         await action.focus();
         await page.keyboard.press("Enter");
         const panel = page.getByRole("region", { name: m.history.explanation.title });
+        if (remoteOffered) {
+          // en-SG: the en-SG class is QUALIFIED, so the explicit action shows the per-request disclosure BEFORE any request, with the
+          // demo passcode field (nothing held yet). Nothing has been sent.
+          const dialog = page.getByRole("dialog", { name: m.ai.remoteTitle });
+          await expect(dialog).toBeVisible();
+          await expect(dialog).toHaveAttribute("aria-modal", "true");
+          await expect(dialog.getByLabel(m.aiAccess.passcodeLabel)).toHaveAttribute("type", "password");
+          expect(tripwire.hits).toEqual([]);
+          await expectNoHorizontalOverflow(page);
+          await captureState(page, testInfo, context, "history-disclosure-first", ["en-SG: the disclosure opens before any request", "aria-modal, named by the title", "passcode field shown (type=password)", "tripwire: no /api/ai/* request"], dialog);
+          // Cancel (the safe action): the standard wording with the not-used line; nothing sent.
+          await dialog.getByRole("button", { name: m.ai.cancel }).click();
+          await expect(dialog).toHaveCount(0);
+        }
         await expect(panel.getByRole("status")).not.toBeEmpty();
         await expect(page.getByRole("dialog")).toHaveCount(0);
         await expect(page.getByText(m.aiAccess.passcodeLabel)).toHaveCount(0);
         await expect(panel.getByText(m.ai.demoTag)).toHaveCount(0);
         await expect(panel.getByText(m.ai.resultCheck)).toHaveCount(0);
         await expect(panel.getByRole("group")).toHaveCount(0);
-        await expect(panel.getByText(m.ai.remoteNotAccepted)).toHaveCount(0);
+        // en-SG after Cancel: the short not-used line; zh-SG: none (no remote request was possible).
+        await expect(panel.getByText(m.ai.remoteNotAccepted)).toHaveCount(remoteOffered ? 1 : 0);
         await expect(panel.getByText(m.aiHistoryFallback.unavailableAfterRequest)).toHaveCount(0);
         await expect(action).toHaveAttribute("aria-expanded", "true");
+        expect(tripwire.hits).toEqual([]);
         await expectNoHorizontalOverflow(page);
-        await captureState(page, testInfo, context, "history-deterministic", ["no dialog", "no passcode field", "role=status headline present", "no ai.demoTag / ai.resultCheck / AI group", "no horizontal overflow", "tripwire: no /api/ai/* request"], panel);
+        await captureState(page, testInfo, context, "history-deterministic", [remoteOffered ? "after Cancel: no dialog, standard wording with the not-used line" : "zh-SG: no dialog, standard wording at once", "no passcode field", "role=status headline present", "no ai.demoTag / ai.resultCheck / AI group", "no horizontal overflow", "tripwire: no /api/ai/* request"], panel);
 
         // More/Settings: the "Keep wording on this device" setting (C2) is present and operable by keyboard.
         await openSettings(page, m);
@@ -144,7 +166,8 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await keep.scrollIntoViewIfNeeded();
         await captureState(page, testInfo, context, "settings-private-toggle", ["checkbox present with its label and description", "toggled on and off with Space", "no horizontal overflow"], page.getByRole("region", { name: m.more.settingsHeading }));
 
-        // Care: a deterministic preview has no AI action; the printed artifact carries no AI marking.
+        // Care: the seeded glucose-readings preview is too large to send (not remote-eligible), so it has no AI action in either locale;
+        // the printed artifact carries no AI marking.
         const article = await openCarePreview(page, m);
         await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(0);
         await expect(page.getByRole("dialog")).toHaveCount(0);

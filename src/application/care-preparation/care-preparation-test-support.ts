@@ -15,12 +15,12 @@ import { createCareSummaryInvalidation } from "./care-summary-invalidation";
 import type { CareSummarySelectionInput } from "./care-preparation-contracts";
 import type { CareSummaryDraft } from "./deterministic-care-summary-renderer";
 import { slotToken, type AiInvocationAuditRow, type ShellFieldPath, type ShellTexts, type SlotPlan } from "@/domain/ai";
-import { AI_ACTIVATION_MANIFEST } from "@/application/ai/ai-activation-manifest";
+import type { AiActivationManifest } from "@/application/ai/ai-activation-manifest";
 import { AI_HYBRID_RUNTIME_BUNDLES } from "@/application/ai/ai-hybrid-runtime-bundles";
 import { createAiHybridTaskService } from "@/application/ai/ai-hybrid-task-service";
 import type { AiInvocationAuditPort, AiShellProviderPort, ProviderInvocationResult } from "@/application/ai/ai-provider-port";
 import { planSlots } from "@/application/ai/language/slot-planner";
-import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
+import { qualifiedTestRequestClassGate, testManifestEnabling } from "@/application/ai/request-class-test-support";
 import { buildCareSummaryAiRequest } from "./ai-care-summary-request";
 
 /** Shared fake-IndexedDB harness for Packet 9C application tests (test-only module). */
@@ -157,7 +157,9 @@ export function syntheticCareDraft(shape: SyntheticCareDraftShape, locale: "en-S
 /** Packet 11C Task B1b, test-only: the AI invocation of the fake-provider tests and an activated test manifest (never shipped). */
 export const AI_AUDIT_REF = "44444444-4444-4444-8444-444444444444";
 export const AI_VALIDATED_AT = "2026-10-04T02:05:00.000Z" as Instant;
-export const ENABLED_CARE_MANIFEST = { ...AI_ACTIVATION_MANIFEST, tasks: { ...AI_ACTIVATION_MANIFEST.tasks, DRAFT_CARE_PREPARATION_SUMMARY: "SYNTHETIC_REMOTE_ENABLED" } } as typeof AI_ACTIVATION_MANIFEST;
+// Packet 11C English activation (owner decisions Q and A): built on the pre-activation manifest, so it enables the care task ONLY (the
+// shipped manifest now enables EXPLAIN_PATTERN too).
+export const ENABLED_CARE_MANIFEST: AiActivationManifest = testManifestEnabling("DRAFT_CARE_PREPARATION_SUMMARY");
 
 /** Fake model wording for every care field: a neutral intro and a short framed bullet around the plan's tokens, in plan order. */
 export function fakeModelCareShells(plan: SlotPlan): Map<ShellFieldPath, string> {
@@ -207,7 +209,7 @@ export async function acceptedAiCareComposition(current: CareSummarySnapshotPayl
     monotonicMs: () => 0,
     manifest: ENABLED_CARE_MANIFEST,
     provider: fakeCareShellProvider(() => completedShells(options.candidate(planned.plan, (options.shells ?? fakeModelCareShells)(planned.plan) as ShellTexts))),
-    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (independent of the shipped records).
     requestClassGate: qualifiedTestRequestClassGate(),
   });
   const result = await service.execute(built.request);

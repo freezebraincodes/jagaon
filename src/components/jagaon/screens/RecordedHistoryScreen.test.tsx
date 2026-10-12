@@ -13,7 +13,6 @@ import {
 } from "@/application/history/appointment-note-selection";
 import type { RecordedHistoryQueryPort, RecordedHistoryView } from "@/application/history/recorded-history-contracts";
 import { databases, dayBefore, FACT, higherFixture, local, NOW, reading, RECENT, REFERENCE, setup, TODAY } from "@/application/history/history-test-support";
-import { AI_ACTIVATION_MANIFEST } from "@/application/ai/ai-activation-manifest";
 import { createAiHybridTaskService, type AiHybridExecutionResult } from "@/application/ai/ai-hybrid-task-service";
 import { createPatternExplainer } from "@/application/ai/explain-pattern";
 import { createBrowserHistoryExplainer } from "@/application/ai/browser-history-explainer";
@@ -24,7 +23,7 @@ import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
 import { shellTaskRequestSchema, slotToken, type AiInvocationAuditRow, type ShellFieldPath } from "@/domain/ai";
 import type { PatternExplainerPort, PatternExplanationResult } from "../history/PatternExplanationPanel";
 import { RecordedHistoryScreen } from "./RecordedHistoryScreen";
-import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
+import { DETERMINISTIC_ONLY_TEST_MANIFEST, qualifiedTestRequestClassGate, testManifestEnabling } from "@/application/ai/request-class-test-support";
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;
 const originalIDBKeyRange = Dexie.dependencies.IDBKeyRange;
@@ -297,19 +296,22 @@ const requestIds = () => {
   return () => `8b3d4e5f-6a70-4b1c-9d2e-${(n++).toString(16).padStart(12, "0")}`;
 };
 
-/** The real hybrid service under the SHIPPED manifest (EXPLAIN_PATTERN NOT_ACTIVATED); `invoke` is never reached. */
+/**
+ * The real hybrid service with EXPLAIN_PATTERN NOT_ACTIVATED; `invoke` is never reached. Packet 11C English activation (owner decisions Q
+ * and A): the shipped manifest now enables EXPLAIN_PATTERN, so this injects the pre-activation manifest (every task DETERMINISTIC_ONLY).
+ */
 function shippedExecute(invoke = vi.fn()): Execute {
   return createAiHybridTaskService({
     releaseProfile: "HACKATHON_DEMO",
     audit: { append: async () => undefined },
     now: () => NOW,
     monotonicMs: () => 0,
-    manifest: AI_ACTIVATION_MANIFEST,
+    manifest: DETERMINISTIC_ONLY_TEST_MANIFEST,
     provider: { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, invoke },
   }).execute;
 }
 
-/** The real use case; `execute` defaults to the shipped hybrid service. */
+/** The real use case; `execute` defaults to the hybrid service with EXPLAIN_PATTERN not activated. */
 function realExplainer(history: RecordedHistoryQueryPort, execute: Execute = shippedExecute()): PatternExplainerPort {
   // Packet 11C Addendum C (C5): the zero-attempt rows go nowhere here (these tests pin the screen, not the audit).
   return createPatternExplainer({ history, execute, recordUnsent: async () => true, now: () => NOW as Instant, requestId: requestIds() });
@@ -735,7 +737,7 @@ describe("Recorded history explanation panel (Packet 11C Task 7)", () => {
  * deterministically, with nothing sent. Activated behaviour uses an injected test manifest and a fake route only.
  */
 describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)", () => {
-  const ENABLED: AiActivationManifest = { ...AI_ACTIVATION_MANIFEST, tasks: { ...AI_ACTIVATION_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED" } };
+  const ENABLED: AiActivationManifest = testManifestEnabling("EXPLAIN_PATTERN");
   function fakeRoute() {
     return vi.fn<BrowserShellFetcher>(async (_url, init) => {
       const plan = shellPlanView(shellTaskRequestSchema.parse(JSON.parse(init.body as string)));
@@ -748,7 +750,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     const { history } = await higherFixture();
     const rows: AiInvocationAuditRow[] = [];
     const fetcher = vi.fn(route);
-    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING). C3: no session; every request
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (independent of the shipped records). C3: no session; every request
     // carries its own decision.
     const real = createBrowserHistoryExplainer({ history, audit: { append: async (row) => void rows.push(row) }, manifest, fetcher, online, requestClassGate: qualifiedTestRequestClassGate() });
     const explain = vi.fn(real.explain);
@@ -877,8 +879,8 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     expect(within(dialogOf()).getAllByRole("button").map((button) => button.textContent)).toEqual([en.ai.pattern.confirm, en.ai.cancel]);
   });
 
-  it("C6: NOT_ACTIVATED (shipped manifest): no disclosure, so no passcode field ever appears", async () => {
-    const run = await wired(AI_ACTIVATION_MANIFEST);
+  it("C6: NOT_ACTIVATED (the pre-activation manifest): no disclosure, so no passcode field ever appears", async () => {
+    const run = await wired(DETERMINISTIC_ONLY_TEST_MANIFEST);
     render(screenElement("en-SG", run.history, run.explainer));
     await askAction();
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -1014,8 +1016,8 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     expect(rows.map((row) => `${row.outcomeCode}:${row.attempts.count}`)).toEqual(["REQUEST_CANCELLED:0"]);
   });
 
-  it("NOT_ACTIVATED (shipped manifest): the disclosure never appears", async () => {
-    const run = await wired(AI_ACTIVATION_MANIFEST);
+  it("NOT_ACTIVATED (the pre-activation manifest): the disclosure never appears", async () => {
+    const run = await wired(DETERMINISTIC_ONLY_TEST_MANIFEST);
     render(screenElement("en-SG", run.history, run.explainer));
     await askAction();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

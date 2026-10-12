@@ -11,7 +11,7 @@ import { atomMultiset, composeDeterministic } from "./language/deterministic-com
 import { planSlots } from "./language/slot-planner";
 import { projectShellTaskRequest } from "./language/shell-projector";
 import { requestClassIdentity, SHIPPED_REQUEST_CLASS_GATE, type AiRequestClassGate } from "./request-class-qualification";
-import { qualifiedTestRequestClassGate } from "./request-class-test-support";
+import { DETERMINISTIC_ONLY_TEST_MANIFEST, pendingTestRequestClassGate, qualifiedTestRequestClassGate } from "./request-class-test-support";
 
 // Module spies pin the production wiring: S10 (verifyComposition) and the value-blind projector are the real
 // implementations by default; individual tests override a single call.
@@ -40,8 +40,10 @@ function harness(results: Array<ProviderInvocationResult | Promise<ProviderInvoc
   const calls: ShellTaskRequest[] = [];
   const rows: AiInvocationAuditRow[] = [];
   const provider: AiShellProviderPort = { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, invoke: async (input) => { calls.push(input); return results.shift()!; } };
-  // Packet 11C Addendum C (C1): a remote path needs a QUALIFIED class; these tests inject test-only QUALIFIED records (the shipped
-  // records are all PENDING). An override `requestClassGate: undefined` restores the production default.
+  // Packet 11C Addendum C (C1): a remote path needs a QUALIFIED class; these tests inject test-only QUALIFIED records (independent of the
+  // shipped records). An override `requestClassGate: undefined` restores the production default. Packet 11C English activation (owner
+  // decisions Q and A): the shipped manifest enables both tasks and the shipped records qualify only the en-SG classes, so tests whose
+  // subject is "not activated" or "not qualified" inject DETERMINISTIC_ONLY_TEST_MANIFEST or pendingTestRequestClassGate() instead.
   const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async (row) => void rows.push(row) }, now: () => "2026-10-06T01:00:00.000Z", monotonicMs: () => 0, manifest: ENABLED, provider, requestClassGate: qualifiedTestRequestClassGate(), ...overrides });
   return { calls, rows, service };
 }
@@ -52,6 +54,8 @@ const expectOneValidRow = (rows: AiInvocationAuditRow[], outcomeCode: string, ru
   expect(rows[0]).toMatchObject({ auditSchemaVersion: "ai-invocation-audit.11c.2", outcomeCode, runtimeBundleKey });
 };
 const CARE = plannedFixture("p11.draft-care-preparation-summary.en-sg.ordinary");
+const ZH = plannedFixture("p11.explain-pattern.zh-sg.ordinary");
+const CARE_ZH = plannedFixture("p11.draft-care-preparation-summary.zh-sg.ordinary");
 const INELIGIBLE_CASES = [
   ["an over-budget care plan", (r: any) => (r.facts.find((fact: any) => fact.field === "QUESTION_TEXT").value.text = `${"Q".repeat(300)}?`), "BUDGET_EXCEEDED"],
   ["a Patterns section", (r: any) => (r.taskPayload.sections[0].sectionId = "PATTERNS"), "PAYLOAD_INVALID"],
@@ -82,11 +86,14 @@ describe("hybrid task service", () => {
       expect(row).toMatchObject({ outcomeCode: "REQUEST_CLASS_NOT_QUALIFIED", attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, providerModel: null, sourceRevisions: [], usageBasis: "NONE" });
       expect(row.measurements).toMatchObject({ inputTokens: null, outputTokens: null, costMicroUsd: null });
     };
+    // Packet 11C English activation (owner decisions Q and A): the shipped records qualify the en-SG classes only, so the unqualified
+    // path is pinned for the zh-SG classes under the shipped records and for every class under an all-PENDING gate (pre-activation).
     it.each([
-      ["the production default (no gate injected: the shipped, all-PENDING records)", { requestClassGate: undefined }],
-      ["the shipped gate", { requestClassGate: SHIPPED_REQUEST_CLASS_GATE }],
-    ])("an unqualified class under %s composes deterministically, sends nothing, asks no disclosure and writes one REQUEST_CLASS_NOT_QUALIFIED row", async (_label, overrides) => {
-      for (const fixture of [EN, CARE]) {
+      ["an all-PENDING gate over the shipped definitions (pre-activation)", { requestClassGate: pendingTestRequestClassGate() }, [EN, CARE, ZH, CARE_ZH]],
+      ["the production default (no gate injected: the shipped records), zh-SG", { requestClassGate: undefined }, [ZH, CARE_ZH]],
+      ["the shipped gate, zh-SG", { requestClassGate: SHIPPED_REQUEST_CLASS_GATE }, [ZH, CARE_ZH]],
+    ] as const)("an unqualified class under %s composes deterministically, sends nothing, asks no disclosure and writes one REQUEST_CLASS_NOT_QUALIFIED row", async (_label, overrides, fixtures) => {
+      for (const fixture of fixtures) {
         const decide = vi.fn(async () => "ACCEPTED" as const);
         const invoke = vi.fn();
         const rows: AiInvocationAuditRow[] = [];
@@ -102,10 +109,21 @@ describe("hybrid task service", () => {
         unqualifiedRow(rows[0]!);
       }
     });
+    it("the production default (no gate injected: the shipped records) admits the en-SG classes: the disclosure is asked once and the exact value-blind request is sent", async () => {
+      for (const [label, fixture] of [["en-SG explanation", EN], ["en-SG care", CARE]] as const) {
+        const decide = vi.fn(async () => "ACCEPTED" as const);
+        const sent: ShellTaskRequest[] = [];
+        const run = harness([], { requestClassGate: undefined, provider: { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, remoteUse: { decide }, invoke: async (input: ShellTaskRequest) => (sent.push(input), completed(fixture === EN ? VALID : {})) } });
+        await run.service.execute(fixture.request);
+        expect(decide, label).toHaveBeenCalledTimes(1);
+        expect(sent[0], label).toEqual(projectShellTaskRequest(fixture.plan));
+        expect(SHIPPED_REQUEST_CLASS_GATE.admit(sent[0]!), label).toEqual({ admitted: true, classId: requestClassIdentity(sent[0]!).classId });
+      }
+    });
     it("the class is decided on the projected value-blind request, after every earlier check and before the disclosure", async () => {
       const admit = vi.fn<AiRequestClassGate["admit"]>(() => ({ admitted: false, classId: null, reason: "NO_DEFINITION" }));
       const gate: AiRequestClassGate = { admit, anyAdmissible: () => false };
-      for (const overrides of [{ manifest: AI_ACTIVATION_MANIFEST }, { privateMode: () => true }, { online: () => false }, { provider: undefined }]) {
+      for (const overrides of [{ manifest: DETERMINISTIC_ONLY_TEST_MANIFEST }, { privateMode: () => true }, { online: () => false }, { provider: undefined }]) {
         await harness([], { ...overrides, requestClassGate: gate }).service.execute(EN.request);
         await harness([], { requestClassGate: gate }).service.execute(ineligibleRequest(INELIGIBLE_CASES[1][1]));
       }
@@ -212,12 +230,17 @@ describe("hybrid task service", () => {
       const throwing = harness([completed(VALID)], { remoteSwitchKnownOff: () => { throw new Error("unknown"); } });
       expect(await throwing.service.execute(EN.request)).toMatchObject({ mode: "REMOTE_DISABLED" });
       expectOneValidRow(throwing.rows, "REMOTE_AI_DISABLED");
-      const unqualified = harness([completed(VALID)], { remoteSwitchKnownOff: () => true, requestClassGate: undefined });
+      const unqualified = harness([completed(VALID)], { remoteSwitchKnownOff: () => true, requestClassGate: pendingTestRequestClassGate() });
       await unqualified.service.execute(EN.request);
       expectOneValidRow(unqualified.rows, "REQUEST_CLASS_NOT_QUALIFIED");
-      const shipped = harness([completed(VALID)], { remoteSwitchKnownOff: () => true, manifest: AI_ACTIVATION_MANIFEST });
-      await shipped.service.execute(EN.request);
-      expectOneValidRow(shipped.rows, "TASK_DISABLED");
+      const notActivated = harness([completed(VALID)], { remoteSwitchKnownOff: () => true, manifest: DETERMINISTIC_ONLY_TEST_MANIFEST });
+      await notActivated.service.execute(EN.request);
+      expectOneValidRow(notActivated.rows, "TASK_DISABLED");
+      // The shipped manifest and records (en-SG qualified) with the switch known off: REMOTE_AI_DISABLED, nothing sent.
+      const shipped = harness([completed(VALID)], { remoteSwitchKnownOff: () => true, manifest: AI_ACTIVATION_MANIFEST, requestClassGate: undefined });
+      expect(await shipped.service.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", mode: "REMOTE_DISABLED" });
+      expect(shipped.calls).toHaveLength(0);
+      expectOneValidRow(shipped.rows, "REMOTE_AI_DISABLED");
     });
     it("not known off (false or absent): the request proceeds as before", async () => {
       const run = harness([completed(VALID)], { remoteSwitchKnownOff: () => false });
@@ -225,7 +248,7 @@ describe("hybrid task service", () => {
     });
   });
   it.each([
-    ["NOT_ACTIVATED (production manifest)", { manifest: AI_ACTIVATION_MANIFEST }, "NOT_ACTIVATED", "TASK_DISABLED"],
+    ["NOT_ACTIVATED (a task that is not activated)", { manifest: DETERMINISTIC_ONLY_TEST_MANIFEST }, "NOT_ACTIVATED", "TASK_DISABLED"],
     ["PRIVATE", { privateMode: () => true }, "PRIVATE", "PRIVACY_REJECTED"],
     ["OFFLINE", { online: () => false }, "OFFLINE", "TRANSPORT_FAILED"],
     ["NO_PROVIDER", { provider: undefined }, "NO_PROVIDER", "MISSING_CONFIGURATION"],
@@ -252,7 +275,10 @@ describe("hybrid task service", () => {
       expect(row.measurements).toMatchObject({ inputTokens: null, outputTokens: null, costMicroUsd: null });
     };
     it.each([
-      ["the shipped manifest (deterministic-only)", { manifest: AI_ACTIVATION_MANIFEST, requestClassGate: undefined }],
+      // Packet 11C English activation: the shipped manifest and records now enable and qualify the en-SG requests; the setting still keeps
+      // the wording on the device.
+      ["the shipped manifest and records (both tasks enabled, en-SG classes QUALIFIED)", { manifest: AI_ACTIVATION_MANIFEST, requestClassGate: undefined }],
+      ["the pre-activation manifest (deterministic-only)", { manifest: DETERMINISTIC_ONLY_TEST_MANIFEST, requestClassGate: undefined }],
       ["an activated manifest with a QUALIFIED class", {}],
     ])("under %s: mode PRIVATE, one exact PRIVACY_REJECTED row, nothing projected, gated, disclosed or sent", async (_label, overrides) => {
       for (const fixture of [EN, CARE]) {
@@ -412,7 +438,7 @@ describe("hybrid task service", () => {
     expect(run.rows[0]!.attempts).toEqual({ count: 0, structuralRepairUsed: false, timedOut: false });
   });
   it.each([
-    ["NOT_ACTIVATED", { manifest: AI_ACTIVATION_MANIFEST }, "TASK_DISABLED"],
+    ["NOT_ACTIVATED", { manifest: DETERMINISTIC_ONLY_TEST_MANIFEST }, "TASK_DISABLED"],
     ["PRIVATE", { privateMode: () => true }, "PRIVACY_REJECTED"],
     ["OFFLINE", { online: () => false }, "TRANSPORT_FAILED"],
     ["NO_PROVIDER", { provider: undefined }, "MISSING_CONFIGURATION"],
@@ -740,7 +766,7 @@ describe("remote-use disclosure decided before the first attempt (Packet 11C B3)
   });
 
   it.each([
-    ["NOT_ACTIVATED", { manifest: AI_ACTIVATION_MANIFEST }, EN.request, "TASK_DISABLED"],
+    ["NOT_ACTIVATED", { manifest: DETERMINISTIC_ONLY_TEST_MANIFEST }, EN.request, "TASK_DISABLED"],
     ["PRIVATE", { privateMode: () => true }, EN.request, "PRIVACY_REJECTED"],
     ["OFFLINE", { online: () => false }, EN.request, "TRANSPORT_FAILED"],
     ["INELIGIBLE", {}, ineligibleRequest(INELIGIBLE_CASES[1][1]), "PAYLOAD_INVALID"],
@@ -796,7 +822,7 @@ describe("conservative usage accounting (Packet 11C Addendum C, C5)", () => {
   });
 
   it("nothing sent: basis NONE, no usage", async () => {
-    const run = harness([], { manifest: AI_ACTIVATION_MANIFEST });
+    const run = harness([], { manifest: DETERMINISTIC_ONLY_TEST_MANIFEST });
     await run.service.execute(EN.request);
     expect(measured(run.rows[0]!)).toEqual({ inputTokens: null, outputTokens: null, costMicroUsd: null, usageBasis: "NONE" });
   });

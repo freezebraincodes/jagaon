@@ -21,13 +21,15 @@ import { planSlots } from "./language/slot-planner";
 import { createAiHybridTaskService } from "./ai-hybrid-task-service";
 import { createAiInvocationAuditRepository } from "./ai-audit-persistence";
 import { AI_REQUEST_CLASS_DEFINITIONS } from "./request-class-definitions";
-import { AI_REQUEST_CLASS_QUALIFICATION_RECORDS, createRequestClassGate, requestClassIdentity, SHIPPED_REQUEST_CLASS_GATE } from "./request-class-qualification";
-// Packet 11C Addendum C (C1): every activated (test manifest) path below also injects test-only QUALIFIED records; the shipped records
-// are all PENDING (proven in the C1 block).
-import { qualifiedTestRequestClassGate } from "./request-class-test-support";
+import { createRequestClassGate, requestClassIdentity, SHIPPED_REQUEST_CLASS_GATE } from "./request-class-qualification";
+// Packet 11C Addendum C (C1): every activated (test manifest) path below also injects test-only QUALIFIED records. Packet 11C English
+// activation (owner decisions Q and A): the shipped records qualify the six en-SG classes and the shipped manifest enables both tasks;
+// tests whose subject is "not activated" or "not qualified" inject DETERMINISTIC_ONLY_TEST_MANIFEST or pendingTestRequestClassGate().
+import { DETERMINISTIC_ONLY_TEST_MANIFEST, pendingTestRequestClassGate, qualifiedTestRequestClassGate, testManifestEnabling } from "./request-class-test-support";
 import { closeCarePreparationHarnesses, createCarePreparationHarness, ENABLED_CARE_MANIFEST, exact, fakeModelCareShells, testIds } from "@/application/care-preparation/care-preparation-test-support";
 import { createCarePreparationService } from "@/application/care-preparation/care-preparation-service";
 import { projectValidatedAiCareSummary } from "@/application/care-preparation/ai-care-summary-replacement";
+import { buildCareSummaryAiRequest } from "@/application/care-preparation/ai-care-summary-request";
 import type { CareSummaryAiWordingPort } from "@/components/jagaon/screens/CareSummaryPreviewScreen";
 import { createBrowserJournalRuntime, type JagaOnRuntime } from "@/application/journal/browser-journal-runtime";
 
@@ -41,6 +43,9 @@ vi.mock("./ai-hybrid-task-service", async (importOriginal) => {
  * Packet 11C Addendum B, Task B2b: the browser wiring of the history explanation (one hybrid service, one pattern explainer). The shipped
  * app passes only the history and audit ports: the shipped manifest, the interim fail-closed disclosure and the browser network primitive.
  * Activated behaviour is exercised only with an injected test manifest and a fake fetcher; never a live provider.
+ * Packet 11C English activation (owner decisions Q and A, 2026-10-12): the shipped manifest enables both tasks and the shipped records
+ * qualify the en-SG classes, so the "shipped" tests below pin the per-locale outcome (en-SG: the disclosure first, nothing sent without
+ * the request's own acceptance; zh-SG: never admitted, nothing sent), with the global fetch stubbed; the I-5 block pins the demo dataset.
  */
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;
@@ -74,7 +79,8 @@ afterEach(async () => {
   for (const database of databases.splice(0)) await Dexie.delete(database.name);
 });
 
-const ENABLED: AiActivationManifest = { ...AI_ACTIVATION_MANIFEST, tasks: { ...AI_ACTIVATION_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED" } };
+// Packet 11C English activation: built on the pre-activation manifest, so it enables EXPLAIN_PATTERN only.
+const ENABLED: AiActivationManifest = testManifestEnabling("EXPLAIN_PATTERN");
 const USAGE = { inputTokens: 600, outputTokens: 80, costMicroUsd: 5 };
 
 /** Packet 11C Addendum C (C6): a row's usage basis (current rows only; the wiring never writes a legacy row). */
@@ -131,16 +137,35 @@ describe("browser history explainer wiring (Packet 11C B2b)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it.each([["en-SG"], ["zh-SG"]] as const)("shipped (%s): a DETERMINISTIC explanation, one audit row, no network call", async (locale) => {
+  // Packet 11C English activation (owner decisions Q and A; was: both locales TASK_DISABLED): the shipped manifest and records admit the
+  // en-SG request (it needs the request's own acceptance: none here, so nothing is sent) and never the zh-SG request (PENDING).
+  it.each([
+    ["en-SG", true, "REMOTE_USE_NOT_ACCEPTED"],
+    ["zh-SG", false, "REQUEST_CLASS_NOT_QUALIFIED"],
+  ] as const)("shipped (%s): a DETERMINISTIC explanation without a decision, one audit row, no network call", async (locale, disclosureRequired, outcomeCode) => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const { history } = await higherFixture();
     const log = audit();
-    const result = await createBrowserHistoryExplainer({ history, audit: log.port }).explain({ factId: FACT, locale });
+    const explainer = createBrowserHistoryExplainer({ history, audit: log.port });
+    expect(await explainer.disclosureRequired({ factId: FACT, locale })).toBe(disclosureRequired);
+    const result = await explainer.explain({ factId: FACT, locale });
     expect(result).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(log.rows).toHaveLength(1);
     expect(aiInvocationAuditRowSchema.safeParse(log.rows[0]).success).toBe(true);
+    expect(log.rows[0]).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale, outcomeCode, providerModel: null, attempts: { count: 0 }, sourceRevisions: [] });
+  });
+
+  it.each([["en-SG"], ["zh-SG"]] as const)("not activated (the pre-activation manifest, %s): a DETERMINISTIC explanation, one TASK_DISABLED row, no network call", async (locale) => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { history } = await higherFixture();
+    const log = audit();
+    const result = await createBrowserHistoryExplainer({ history, audit: log.port, manifest: DETERMINISTIC_ONLY_TEST_MANIFEST }).explain({ factId: FACT, locale });
+    expect(result).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(log.rows).toHaveLength(1);
     expect(log.rows[0]).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale, outcomeCode: "TASK_DISABLED", providerModel: null, attempts: { count: 0 }, sourceRevisions: [] });
   });
 
@@ -206,10 +231,14 @@ async function explainClassOf(history: RecordedHistoryQueryPort, locale: "en-SG"
   return requestClassIdentity(projectShellTaskRequest(planned.plan)).classId;
 }
 
-/** A gate built over the shipped definitions with test-only owner records QUALIFIED for exactly `classIds` (all others PENDING). */
+/**
+ * A gate built over the shipped definitions with test-only owner records QUALIFIED for exactly `classIds` (all others PENDING). Packet 11C
+ * English activation: built on all-PENDING records (the pre-activation state), not on the shipped records (which qualify en-SG).
+ */
 function gateQualifying(classIds: readonly string[]) {
   const signed = { evidenceRef: "test/evidence", signedOffBy: "test", signedOffAt: "2026-10-08T00:00:00.000Z" };
-  return createRequestClassGate({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => (classIds.includes(record.classId) ? { ...record, status: "QUALIFIED" as const, ...signed } : record)) });
+  const pending = AI_REQUEST_CLASS_DEFINITIONS.map((definition) => ({ classId: definition.classId, contractDigest: definition.contractDigest, status: "PENDING" as const, evidenceRef: null, signedOffBy: null, signedOffAt: null }));
+  return createRequestClassGate({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: pending.map((record) => (classIds.includes(record.classId) ? { ...record, status: "QUALIFIED" as const, ...signed } : record)) });
 }
 
 /**
@@ -220,11 +249,11 @@ function gateQualifying(classIds: readonly string[]) {
  * "ACCEPTED" | "DECLINED"`) and is bound to the request's own signal. Nothing else can accept.
  */
 describe("browser history explainer: per-request disclosure (Packet 11C Addendum C, C3)", () => {
-  it("never requires the disclosure while NOT_ACTIVATED (shipped manifest), reads nothing for it, and an accepted request still sends nothing", async () => {
+  it("never requires the disclosure while NOT_ACTIVATED (the pre-activation manifest), reads nothing for it, and an accepted request still sends nothing", async () => {
     const { history } = await higherFixture();
     const probe = vi.fn((request: { factId: string }) => history.loadExplainablePattern(request));
     const log = audit();
-    const explainer = createBrowserHistoryExplainer({ history: { load: history.load, loadExplainablePattern: probe }, audit: log.port });
+    const explainer = createBrowserHistoryExplainer({ history: { load: history.load, loadExplainablePattern: probe }, audit: log.port, manifest: DETERMINISTIC_ONLY_TEST_MANIFEST });
     expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
     expect(probe).not.toHaveBeenCalled();
     const result = await explainer.explain({ factId: FACT, locale: "en-SG", disclosure: "ACCEPTED" });
@@ -591,18 +620,20 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
   });
 
   describe("Packet 11C Addendum C, C1: unqualified request classes, before any disclosure or send", () => {
-    it("the production default (no gate: the shipped, all-PENDING records), even activated and accepted: no disclosure, no POST, one REQUEST_CLASS_NOT_QUALIFIED row per flow", async () => {
+    it("an all-PENDING gate (pre-activation), even activated and accepted: no disclosure, no POST, one REQUEST_CLASS_NOT_QUALIFIED row per flow; the production default passes the shipped gate", async () => {
       const fetchSpy = vi.fn();
       vi.stubGlobal("fetch", fetchSpy);
       const care = await careSetup();
       const { history } = await higherFixture();
       const fetcher = fakeCareRoute();
+      // Without an injected gate, the one service gets the shipped gate.
       const before = vi.mocked(createAiHybridTaskService).mock.calls.length;
-      const assistance = createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, fetcher, now: () => LATER });
-      // The one service gets the shipped gate.
+      createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, fetcher, now: () => LATER });
       expect(vi.mocked(createAiHybridTaskService).mock.calls.slice(before).map((call) => call[0].requestClassGate)).toEqual([SHIPPED_REQUEST_CLASS_GATE]);
+      // Packet 11C English activation: the shipped records qualify the en-SG classes, so "nothing qualified" is an all-PENDING gate.
+      const assistance = createBrowserAiAssistance({ history, carePreparation: care.carePreparation, audit: care.audits, manifest: BOTH, requestClassGate: pendingTestRequestClassGate(), fetcher, now: () => LATER });
       expect(await assistance.history.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(false);
-      // Packet 11C Addendum C (C3, C1 carry): the care AI action is hidden when this preview's class is not QUALIFIED (shipped: never shown).
+      // Packet 11C Addendum C (C3, C1 carry): the care AI action is hidden when this preview's class is not QUALIFIED.
       expect(assistance.careSummary!.available(care.payload)).toBe(false);
       expect(await assistance.careSummary!.disclosureRequired(care.payload)).toBe(false);
       // Even with an explicit per-request acceptance, the class decides first: nothing is sent.
@@ -665,11 +696,27 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
     expect(typeof port?.compose).toBe("function");
   });
 
-  it("shipped manifest: never available, never a disclosure; an explicit request keeps the deterministic preview, one audit row, no POST", async () => {
+  // Packet 11C English activation (owner decisions Q and A; was: "shipped manifest ... TASK_DISABLED"): the shipped manifest enables the
+  // care task, but this preview's shape (an appointment, one reading and one question) is not an evaluated class: never available, no
+  // disclosure; an explicit request keeps the deterministic preview, one REQUEST_CLASS_NOT_QUALIFIED row, no POST.
+  it("shipped manifest and records, a preview outside the evaluated classes: never available, never a disclosure; an explicit request keeps the deterministic preview, one audit row, no POST", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const care = await careSetup();
     const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, now: () => LATER }).careSummary!;
+    expect(wording.available(care.payload)).toBe(false);
+    expect(await wording.disclosureRequired(care.payload)).toBe(false);
+    expect(await wording.compose({ snapshotRef: care.snapshotRef, locale: "en-SG", disclosure: "ACCEPTED" })).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "TASK_DISABLED" });
+    expect(await care.snapshots()).toBe(1);
+    expect((await care.audits.list()).map((row) => [row.taskType, row.outcomeCode, row.attempts.count, row.providerModel])).toEqual([["DRAFT_CARE_PREPARATION_SUMMARY", "REQUEST_CLASS_NOT_QUALIFIED", 0, null]]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("not activated (the pre-activation manifest): never available, never a disclosure; an explicit request keeps the deterministic preview, one TASK_DISABLED row, no POST", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const care = await careSetup();
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, manifest: DETERMINISTIC_ONLY_TEST_MANIFEST, now: () => LATER }).careSummary!;
     expect(wording.available(care.payload)).toBe(false);
     expect(await wording.disclosureRequired(care.payload)).toBe(false);
     expect(await wording.compose({ snapshotRef: care.snapshotRef, locale: "en-SG", disclosure: "ACCEPTED" })).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "TASK_DISABLED" });
@@ -785,7 +832,8 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
    * Packet 11C Addendum C, Task C2 (hybrid spec D11): the patient's "Keep wording on this device" setting, passed to the ONE hybrid
    * service of both flows and read per request. When on: zero network calls, no disclosure (so no passcode field), no care AI action, a
    * deterministic history explanation and exactly one PRIVACY_REJECTED row (mode PRIVATE) per explicit request; probes write none.
-   * Proven under the shipped manifest AND an injected activated manifest with test-only QUALIFIED classes (fetch spy and fake route).
+   * Proven under the shipped manifest and records (Packet 11C English activation: both tasks enabled, the en-SG classes QUALIFIED) AND an
+   * injected activated manifest with test-only QUALIFIED classes (fetch spy and fake route).
    */
   describe("Packet 11C Addendum C, C2: private mode (Keep wording on this device)", () => {
     const privateRow = (row: AiInvocationAuditRow, taskType: string, locale: string) => {
@@ -803,7 +851,7 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
     };
 
     it.each([
-      ["the shipped manifest (no test seam)", false],
+      ["the shipped manifest and records (no test seam; the en-SG history class is QUALIFIED)", false],
       ["an injected activated manifest with test-only QUALIFIED classes and a fake route", true],
     ])("under %s: no POST, no disclosure, no care action, deterministic explanation, one exact PRIVACY_REJECTED row per explicit request", async (_label, activated) => {
       const fetchSpy = vi.fn();
@@ -1050,14 +1098,18 @@ describe("browser history explainer: one audit row per explicit request (Packet 
   });
 
   it("shipped manifest: the probes never write; one explicit explanation writes exactly one row", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
     const { history } = await higherFixture();
     const log = audit();
     const explainer = createBrowserHistoryExplainer({ history, audit: log.port });
-    await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" });
+    expect(await explainer.disclosureRequired({ factId: FACT, locale: "en-SG" })).toBe(true);
     await history.loadExplainablePattern({ factId: FACT });
     expect(log.rows).toHaveLength(0);
     await explainer.explain({ factId: FACT, locale: "en-SG" });
-    expect(log.rows.map((row) => row.outcomeCode)).toEqual(["TASK_DISABLED"]);
+    // Packet 11C English activation (was TASK_DISABLED): the en-SG class is QUALIFIED; without the request's own decision nothing is sent.
+    expect(log.rows.map((row) => row.outcomeCode)).toEqual(["REMOTE_USE_NOT_ACCEPTED"]);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -1082,7 +1134,8 @@ describe("browser history explainer: fallback after an attempted remote request 
       audit: audit().port,
       manifest: options.manifest ?? ENABLED,
       fetcher: options.fetcher,
-      ...(options.qualified === false ? {} : { requestClassGate: qualifiedTestRequestClassGate() }),
+      // Packet 11C English activation: "not qualified" is an all-PENDING gate (the shipped records qualify this en-SG class).
+      requestClassGate: options.qualified === false ? pendingTestRequestClassGate() : qualifiedTestRequestClassGate(),
       ...(options.privateMode ? { privateMode: () => true } : {}),
       ...(options.switchOff ? { remoteSwitchKnownOff: () => true } : {}),
       ...(options.online === false ? { online: () => false } : {}),
@@ -1115,9 +1168,9 @@ describe("browser history explainer: fallback after an attempted remote request 
   });
 
   it.each([
-    ["ordinary deterministic use (shipped manifest)", { manifest: AI_ACTIVATION_MANIFEST }, "ACCEPTED"],
+    ["ordinary deterministic use (a task that is not activated)", { manifest: DETERMINISTIC_ONLY_TEST_MANIFEST }, "ACCEPTED"],
     ["private mode", { privateMode: true }, "ACCEPTED"],
-    ["not qualified (shipped all-PENDING records)", { qualified: false }, "ACCEPTED"],
+    ["not qualified (an all-PENDING gate)", { qualified: false }, "ACCEPTED"],
     ["the server switch known off before any send", { switchOff: true }, "ACCEPTED"],
     ["offline", { online: false }, "ACCEPTED"],
     ["no decision for the request (e.g. its disclosure closed moot)", {}, undefined],
@@ -1317,3 +1370,192 @@ describe("browser AI assistance: AI credit limit (Owner decision 2026-10-12, AI 
   });
 });
 
+/**
+ * Packet 11C English activation (owner decisions Q and A, 2026-10-12): integrated check I-5 of the English AI readiness request (§5).
+ * Offline: the transport is an injected fake route (the global fetch is a spy that must stay unused); never a provider. Nothing is
+ * injected into the wiring but its ports and the fake route, so the SHIPPED manifest and the SHIPPED request-class gate decide.
+ * - History, over the demo dataset the app opens with (a new local dataset is seeded with the synthetic scenario; the prepared demo
+ *   profile only completes onboarding): the before-breakfast comparison's en-SG request is class a00d8ad5… (QUALIFIED). The disclosure is
+ *   required first; a request without its own decision sends nothing; an accepted one is exactly one value-blind POST of that class. In
+ *   zh-SG it is class c54c7d67… (PENDING): no disclosure, the standard wording, nothing sent.
+ * - Care: an en-SG preview of the evaluated ORDINARY shape (one reading, one question, no appointment) is class 5d0c75ce… (QUALIFIED):
+ *   offered, disclosure first, one POST of that class when accepted; the same preview in zh-SG (8de6bc4e…, PENDING) is never offered or
+ *   sent. The demo dataset's OWN care selections map to no evaluated class (the glucose group alone is too many facts to send; every other
+ *   group or question combination has its own section counts): never offered, nothing sent (fail closed; readiness blocker 3).
+ */
+describe("Packet 11C English activation, I-5: the shipped manifest and gate over the demo flows (offline, fake route)", () => {
+  const LATER = "2026-10-04T02:05:00.000Z" as Instant;
+  const EN_EXPLAIN = "a00d8ad562619f605ca03fe406c18abe095410db4d6f53cca02f68601104910d";
+  const ZH_EXPLAIN = "c54c7d6754b5a791ab4e5732e82e6e9d8f4e235bd8004484db25f7f1558d9dac";
+  const EN_CARE_ORDINARY = "5d0c75cef363c190e726f5cb055f4f9b6b265b76b7f8779b612467203ac6adca";
+  const ZH_CARE_ORDINARY = "8de6bc4ed13d6ffac59be50a33ff31c7f0523e554f37173823ad0fc781e8643a";
+  const names: string[] = [];
+  const opened: JagaOnRuntime[] = [];
+  afterEach(async () => {
+    for (const runtime of opened.splice(0)) runtime.close();
+    for (const name of names.splice(0)) await Dexie.delete(name);
+    await closeCarePreparationHarnesses();
+  });
+
+  /** The class of the value-blind request one POST carried. */
+  const postedClass = (init: RequestInit) => requestClassIdentity(shellTaskRequestSchema.parse(JSON.parse(init.body as string))).classId;
+  /** A fake POST /api/ai/shell answering valid shells (fake model wording) for either flow's approved value-blind request. */
+  function fakeDemoRoute() {
+    return vi.fn<BrowserShellFetcher>(async (_url, init) => {
+      const plan = shellPlanView(shellTaskRequestSchema.parse(JSON.parse(init.body as string)));
+      const home = (path: ShellFieldPath) => plan.slots.find((slot) => slot.homeField === path)!.slotId;
+      const texts = plan.taskType === "EXPLAIN_PATTERN" ? new Map<ShellFieldPath, string>([["headline", `A look at ${slotToken(home("headline"))}.`], ["evidence", `This is based on ${slotToken(home("evidence"))}.`]]) : fakeModelCareShells(plan);
+      return new Response(JSON.stringify({ kind: "CANDIDATE", candidate: shellCandidate(plan, texts), retention: "CONFIRMED_NOT_STORED", usage: USAGE }), { headers: { "content-type": "application/json" } });
+    });
+  }
+  /** The demo dataset the app opens with: a new local dataset, seeded with the synthetic scenario (the runtime's default). */
+  async function demoRuntime() {
+    const name = `i5-demo-${crypto.randomUUID()}`;
+    names.push(name);
+    const runtime = await createBrowserJournalRuntime(name, { now: () => LATER });
+    opened.push(runtime);
+    return runtime;
+  }
+
+  it("History: the demo comparison's en-SG request is admitted (a00d8ad5…), disclosure first, one POST of that class when accepted; zh-SG is never admitted", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const runtime = await demoRuntime();
+    const view = await runtime.history.load({ period: "THIS_WEEK" });
+    expect(view.status === "READY" && view.comparisons.map((fact) => fact.factId)).toEqual(["COMPARISON:BEFORE_BREAKFAST", "NO_MATERIAL:BEFORE_DINNER"]);
+    const factId = "COMPARISON:BEFORE_BREAKFAST";
+    expect(await explainClassOfFact(runtime.history, factId, "en-SG")).toBe(EN_EXPLAIN);
+    expect(await explainClassOfFact(runtime.history, factId, "zh-SG")).toBe(ZH_EXPLAIN);
+    const fetcher = fakeDemoRoute();
+    const before = vi.mocked(createAiHybridTaskService).mock.calls.length;
+    const log = audit();
+    const explainer = createBrowserAiAssistance({ history: runtime.history, carePreparation: runtime.carePreparation, audit: log.port, fetcher, now: () => LATER }).history;
+    // Nothing injected: the one service runs on the shipped manifest and the shipped gate.
+    const deps = vi.mocked(createAiHybridTaskService).mock.calls.slice(before).map((call) => call[0]);
+    expect(deps.map((dep) => [dep.manifest, dep.requestClassGate])).toEqual([[AI_ACTIVATION_MANIFEST, SHIPPED_REQUEST_CLASS_GATE]]);
+    expect(AI_ACTIVATION_MANIFEST.tasks).toMatchObject({ EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED", DRAFT_CARE_PREPARATION_SUMMARY: "SYNTHETIC_REMOTE_ENABLED" });
+    // en-SG: the disclosure first; without the request's own decision nothing is sent.
+    expect(await explainer.disclosureRequired({ factId, locale: "en-SG" })).toBe(true);
+    expect(await explainer.explain({ factId, locale: "en-SG" })).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
+    expect(fetcher).not.toHaveBeenCalled();
+    // Accepted: exactly one value-blind POST of the qualified class, and the AI explanation.
+    expect(await explainer.explain({ factId, locale: "en-SG", disclosure: "ACCEPTED" })).toMatchObject({ kind: "EXPLAINED", source: "AI" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0]![0]).toBe(AI_SHELL_ROUTE_PATH);
+    expect(postedClass(fetcher.mock.calls[0]![1])).toBe(EN_EXPLAIN);
+    expect(fetcher.mock.calls[0]![1].body as string).not.toMatch(/periodSummary|"facts"|sources|revisionId|recordId|\d{4}-\d{2}-\d{2}|\d\.\d/);
+    // zh-SG: never admitted (PENDING): no disclosure, the standard wording even with an acceptance, nothing sent.
+    expect(await explainer.disclosureRequired({ factId, locale: "zh-SG" })).toBe(false);
+    expect(await explainer.explain({ factId, locale: "zh-SG", disclosure: "ACCEPTED" })).toMatchObject({ kind: "EXPLAINED", source: "DETERMINISTIC" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(log.rows.map((row) => [row.locale, row.outcomeCode, row.attempts.count])).toEqual([
+      ["en-SG", "REMOTE_USE_NOT_ACCEPTED", 0],
+      ["en-SG", "ACCEPTED", 1],
+      ["zh-SG", "REQUEST_CLASS_NOT_QUALIFIED", 0],
+    ]);
+  }, 60_000);
+
+  it("Care: the evaluated en-SG ORDINARY preview is admitted (5d0c75ce…), disclosure first, one POST of that class when accepted; in zh-SG it is never offered or sent", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    for (const [locale, classId, admitted] of [["en-SG", EN_CARE_ORDINARY, true], ["zh-SG", ZH_CARE_ORDINARY, false]] as const) {
+      const h = await createCarePreparationHarness();
+      const commands = createCarePreparationService(h.database, { now: () => LATER, ids: testIds, projectAiCareSummary: projectValidatedAiCareSummary });
+      const audits = createAiInvocationAuditRepository(h.database);
+      const reading = await h.journal.recordGlucose({ payload: { measurement: { enteredValue: "6.6" as never, enteredUnit: "MMOL_L" as const, normalization: null }, measurementMethod: "FINGERSTICK_METER" as const, context: { kind: "PATIENT_SELECTED_SLOT" as const, slot: "BEDTIME" as const } }, temporal: { kind: "POINT", occurrence: exact("2026-10-03T13:00:00.000Z") }, recordedAt: LATER });
+      const question = await h.organisation.createCareQuestion({ questionText: { text: "Can I keep the pen in my bag? (demo)", language: "en-SG" } });
+      if (reading.kind !== "COMMITTED" || question.kind !== "COMMITTED") throw new Error("fixture");
+      // The ORDINARY shape: one reading and one question, no appointment.
+      const prepared = await commands.prepare({ ...(await h.selection()), locale, appointment: null });
+      if (prepared.kind !== "COMMITTED") throw new Error(JSON.stringify(prepared));
+      const view = await h.query.loadSummary(prepared.recordId);
+      if (view.status !== "READY") throw new Error("ready");
+      const built = buildCareSummaryAiRequest({ current: view.payload, requestId: "33333333-3333-4333-8333-333333333333", requestedAt: LATER });
+      if (built.kind !== "READY") throw new Error(built.reason);
+      const planned = planSlots(built.request, resolveAiHybridBundle("DRAFT_CARE_PREPARATION_SUMMARY", locale));
+      if (planned.kind !== "PLANNED") throw new Error("plan");
+      expect(requestClassIdentity(projectShellTaskRequest(planned.plan)).classId, locale).toBe(classId);
+      const fetcher = fakeDemoRoute();
+      const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands }, audit: audits, fetcher, now: () => LATER }).careSummary!;
+      const snapshotRef = { recordId: prepared.recordId, expectedRevisionId: prepared.revisionId, expectedRevisionNumber: prepared.revisionNumber };
+      expect(wording.available(view.payload), locale).toBe(admitted);
+      expect(await wording.disclosureRequired(view.payload), locale).toBe(admitted);
+      if (admitted) {
+        // Without the request's own decision nothing is sent; accepted: one POST of exactly the qualified class, and the replacement.
+        expect((await wording.compose({ snapshotRef, locale })).kind).toBe("KEPT_DETERMINISTIC");
+        expect(fetcher).not.toHaveBeenCalled();
+        const outcome = await wording.compose({ snapshotRef, locale, disclosure: "ACCEPTED" });
+        expect(outcome.kind).toBe("REPLACED");
+        expect(fetcher).toHaveBeenCalledTimes(1);
+        expect(postedClass(fetcher.mock.calls[0]![1])).toBe(classId);
+        expect(fetcher.mock.calls[0]![1].body as string).not.toMatch(/6\.6|mmol|pen in my bag|revisionId|recordId|\d{4}-\d{2}-\d{2}/);
+        expect((await audits.list()).map((row) => [row.outcomeCode, row.attempts.count]).sort()).toEqual([["ACCEPTED", 1], ["REMOTE_USE_NOT_ACCEPTED", 0]]);
+      } else {
+        expect(await wording.compose({ snapshotRef, locale, disclosure: "ACCEPTED" })).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "TASK_DISABLED" });
+        expect(fetcher).not.toHaveBeenCalled();
+        expect((await audits.list()).map((row) => [row.outcomeCode, row.attempts.count])).toEqual([["REQUEST_CLASS_NOT_QUALIFIED", 0]]);
+      }
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  }, 60_000);
+
+  it("Care over the demo dataset: its own selections map to no evaluated class (fail closed): never offered, no disclosure, nothing sent", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const runtime = await demoRuntime();
+    const visit = await runtime.careOrganisation.query.loadVisitPreparation();
+    if (visit.status !== "READY") throw new Error(visit.status);
+    const fetcher = fakeDemoRoute();
+    const wording = createBrowserAiAssistance({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit, fetcher, now: () => LATER }).careSummary!;
+    const evaluated = new Set(AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.classId));
+    const outcomes: string[] = [];
+    for (const locale of ["en-SG", "zh-SG"] as const) {
+      // Each record group the screen offers, on its own, with the seeded appointment (the screen always includes it).
+      for (const group of visit.factGroups.filter((entry) => entry.sources.length > 0)) {
+        const prepared = await runtime.carePreparation.commands.prepare({
+          locale,
+          period: visit.period,
+          appointment: visit.appointment ? { recordType: "APPOINTMENT", recordId: visit.appointment.recordId, revisionId: visit.appointment.revisionId } : null,
+          groups: [{ key: group.key, sources: group.sources }],
+          questions: [],
+          notSelected: visit.factGroups.filter((entry) => entry.key !== group.key).flatMap((entry) => entry.sources),
+        });
+        if (prepared.kind !== "COMMITTED") throw new Error(JSON.stringify(prepared));
+        const view = await runtime.carePreparation.query.loadSummary(prepared.recordId);
+        if (view.status !== "READY") throw new Error("ready");
+        const built = buildCareSummaryAiRequest({ current: view.payload, requestId: "33333333-3333-4333-8333-333333333333", requestedAt: LATER });
+        let outcome: string = built.kind === "READY" ? "READY" : built.reason;
+        if (built.kind === "READY") {
+          const planned = planSlots(built.request, resolveAiHybridBundle("DRAFT_CARE_PREPARATION_SUMMARY", locale));
+          outcome = planned.kind !== "PLANNED" || planned.plan.remote.eligible !== true ? "NOT_REMOTE_ELIGIBLE" : evaluated.has(requestClassIdentity(projectShellTaskRequest(planned.plan)).classId) ? "EVALUATED_CLASS" : "NO_DEFINITION";
+        }
+        outcomes.push(`${locale} ${group.key}: ${outcome}`);
+        expect(wording.available(view.payload), `${locale} ${group.key}`).toBe(false);
+        expect(await wording.disclosureRequired(view.payload), `${locale} ${group.key}`).toBe(false);
+      }
+    }
+    expect(outcomes).toEqual([
+      "en-SG GLUCOSE: TOO_MANY_FACTS",
+      "en-SG INSULIN: NO_DEFINITION",
+      "en-SG MEALS: NO_DEFINITION",
+      "en-SG WALKS: NO_DEFINITION",
+      "zh-SG GLUCOSE: TOO_MANY_FACTS",
+      "zh-SG INSULIN: NO_DEFINITION",
+      "zh-SG MEALS: NO_DEFINITION",
+      "zh-SG WALKS: NO_DEFINITION",
+    ]);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  }, 60_000);
+});
+
+/** The EXPLAIN class of one comparison's own request in `locale` (the same pure builder, planner and projection as the wiring). */
+async function explainClassOfFact(history: RecordedHistoryQueryPort, factId: string, locale: "en-SG" | "zh-SG"): Promise<string> {
+  const loaded = await history.loadExplainablePattern({ factId });
+  if (loaded.kind !== "EXPLAINABLE") throw new Error("fixture");
+  const request = buildSourceBackedExplainRequest({ view: loaded.view, locale, requestId: "8b3d4e5f-6a70-4b1c-9d2e-000000000000", requestedAt: NOW as Instant });
+  const planned = planSlots(request, resolveAiHybridBundle("EXPLAIN_PATTERN", locale));
+  if (planned.kind !== "PLANNED") throw new Error("plan");
+  return requestClassIdentity(projectShellTaskRequest(planned.plan)).classId;
+}

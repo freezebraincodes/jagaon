@@ -4,6 +4,7 @@
   "sources": {
     "releaseProfile": "src/config/release-profile.ts",
     "aiActivation": "src/application/ai/ai-activation-manifest.ts",
+    "aiRequestClassQualification": "src/application/ai/request-class-qualification.ts",
     "intelligenceActivation": "src/application/intelligence/activation-manifest.ts",
     "screens": "src/components/jagaon/screen-manifest.ts",
     "storageProfile": "src/storage/storage-profile-manifest.ts"
@@ -19,11 +20,11 @@
       { "id": "PREVENTIVE_CARE_AND_CARE_PREPARATION", "packet": "9B", "note": "Health checks and visit preparation" },
       { "id": "CARE_SUMMARY_PREVIEW_AND_EXPORT", "packet": "9C", "note": "User-approved local preview, print and export" },
       { "id": "DATA_BACKUP_RESTORE_DELETION", "packet": "10", "note": "Encrypted backup, restore, permanent deletion, demo reset" },
-      { "id": "AI_DETERMINISTIC_FALLBACK_AND_DISCLOSURE", "packet": "11A-11C", "note": "Deterministic wording only; remote wording stays off (all tasks DETERMINISTIC_ONLY)" }
+      { "id": "AI_DETERMINISTIC_FALLBACK_AND_DISCLOSURE", "packet": "11A-11C", "note": "Deterministic wording, the per-request disclosure and the deterministic fallback. Packet 11C English activation (owner decisions Q and A, 2026-10-12): EXPLAIN_PATTERN and DRAFT_CARE_PREPARATION_SUMMARY are SYNTHETIC_REMOTE_ENABLED under HACKATHON_DEMO and the six en-SG request classes are QUALIFIED (six zh-SG PENDING), but remote wording stays off for the candidate while JAGAON_REMOTE_AI is unset" }
     ],
     "disabled": [
-      { "id": "REMOTE_AI_EXPLAIN_PATTERN", "packet": "11C", "reason": "Task is DETERMINISTIC_ONLY and JAGAON_REMOTE_AI is unset for the candidate; request classes PENDING; D2 open" },
-      { "id": "REMOTE_AI_DRAFT_CARE_PREPARATION_SUMMARY", "packet": "11C", "reason": "Task is DETERMINISTIC_ONLY and JAGAON_REMOTE_AI is unset for the candidate; request classes PENDING; D2 open" },
+      { "id": "REMOTE_AI_EXPLAIN_PATTERN", "packet": "11C", "reason": "Task is SYNTHETIC_REMOTE_ENABLED (Packet 11C English activation) and its three en-SG request classes are QUALIFIED (zh-SG PENDING), but JAGAON_REMOTE_AI is unset for the candidate, so the route refuses REMOTE_AI_DISABLED and nothing is sent; D2 open" },
+      { "id": "REMOTE_AI_DRAFT_CARE_PREPARATION_SUMMARY", "packet": "11C", "reason": "Task is SYNTHETIC_REMOTE_ENABLED (Packet 11C English activation) and its three en-SG request classes are QUALIFIED (zh-SG PENDING), but JAGAON_REMOTE_AI is unset for the candidate, so the route refuses REMOTE_AI_DISABLED and nothing is sent; a preview outside the evaluated classes is never offered; D2 open" },
       { "id": "PACKET_5A_SAFETY_UI", "packet": "5A", "reason": "No route renders Packet 5A; storage profile safetyRuntime ABSENT (R10, D6)" },
       { "id": "PACKET_7B", "packet": "7B", "reason": "Deferred; not implemented in the candidate" },
       { "id": "PACKET_13_TRTC_VOICE", "packet": "13", "reason": "Present (route /api/voice/usersig: POST for the credential, GET for the credential-free availability probe, which answers { available: false } for the candidate); refuses without configuration (JAGAON_VOICE_CLOUD and the voice origins, passcode, limits and TRTC credentials unset); disabled for the candidate. JAGAON_TRUST_VERCEL_CLIENT_IP is optional and off by default (only the exact value on enables it); when on, the failed-passcode throttle buckets by the x-real-ip header only, which is safe only on Vercel (elsewhere a client can forge it, so off means one shared bucket). The TELL_JAGAON screen is present. Live TRTC calls need separate owner authorization" },
@@ -33,14 +34,34 @@
     ]
   },
   "ai": {
-    "manifestVersion": "ai-activation.11a.1",
+    "manifestVersion": "ai-activation.11c.1",
     "tasks": {
       "EXTRACT_CANDIDATE_FACTS": "DETERMINISTIC_ONLY",
-      "EXPLAIN_PATTERN": "DETERMINISTIC_ONLY",
+      "EXPLAIN_PATTERN": "SYNTHETIC_REMOTE_ENABLED",
       "DRAFT_NEUTRAL_INQUIRY": "DETERMINISTIC_ONLY",
       "ANSWER_BOUNDED_RECORD_QUERY": "DETERMINISTIC_ONLY",
-      "DRAFT_CARE_PREPARATION_SUMMARY": "DETERMINISTIC_ONLY",
+      "DRAFT_CARE_PREPARATION_SUMMARY": "SYNTHETIC_REMOTE_ENABLED",
       "PHRASE_NON_CLINICAL_RESPONSE": "DETERMINISTIC_ONLY"
+    },
+    "requestClasses": {
+      "contractDigest": "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1",
+      "qualified": [
+        { "classId": "a00d8ad562619f605ca03fe406c18abe095410db4d6f53cca02f68601104910d", "taskType": "EXPLAIN_PATTERN", "locale": "en-SG" },
+        { "classId": "0c43de4a6cfb9eb6ec40c2ae13404c8f7664b127e864724452dbf0dc3f40a1f7", "taskType": "EXPLAIN_PATTERN", "locale": "en-SG" },
+        { "classId": "38ad0280e6382f4e3b314613b464bef0438ea6f6cc19cae2f41a10e0550e320d", "taskType": "EXPLAIN_PATTERN", "locale": "en-SG" },
+        { "classId": "5d0c75cef363c190e726f5cb055f4f9b6b265b76b7f8779b612467203ac6adca", "taskType": "DRAFT_CARE_PREPARATION_SUMMARY", "locale": "en-SG" },
+        { "classId": "37f7e95a9ff5436dbaab17b1bfefa57d132aaf7f407157c9d3cd2e3a39c9154f", "taskType": "DRAFT_CARE_PREPARATION_SUMMARY", "locale": "en-SG" },
+        { "classId": "8c3203f88db4567aa82a51d86967b845960f8f7f226591416c476c2ea670ec6b", "taskType": "DRAFT_CARE_PREPARATION_SUMMARY", "locale": "en-SG" }
+      ],
+      "pending": [
+        { "classId": "c54c7d6754b5a791ab4e5732e82e6e9d8f4e235bd8004484db25f7f1558d9dac", "taskType": "EXPLAIN_PATTERN", "locale": "zh-SG" },
+        { "classId": "e8fdbc6bbd7df5a90c2d9f395955d90bc1c8d6a41505c5b5f2019a9d335f49c4", "taskType": "EXPLAIN_PATTERN", "locale": "zh-SG" },
+        { "classId": "2b3c472d0983bcff6364cfbd915ec026866a26f996608e8a55cbfa64d4cccc0d", "taskType": "EXPLAIN_PATTERN", "locale": "zh-SG" },
+        { "classId": "8de6bc4ed13d6ffac59be50a33ff31c7f0523e554f37173823ad0fc781e8643a", "taskType": "DRAFT_CARE_PREPARATION_SUMMARY", "locale": "zh-SG" },
+        { "classId": "5763ae537e7b6e535115b92355e17a3f47cb4a239b0d75316559d19e35897b67", "taskType": "DRAFT_CARE_PREPARATION_SUMMARY", "locale": "zh-SG" },
+        { "classId": "6a2e08dc46365327f1cfe34fa2f8aba3dd341d260b8b07de1ad90c2b9b889625", "taskType": "DRAFT_CARE_PREPARATION_SUMMARY", "locale": "zh-SG" }
+      ],
+      "signOff": { "evidenceRef": "internal-docs/superpowers/reviews/2026-10-12-11c-en-demo-protocol.md", "signedOffBy": "JagaOn owner", "signedOffAt": "2026-10-11T18:13:14Z", "note": "Waiver of the manual review under the revised English demo protocol (owner decision Q), not a completed human-review PASS" }
     },
     "remoteSwitch": "JAGAON_REMOTE_AI",
     "remoteState": "OFF"

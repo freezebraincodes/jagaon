@@ -41,7 +41,9 @@ import { createPatternExplainer, type PatternExplanation } from "./explain-patte
  *   SYNTHETIC_REMOTE_ENABLED for the release profile, the device is online, the server-side remote switch is not known to be off
  *   (`remoteSwitchKnownOff`, pluggable for C6; absent = not known off) and the request's own projected class is QUALIFIED (C1). History:
  *   the request built for that comparison and locale (one local read of the comparison's source projection; replaces C1's task-level
- *   `anyAdmissible`). Care: that preview's own request. With the shipped manifest and the all-PENDING records it is never offered.
+ *   `anyAdmissible`). Care: that preview's own request. Packet 11C English activation (owner decisions Q and A): with the shipped
+ *   manifest and records it is offered only for an en-SG request of a QUALIFIED class; never in zh-SG (PENDING) and never for a request
+ *   outside the evaluated classes.
  *
  * Only the history, care-preparation and audit ports are passed by the shipped app. The other dependencies are test seams (an injected
  * test manifest, a fake fetcher, a fixed clock, a test-only request-class gate, a remote switch signal).
@@ -49,12 +51,13 @@ import { createPatternExplainer, type PatternExplanation } from "./explain-patte
  * Packet 11C Addendum B, Task B4b: `createBrowserAiAssistance` is the app's ONE AI wiring per opened runtime. The SAME hybrid service
  * (so the same browser shell client, per-request decisions and audit port) serves the history explanation and the care-summary AI
  * wording (`composeCareSummaryWithAi` over the runtime's care-preparation ports). `createBrowserHistoryExplainer` is its history half.
- * With the shipped manifest the care wording is never `available()`, never asks the disclosure and never sends; the preview screen does
- * not show its action. A DETERMINISTIC hybrid result never creates a replacement snapshot (the use case replaces only from a validated AI
+ * The care wording is `available()` (and asks the disclosure) only for a preview whose own request may be sent; otherwise the preview
+ * screen does not show its action and nothing is sent. A DETERMINISTIC hybrid result never creates a replacement snapshot (the use case replaces only from a validated AI
  * composition, and the runtime's care service re-validates it with `projectValidatedAiCareSummary`).
  *
- * Packet 11C Addendum C, Task C1: the one hybrid service gets the request-class gate (shipped: all PENDING, so every request composes
- * deterministically before any disclosure or send, audited REQUEST_CLASS_NOT_QUALIFIED).
+ * Packet 11C Addendum C, Task C1: the one hybrid service gets the request-class gate (shipped: since the Packet 11C English activation the
+ * six en-SG classes are QUALIFIED; any other request composes deterministically before any disclosure or send, audited
+ * REQUEST_CLASS_NOT_QUALIFIED).
  *
  * Packet 11C Addendum C, Task C6 (owner approval of Addendum C; C6 amendment):
  * - Demo passcode: one in-memory entry per runtime (`accessPasscode`, the same object on both flows). The disclosure dialog asks for it
@@ -93,7 +96,8 @@ export type BrowserHistoryExplainerDependencies = Readonly<{
   online?: () => boolean;
   /**
    * Packet 11C Addendum C (C1): which request classes may be sent. Absent (the shipped app) means the shipped gate: the generated
-   * definitions and the shipped qualification records, all PENDING, so nothing is sent and no disclosure is shown. Test seam only.
+   * definitions and the shipped qualification records (six en-SG QUALIFIED, six zh-SG PENDING), so only an en-SG request of a qualified
+   * class may ask the disclosure and be sent. Test seam only.
    */
   requestClassGate?: AiRequestClassGate;
   /**

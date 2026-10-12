@@ -20,7 +20,7 @@ import { projectProviderTaskPayload } from "./detached-payload-projector";
 import { projectShellTaskRequest } from "./language/shell-projector";
 import { planSlots } from "./language/slot-planner";
 import type { AiRequestClassGate } from "./request-class-qualification";
-import { qualifiedTestRequestClassGate } from "./request-class-test-support";
+import { DETERMINISTIC_ONLY_TEST_MANIFEST, pendingTestRequestClassGate, qualifiedTestRequestClassGate, testManifestEnabling } from "./request-class-test-support";
 
 /**
  * Packet 11C Addendum B, Task B2b: the browser shell client for POST /api/ai/shell (B-boundary, D1, D2, D6, interim disclosure rule).
@@ -33,7 +33,8 @@ const CARE = plannedFixture("p11.draft-care-preparation-summary.en-sg.ordinary")
 const REQUEST = (): ShellTaskRequest => structuredClone(projectShellTaskRequest(EN.plan)) as ShellTaskRequest;
 const VALID = shellCandidate(EN.plan, new Map<ShellFieldPath, string>([["headline", "A look at {{S1}}."], ["evidence", "This is based on {{S3}}."]]));
 const USAGE = { inputTokens: 600, outputTokens: 80, costMicroUsd: 5 };
-const ENABLED: AiActivationManifest = { ...AI_ACTIVATION_MANIFEST, tasks: { ...AI_ACTIVATION_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED", DRAFT_CARE_PREPARATION_SUMMARY: "SYNTHETIC_REMOTE_ENABLED" } };
+// Packet 11C English activation (owner decisions Q and A): a test manifest enabling both shell tasks, independent of the shipped one.
+const ENABLED: AiActivationManifest = testManifestEnabling("EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY");
 /** Test-only. In production a disclosure accepts only the one request the patient accepted the dialog for (C3, per-request decisions). */
 const ACCEPTED: AiRemoteUseDisclosure = { decide: async () => "ACCEPTED" };
 const SENTINEL = "SENTINEL-technical-detail";
@@ -523,10 +524,12 @@ describe("the client under the hybrid service", () => {
     return { hybrid, rows };
   }
 
-  it("C1: the shipped request-class gate (all PENDING) with an activated test manifest: deterministic, no disclosure, no POST, one REQUEST_CLASS_NOT_QUALIFIED row", async () => {
+  // Packet 11C English activation (owner decisions Q and A): the shipped records qualify the en-SG classes, so the unqualified case is an
+  // all-PENDING gate (the pre-activation state), and the shipped gate is pinned to admit this en-SG request (next test).
+  it("C1: an all-PENDING request-class gate (pre-activation) with an activated test manifest: deterministic, no disclosure, no POST, one REQUEST_CLASS_NOT_QUALIFIED row", async () => {
     const decide = vi.fn<AiRemoteUseDisclosure["decide"]>(async () => "ACCEPTED");
     const fetcher = answering(() => json({ kind: "CANDIDATE", candidate: VALID, retention: "CONFIRMED_NOT_STORED", usage: USAGE }));
-    const run = service({ disclosure: { decide }, fetcher, requestClassGate: "SHIPPED" });
+    const run = service({ disclosure: { decide }, fetcher, requestClassGate: pendingTestRequestClassGate() });
     expect(await run.hybrid.execute(EN.request)).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "CLASS_NOT_QUALIFIED", reason: "TASK_DISABLED" });
     expect(decide).not.toHaveBeenCalled();
     expect(fetcher).not.toHaveBeenCalled();
@@ -535,10 +538,21 @@ describe("the client under the hybrid service", () => {
     expect(aiInvocationAuditRowSchema.safeParse(run.rows[0]).success).toBe(true);
   });
 
-  it("the shipped manifest: deterministic, no disclosure asked, no POST, one audit row without a provider", async () => {
+  it("the shipped manifest and the shipped gate admit the en-SG request: the disclosure is decided before exactly one POST", async () => {
+    const decide = vi.fn<AiRemoteUseDisclosure["decide"]>(async () => "ACCEPTED");
+    const fetcher = answering(() => json({ kind: "CANDIDATE", candidate: VALID, retention: "CONFIRMED_NOT_STORED", usage: USAGE }));
+    const run = service({ manifest: AI_ACTIVATION_MANIFEST, disclosure: { decide }, fetcher, requestClassGate: "SHIPPED" });
+    expect(await run.hybrid.execute(EN.request)).toMatchObject({ kind: "COMPOSED", source: "AI" });
+    expect(decide).toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(decide.mock.invocationCallOrder[0]!).toBeLessThan(fetcher.mock.invocationCallOrder[0]!);
+    expect(run.rows.map((row) => row.outcomeCode)).toEqual(["ACCEPTED"]);
+  });
+
+  it("a task that is not activated (the pre-activation manifest): deterministic, no disclosure asked, no POST, one audit row without a provider", async () => {
     const decide = vi.fn<AiRemoteUseDisclosure["decide"]>(async () => "ACCEPTED");
     const fetcher = answering(() => json({}));
-    const run = service({ manifest: AI_ACTIVATION_MANIFEST, disclosure: { decide }, fetcher });
+    const run = service({ manifest: DETERMINISTIC_ONLY_TEST_MANIFEST, disclosure: { decide }, fetcher });
     expect(await run.hybrid.execute(EN.request)).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "NOT_ACTIVATED", reason: "TASK_DISABLED" });
     expect(decide).not.toHaveBeenCalled();
     expect(fetcher).not.toHaveBeenCalled();
@@ -644,15 +658,16 @@ describe("the client under the hybrid service", () => {
       usage: { input_tokens: 600, output_tokens: 80, output_tokens_details: { reasoning_tokens: 0 } },
       store: false, error: null, incomplete_details: null, ...extra,
     });
-    // Packet 11C Addendum C (C1): the route side gets test-only QUALIFIED records too, unless `routeGate` is "SHIPPED" (the default).
+    // Packet 11C Addendum C (C1): the route side gets test-only QUALIFIED records too (the default "TEST"); "PENDING" is an all-PENDING
+    // gate (Packet 11C English activation: the shipped records now qualify this en-SG request, so they no longer refuse it).
     // Packet 11C Addendum C (C6): the route gets the deployment configuration (TEST values; `deployment` overrides single entries), and
     // the posts carry what a same-origin browser adds itself (Origin, Sec-Fetch-Site); the passcode header comes from the client.
-    function viaRoute(candidates: Array<{ text: string; extra?: Record<string, unknown> }>, manifest: AiActivationManifest = ENABLED, routeGate: "TEST" | "SHIPPED" = "TEST", deployment: Record<string, string | undefined> = {}) {
+    function viaRoute(candidates: Array<{ text: string; extra?: Record<string, unknown> }>, manifest: AiActivationManifest = ENABLED, routeGate: "TEST" | "PENDING" = "TEST", deployment: Record<string, string | undefined> = {}) {
       const deepseek = vi.fn(async (_url: string, _init: RequestInit) => {
         const next = candidates.shift()!;
         return new Response(JSON.stringify(envelope(next.text, next.extra)), { status: 200, headers: { "content-type": "application/json" } });
       });
-      const handle = createAiShellHandler({ environment: { DEEPSEEK_API_KEY: "deepseek-SENTINEL-test", ...TEST_DEPLOYMENT_ENVIRONMENT, ...deployment }, activationManifest: manifest, fetcher: deepseek, ...(routeGate === "TEST" ? { requestClassGate: qualifiedTestRequestClassGate() } : {}) });
+      const handle = createAiShellHandler({ environment: { DEEPSEEK_API_KEY: "deepseek-SENTINEL-test", ...TEST_DEPLOYMENT_ENVIRONMENT, ...deployment }, activationManifest: manifest, fetcher: deepseek, requestClassGate: routeGate === "TEST" ? qualifiedTestRequestClassGate() : pendingTestRequestClassGate() });
       const posts = vi.fn<BrowserShellFetcher>((url, init) => handle(new Request(`http://localhost${url}`, { ...init, headers: { ...(init.headers as Record<string, string>), Origin: TEST_ORIGIN, "Sec-Fetch-Site": "same-origin" } })));
       return { deepseek, posts };
     }
@@ -684,7 +699,7 @@ describe("the client under the hybrid service", () => {
     });
 
     it("C1: the route's own class check refuses (403, before any credential read) when only the browser has the class qualified; audited REQUEST_CLASS_NOT_QUALIFIED", async () => {
-      const route = viaRoute([{ text: JSON.stringify(VALID) }], ENABLED, "SHIPPED");
+      const route = viaRoute([{ text: JSON.stringify(VALID) }], ENABLED, "PENDING");
       const run = service({ fetcher: route.posts });
       expect(await run.hybrid.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", mode: "REMOTE_AI", reason: "PROVIDER_REJECTED" });
       expect(route.posts).toHaveBeenCalledTimes(1);
@@ -699,7 +714,7 @@ describe("the client under the hybrid service", () => {
     it("fix round 1 end to end: the route's rate limit, a missing credential and server TASK_DISABLED each give 0 attempts / NONE", async () => {
       const cases: Array<[string, () => ReturnType<typeof viaRoute>, string]> = [
         ["a missing credential", () => viaRoute([{ text: JSON.stringify(VALID) }], ENABLED, "TEST", { DEEPSEEK_API_KEY: undefined }), "MISSING_CONFIGURATION"],
-        ["server TASK_DISABLED (only the browser is activated)", () => viaRoute([{ text: JSON.stringify(VALID) }], AI_ACTIVATION_MANIFEST), "PROVIDER_FAILED"],
+        ["server TASK_DISABLED (only the browser is activated)", () => viaRoute([{ text: JSON.stringify(VALID) }], DETERMINISTIC_ONLY_TEST_MANIFEST), "PROVIDER_FAILED"],
       ];
       for (const [label, make, code] of cases) {
         const route = make();
@@ -750,7 +765,7 @@ describe("the client under the hybrid service", () => {
     });
 
     it("the route's own activation check still refuses when only the browser is activated", async () => {
-      const route = viaRoute([{ text: JSON.stringify(VALID) }], AI_ACTIVATION_MANIFEST);
+      const route = viaRoute([{ text: JSON.stringify(VALID) }], DETERMINISTIC_ONLY_TEST_MANIFEST);
       const run = service({ fetcher: route.posts });
       expect(await run.hybrid.execute(EN.request)).toMatchObject({ source: "DETERMINISTIC", reason: "PROVIDER_FAILED" });
       expect(route.deepseek).not.toHaveBeenCalled();

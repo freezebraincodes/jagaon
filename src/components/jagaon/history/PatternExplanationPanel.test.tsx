@@ -20,7 +20,7 @@ import {
   NOW,
   variabilityFixture,
 } from "@/application/history/history-test-support";
-import { AI_ACTIVATION_MANIFEST } from "@/application/ai/ai-activation-manifest";
+import { DETERMINISTIC_ONLY_TEST_MANIFEST } from "@/application/ai/request-class-test-support";
 import { createAiHybridTaskService } from "@/application/ai/ai-hybrid-task-service";
 import { createPatternExplainer } from "@/application/ai/explain-pattern";
 import { renderSummaryRoleNotice } from "@/application/ai/language/atom-renderer";
@@ -54,14 +54,18 @@ const counter = () => {
   return () => `7a2c3d4e-5f60-4a1b-8c2d-${(n++).toString(16).padStart(12, "0")}`;
 };
 
-/** The real explainer over the shipped (NOT_ACTIVATED) manifest; `invoke` must never be reached. */
+/**
+ * The real explainer over a NOT_ACTIVATED manifest; `invoke` must never be reached. Packet 11C English activation (owner decisions Q and
+ * A): the shipped manifest now enables EXPLAIN_PATTERN, so these panel tests inject the pre-activation manifest (every task
+ * DETERMINISTIC_ONLY) to keep rendering the deterministic explanation.
+ */
 function realExplainer(history: RecordedHistoryQueryPort, invoke = vi.fn()): PatternExplainerPort {
   const service = createAiHybridTaskService({
     releaseProfile: "HACKATHON_DEMO",
     audit: { append: async () => undefined },
     now: () => NOW,
     monotonicMs: () => 0,
-    manifest: AI_ACTIVATION_MANIFEST,
+    manifest: DETERMINISTIC_ONLY_TEST_MANIFEST,
     provider: { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, invoke },
   });
   // Assignability pin: the Task 6 use case is the port the screen and panel consume.

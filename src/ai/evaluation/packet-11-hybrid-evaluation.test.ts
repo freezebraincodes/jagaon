@@ -644,16 +644,18 @@ describe("hybrid harness packet11-eval.12: deepseek-flash recorded for the hybri
     expect(report.fixtures[0]).toMatchObject({ source: "DETERMINISTIC", reasonCode: "PROVIDER_FAILED", attempts: 1, repairUsed: false, inputTokens: 700, outputTokens: 512, credits: 0.004, retention: "CONFIRMED_NOT_STORED" });
     expect(report.provider).toEqual({ providerKey: "kie", endpoint: model.endpoint });
   });
-  it("the hybrid contract and the legacy contract stay separate; nothing is pinned or activated", () => {
+  // Packet 11C English activation (owner decisions Q and A, 2026-10-12; deliberate): the shipped manifest enables exactly the two hybrid
+  // shell tasks (was: every task DETERMINISTIC_ONLY, ai-activation.11a.1); no model snapshot or bundle route profile is pinned.
+  it("the hybrid contract and the legacy contract stay separate; nothing is pinned; only the two hybrid shell tasks are activated", () => {
     expect(JSON.stringify(APPROVED_SMOKE_CONTRACT)).toBe('{"requestModelId":"deepseek-flash","responseModelSnapshot":"deepseek-flash","promptVersion":"11b.11","providerSchemaVersion":"kie-schema.11b.3","routeVersion":"packet11-responses.11b.6","validatorRulesRevision":"11b.2-meaning-r7","approvedMeaningRegistryRevision":"ai-meaning-registry.11b.1","fixtureSetRevision":"packet11-fixtures.11b.3","evaluationReportVersion":"packet11-eval.4"}');
     expect(APPROVED_SMOKE_CONTRACT).not.toHaveProperty("approvalScope");
     expect(APPROVED_SMOKE_CONTRACT).not.toHaveProperty("shellMaxOutputTokens");
     expect(APPROVED_HYBRID_CONTRACT.legacyFactGeneration).toBe("NOT_APPROVED");
     for (const task of AI_TASK_TYPES) {
       expect(AI_TASK_RUNTIME_BUNDLES[task].modelSnapshot, task).toBeNull();
-      expect(AI_ACTIVATION_MANIFEST.tasks[task], task).toBe("DETERMINISTIC_ONLY");
+      expect(AI_ACTIVATION_MANIFEST.tasks[task], task).toBe(task === "EXPLAIN_PATTERN" || task === "DRAFT_CARE_PREPARATION_SUMMARY" ? "SYNTHETIC_REMOTE_ENABLED" : "DETERMINISTIC_ONLY");
     }
-    expect(AI_ACTIVATION_MANIFEST.manifestVersion).toBe("ai-activation.11a.1");
+    expect(AI_ACTIVATION_MANIFEST.manifestVersion).toBe("ai-activation.11c.1");
     for (const task of ["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"] as const) {
       expect(AI_HYBRID_RUNTIME_BUNDLES[task], task).toMatchObject({ modelSnapshot: null, routeProfile: "deterministic-only.11a.1" });
       // Fix round 1: the cap is a bundle component; the output token ceiling stays the legacy bundle's.

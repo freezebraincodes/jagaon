@@ -15,7 +15,7 @@ import type { AiLocale, ShellTask } from "@/domain/ai";
  *   64-hex digests concatenated). `sampleFixtureIds` are the FULL fixtures sharing that identical request and model-facing body:
  *   repeated samples of one body, never model exposure to any fixture's patient text (none crosses the boundary).
  * Plain data only: no evaluation, prompt, provider or credential code is imported (browser-safe). Whether a class may be sent is NOT
- * recorded here: that is the separate, owner-signed qualification record (request-class-qualification.ts; all PENDING).
+ * recorded here: that is the separate, owner-signed qualification record (request-class-qualification.ts).
  */
 export const AI_REQUEST_CLASS_SCHEME = "ai-request-class.11c.1";
 

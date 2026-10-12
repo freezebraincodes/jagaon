@@ -27,7 +27,8 @@ import {
 
 /**
  * Packet 11C C7, target 2 (isolated harness): the care-summary AI wording with the injected test activation and test-only QUALIFIED
- * records; every /api/ai/shell answer is a fake typed body (route interception). The printed artifact is checked in print media
+ * records (plus the `?records=pending` and `?records=shipped` modes below); every /api/ai/shell answer is a fake typed body (route
+ * interception). The printed artifact is checked in print media
  * (and saved as a PDF in Chromium). Synthetic data only. Technical evidence, not owner approval; human acceptance pending.
  */
 
@@ -254,12 +255,14 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         expect(shell.calls.map((call) => [call.answered, call.passcodeHeader])).toEqual([["FAILED:OPERATIONAL_SPEND_LOCKED", SYNTHETIC_PASSCODE]]);
       });
 
-      test(`not qualified (shipped all-PENDING records under the test manifest): no disclosure, no care AI action, nothing sent (${locale}, ${viewport.label})`, async ({ page, browserName }, testInfo) => {
+      // Packet 11C English activation (owner decisions Q and A; deliberate): the shipped records now qualify the en-SG classes, so
+      // "nothing qualified" is the `?records=pending` mode (an all-PENDING gate, the pre-activation state; was `?records=shipped`).
+      test(`not qualified (all-PENDING records under the test manifest): no disclosure, no care AI action, nothing sent (${locale}, ${viewport.label})`, async ({ page, browserName }, testInfo) => {
         const context: EvidenceContext = { target: "harness", locale, viewport: viewport.label, engine: browserName };
         planStates(testInfo, context, ["not-qualified-history", "not-qualified-care"]);
         const shell = await interceptShellRoute(page);
-        const m = await startPreparedProfile(page, HARNESS_URL, locale, "?records=shipped");
-        await expect(page.locator("[data-c7-records=shipped]")).toHaveCount(1);
+        const m = await startPreparedProfile(page, HARNESS_URL, locale, "?records=pending");
+        await expect(page.locator("[data-c7-records=pending]")).toHaveCount(1);
         await page.getByRole("navigation").getByRole("button", { name: m.shared.navHistory }).click();
         const actionButton = page.getByRole("button", { name: m.history.explanation.action }).first();
         await actionButton.click();
@@ -268,12 +271,45 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await expect(page.getByRole("dialog")).toHaveCount(0);
         await expect(panel.getByText(m.ai.demoTag)).toHaveCount(0);
         await expect(panel.getByText(m.aiHistoryFallback.unavailableAfterRequest)).toHaveCount(0);
-        await captureState(page, testInfo, context, "not-qualified-history", ["test manifest, shipped PENDING records: no disclosure", "standard wording, no AI tag", "0 POSTs"], panel);
+        await captureState(page, testInfo, context, "not-qualified-history", ["test manifest, all-PENDING records: no disclosure", "standard wording, no AI tag", "0 POSTs"], panel);
         const article = await openCarePreview(page, m, "insulinRecords");
         await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(0);
         await expect(article).not.toContainText(m.ai.demoTag);
         await expectNoHorizontalOverflow(page);
         await captureState(page, testInfo, context, "not-qualified-care", ["unqualified preview: no 'Organise with AI' action", "no AI marking"], article);
+        expect(shell.calls).toHaveLength(0);
+      });
+
+      // Packet 11C English activation: the SHIPPED records under the test manifest qualify the en-SG history class (the disclosure is
+      // offered first; Cancel sends nothing) and refuse the zh-SG one (PENDING: no disclosure). The seeded insulin preview (with the
+      // seeded appointment) is not an evaluated class, so it has no care AI action in either locale.
+      const shippedQualifies = locale === "en-SG";
+      test(`shipped records (test manifest): ${shippedQualifies ? "en-SG history class qualified, disclosure first" : "zh-SG history class PENDING, no disclosure"}; no care AI action on the seeded preview; nothing sent (${locale}, ${viewport.label})`, async ({ page, browserName }, testInfo) => {
+        const context: EvidenceContext = { target: "harness", locale, viewport: viewport.label, engine: browserName };
+        planStates(testInfo, context, ["shipped-records-history", "shipped-records-care"]);
+        const shell = await interceptShellRoute(page);
+        const m = await startPreparedProfile(page, HARNESS_URL, locale, "?records=shipped");
+        await expect(page.locator("[data-c7-records=shipped]")).toHaveCount(1);
+        await page.getByRole("navigation").getByRole("button", { name: m.shared.navHistory }).click();
+        await page.getByRole("button", { name: m.history.explanation.action }).first().click();
+        const panel = page.getByRole("region", { name: m.history.explanation.title });
+        if (shippedQualifies) {
+          const dialog = page.getByRole("dialog", { name: m.ai.remoteTitle });
+          await expect(dialog).toBeVisible();
+          expect(shell.calls).toHaveLength(0);
+          await dialog.getByRole("button", { name: m.ai.cancel }).click();
+          await expect(dialog).toHaveCount(0);
+        }
+        await expect(panel.getByRole("status")).not.toBeEmpty();
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        await expect(panel.getByText(m.ai.demoTag)).toHaveCount(0);
+        await expect(panel.getByText(m.ai.remoteNotAccepted)).toHaveCount(shippedQualifies ? 1 : 0);
+        await captureState(page, testInfo, context, "shipped-records-history", [shippedQualifies ? "en-SG: disclosure shown first, Cancel: standard wording with the not-used line" : "zh-SG: no disclosure, standard wording", "0 POSTs"], panel);
+        const article = await openCarePreview(page, m, "insulinRecords");
+        await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(0);
+        await expect(article).not.toContainText(m.ai.demoTag);
+        await expectNoHorizontalOverflow(page);
+        await captureState(page, testInfo, context, "shipped-records-care", ["seeded insulin preview (with the appointment) is not an evaluated class: no 'Organise with AI' action", "no AI marking"], article);
         expect(shell.calls).toHaveLength(0);
       });
     });

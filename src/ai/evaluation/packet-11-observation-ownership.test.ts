@@ -187,7 +187,7 @@ describe("observation ownership: composition", () => {
   });
 
   it("through the service (fake model, REMOTE_AI): every EXPLAIN fixture is an AI composition whose observation is the selected deterministic variant, accepted by the real r7", async () => {
-    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (independent of the shipped records).
     const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", manifest: ENABLED, provider: echoing(), audit: { append: async () => undefined }, now: () => "2026-10-07T10:00:00.000Z", monotonicMs: () => 0, requestClassGate: qualifiedTestRequestClassGate() });
     for (const fixture of EXPLAIN) {
       const { request, plan, atoms } = planOf(fixture.id);
@@ -206,7 +206,7 @@ describe("observation ownership: composition", () => {
 
   // Presentation correction P1 (ai-language-copy.11b.8, 2026-10-08): supplied items are quoted as the person's own words.
   it("the problematic multi-fact fixtures (en and zh) now read as separate recorded statements with no link", async () => {
-    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (independent of the shipped records).
     const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", manifest: ENABLED, provider: echoing(), audit: { append: async () => undefined }, now: () => "2026-10-07T10:00:00.000Z", monotonicMs: () => 0, requestClassGate: qualifiedTestRequestClassGate() });
     const expected: Record<string, string> = {
       "p11.explain-pattern.en-sg.forbidden-adherence": "The recorded values are 10.4 mmol/L and 11.1 mmol/L. Other recorded item, in your own words: “forgot breakfast tablet”.",

@@ -10,9 +10,9 @@ import { createCareOrganisationService } from "@/application/care-organisation/c
 import { createCareOrganisationQuery } from "@/application/care-organisation/care-organisation-query";
 import { seedSyntheticCareOrganisation } from "@/application/care-organisation/synthetic-care-organisation-seed";
 import { createAiInvocationAuditRepository } from "@/application/ai/ai-audit-persistence";
-import { AI_ACTIVATION_MANIFEST } from "@/application/ai/ai-activation-manifest";
+import type { AiActivationManifest } from "@/application/ai/ai-activation-manifest";
 import { createAiHybridTaskService } from "@/application/ai/ai-hybrid-task-service";
-import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
+import { DETERMINISTIC_ONLY_TEST_MANIFEST, qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 import { CARE_PREPARATION_STORED_ROW_CODECS, carePreparationRevisionRowCodec } from "./care-preparation-persistence";
 import { createCarePreparationService, type CarePreparationDependencies } from "./care-preparation-service";
 import { createCarePreparationQuery } from "./care-preparation-query";
@@ -318,11 +318,11 @@ describe("replaceWithAiAssistedPreview (Packet 11C B1b)", () => {
     const refused = { kind: "REJECTED", code: "SUMMARY_AI_VALIDATION_MISSING" };
     // No audit row with that request id.
     expect(await h.service.replaceWithAiAssistedPreview({ ...input, aiInvocationAuditRef: crypto.randomUUID() })).toEqual(refused);
-    // An audit row that is not ACCEPTED (a deterministic run of the shipped manifest).
+    // An audit row that is not ACCEPTED (a deterministic run with the task not activated: the pre-activation manifest).
     const built = buildCareSummaryAiRequest({ current: payload, requestId: crypto.randomUUID(), requestedAt: NOW });
     if (built.kind !== "READY") throw new Error(built.reason);
-    const shipped = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: h.audits, now: () => LATER, monotonicMs: () => 0, manifest: AI_ACTIVATION_MANIFEST });
-    const deterministic = await shipped.execute(built.request);
+    const notActivated = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: h.audits, now: () => LATER, monotonicMs: () => 0, manifest: DETERMINISTIC_ONLY_TEST_MANIFEST });
+    const deterministic = await notActivated.execute(built.request);
     if (deterministic.kind !== "COMPOSED" || deterministic.source !== "DETERMINISTIC") throw new Error("deterministic");
     expect(await h.service.replaceWithAiAssistedPreview({ ...input, composition: deterministic.composition, aiInvocationAuditRef: deterministic.auditRef })).toEqual(refused);
     // A composition that does not project (another value in the text), or none at all.
@@ -417,9 +417,9 @@ describe("care audit row codec: AI assistance only on the AI-assisted snapshot's
 
 describe("composeCareSummaryWithAi (Packet 11C B1b)", () => {
   type H = Awaited<ReturnType<typeof setup>>;
-  function composer(h: H, options: { manifest?: typeof AI_ACTIVATION_MANIFEST; provider?: ReturnType<typeof fakeCareShellProvider> } = {}) {
+  function composer(h: H, options: { manifest?: AiActivationManifest; provider?: ReturnType<typeof fakeCareShellProvider> } = {}) {
     const provider = options.provider ?? fakeCareShellProvider(() => ({ kind: "FAILED", reason: "PROVIDER_FAILED" }));
-    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (independent of the shipped records).
     const hybrid = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: h.audits, now: () => LATER, monotonicMs: () => 0, manifest: options.manifest ?? ENABLED_CARE_MANIFEST, provider, requestClassGate: qualifiedTestRequestClassGate() });
     const execute = vi.fn(hybrid.execute);
     // Packet 11C Addendum C (C5): the service's zero-attempt row for a request that never reaches execute.
@@ -450,10 +450,12 @@ describe("composeCareSummaryWithAi (Packet 11C B1b)", () => {
   };
   const snapshotHeads = async (h: H) => (await h.database.table("recordHeads").where("recordType").equals("CARE_SUMMARY_SNAPSHOT").toArray()) as RecordHead[];
 
-  it("with the shipped manifest: keeps the deterministic preview, creates no snapshot, makes no provider call and writes one audit row", async () => {
+  // Packet 11C English activation (owner decisions Q and A): the shipped manifest now enables the care task, so "not activated" is the
+  // injected pre-activation manifest (was: the shipped manifest).
+  it("with the task not activated (the pre-activation manifest): keeps the deterministic preview, creates no snapshot, makes no provider call and writes one audit row", async () => {
     const h = await setup();
     const { head } = await h.prepared();
-    const { use, provider } = composer(h, { manifest: AI_ACTIVATION_MANIFEST });
+    const { use, provider } = composer(h, { manifest: DETERMINISTIC_ONLY_TEST_MANIFEST });
     const before = await h.counts();
     expect(await use.composeCareSummaryWithAi({ snapshotRef: head, locale: "en-SG" })).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "TASK_DISABLED" });
     expect(provider.calls).toBe(0);

@@ -22,7 +22,7 @@ import type { BrowserShellFetcher } from "@/application/ai/browser-shell-client"
 import { shellCandidate } from "@/ai/evaluation/packet-11-hybrid-test-support";
 import type { PrintPort } from "../care-preparation/PrintPort";
 import { CareSummaryPreviewScreen, type CareSummaryAiWordingOutcome, type CareSummaryAiWordingPort } from "./CareSummaryPreviewScreen";
-// Packet 11C Addendum C (C1): the activated paths inject test-only QUALIFIED records (the shipped records are all PENDING).
+// Packet 11C Addendum C (C1): the activated paths inject test-only QUALIFIED records (independent of the shipped records).
 import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;

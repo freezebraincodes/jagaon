@@ -1,15 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AI_TASK_TYPES, aiInvocationAuditRowSchema, type AiInvocationAuditRow, type AiTaskType } from "@/domain/ai";
 import { FIXTURE_NOW, FIXTURE_REQUEST_ID, abstainFixture, outputFixture, requestFixture } from "@/domain/ai/ai-test-fixtures";
-import { AI_ACTIVATION_MANIFEST, type AiActivationManifest, type AiTaskActivationState } from "./ai-activation-manifest";
+import { AI_ACTIVATION_MANIFEST, AI_DETERMINISTIC_ONLY_MANIFEST, type AiActivationManifest, type AiTaskActivationState } from "./ai-activation-manifest";
 import type { AiProviderPort, ProviderInvocationResult } from "./ai-provider-port";
 import { createAiTaskService } from "./ai-task-service";
 
 /**
- * Packet 11A Task 4: provider-neutral orchestration. The shipped manifest is
- * deterministic-only, so the provider is never called. Remote paths are
- * exercised only through an injected test manifest and a fake provider; no
+ * Packet 11A Task 4: provider-neutral orchestration. Without an injected manifest
+ * the service is deterministic-only, so the provider is never called. Remote paths
+ * are exercised only through an injected test manifest and a fake provider; no
  * network, credential or real provider exists in 11A.
+ * Packet 11C English activation (owner decisions Q and A, 2026-10-12; I-8 review
+ * follow-up): the shipped manifest now enables EXPLAIN_PATTERN and
+ * DRAFT_CARE_PREPARATION_SUMMARY for the value-blind hybrid shell path; this legacy
+ * service (it sends record values) defaults to `AI_DETERMINISTIC_ONLY_MANIFEST`
+ * instead, pinned below.
  */
 
 const MODEL = { providerKey: "fake", modelSnapshot: "fake-model-1" } as const;
@@ -56,6 +61,23 @@ describe("deterministic-only 11A manifest", () => {
     expect(invoke).not.toHaveBeenCalled();
     expect(rows).toHaveLength(1);
     expect(aiInvocationAuditRowSchema.parse(rows[0])).toMatchObject({ requestId: FIXTURE_REQUEST_ID, taskType, outcomeCode: "TASK_DISABLED", routeProfileKey: "deterministic-only.11a.1", providerModel: null, attempts: { count: 0 }, sourceRevisions: [], downstream: null });
+  });
+
+  it("Packet 11C English activation (I-8 follow-up): with NO manifest injected and a provider supplied, it never calls the provider for any task, although the shipped manifest enables two tasks", async () => {
+    expect(Object.values(AI_ACTIVATION_MANIFEST.tasks)).toContain("SYNTHETIC_REMOTE_ENABLED");
+    expect(AI_DETERMINISTIC_ONLY_MANIFEST).toEqual({ manifestVersion: "ai-activation.11a.1", profile: "HACKATHON_DEMO", tasks: Object.fromEntries(AI_TASK_TYPES.map((taskType) => [taskType, "DETERMINISTIC_ONLY"])) });
+    expect(Object.isFrozen(AI_DETERMINISTIC_ONLY_MANIFEST) && Object.isFrozen(AI_DETERMINISTIC_ONLY_MANIFEST.tasks)).toBe(true);
+    const { provider, invoke } = fakeProvider(...AI_TASK_TYPES.map(() => completed(outputFixture("EXPLAIN_PATTERN"))));
+    const { service, rows } = harness({ provider });
+    for (const taskType of AI_TASK_TYPES) {
+      expect(await service.execute(request(taskType)), taskType).toMatchObject({ kind: "FALLBACK", fallback: { kind: "DETERMINISTIC_FALLBACK", taskType, reason: "TASK_DISABLED" } });
+    }
+    expect(invoke).not.toHaveBeenCalled();
+    expect(rows.map((row) => [row.taskType, row.outcomeCode, row.attempts.count])).toEqual(AI_TASK_TYPES.map((taskType) => [taskType, "TASK_DISABLED", 0]));
+    // Injection still works: the shipped manifest, injected explicitly, enables exactly its two tasks here (the evaluation seam).
+    const injected = fakeProvider(completed(outputFixture("EXPLAIN_PATTERN")));
+    await harness({ provider: injected.provider, manifest: AI_ACTIVATION_MANIFEST }).service.execute(request("EXPLAIN_PATTERN"));
+    expect(injected.invoke).toHaveBeenCalledTimes(1);
   });
 
   it("a registered-disabled task falls back as TASK_DISABLED", async () => {

@@ -43,7 +43,8 @@ import { SHIPPED_REQUEST_CLASS_GATE, type AiRequestClassGate } from "./request-c
  * its reported usage, else its pre-send upper bound (`shellRouteCallUpperBound`; basis UPPER_BOUND), never zero. `recordUnsent` writes
  * the zero-attempt row of an explicit request that never reached `execute`, so each explicit request has exactly one row.
  * Packet 11C Addendum C, Task C1 (owner decision C1): after the projection and BEFORE the disclosure, the projected value-blind request's
- * class (under the current contract) must be QUALIFIED (`requestClassGate`; production: the shipped records, all PENDING). Otherwise the
+ * class (under the current contract) must be QUALIFIED (`requestClassGate`; production: the shipped records, which since the Packet 11C
+ * English activation (owner decisions Q and A) qualify the six en-SG classes only; every zh-SG class is PENDING). Otherwise the
  * request composes deterministically in mode CLASS_NOT_QUALIFIED (closed reason TASK_DISABLED: remote use is not enabled for this
  * request) with no disclosure and nothing sent, audited with the audit-only REQUEST_CLASS_NOT_QUALIFIED (zero attempts). A gate that
  * throws is not qualified. The route's own class refusal (a provider FAILED carrying `refusal`) is audited with the same code.
@@ -100,7 +101,8 @@ export type AiHybridTaskServiceDependencies = Readonly<{
   online?: () => boolean;
   /**
    * Packet 11C Addendum C (C1): which request classes may be sent. Absent means the shipped gate (the generated definitions and the
-   * shipped qualification records, all PENDING). Test seam: tests of a remote path inject test-only QUALIFIED records.
+   * shipped qualification records: six en-SG QUALIFIED, six zh-SG PENDING). Test seam: tests of a remote path inject test-only QUALIFIED
+   * records.
    */
   requestClassGate?: AiRequestClassGate;
   /**

@@ -29,7 +29,7 @@ const envelope = (text: string) => ({
 describe("a completed call whose accepted candidate fails the route's re-parse (C5)", () => {
   it("is FAILED with the call's reported usage, never without it", async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify(envelope(JSON.stringify({ not: "a shell" }))), { status: 200, headers: { "content-type": "application/json" } }));
-    // Packet 11C Addendum C (C1): a remote path needs a QUALIFIED class (test-only records; the shipped records are all PENDING).
+    // Packet 11C Addendum C (C1): a remote path needs a QUALIFIED class (test-only records, independent of the shipped records).
     // Packet 11C Addendum C (C6): plus the deployment configuration (test values) and a same-origin browser POST with the passcode.
     const handler = createAiShellHandler({ environment: { DEEPSEEK_API_KEY: "deepseek-SENTINEL-reparse", ...TEST_DEPLOYMENT_ENVIRONMENT }, activationManifest: ENABLED, fetcher, requestClassGate: qualifiedTestRequestClassGate() });
     const request = projectShellTaskRequest(plannedFixture("p11.explain-pattern.en-sg.ordinary").plan);

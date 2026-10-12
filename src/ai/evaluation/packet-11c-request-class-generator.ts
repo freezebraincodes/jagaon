@@ -8,7 +8,7 @@ import { SHELL_RULES_REVISION } from "@/application/ai/language/shell-lexicon";
 import { projectShellTaskRequest } from "@/application/ai/language/shell-projector";
 import { planSlots } from "@/application/ai/language/slot-planner";
 import { AI_REQUEST_CLASS_SCHEME, type AiRequestClassContractInputs, type AiRequestClassDefinition } from "@/application/ai/request-class-definitions";
-import { requestClassId, shellRequestDigest } from "@/application/ai/request-class-qualification";
+import { aiRequestClassQualificationRecordSchema, requestClassId, shellRequestDigest, type AiRequestClassQualificationRecord } from "@/application/ai/request-class-qualification";
 import { canonicalizeJson } from "@/application/contracts/canonical-json";
 import { sha256Hex } from "@/application/intelligence/metrics";
 import { AI_LOCALES, SHELL_INPUT_VERSIONS, SHELL_MAX_OUTPUT_TOKENS, SHELL_OUTPUT_VERSIONS, SHELL_PROVIDER_REQUEST_VERSION, SHELL_TASKS, SHELL_TEMPERATURE, SLOT_PLAN_VERSION, type ShellTask, type ShellTaskRequest } from "@/domain/ai";
@@ -33,8 +33,12 @@ import { hybridFixturesForPhase } from "./packet-11-hybrid-fixtures";
  * with a fetcher that records the body and throws, exactly as the presentation guard captures it; every sample of a class must yield the
  * same body), keyed by the class's shellRequestDigest, and `endpointSha256` is the sha256 of the URL that adapter sends to (the URL itself
  * stays server-only). This changed every classId (intended). The SHIPPED qualification records are generated here too
- * (`renderQualificationRecordsBlock`): one per definition, ALL PENDING, no evidence, no sign-off (this generator never writes another
- * status); the test requires the records literal in `request-class-qualification.ts` to be byte-identical to it.
+ * (`renderQualificationRecordsBlock`): one per definition, PENDING with no evidence and no sign-off unless an owner sign-off record for
+ * that class is passed in (this generator never decides a status); the test requires the records literal in
+ * `request-class-qualification.ts` to be byte-identical to it.
+ *
+ * Packet 11C English activation (owner decisions Q and A, 2026-10-12): the owner's sign-off records for the six en-SG classes are pinned
+ * in packet-11c-request-classes.test.ts and passed in there; the six zh-SG classes render PENDING.
  */
 
 const sha256 = (text: string) => sha256Hex(text);
@@ -161,7 +165,7 @@ export async function renderRequestClassDefinitionsModule(): Promise<string> {
     ` *   64-hex digests concatenated). \`sampleFixtureIds\` are the FULL fixtures sharing that identical request and model-facing body:`,
     ` *   repeated samples of one body, never model exposure to any fixture's patient text (none crosses the boundary).`,
     ` * Plain data only: no evaluation, prompt, provider or credential code is imported (browser-safe). Whether a class may be sent is NOT`,
-    ` * recorded here: that is the separate, owner-signed qualification record (request-class-qualification.ts; all PENDING).`,
+    ` * recorded here: that is the separate, owner-signed qualification record (request-class-qualification.ts).`,
     ` */`,
     `export const AI_REQUEST_CLASS_SCHEME = ${json(AI_REQUEST_CLASS_SCHEME)};`,
     ``,
@@ -228,15 +232,33 @@ export const QUALIFICATION_RECORDS_END = "\n\nexport const SHIPPED_REQUEST_CLASS
 
 /**
  * CL3 re-freeze: the exact text of the shipped records literal (from `export const AI_REQUEST_CLASS_QUALIFICATION_RECORDS` to its closing
- * `);`): one record per definition, in definition order, ALL PENDING with no evidence and no sign-off. Moving a class to QUALIFIED is an
- * owner sign-off, never this generator.
+ * `);`): one record per definition, in definition order, PENDING with no evidence and no sign-off. Moving a class to QUALIFIED is an
+ * owner sign-off, never this generator: Packet 11C English activation (owner decisions Q and A, 2026-10-12) passes the owner's sign-off
+ * records in `ownerSignOffs`, each rendered as given. Each must be schema-valid, name a definition's class under that definition's
+ * contract, and appear at most once; anything else throws (nothing is rendered QUALIFIED by default).
  */
-export function renderQualificationRecordsBlock(definitions: readonly Pick<AiRequestClassDefinition, "classId" | "contractDigest">[]): string {
+export function renderQualificationRecordsBlock(
+  definitions: readonly Pick<AiRequestClassDefinition, "classId" | "contractDigest">[],
+  ownerSignOffs: readonly AiRequestClassQualificationRecord[] = [],
+): string {
   const json = (value: unknown) => JSON.stringify(value);
+  const signOffOf = new Map<string, AiRequestClassQualificationRecord>();
+  for (const signOff of ownerSignOffs) {
+    const record = aiRequestClassQualificationRecordSchema.parse(signOff);
+    const definition = definitions.find((entry) => entry.classId === record.classId);
+    if (definition === undefined || definition.contractDigest !== record.contractDigest || signOffOf.has(record.classId)) throw new Error(`QUALIFICATION_SIGN_OFF_INVALID: ${record.classId}`);
+    signOffOf.set(record.classId, record);
+  }
+  const line = (definition: Pick<AiRequestClassDefinition, "classId" | "contractDigest">) => {
+    const signOff = signOffOf.get(definition.classId);
+    return signOff === undefined
+      ? `    { classId: ${json(definition.classId)}, contractDigest: ${json(definition.contractDigest)}, status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },`
+      : `    { classId: ${json(signOff.classId)}, contractDigest: ${json(signOff.contractDigest)}, status: ${json(signOff.status)}, evidenceRef: ${json(signOff.evidenceRef)}, signedOffBy: ${json(signOff.signedOffBy)}, signedOffAt: ${json(signOff.signedOffAt)} },`;
+  };
   return [
     `${QUALIFICATION_RECORDS_START}: readonly AiRequestClassQualificationRecord[] = Object.freeze(`,
     `  ([`,
-    ...definitions.map((definition) => `    { classId: ${json(definition.classId)}, contractDigest: ${json(definition.contractDigest)}, status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },`),
+    ...definitions.map(line),
     `  ] as const satisfies readonly AiRequestClassQualificationRecord[]).map((record): AiRequestClassQualificationRecord => Object.freeze({ ...record })),`,
     `);`,
   ].join("\n");

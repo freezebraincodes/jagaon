@@ -21,7 +21,7 @@ import type { AiInvocationAuditRow, AiTaskRequest, ShellFieldPath, ShellTaskRequ
 import { requestFixture, sourceBackedRequest } from "@/domain/ai/ai-test-fixtures";
 import { AI_REQUEST_CLASS_DEFINITIONS } from "@/application/ai/request-class-definitions";
 import { AI_REQUEST_CLASS_QUALIFICATION_RECORDS, createRequestClassGate, requestClassIdentity, type AiRequestClassGate } from "@/application/ai/request-class-qualification";
-import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
+import { DETERMINISTIC_ONLY_TEST_MANIFEST, pendingTestRequestClassGate, qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 import { buildCareSummaryAiRequest } from "@/application/care-preparation/ai-care-summary-request";
 import { NOW, syntheticCareDraft } from "@/application/care-preparation/care-preparation-test-support";
 import { renderDeterministicCareSummary } from "@/application/care-preparation/deterministic-care-summary-renderer";
@@ -33,6 +33,12 @@ import * as route from "./route";
 /**
  * Packet 11C Addendum B, Task B2a: the value-blind shell route POST /api/ai/shell (B-boundary, D1, D2, D6). Fake fetchers only; no live
  * call. The provider is fixed (Direct DeepSeek, deepseek-flash); activation is tested only with an injected test manifest.
+ *
+ * Packet 11C English activation (owner decisions Q and A, 2026-10-12): the shipped manifest enables both shell tasks and the shipped records
+ * qualify the six en-SG classes (every zh-SG class PENDING). The shipped-route tests below pin that: with the deployment configuration an
+ * en-SG request reaches the (fake) transport and a zh-SG request is refused REQUEST_CLASS_NOT_QUALIFIED before any credential read;
+ * without the switch nothing is read or sent. Tests whose subject is a task that is not activated or an unqualified class inject the
+ * pre-activation manifest (`DETERMINISTIC_ONLY_TEST_MANIFEST`) or an all-PENDING gate (`pendingTestRequestClassGate()`).
  */
 
 const TOKEN = "deepseek-SENTINEL-route-credential";
@@ -79,8 +85,8 @@ function recordingEnvironment(values: Record<string, string> = ENV) {
   return { environment, reads };
 }
 type Options = Partial<Parameters<typeof createAiShellHandler>[0]>;
-// Packet 11C Addendum C (C1): a remote path needs a QUALIFIED class; these tests inject test-only QUALIFIED records (the shipped records
-// are all PENDING). An option `requestClassGate: undefined` restores the production default.
+// Packet 11C Addendum C (C1): a remote path needs a QUALIFIED class; these tests inject test-only QUALIFIED records (independent of the
+// shipped records, which qualify only the en-SG classes). An option `requestClassGate: undefined` restores the production default.
 const handler = (options: Options = {}) => createAiShellHandler({ environment: ENV, activationManifest: ENABLED, requestClassGate: qualifiedTestRequestClassGate(), ...options });
 async function call(request: Request, options: Options = {}) {
   const response = await handler(options)(request);
@@ -102,17 +108,38 @@ describe("route module", () => {
     expect(source).not.toMatch(/NEXT_PUBLIC_/);
   });
 
-  it("C1: the production wiring passes only the server environment (so the shipped request-class gate, all PENDING, applies)", () => {
+  it("C1: the production wiring passes only the server environment (so the shipped manifest and request-class gate apply)", () => {
     const source = readFileSync(join(process.cwd(), "src/app/api/ai/shell/route.ts"), "utf8");
     expect(source).toMatch(/const handle = createAiShellHandler\(\{ environment: process\.env \}\);/);
     // Packet 11C Addendum C (C6): nor a spend ledger (the shipped per-instance ledger applies).
     expect(source).not.toMatch(/requestClassGate|request-class|activationManifest|spendLedger|SpendLedger/);
   });
 
-  it("the shipped route is NOT_ACTIVATED: a valid approved request is refused server-side with no credential read and no fetch", async () => {
+  it("the shipped route (shipped manifest and records, deployment configuration): an en-SG request reaches the transport once; a zh-SG request is refused before any credential read or fetch", async () => {
+    // Packet 11C English activation (owner decisions Q and A): was "the shipped route is NOT_ACTIVATED" (every request TASK_DISABLED).
+    for (const [label, fixture] of [["en-SG explanation", EN], ["en-SG care", CARE]] as const) {
+      const fetcher = deepseek(fixture === EN ? VALID : shellCandidate(CARE.plan, new Map()));
+      const { environment, reads } = recordingEnvironment();
+      const response = await createAiShellHandler({ environment, fetcher })(post(shellRequest(fixture)));
+      expect(response.status, label).toBe(200);
+      expect(credentialReads(reads), label).toEqual(["DEEPSEEK_API_KEY"]);
+      expect(fetcher, label).toHaveBeenCalledTimes(1);
+      expect(fetcher.mock.calls[0]![0], label).toBe(DEEPSEEK_RESPONSES_URL);
+    }
+    for (const [label, fixture] of [["zh-SG explanation", ZH], ["zh-SG care", CARE_ZH]] as const) {
+      const fetcher = deepseek();
+      const { environment, reads } = recordingEnvironment();
+      const response = await createAiShellHandler({ environment, fetcher })(post(shellRequest(fixture)));
+      expect([response.status, await response.json()], label).toEqual([403, { kind: "REFUSED", reason: "REQUEST_CLASS_NOT_QUALIFIED", notSentToProvider: true }]);
+      expect(credentialReads(reads), label).toEqual([]);
+      expect(fetcher, label).not.toHaveBeenCalled();
+    }
+  });
+
+  it("a task that is not activated (the pre-activation manifest) is refused server-side with no credential read and no fetch", async () => {
     const fetcher = deepseek();
     const { environment, reads } = recordingEnvironment();
-    const response = await createAiShellHandler({ environment, fetcher })(post(shellRequest()));
+    const response = await createAiShellHandler({ environment, fetcher, activationManifest: DETERMINISTIC_ONLY_TEST_MANIFEST })(post(shellRequest()));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true });
     expect(credentialReads(reads)).toEqual([]);
@@ -133,10 +160,12 @@ describe("route module", () => {
    * is re-imported after the probe is installed, because it hands process.env to the handler when it is evaluated.
    */
   it.each([
-    // Packet 11C Addendum C (C6): the shipped deployment without its configuration answers the switch's closed refusal; with the
-    // configuration (test values) the shipped manifest still refuses (TASK_DISABLED). Neither reads the credential or sends anything.
+    // Packet 11C Addendum C (C6): the shipped deployment without its configuration answers the switch's closed refusal. Packet 11C
+    // English activation: the shipped manifest no longer refuses an en-SG request (was: with the configuration, TASK_DISABLED), so the
+    // second case is the configuration with the server switch off (JAGAON_REMOTE_AI=off): the same closed refusal. Neither reads the
+    // credential or sends anything; the shipped route with the switch on is pinned in the next test.
     ["without the deployment configuration", {}, [403, { kind: "REFUSED", reason: "REMOTE_AI_DISABLED", notSentToProvider: true }]],
-    ["with the deployment configuration", TEST_DEPLOYMENT_ENVIRONMENT, [200, { kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true }]],
+    ["with the deployment configuration and the remote-AI switch off", { ...TEST_DEPLOYMENT_ENVIRONMENT, [AI_SHELL_DEPLOYMENT_ENV.remoteAi]: "off" }, [403, { kind: "REFUSED", reason: "REMOTE_AI_DISABLED", notSentToProvider: true }]],
   ] as const)("route.POST (shipped manifest, %s) refuses every request kind with no credential read and no network call", async (_label, deployment, approved) => {
     const reads: string[] = [];
     const original = process.env;
@@ -177,6 +206,36 @@ describe("route module", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("route.POST (shipped manifest and records, with the deployment configuration and the switch on): zh-SG requests are refused with no credential read and no network call; an en-SG request reads the credential once and reaches the transport once", async () => {
+    const original = process.env;
+    const reads: string[] = [];
+    const fetchSpy = deepseek();
+    vi.stubGlobal("fetch", fetchSpy);
+    const base: Record<string, string | undefined> = { ...original, DEEPSEEK_API_KEY: TOKEN, KIE_API_KEY: TOKEN };
+    for (const key of Object.values(AI_SHELL_DEPLOYMENT_ENV)) delete base[key];
+    process.env = new Proxy({ ...base, ...TEST_DEPLOYMENT_ENVIRONMENT } as NodeJS.ProcessEnv, { get: (target, key) => (typeof key === "string" && /API_KEY|TOKEN|SECRET/.test(key) && reads.push(key), Reflect.get(target, key)) });
+    try {
+      vi.resetModules();
+      const fresh = await import("./route");
+      for (const [label, fixture] of [["zh-SG explanation", ZH], ["zh-SG care", CARE_ZH]] as const) {
+        const response = await fresh.POST(post(shellRequest(fixture)));
+        expect([response.status, await response.json()], label).toEqual([403, { kind: "REFUSED", reason: "REQUEST_CLASS_NOT_QUALIFIED", notSentToProvider: true }]);
+      }
+      expect(reads).toEqual([]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      const response = await fresh.POST(post(shellRequest(EN)));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ kind: "CANDIDATE" });
+      expect(reads).toEqual(["DEEPSEEK_API_KEY"]);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(fetchSpy.mock.calls[0]![0]).toBe(DEEPSEEK_RESPONSES_URL);
+    } finally {
+      process.env = original;
+      vi.resetModules();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("rechecks the exact HACKATHON_DEMO profile on the server", async () => {
     const fetcher = deepseek();
     for (const releaseProfile of ["PRODUCTION", "hackathon_demo", undefined]) {
@@ -189,11 +248,14 @@ describe("route module", () => {
 describe("Packet 11C Addendum C, C1: an unqualified request class is refused before any credential read", () => {
   // Packet 11C Addendum C (C6): every REFUSED carries the explicit "not sent to provider" marker.
   const REFUSED = { kind: "REFUSED", reason: "REQUEST_CLASS_NOT_QUALIFIED", notSentToProvider: true };
+  // Packet 11C English activation (owner decisions Q and A): the shipped records qualify the en-SG classes, so the "every class refused"
+  // property is now pinned for an all-PENDING gate (the pre-activation state), and for the zh-SG classes under the shipped records.
   it.each([
-    ["the production default (no gate: the shipped, all-PENDING records)", undefined],
-    ["a gate over the shipped definitions and records", createRequestClassGate({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS })],
-  ])("under %s, every evaluated class (activated test manifest) answers 403 REFUSED, with no credential read, no fetch and no usage", async (_label, requestClassGate) => {
-    for (const fixture of [EN, ZH, CARE, CARE_ZH]) {
+    ["an all-PENDING gate over the shipped definitions (pre-activation)", pendingTestRequestClassGate(), [EN, ZH, CARE, CARE_ZH]],
+    ["the production default (no gate: the shipped records), for the zh-SG classes", undefined, [ZH, CARE_ZH]],
+    ["a gate over the shipped definitions and records, for the zh-SG classes", createRequestClassGate({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS }), [ZH, CARE_ZH]],
+  ] as const)("under %s, every evaluated class (activated test manifest) answers 403 REFUSED, with no credential read, no fetch and no usage", async (_label, requestClassGate, fixtures) => {
+    for (const fixture of fixtures) {
       const fetcher = deepseek();
       const { environment, reads } = recordingEnvironment();
       const response = await createAiShellHandler({ environment, fetcher, activationManifest: ENABLED, ...(requestClassGate ? { requestClassGate } : {}) })(post(shellRequest(fixture)));
@@ -207,18 +269,21 @@ describe("Packet 11C Addendum C, C1: an unqualified request class is refused bef
   });
   it("the class is the received request's own: a gate qualifying one class admits only that class, after the request and activation checks", async () => {
     const id = requestClassIdentity(shellRequest(EN)).classId;
+    // Over all-PENDING records (the pre-activation state), so that this one test record is the only QUALIFIED one.
     const gate = createRequestClassGate({
       definitions: AI_REQUEST_CLASS_DEFINITIONS,
-      records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => (record.classId === id ? { ...record, status: "QUALIFIED", evidenceRef: "test/evidence", signedOffBy: "test", signedOffAt: "2026-10-08T00:00:00.000Z" } : record)),
+      records: AI_REQUEST_CLASS_DEFINITIONS.map((definition) => ({ classId: definition.classId, contractDigest: definition.contractDigest, status: definition.classId === id ? "QUALIFIED" : "PENDING", evidenceRef: definition.classId === id ? "test/evidence" : null, signedOffBy: definition.classId === id ? "test" : null, signedOffAt: definition.classId === id ? "2026-10-08T00:00:00.000Z" : null })),
     });
     const admitted = await call(post(shellRequest(EN)), { requestClassGate: gate, fetcher: deepseek() });
     expect(admitted).toMatchObject({ status: 200, body: { kind: "CANDIDATE" } });
     expect(await call(post(shellRequest(ZH)), { requestClassGate: gate, fetcher: deepseek() })).toMatchObject({ status: 403, body: REFUSED });
-    // A request refused earlier is refused for that reason (the gate is never asked); the shipped manifest still answers TASK_DISABLED.
+    expect(await call(post(shellRequest(CARE)), { requestClassGate: gate, fetcher: deepseek() })).toMatchObject({ status: 403, body: REFUSED });
+    // A request refused earlier is refused for that reason (the gate is never asked); a task that is not activated (the pre-activation
+    // manifest) still answers TASK_DISABLED.
     const admit = vi.fn<AiRequestClassGate["admit"]>(() => ({ admitted: true, classId: id }));
     const spy: AiRequestClassGate = { admit, anyAdmissible: () => true };
     expect(await call(post({ ...shellRequest(EN), facts: [] }), { requestClassGate: spy })).toMatchObject({ status: 400, body: { kind: "FAILED", reason: "PAYLOAD_INVALID", notSentToProvider: true } });
-    expect(await call(post(shellRequest(EN)), { requestClassGate: spy, activationManifest: AI_ACTIVATION_MANIFEST })).toMatchObject({ status: 200, body: { kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true } });
+    expect(await call(post(shellRequest(EN)), { requestClassGate: spy, activationManifest: DETERMINISTIC_ONLY_TEST_MANIFEST, fetcher: deepseek() })).toMatchObject({ status: 200, body: { kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true } });
     expect(admit).not.toHaveBeenCalled();
   });
   it("an approved class outside the definitions (other care section counts) is refused; a gate that throws refuses", async () => {
@@ -495,7 +560,7 @@ describe("provider outcomes", () => {
       ["an oversized body", () => call(post(undefined, { raw: "x".repeat(AI_SHELL_MAX_BODY_BYTES + 1) }), { fetcher: deepseek() })],
       ["malformed JSON", () => call(post(undefined, { raw: "{not json" }), { fetcher: deepseek() })],
       ["raw facts", () => call(post({ ...shellRequest(), facts: [] }), { fetcher: deepseek() })],
-      ["the shipped manifest", () => call(post(shellRequest()), { fetcher: deepseek(), activationManifest: AI_ACTIVATION_MANIFEST })],
+      ["a task that is not activated", () => call(post(shellRequest()), { fetcher: deepseek(), activationManifest: DETERMINISTIC_ONLY_TEST_MANIFEST })],
       ["another release profile", () => call(post(shellRequest()), { fetcher: deepseek(), releaseProfile: "PRODUCTION" })],
       ["a missing key", () => call(post(shellRequest()), { fetcher: deepseek(), environment: { ...TEST_DEPLOYMENT_ENVIRONMENT } })],
       ["a request cancelled before the call", () => call(post(shellRequest(), { signal: aborted.signal }), { fetcher: deepseek() })],

@@ -57,7 +57,7 @@ import { AI_LOCALES, AI_TASK_TYPES, SHELL_INPUT_VERSIONS, SHELL_MAX_OUTPUT_TOKEN
 import { getMessages } from "@/i18n/get-messages";
 import { AI_REQUEST_CLASS_CONTRACT, AI_REQUEST_CLASS_DEFINITIONS } from "@/application/ai/request-class-definitions";
 import { AI_REMOTE_ELIGIBILITY_POLICY_VERSION, AI_REQUEST_CLASS_QUALIFICATION_RECORDS, SHIPPED_REQUEST_CLASS_GATE } from "@/application/ai/request-class-qualification";
-import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
+import { DETERMINISTIC_ONLY_TEST_MANIFEST, pendingTestRequestClassGate, qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 import { canonicalizeJson } from "@/application/contracts/canonical-json";
 import { requestClassContractDigest, requestClassContractInputsFromCode, splitQualificationModule } from "./packet-11c-request-class-generator";
 import { VALIDATOR_RULES_REVISION } from "./packet-11-evaluation";
@@ -79,7 +79,8 @@ import { SOURCE_BACKED_SCENARIOS, sourceBackedFixture } from "./packet-11-source
  *   pending: pinned as bytes, never recorded as approved);
  * - the `/api/ai/shell` route's provider and model (D2: Direct DeepSeek `deepseek-flash`, recorded in the contract; NOT a production pin:
  *   every runtime bundle keeps `modelSnapshot: null` and nothing is activated), temperature, caps and the budgets table;
- * - the shipped activation manifest (every task DETERMINISTIC_ONLY);
+ * - the shipped activation manifest (Packet 11C English activation: EXPLAIN_PATTERN and DRAFT_CARE_PREPARATION_SUMMARY
+ *   SYNTHETIC_REMOTE_ENABLED, every other task DETERMINISTIC_ONLY);
  * - the current model-facing request digests: the 70 fixtures (current, and version-normalised to the historical evaluated bytes), the
  *   source-backed EXPLAIN classes and the care snapshot classes.
  * Where several code sources carry one value, they must agree; a disagreement shows every source by name.
@@ -120,6 +121,15 @@ import { SOURCE_BACKED_SCENARIOS, sourceBackedFixture } from "./packet-11-source
  *   setting's copy group ai-wording-setting.11c.2 (owner decisions U04/U05 moved it from 11c.1);
  * - `historyFallback` (owner decision U12): the copy group ai-history-fallback.11c.1.
  * None of it is model-facing (checked on every captured body): every body digest is unchanged.
+ *
+ * Packet 11C English activation (owner decisions Q and A, 2026-10-12; deliberate): `activationManifest` moves to ai-activation.11c.1
+ * with EXPLAIN_PATTERN and DRAFT_CARE_PREPARATION_SUMMARY SYNTHETIC_REMOTE_ENABLED (the four other tasks DETERMINISTIC_ONLY), and
+ * `requestClasses` pins the six en-SG classes QUALIFIED by the owner's sign-off (evidence: the English demo protocol record, a waiver of
+ * the manual review, not a completed human-review PASS), the six zh-SG classes PENDING, the shipped gate admitting both tasks (en-SG
+ * classes only) and the new sha256 of the qualification module outside its records literal (doc comments only; the rule, schema and
+ * gate code are byte-identical). The contract digest, the 12 classIds, the definitions digest, the prompt and rule assets and every
+ * model-facing body are unchanged. The route-order probe injects the pre-activation manifest and an all-PENDING gate for its activation
+ * and class faults (the shipped state no longer produces them).
  *
  * Changing anything pinned here fails with FROZEN_CONTRACT_CHANGED and the item's name. Update this manifest only deliberately, with the
  * owner's re-approval of the contract and the evidence policy (a changed model-facing byte needs fresh evaluation evidence).
@@ -234,7 +244,19 @@ const FROZEN = Object.freeze({
       DRAFT_CARE_PREPARATION_SUMMARY: { outputTokenCeiling: 800, maxAttempts: 2, structuralRepairAllowed: true, perCallTimeoutMs: 18_000, overallTimeoutMs: 32_000 },
     },
   },
-  activationManifest: { manifestVersion: "ai-activation.11a.1", profile: "HACKATHON_DEMO", everyTask: "DETERMINISTIC_ONLY" },
+  // Packet 11C English activation (owner decisions Q and A, deliberate): was ai-activation.11a.1 with every task DETERMINISTIC_ONLY.
+  activationManifest: {
+    manifestVersion: "ai-activation.11c.1",
+    profile: "HACKATHON_DEMO",
+    tasks: {
+      EXTRACT_CANDIDATE_FACTS: "DETERMINISTIC_ONLY",
+      EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED",
+      DRAFT_NEUTRAL_INQUIRY: "DETERMINISTIC_ONLY",
+      ANSWER_BOUNDED_RECORD_QUERY: "DETERMINISTIC_ONLY",
+      DRAFT_CARE_PREPARATION_SUMMARY: "SYNTHETIC_REMOTE_ENABLED",
+      PHRASE_NON_CLINICAL_RESPONSE: "DETERMINISTIC_ONLY",
+    },
+  },
   // Packet 11C Addendum C (C1, owner decision C1): remote eligibility is restricted to QUALIFIED request classes. The immutable,
   // generated class definitions are bound to the contract digest (computed from the frozen sources above); the separate owner
   // qualification records ship ALL PENDING (no evidence, no sign-off). Never model-facing.
@@ -249,6 +271,11 @@ const FROZEN = Object.freeze({
   // generator, ALL PENDING with no evidence. Batch 2 then bound the 11b.19 prompts, bodies and bundle keys (contract e415a265…). The 11b.20/r12
   // candidate binds the 11b.20 prompts, bodies and bundle keys and shell rules r12; regenerated with the same derivation, ALL PENDING with no
   // evidence or sign-off; owner approval pending.
+  // Packet 11C English activation (owner decisions Q and A, 2026-10-12; deliberate): the owner signed off the six en-SG classes of this
+  // contract (QUALIFIED; evidence: the English demo protocol record, a waiver of the manual review, not a completed human-review PASS);
+  // the six zh-SG classes stay PENDING. Was: 12 PENDING, no evidence, no sign-off, outside-records sha256 d5531a2a…d17b, no admissible
+  // task. The outside-records sha256 changed by doc comments only (the rule, schema and gate code are byte-identical). The contract
+  // digest, the definitions digest and every classId are unchanged.
   requestClasses: {
     scheme: "ai-request-class.11c.1",
     remoteEligibilityPolicy: "ai-remote-eligibility.11c.1",
@@ -257,9 +284,25 @@ const FROZEN = Object.freeze({
     contractBindings: { classBodies: 12, endpointSha256: "6a440b422e727dd307ca07f0f1df977bd3ac1d0d62917187225a12b9f5f306de", sourceBackedAndCareClassBodiesBound: true },
     classesPerTaskLocale: { "EXPLAIN_PATTERN en-SG": 3, "EXPLAIN_PATTERN zh-SG": 3, "DRAFT_CARE_PREPARATION_SUMMARY en-SG": 3, "DRAFT_CARE_PREPARATION_SUMMARY zh-SG": 3 },
     samples: 70,
-    qualificationRecords: { count: 12, statuses: ["PENDING"], withEvidence: 0, signedOff: 0 },
-    qualificationModuleSha256OutsideRecords: "d5531a2afe31f970766616429c51031586331addc7961866245746af3a43d17b",
-    shippedGateAdmissibleTasks: [],
+    qualificationRecords: {
+      count: 12,
+      statuses: ["QUALIFIED", "PENDING"],
+      withEvidence: 6,
+      signedOff: 6,
+      qualified: [
+        { classId: "a00d8ad562619f605ca03fe406c18abe095410db4d6f53cca02f68601104910d", taskType: "EXPLAIN_PATTERN", locale: "en-SG" },
+        { classId: "0c43de4a6cfb9eb6ec40c2ae13404c8f7664b127e864724452dbf0dc3f40a1f7", taskType: "EXPLAIN_PATTERN", locale: "en-SG" },
+        { classId: "38ad0280e6382f4e3b314613b464bef0438ea6f6cc19cae2f41a10e0550e320d", taskType: "EXPLAIN_PATTERN", locale: "en-SG" },
+        { classId: "5d0c75cef363c190e726f5cb055f4f9b6b265b76b7f8779b612467203ac6adca", taskType: "DRAFT_CARE_PREPARATION_SUMMARY", locale: "en-SG" },
+        { classId: "37f7e95a9ff5436dbaab17b1bfefa57d132aaf7f407157c9d3cd2e3a39c9154f", taskType: "DRAFT_CARE_PREPARATION_SUMMARY", locale: "en-SG" },
+        { classId: "8c3203f88db4567aa82a51d86967b845960f8f7f226591416c476c2ea670ec6b", taskType: "DRAFT_CARE_PREPARATION_SUMMARY", locale: "en-SG" },
+      ],
+      signOff: { evidenceRef: "internal-docs/superpowers/reviews/2026-10-12-11c-en-demo-protocol.md", signedOffBy: "JagaOn owner", signedOffAt: "2026-10-11T18:13:14Z" },
+      pendingLocales: ["zh-SG"],
+      pendingWithoutEvidenceOrSignOff: 6,
+    },
+    qualificationModuleSha256OutsideRecords: "97d7a222a65e57aadb2f9f9f75c7e6c7a19c7726737ea138f766579b2058b0f1",
+    shippedGateAdmissibleTasks: ["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"],
   },
   // CL3 re-freeze (C3, owner decision C3; label introduced in RF): disclosure acceptance belongs to ONE explicit request (its decision
   // token) and ends when that request settles or its token aborts; a later request never inherits it; the interim default never accepts.
@@ -365,7 +408,7 @@ async function routeTransmission() {
     // with the demo passcode. Neither is part of the model-facing body (checked by the byte comparison).
     environment: { DEEPSEEK_API_KEY: SENTINEL, ...TEST_DEPLOYMENT_ENVIRONMENT },
     activationManifest: ENABLED,
-    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING; pinned in `requestClasses`).
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records, independent of the shipped records (pinned in `requestClasses`).
     requestClassGate: qualifiedTestRequestClassGate(),
     fetcher: async (url, init) => {
       sent.push({ url, body: String(init.body) });
@@ -441,8 +484,10 @@ function probeRouteCheckOrder() {
       const sent: string[] = [];
       const handler = createAiShellHandler({
         environment,
-        activationManifest: has("activation") ? AI_ACTIVATION_MANIFEST : ENABLED,
-        requestClassGate: has("requestClassQualification") ? SHIPPED_REQUEST_CLASS_GATE : qualifiedTestRequestClassGate(),
+        // Packet 11C English activation: the shipped manifest and gate now admit this en-SG request, so the activation and class faults
+        // are the pre-activation manifest (every task DETERMINISTIC_ONLY) and an all-PENDING gate over the shipped definitions.
+        activationManifest: has("activation") ? DETERMINISTIC_ONLY_TEST_MANIFEST : ENABLED,
+        requestClassGate: has("requestClassQualification") ? pendingTestRequestClassGate() : qualifiedTestRequestClassGate(),
         fetcher: async (url) => {
           sent.push(url);
           throw new Error("OFFLINE_CAPTURE_ONLY");
@@ -586,7 +631,8 @@ const ACTUAL: { readonly [K in FrozenItem]: () => unknown } = {
   activationManifest: () => ({
     manifestVersion: AI_ACTIVATION_MANIFEST.manifestVersion,
     profile: AI_ACTIVATION_MANIFEST.profile,
-    everyTask: agree({ ...AI_ACTIVATION_MANIFEST.tasks, taskCount: Object.keys(AI_ACTIVATION_MANIFEST.tasks).length === AI_TASK_TYPES.length ? "DETERMINISTIC_ONLY" : Object.keys(AI_ACTIVATION_MANIFEST.tasks) }),
+    // Every registered task, in registry order (a missing or extra task shows as a difference).
+    tasks: Object.fromEntries([...AI_TASK_TYPES, ...Object.keys(AI_ACTIVATION_MANIFEST.tasks).filter((task) => !(AI_TASK_TYPES as readonly string[]).includes(task))].map((task) => [task, AI_ACTIVATION_MANIFEST.tasks[task as keyof typeof AI_ACTIVATION_MANIFEST.tasks] ?? "MISSING"])),
   }),
   requestClasses: async () => ({
     scheme: AI_REQUEST_CLASS_CONTRACT.scheme,
@@ -618,6 +664,17 @@ const ACTUAL: { readonly [K in FrozenItem]: () => unknown } = {
       statuses: [...new Set(AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => record.status))],
       withEvidence: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.filter((record) => record.evidenceRef !== null).length,
       signedOff: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.filter((record) => record.signedOffBy !== null || record.signedOffAt !== null).length,
+      qualified: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.filter((record) => record.status === "QUALIFIED").map((record) => {
+        const definition = AI_REQUEST_CLASS_DEFINITIONS.find((entry) => entry.classId === record.classId);
+        return { classId: record.classId, taskType: definition?.taskType ?? "NO_DEFINITION", locale: definition?.locale ?? "NO_DEFINITION" };
+      }),
+      signOff: agree(
+        Object.fromEntries(
+          AI_REQUEST_CLASS_QUALIFICATION_RECORDS.filter((record) => record.status === "QUALIFIED").map((record) => [record.classId, { evidenceRef: record.evidenceRef, signedOffBy: record.signedOffBy, signedOffAt: record.signedOffAt }]),
+        ),
+      ),
+      pendingLocales: [...new Set(AI_REQUEST_CLASS_QUALIFICATION_RECORDS.filter((record) => record.status === "PENDING").map((record) => AI_REQUEST_CLASS_DEFINITIONS.find((entry) => entry.classId === record.classId)?.locale ?? "NO_DEFINITION"))],
+      pendingWithoutEvidenceOrSignOff: AI_REQUEST_CLASS_QUALIFICATION_RECORDS.filter((record) => record.status === "PENDING" && record.evidenceRef === null && record.signedOffBy === null && record.signedOffAt === null).length,
     },
     // C1-review carry: the rule, schema and gate, frozen independently of the regenerated records literal.
     qualificationModuleSha256OutsideRecords: sha256(splitQualificationModule(readFileSync(join(process.cwd(), "src/application/ai/request-class-qualification.ts"), "utf8")).outside),

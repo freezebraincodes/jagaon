@@ -65,8 +65,8 @@ import {
   type DemoOnboardingStoragePort,
 } from "@/application/onboarding/demo-onboarding-repository";
 import { createPreparedOnboardingState } from "@/application/onboarding/prepared-onboarding-fixture";
-// Packet 11C Addendum C (C1): the activated paths inject test-only QUALIFIED records (the shipped records are all PENDING).
-import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
+// Packet 11C Addendum C (C1): the activated paths inject test-only QUALIFIED records (independent of the shipped records).
+import { pendingTestRequestClassGate, qualifiedTestRequestClassGate, testManifestEnabling } from "@/application/ai/request-class-test-support";
 import type { DemoOnboardingStateV1 } from "@/application/onboarding/demo-onboarding-contracts";
 
 afterEach(() => cleanup());
@@ -1297,7 +1297,13 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
     expect(explainer.explain).not.toHaveBeenCalled();
   });
 
-  it("shipped manifest: no audit row or network call at startup, history load or probing; one deterministic local explanation on the explicit action", async () => {
+  /**
+   * Packet 11C English activation (owner decisions Q and A, 2026-10-12; was: "shipped manifest ... one deterministic local explanation,
+   * TASK_DISABLED"): the real shipped wiring (no factory injected: the shipped manifest and records, the browser network primitive stubbed
+   * as a spy) over the prepared demo profile. en-SG: nothing at startup, history load or probing; the explicit action shows the
+   * disclosure FIRST (nothing written or sent before the decision); Cancel keeps the standard wording, one REMOTE_USE_DECLINED row.
+   */
+  it("shipped manifest and records (en-SG): no audit row or network call at startup, history load or probing; the explicit action shows the disclosure first; Cancel gives the deterministic explanation and sends nothing", async () => {
     const en = getMessages("en-SG");
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
@@ -1318,14 +1324,42 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
     expect(runtime.aiAudit.append).not.toHaveBeenCalled();
 
     fireEvent.click(action);
+    const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
+    expect(runtime.aiAudit.append).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: en.ai.cancel }));
     const panel = await screen.findByRole("region", { name: en.history.explanation.title });
     await waitFor(() => expect(within(panel).getByRole("status")).not.toBeEmptyDOMElement());
     expect(within(panel).getByRole("status")).not.toHaveTextContent(en.history.explanation.unavailable);
     expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
+    expect(within(panel).getByText(en.ai.remoteNotAccepted)).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(rows).toHaveLength(1);
-    expect(aiInvocationAuditRowSchema.parse(rows[0])).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcomeCode: "TASK_DISABLED", providerModel: null, attempts: { count: 0 } });
+    expect(aiInvocationAuditRowSchema.parse(rows[0])).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcomeCode: "REMOTE_USE_DECLINED", providerModel: null, attempts: { count: 0 } });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("shipped manifest and records (zh-SG): the class is PENDING: no disclosure, one deterministic local explanation, one REQUEST_CLASS_NOT_QUALIFIED row, no network call", async () => {
+    const zh = getMessages("zh-SG");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { history } = await higherFixture();
+    const runtime = fakeRuntime();
+    runtime.resolveLocale = vi.fn(async () => "zh-SG" as const);
+    runtime.history = history;
+    const rows: unknown[] = [];
+    runtime.aiAudit = { append: vi.fn(async (row) => void rows.push(row)) };
+    render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={onboardingStorage(createPreparedOnboardingState("zh-SG", NOW)).factory} />);
+    await screen.findByRole("button", { name: zh.today.recordReading });
+    fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: zh.shared.navHistory }));
+    fireEvent.click(await screen.findByRole("button", { name: zh.history.explanation.action }));
+    const panel = await screen.findByRole("region", { name: zh.history.explanation.title });
+    await waitFor(() => expect(within(panel).getByRole("status")).not.toBeEmptyDOMElement());
+    expect(within(panel).getByRole("status")).not.toHaveTextContent(zh.history.explanation.unavailable);
+    expect(within(panel).queryByText(zh.history.explanation.aiLabel)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(rows).toHaveLength(1));
+    expect(aiInvocationAuditRowSchema.parse(rows[0])).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "zh-SG", outcomeCode: "REQUEST_CLASS_NOT_QUALIFIED", providerModel: null, attempts: { count: 0 } });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
@@ -1333,7 +1367,7 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
 /**
  * Packet 11C Addendum B, Task B3: the disclosure in the wired app. Packet 11C Addendum C, C3 (replaces the B3 once-per-app-session
  * acceptance): an acceptance covers the one explicit request it was given for; every new request asks again; nothing is persisted. Activated behaviour only through an injected factory that adds a test manifest and a fake route
- * to the real browser wiring; the shipped app never shows the dialog.
+ * to the real browser wiring (the shipped wiring is pinned in "JagaOnApp history explanation wiring" above).
  */
 /**
  * Owner UI decision U03 (2026-10-09): while the disclosure shows the demo passcode field, its primary action needs non-whitespace input,
@@ -1362,7 +1396,8 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
     for (const database of historyDatabases.splice(0)) await Dexie.delete(database.name);
   });
 
-  const ENABLED: AiActivationManifest = { ...AI_ACTIVATION_MANIFEST, tasks: { ...AI_ACTIVATION_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED" } };
+  // Packet 11C English activation: built on the pre-activation manifest, so it enables EXPLAIN_PATTERN only.
+  const ENABLED: AiActivationManifest = testManifestEnabling("EXPLAIN_PATTERN");
   function fakeRoute() {
     return vi.fn<BrowserShellFetcher>(async (_url, init) => {
       const plan = shellPlanView(shellTaskRequestSchema.parse(JSON.parse(init.body as string)));
@@ -1607,7 +1642,7 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
 
     it.each([
       ["activated (test manifest, test-only QUALIFIED classes, fake route)", true],
-      ["the shipped manifest", false],
+      ["the shipped manifest and records (the en-SG class QUALIFIED)", false],
     ])("on, %s: no dialog or passcode field, no POST, a deterministic explanation and one exact PRIVACY_REJECTED row", async (_label, activated) => {
       const en = getMessages("en-SG");
       const app = await activatedApp();
@@ -1649,8 +1684,10 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
 
 /**
  * Packet 11C Addendum B, Task B4b: the care-summary AI wording in the wired app. The preview gets the care wording of the same AI wiring
- * as the history explanation (one hybrid service, browser shell client, session disclosure and audit port). With the shipped manifest
- * the action is never shown and nothing is called at startup, screen load, preview, approval or print. Activated behaviour only through
+ * as the history explanation (one hybrid service, browser shell client, session disclosure and audit port). Packet 11C English activation
+ * (owner decisions Q and A): the shipped manifest enables the care task and the shipped records qualify the en-SG care classes, but this
+ * preview (one reading, no question, no appointment) is not an evaluated class, so with the shipped wiring the action is never shown and
+ * nothing is called at startup, screen load, preview, approval or print. Activated behaviour only through
  * an injected factory that adds a test manifest and a fake route to the real wiring, over a real care-preparation service with the AI
  * projection (the shipped runtime's projector is pinned in browser-journal-runtime.test.ts).
  */
@@ -1725,7 +1762,7 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     return screen.findByRole("article");
   }
 
-  it("shipped manifest: no AI action, dialog, audit row or network call at startup, preview, approval or print", async () => {
+  it("shipped manifest and records, a preview outside the evaluated classes: no AI action, dialog, audit row or network call at startup, preview, approval or print", async () => {
     const en = getMessages("en-SG");
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
@@ -1746,7 +1783,9 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("C3: activated (test manifest) with the SHIPPED all-PENDING records: no disclosure in either flow, no care AI action, nothing sent", async () => {
+  // Packet 11C English activation (owner decisions Q and A): the shipped records qualify the en-SG classes, so "nothing qualified" is an
+  // injected all-PENDING gate (the pre-activation state; was: the shipped records).
+  it("C3: activated (test manifest) with an all-PENDING gate: no disclosure in either flow, no care AI action, nothing sent", async () => {
     const en = getMessages("en-SG");
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
@@ -1754,8 +1793,7 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     const { history } = await higherFixture();
     care.runtime.history = history;
     const fetcher = fakeRoute();
-    // No request-class gate: the production default (the shipped records, every class PENDING).
-    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, fetcher, now: () => LATER as never });
+    const factory: AiAssistanceFactory = (ports) => createBrowserAiAssistance({ ...ports, manifest: BOTH, requestClassGate: pendingTestRequestClassGate(), fetcher, now: () => LATER as never });
     render(<JagaOnApp runtimeFactory={async () => care.runtime} onboardingRepositoryFactory={completed()} printPortFactory={() => ({ print: vi.fn() })} aiAssistanceFactory={factory} />);
     fireEvent.click(within(await screen.findByRole("navigation")).getByRole("button", { name: en.shared.navHistory }));
     fireEvent.click(await screen.findByRole("button", { name: en.history.explanation.action }));

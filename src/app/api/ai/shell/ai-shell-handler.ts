@@ -82,7 +82,8 @@ export type AiShellHandlerOptions = {
   rateLimit?: { maxRequests: number; windowMs: number };
   /**
    * Packet 11C Addendum C (C1): which request classes may be sent. Absent means the shipped gate (the generated definitions and the
-   * shipped qualification records, all PENDING); route.ts passes none. Test seam only: tests inject test-only QUALIFIED records.
+   * shipped qualification records: Packet 11C English activation, owner decisions Q and A, the six en-SG classes QUALIFIED, the six zh-SG
+   * classes PENDING); route.ts passes none. Test seam only: tests inject test-only QUALIFIED records.
    */
   requestClassGate?: AiRequestClassGate;
   /**

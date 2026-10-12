@@ -9,7 +9,7 @@ import { AI_ACTIVATION_MANIFEST, type AiActivationManifest } from "@/application
 import { PROVIDER_FAILURE_REASONS } from "@/application/ai/ai-provider-port";
 import { AI_SHELL_ACCESS_HEADER, AI_SHELL_ROUTE_REFUSAL_REASONS, aiShellRouteResponseSchema, shellRouteCallUpperBound } from "@/application/ai/ai-shell-route-contract";
 import { projectShellTaskRequest } from "@/application/ai/language/shell-projector";
-import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
+import { DETERMINISTIC_ONLY_TEST_MANIFEST, pendingTestRequestClassGate, qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
 import { AI_AUDIT_ONLY_OUTCOME_CODES, AI_REASON_CODES, type ShellFieldPath, type ShellTaskRequest } from "@/domain/ai";
 import { createAiShellHandler } from "./ai-shell-handler";
 import { AI_SHELL_DEPLOYMENT_ENV, parseAiShellDeploymentConfig } from "./ai-shell-deployment-config";
@@ -20,6 +20,11 @@ import { InMemoryDailySpendLedger, type SpendLedger, type SpendReserveResult } f
  * Packet 11C Addendum C, Task C6 (owner approval of Addendum C and the C6 amendment): the server-side remote-AI switch, origin protection,
  * access authorization (demo passcode) and the pre-send spend reservation of POST /api/ai/shell. Fake fetchers and fake ledgers only; no
  * provider call. Every configuration value here is a TEST value (ai-shell-route-test-support.ts); nothing is a code default.
+ *
+ * Packet 11C English activation (owner decisions Q and A, 2026-10-12): the shipped manifest enables both shell tasks and the shipped gate
+ * admits the en-SG classes, so the shipped defaults no longer produce TASK_DISABLED or REQUEST_CLASS_NOT_QUALIFIED for the en-SG request
+ * used here. Those checks inject the pre-activation manifest (`DETERMINISTIC_ONLY_TEST_MANIFEST`) and an all-PENDING gate
+ * (`pendingTestRequestClassGate()`) instead, so they still prove the same refusals, and nothing reaches a transport.
  */
 
 const TOKEN = "deepseek-SENTINEL-c6-credential";
@@ -193,15 +198,15 @@ describe("C6 route order: every refusal happens before the credential read and b
     // Origin before access.
     expect(await (await handler()(post(hostile))).json()).toEqual(refused("ORIGIN_REJECTED"));
     // Access before activation.
-    expect(await (await handler({ activationManifest: AI_ACTIVATION_MANIFEST })(post(testBrowserHeaders("wrong-passcode")))).json()).toEqual(refused("ACCESS_DENIED"));
-    // Activation before class and spend (the shipped manifest keeps its closed FAILED answer; nothing reserved).
+    expect(await (await handler({ activationManifest: DETERMINISTIC_ONLY_TEST_MANIFEST })(post(testBrowserHeaders("wrong-passcode")))).json()).toEqual(refused("ACCESS_DENIED"));
+    // Activation before class and spend (a task that is not activated keeps its closed FAILED answer; nothing reserved).
     const spy = spyLedger();
     const admit = vi.fn(() => ({ admitted: true as const, classId: "x" }));
-    expect(await (await handler({ activationManifest: AI_ACTIVATION_MANIFEST, spendLedger: spy.ledger, requestClassGate: { admit, anyAdmissible: () => true } })(post())).json()).toEqual({ kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true });
+    expect(await (await handler({ activationManifest: DETERMINISTIC_ONLY_TEST_MANIFEST, spendLedger: spy.ledger, requestClassGate: { admit, anyAdmissible: () => true } })(post())).json()).toEqual({ kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true });
     expect(admit).not.toHaveBeenCalled();
     expect(spy.log).toEqual([]);
-    // Class before spend (the shipped all-PENDING records): nothing reserved.
-    expect(await (await handler({ requestClassGate: undefined, spendLedger: spy.ledger })(post())).json()).toEqual(refused("REQUEST_CLASS_NOT_QUALIFIED"));
+    // Class before spend (an all-PENDING gate over the shipped definitions): nothing reserved.
+    expect(await (await handler({ requestClassGate: pendingTestRequestClassGate(), spendLedger: spy.ledger })(post())).json()).toEqual(refused("REQUEST_CLASS_NOT_QUALIFIED"));
     expect(spy.log).toEqual([]);
     // Spend before the credential: the reservation is the last check before the credential read.
     const late = recordingEnvironment(ENV);
@@ -367,7 +372,7 @@ describe("C6 spend settlement (owner rule: commit reported usage; transmitted wi
 describe("C6 fix round 1: pre-call FAILED answers are marked not sent to the provider", () => {
   const notSent = (reason: string) => ({ kind: "FAILED", reason, notSentToProvider: true });
   it.each<[string, () => Promise<Response>, number, string]>([
-    ["server activation (shipped manifest)", () => handler({ activationManifest: AI_ACTIVATION_MANIFEST })(post()), 200, "TASK_DISABLED"],
+    ["server activation (a task that is not activated)", () => handler({ activationManifest: DETERMINISTIC_ONLY_TEST_MANIFEST })(post()), 200, "TASK_DISABLED"],
     ["another release profile", () => handler({ releaseProfile: "PRODUCTION" })(post()), 200, "PROFILE_NOT_PERMITTED"],
     ["a missing credential", () => handler({ environment: { ...TEST_DEPLOYMENT_ENVIRONMENT } })(post()), 200, "MISSING_CONFIGURATION"],
     ["a request cancelled before the call", () => { const c = new AbortController(); c.abort(); return handler({ fetcher: deepseek() })(post(testBrowserHeaders(), shellRequest(), c.signal)); }, 200, "REQUEST_CANCELLED"],
@@ -414,7 +419,7 @@ describe("C6 passcode and rate limit", () => {
       await handler({ fetcher: deepseek() })(post(testBrowserHeaders(WRONG))),
       await handler({ fetcher: deepseek(500) })(post()),
       await handler({ environment: { ...ENV, JAGAON_REMOTE_AI: "off" } })(post()),
-      await handler({ requestClassGate: undefined })(post()),
+      await handler({ requestClassGate: pendingTestRequestClassGate() })(post()),
     ];
     for (const response of responses) {
       const text = `${JSON.stringify([...response.headers.entries()])}${await response.text()}`;

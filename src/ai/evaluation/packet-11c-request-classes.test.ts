@@ -35,12 +35,28 @@ import { SOURCE_BACKED_SCENARIOS, sourceBackedFixture } from "./packet-11-source
  *
  * CL3 contract re-freeze (Task RF, C1-review carry): the contract inputs also carry each class's captured model-facing body sha256 and the
  * endpoint sha256 (cross-checked below against the presentation guard's own capture), the shipped qualification records literal is
- * regenerated (all PENDING) and must be byte-identical, and the source-backed and care class assertions name the exact class.
+ * regenerated and must be byte-identical, and the source-backed and care class assertions name the exact class.
+ *
+ * Packet 11C English activation (owner decisions Q and A, 2026-10-12): the regenerated literal now carries the owner's sign-off records
+ * pinned below (`OWNER_SIGN_OFFS_11C_EN`): exactly the six en-SG classes QUALIFIED with the protocol record as evidence (a waiver of the
+ * manual review, not a completed human-review PASS); the six zh-SG classes stay PENDING with no evidence and no sign-off.
  */
 
 const DEFINITIONS_FILE = join(process.cwd(), "src/application/ai/request-class-definitions.ts");
 const QUALIFICATION_FILE = join(process.cwd(), "src/application/ai/request-class-qualification.ts");
 const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
+
+/** The owner's sign-off (decision Q, 2026-10-12 02:13 SGT): the six en-SG classes of contract 4fca780a…39b1, in definition order. */
+const EN_DEMO_CONTRACT = "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1";
+const OWNER_SIGN_OFF = { evidenceRef: "internal-docs/superpowers/reviews/2026-10-12-11c-en-demo-protocol.md", signedOffBy: "JagaOn owner", signedOffAt: "2026-10-11T18:13:14Z" } as const;
+const OWNER_SIGN_OFFS_11C_EN = [
+  ["a00d8ad562619f605ca03fe406c18abe095410db4d6f53cca02f68601104910d", "EXPLAIN_PATTERN"],
+  ["0c43de4a6cfb9eb6ec40c2ae13404c8f7664b127e864724452dbf0dc3f40a1f7", "EXPLAIN_PATTERN"],
+  ["38ad0280e6382f4e3b314613b464bef0438ea6f6cc19cae2f41a10e0550e320d", "EXPLAIN_PATTERN"],
+  ["5d0c75cef363c190e726f5cb055f4f9b6b265b76b7f8779b612467203ac6adca", "DRAFT_CARE_PREPARATION_SUMMARY"],
+  ["37f7e95a9ff5436dbaab17b1bfefa57d132aaf7f407157c9d3cd2e3a39c9154f", "DRAFT_CARE_PREPARATION_SUMMARY"],
+  ["8c3203f88db4567aa82a51d86967b845960f8f7f226591416c476c2ea670ec6b", "DRAFT_CARE_PREPARATION_SUMMARY"],
+].map(([classId, taskType]) => ({ taskType, record: { classId: classId!, contractDigest: EN_DEMO_CONTRACT, status: "QUALIFIED" as const, ...OWNER_SIGN_OFF } }));
 
 beforeAll(() => {
   Dexie.dependencies.indexedDB = fakeIndexedDB;
@@ -62,12 +78,30 @@ describe("Packet 11C C1 request-class definitions (generated, immutable, contrac
     expect(readFileSync(DEFINITIONS_FILE, "utf8")).toBe(await renderRequestClassDefinitionsModule());
   }, 30_000);
 
-  it("the shipped qualification records literal is byte-identical to the regenerated one: one per definition, ALL PENDING, no evidence", () => {
+  it("the shipped qualification records literal is byte-identical to the regenerated one: one per definition, the six en-SG classes QUALIFIED by the owner's sign-off, the six zh-SG classes PENDING with no evidence", () => {
+    // Packet 11C English activation (owner decisions Q and A): the owner's sign-offs are each an en-SG definition of the stated task.
+    expect(AI_REQUEST_CLASS_CONTRACT.digest).toBe(EN_DEMO_CONTRACT);
+    for (const { taskType, record } of OWNER_SIGN_OFFS_11C_EN) {
+      expect(AI_REQUEST_CLASS_DEFINITIONS.find((definition) => definition.classId === record.classId), record.classId).toMatchObject({ taskType, locale: "en-SG", contractDigest: EN_DEMO_CONTRACT });
+    }
+    expect(AI_REQUEST_CLASS_DEFINITIONS.filter((definition) => definition.locale === "en-SG").map((definition) => definition.classId)).toEqual(OWNER_SIGN_OFFS_11C_EN.map(({ record }) => record.classId));
     const { records } = splitQualificationModule(readFileSync(QUALIFICATION_FILE, "utf8"));
-    expect(records).toBe(renderQualificationRecordsBlock(AI_REQUEST_CLASS_DEFINITIONS));
+    expect(records).toBe(renderQualificationRecordsBlock(AI_REQUEST_CLASS_DEFINITIONS, OWNER_SIGN_OFFS_11C_EN.map(({ record }) => record)));
     expect(AI_REQUEST_CLASS_QUALIFICATION_RECORDS.map((record) => [record.classId, record.contractDigest, record.status, record.evidenceRef, record.signedOffBy, record.signedOffAt])).toEqual(
-      AI_REQUEST_CLASS_DEFINITIONS.map((definition) => [definition.classId, AI_REQUEST_CLASS_CONTRACT.digest, "PENDING", null, null, null]),
+      AI_REQUEST_CLASS_DEFINITIONS.map((definition) =>
+        definition.locale === "en-SG"
+          ? [definition.classId, AI_REQUEST_CLASS_CONTRACT.digest, "QUALIFIED", OWNER_SIGN_OFF.evidenceRef, OWNER_SIGN_OFF.signedOffBy, OWNER_SIGN_OFF.signedOffAt]
+          : [definition.classId, AI_REQUEST_CLASS_CONTRACT.digest, "PENDING", null, null, null],
+      ),
     );
+    // Without the owner's sign-offs the generator renders every record PENDING; it never decides a status.
+    expect(renderQualificationRecordsBlock(AI_REQUEST_CLASS_DEFINITIONS)).not.toMatch(/QUALIFIED/);
+    expect(renderQualificationRecordsBlock(AI_REQUEST_CLASS_DEFINITIONS).match(/status: "PENDING"/g)).toHaveLength(AI_REQUEST_CLASS_DEFINITIONS.length);
+    // A sign-off for an unknown class, another contract, twice, or schema-invalid is refused.
+    const first = OWNER_SIGN_OFFS_11C_EN[0]!.record;
+    for (const invalid of [[{ ...first, classId: "0".repeat(64) }], [{ ...first, contractDigest: "0".repeat(64) }], [first, first], [{ ...first, evidenceRef: "" }]]) {
+      expect(() => renderQualificationRecordsBlock(AI_REQUEST_CLASS_DEFINITIONS, invalid as never), JSON.stringify(invalid)).toThrow();
+    }
   });
 
   it("the contract binds each class's exact model-facing body and the endpoint (cross-checked with the presentation guard's capture)", async () => {

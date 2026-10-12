@@ -12,8 +12,13 @@ import { AI_REQUEST_CLASS_CONTRACT, AI_REQUEST_CLASS_DEFINITIONS, type AiRequest
  *   sends) bound to the frozen model-facing contract: classId = sha256(contractDigest || shellRequestDigest), with the contract digest of
  *   the generated, immutable `request-class-definitions.ts`. A changed contract changes every classId.
  * - Qualification records (`AI_REQUEST_CLASS_QUALIFICATION_RECORDS`, below): SEPARATE from the immutable definitions and mutable only by
- *   an owner sign-off (C1-c). Shipped ALL PENDING with no evidence: no class is qualified, so every request falls back to the
- *   deterministic composition before any disclosure or send. No code path sets QUALIFIED.
+ *   an owner sign-off (C1-c). Packet 11C English activation (owner decisions Q and A, 2026-10-12): the six en-SG classes of the current
+ *   contract (three EXPLAIN_PATTERN, three DRAFT_CARE_PREPARATION_SUMMARY) are QUALIFIED by the owner's sign-off under the revised
+ *   English demo protocol (evidenceRef names the protocol record). That sign-off is a WAIVER of the manual human review, not a completed
+ *   human-review PASS: the recorded run verdict stays FAIL [HUMAN_REVIEW_PENDING, BLOCKED_CONTENT_REVIEW_PENDING]. The six zh-SG classes
+ *   stay PENDING with no evidence, so every Chinese request (and any request outside the six English classes) falls back to the
+ *   deterministic composition before any disclosure or send. No code path sets QUALIFIED: the records are a reviewed literal, never
+ *   computed at runtime.
  * - The rule (`requestClassQualification`): a request is admitted only when its class is defined under the CURRENT contract and exactly
  *   one schema-valid record names it with status QUALIFIED and the current contract digest. Anything else (no definition, no record,
  *   several records, an invalid record, a record for another contract, PENDING) is NOT qualified: an invalid or stale record is treated as
@@ -132,22 +137,25 @@ export function createRequestClassGate(registry: AiRequestClassRegistry): AiRequ
 }
 
 /**
- * The SHIPPED qualification records: exactly one per generated definition, every one PENDING with no evidence and no sign-off. Moving a
- * class to QUALIFIED is an owner sign-off (C1-c) after accepted live evidence under this contract; it is never automatic.
- * CL3 re-freeze: the literal below is generated (renderQualificationRecordsBlock in packet-11c-request-class-generator.ts, all PENDING)
- * and packet-11c-request-classes.test.ts requires byte equality; the contract freeze pins the sha256 of this module OUTSIDE the literal.
+ * The SHIPPED qualification records: exactly one per generated definition. Moving a class to QUALIFIED is an owner sign-off (C1-c) under
+ * this contract; it is never automatic. Packet 11C English activation (owner decisions Q and A, 2026-10-12): the six en-SG classes are
+ * QUALIFIED (evidenceRef: the English demo protocol record, a waiver of the manual review, not a completed human-review PASS; signed off
+ * by the JagaOn owner at 2026-10-11T18:13:14Z); the six zh-SG classes stay PENDING with no evidence and no sign-off.
+ * CL3 re-freeze: the literal below is generated (renderQualificationRecordsBlock in packet-11c-request-class-generator.ts, PENDING unless
+ * an owner sign-off record is passed in) and packet-11c-request-classes.test.ts requires byte equality with the owner sign-offs it pins;
+ * the contract freeze pins the sha256 of this module OUTSIDE the literal.
  */
 export const AI_REQUEST_CLASS_QUALIFICATION_RECORDS: readonly AiRequestClassQualificationRecord[] = Object.freeze(
   ([
-    { classId: "a00d8ad562619f605ca03fe406c18abe095410db4d6f53cca02f68601104910d", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "0c43de4a6cfb9eb6ec40c2ae13404c8f7664b127e864724452dbf0dc3f40a1f7", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "38ad0280e6382f4e3b314613b464bef0438ea6f6cc19cae2f41a10e0550e320d", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "a00d8ad562619f605ca03fe406c18abe095410db4d6f53cca02f68601104910d", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "QUALIFIED", evidenceRef: "internal-docs/superpowers/reviews/2026-10-12-11c-en-demo-protocol.md", signedOffBy: "JagaOn owner", signedOffAt: "2026-10-11T18:13:14Z" },
+    { classId: "0c43de4a6cfb9eb6ec40c2ae13404c8f7664b127e864724452dbf0dc3f40a1f7", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "QUALIFIED", evidenceRef: "internal-docs/superpowers/reviews/2026-10-12-11c-en-demo-protocol.md", signedOffBy: "JagaOn owner", signedOffAt: "2026-10-11T18:13:14Z" },
+    { classId: "38ad0280e6382f4e3b314613b464bef0438ea6f6cc19cae2f41a10e0550e320d", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "QUALIFIED", evidenceRef: "internal-docs/superpowers/reviews/2026-10-12-11c-en-demo-protocol.md", signedOffBy: "JagaOn owner", signedOffAt: "2026-10-11T18:13:14Z" },
     { classId: "c54c7d6754b5a791ab4e5732e82e6e9d8f4e235bd8004484db25f7f1558d9dac", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
     { classId: "e8fdbc6bbd7df5a90c2d9f395955d90bc1c8d6a41505c5b5f2019a9d335f49c4", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
     { classId: "2b3c472d0983bcff6364cfbd915ec026866a26f996608e8a55cbfa64d4cccc0d", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "5d0c75cef363c190e726f5cb055f4f9b6b265b76b7f8779b612467203ac6adca", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "37f7e95a9ff5436dbaab17b1bfefa57d132aaf7f407157c9d3cd2e3a39c9154f", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
-    { classId: "8c3203f88db4567aa82a51d86967b845960f8f7f226591416c476c2ea670ec6b", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
+    { classId: "5d0c75cef363c190e726f5cb055f4f9b6b265b76b7f8779b612467203ac6adca", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "QUALIFIED", evidenceRef: "internal-docs/superpowers/reviews/2026-10-12-11c-en-demo-protocol.md", signedOffBy: "JagaOn owner", signedOffAt: "2026-10-11T18:13:14Z" },
+    { classId: "37f7e95a9ff5436dbaab17b1bfefa57d132aaf7f407157c9d3cd2e3a39c9154f", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "QUALIFIED", evidenceRef: "internal-docs/superpowers/reviews/2026-10-12-11c-en-demo-protocol.md", signedOffBy: "JagaOn owner", signedOffAt: "2026-10-11T18:13:14Z" },
+    { classId: "8c3203f88db4567aa82a51d86967b845960f8f7f226591416c476c2ea670ec6b", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "QUALIFIED", evidenceRef: "internal-docs/superpowers/reviews/2026-10-12-11c-en-demo-protocol.md", signedOffBy: "JagaOn owner", signedOffAt: "2026-10-11T18:13:14Z" },
     { classId: "8de6bc4ed13d6ffac59be50a33ff31c7f0523e554f37173823ad0fc781e8643a", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
     { classId: "5763ae537e7b6e535115b92355e17a3f47cb4a239b0d75316559d19e35897b67", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
     { classId: "6a2e08dc46365327f1cfe34fa2f8aba3dd341d260b8b07de1ad90c2b9b889625", contractDigest: "4fca780a686e4a5f7512fc928e3df8cdc7d74dd953427bcdaba3cd20885e39b1", status: "PENDING", evidenceRef: null, signedOffBy: null, signedOffAt: null },
@@ -155,5 +163,5 @@ export const AI_REQUEST_CLASS_QUALIFICATION_RECORDS: readonly AiRequestClassQual
 );
 
 export const SHIPPED_REQUEST_CLASS_REGISTRY: AiRequestClassRegistry = Object.freeze({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS });
-/** The production gate: the shipped definitions and records (all PENDING, so nothing is admitted). */
+/** The production gate: the shipped definitions and records (only the six en-SG classes are admitted; every zh-SG class is PENDING). */
 export const SHIPPED_REQUEST_CLASS_GATE: AiRequestClassGate = createRequestClassGate(SHIPPED_REQUEST_CLASS_REGISTRY);

@@ -20,12 +20,15 @@ import { createPatternExplainer, type PatternExplanation } from "./explain-patte
 import { renderAtom, renderSummaryRoleNotice } from "./language/atom-renderer";
 import { OBSERVATION_PATH } from "./language/observation-composer";
 import { planSlots } from "./language/slot-planner";
-import { qualifiedTestRequestClassGate } from "./request-class-test-support";
+import { DETERMINISTIC_ONLY_TEST_MANIFEST, qualifiedTestRequestClassGate, testManifestEnabling } from "./request-class-test-support";
 
 /**
  * Packet 11C Task 6: the pattern-explanation use case. Every view comes from the real journal -> coordinator ->
  * evaluator -> Recorded-history query; the only fake is `execute` (resolved on demand) and, for the AI case, the
- * provider behind a test-only activated manifest. The shipped manifest stays NOT_ACTIVATED.
+ * provider behind a test-only activated manifest.
+ * Packet 11C English activation (owner decisions Q and A, 2026-10-12): the shipped manifest now enables EXPLAIN_PATTERN, so the
+ * NOT_ACTIVATED cases inject the pre-activation manifest (`NOT_ACTIVATED`, every task DETERMINISTIC_ONLY) and the activated cases a test
+ * manifest enabling EXPLAIN_PATTERN only.
  */
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;
@@ -46,12 +49,13 @@ afterEach(async () => {
 
 type Execute = (request: AiTaskRequest, signal?: AbortSignal) => Promise<AiHybridExecutionResult>;
 
-const ENABLED: AiActivationManifest = { ...AI_ACTIVATION_MANIFEST, tasks: { ...AI_ACTIVATION_MANIFEST.tasks, EXPLAIN_PATTERN: "SYNTHETIC_REMOTE_ENABLED" } };
+const ENABLED: AiActivationManifest = testManifestEnabling("EXPLAIN_PATTERN");
+const NOT_ACTIVATED: AiActivationManifest = DETERMINISTIC_ONLY_TEST_MANIFEST;
 
 /** The real hybrid service; `invoke` is the provider spy (never reached while NOT_ACTIVATED). */
 function hybrid(manifest: AiActivationManifest, invoke: AiShellProviderPort["invoke"]) {
   const provider: AiShellProviderPort = { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, invoke };
-  // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+  // Packet 11C Addendum C (C1): test-only QUALIFIED records (independent of the shipped records).
   return createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async () => undefined }, now: () => NOW, monotonicMs: () => 0, manifest, provider, requestClassGate: qualifiedTestRequestClassGate() });
 }
 
@@ -115,7 +119,7 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
     vi.stubGlobal("fetch", fetchSpy);
     const { history } = await higherFixture();
     const invoke = vi.fn<AiShellProviderPort["invoke"]>();
-    const run = onDemand(hybrid(AI_ACTIVATION_MANIFEST, invoke).execute);
+    const run = onDemand(hybrid(NOT_ACTIVATED, invoke).execute);
     const pending = explainer(history, run.execute).explain({ factId: FACT, locale });
     await run.started;
     run.release();
@@ -173,7 +177,7 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
   it("(c) a correction and processPending() while execute is pending: STALE_RESULT, and no composition is returned", async () => {
     const { journal, coordinator, history, recorded } = await higherFixture();
     const before = await viewOf(history);
-    const run = onDemand(hybrid(AI_ACTIVATION_MANIFEST, vi.fn()).execute);
+    const run = onDemand(hybrid(NOT_ACTIVATED, vi.fn()).execute);
     const pending = explainer(history, run.execute).explain({ factId: FACT, locale: "en-SG" });
     await run.started;
 
@@ -229,7 +233,7 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
         load: history.load,
         loadExplainablePattern: async () => (++loads === 1 ? { kind: "EXPLAINABLE", view: structuredClone(view) } : reloaded),
       };
-      const execute = vi.fn(hybrid(AI_ACTIVATION_MANIFEST, vi.fn()).execute);
+      const execute = vi.fn(hybrid(NOT_ACTIVATED, vi.fn()).execute);
       const result = await explainer(port, execute).explain({ factId: FACT, locale: "en-SG" });
       expect(result, label).toEqual({ kind: "UNAVAILABLE", reason: "STALE_RESULT" });
       expect(loads, label).toBe(2);
@@ -239,7 +243,7 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
 
   it("(d) abort while execute is pending: CANCELLED, without waiting for execute, and the signal reaches execute", async () => {
     const { history } = await higherFixture();
-    const run = onDemand(hybrid(AI_ACTIVATION_MANIFEST, vi.fn()).execute);
+    const run = onDemand(hybrid(NOT_ACTIVATED, vi.fn()).execute);
     const controller = new AbortController();
     const pending = explainer(history, run.execute).explain({ factId: FACT, locale: "en-SG" }, controller.signal);
     await run.started;
@@ -252,7 +256,7 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
   it("(d) abort after execute resolves but before the result is kept: CANCELLED", async () => {
     const { history } = await higherFixture();
     const controller = new AbortController();
-    const inner = hybrid(AI_ACTIVATION_MANIFEST, vi.fn()).execute;
+    const inner = hybrid(NOT_ACTIVATED, vi.fn()).execute;
     const execute: Execute = async (request, signal) => {
       const result = await inner(request, signal);
       controller.abort();
@@ -300,7 +304,7 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
 
   it("fails closed with UNAVAILABLE when execute rejects the request, falls back, throws, or answers for another request", async () => {
     const { history } = await higherFixture();
-    const real = hybrid(AI_ACTIVATION_MANIFEST, vi.fn()).execute;
+    const real = hybrid(NOT_ACTIVATED, vi.fn()).execute;
     const cases: Array<[string, Execute]> = [
       ["REQUEST_REJECTED", async () => ({ kind: "REQUEST_REJECTED" })],
       ["FALLBACK", async (request) => ({ kind: "FALLBACK", fallback: { kind: "DETERMINISTIC_FALLBACK" } as never, auditRef: request.requestId })],
@@ -318,7 +322,7 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
   /** Packet 11C B2b (carried Checkpoint 2 minor): the limitations kept are exactly the request's, as the renderer produced them. */
   it("fails closed when the rendered limitations do not match the request's limitation refs and codes", async () => {
     const { history } = await higherFixture();
-    const real = hybrid(AI_ACTIVATION_MANIFEST, vi.fn()).execute;
+    const real = hybrid(NOT_ACTIVATED, vi.fn()).execute;
     const withLimitations = (change: (limitations: Array<{ limitationRef: string; code: string; text: string }>) => unknown): Execute => async (request, signal) => {
       const result = (await real(request, signal)) as Extract<AiHybridExecutionResult, { kind: "COMPOSED" }>;
       const limitations = result.limitations!.map((limitation) => ({ ...limitation }));
@@ -341,7 +345,7 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
 
   it("returns frozen copies of the limitations, detached from the hybrid result", async () => {
     const { history } = await higherFixture();
-    const real = hybrid(AI_ACTIVATION_MANIFEST, vi.fn()).execute;
+    const real = hybrid(NOT_ACTIVATED, vi.fn()).execute;
     let source: Array<{ limitationRef: string; code: string; text: string }> = [];
     const execute: Execute = async (request, signal) => {
       const result = (await real(request, signal)) as Extract<AiHybridExecutionResult, { kind: "COMPOSED" }>;
@@ -377,7 +381,7 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
       remove(type, listener, options);
     });
     // `execute` never touches the signal itself, so every listener seen here is the use case's own.
-    const real = hybrid(AI_ACTIVATION_MANIFEST, vi.fn()).execute;
+    const real = hybrid(NOT_ACTIVATED, vi.fn()).execute;
     let release!: () => void;
     const execute: Execute = (request) =>
       path === "REJECT" ? Promise.reject(new Error("boom")) : path === "ABORT" ? new Promise((resolve) => (release = () => void real(request).then(resolve))) : real(request);
@@ -411,12 +415,12 @@ describe("createPatternExplainer (Packet 11C Task 6)", () => {
     const declined = explained(await explainer(history, service.execute).explain({ factId: FACT, locale: "en-SG" }));
     expect(declined).toMatchObject({ source: "DETERMINISTIC", remoteUse: "NOT_ACCEPTED" });
     expect(invoke).not.toHaveBeenCalled();
-    const shipped = explained(await explainer(history, hybrid(AI_ACTIVATION_MANIFEST, invoke).execute).explain({ factId: FACT, locale: "en-SG" }));
-    expect(shipped.source).toBe("DETERMINISTIC");
-    expect(shipped).not.toHaveProperty("remoteUse");
+    const notActivated = explained(await explainer(history, hybrid(NOT_ACTIVATED, invoke).execute).explain({ factId: FACT, locale: "en-SG" }));
+    expect(notActivated.source).toBe("DETERMINISTIC");
+    expect(notActivated).not.toHaveProperty("remoteUse");
     // The same explanation either way: only the marker differs.
-    expect(declined.composition).toEqual(shipped.composition);
-    expect(declined.limitations).toEqual(shipped.limitations);
+    expect(declined.composition).toEqual(notActivated.composition);
+    expect(declined.limitations).toEqual(notActivated.limitations);
   });
 });
 

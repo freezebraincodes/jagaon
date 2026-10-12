@@ -6,14 +6,14 @@ import { AI_TASK_TYPES, aiInvocationAuditRowSchema, type AiInvocationAuditRow, t
 import { FIXTURE_NOW, sourceBackedRequest } from "@/domain/ai/ai-test-fixtures";
 import type { ExplainablePatternView } from "@/application/history/recorded-history-contracts";
 import { databases, FACT, higherFixture, NOW } from "@/application/history/history-test-support";
-import { AI_ACTIVATION_MANIFEST, type AiActivationManifest } from "./ai-activation-manifest";
+import { AI_ACTIVATION_MANIFEST, AI_DETERMINISTIC_ONLY_MANIFEST, type AiActivationManifest } from "./ai-activation-manifest";
 import { createAiHybridTaskService } from "./ai-hybrid-task-service";
 import type { AiProviderPort, AiShellProviderPort, ProviderInvocationResult } from "./ai-provider-port";
 import { AI_TASK_RUNTIME_BUNDLES } from "./ai-runtime-bundles";
 import { createAiTaskService } from "./ai-task-service";
 import { projectProviderTaskPayload } from "./detached-payload-projector";
 import { buildSourceBackedExplainRequest } from "./explain-pattern-request";
-import { qualifiedTestRequestClassGate } from "./request-class-test-support";
+import { DETERMINISTIC_ONLY_TEST_MANIFEST, qualifiedTestRequestClassGate } from "./request-class-test-support";
 
 /**
  * Packet 11C Task 6A (owner instruction 2026-10-08): a source-backed EXPLAIN request (one carrying the local
@@ -124,11 +124,13 @@ describe("legacy fact-sending service refuses a source-backed request (Packet 11
     }
   });
 
-  it("refuses it under the shipped deterministic-only manifest too (the refusal does not depend on activation)", async () => {
+  it("refuses it under the legacy service's deterministic-only default manifest too (the refusal does not depend on activation)", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const request = legacyKeyed(await realSourceBackedRequest());
-    const { service, rows, invoke } = legacyHarness(AI_ACTIVATION_MANIFEST);
+    // Packet 11C English activation (I-8 follow-up): the legacy service's default is AI_DETERMINISTIC_ONLY_MANIFEST (the shipped
+    // manifest now enables EXPLAIN_PATTERN for the hybrid path only); passed explicitly because this harness defaults to REMOTE.
+    const { service, rows, invoke } = legacyHarness(AI_DETERMINISTIC_ONLY_MANIFEST);
     expectRefusedBeforeAnySend(await service.execute(request), rows, invoke, fetchSpy, request);
   });
 
@@ -154,7 +156,7 @@ describe("hybrid service still handles a source-backed request (Packet 11C Task 
     const rows: AiInvocationAuditRow[] = [];
     const calls: ShellTaskRequest[] = [];
     const provider: AiShellProviderPort = { providerModel: { providerKey: "test", modelSnapshot: "test-model" }, invoke: async (input) => { calls.push(input); return { kind: "FAILED", reason: "TRANSPORT_FAILED" }; } };
-    // Packet 11C Addendum C (C1): test-only QUALIFIED records (the shipped records are all PENDING).
+    // Packet 11C Addendum C (C1): test-only QUALIFIED records (independent of the shipped records).
     const service = createAiHybridTaskService({ releaseProfile: "HACKATHON_DEMO", audit: { append: async (row) => void rows.push(row) }, now: () => FIXTURE_NOW, monotonicMs: () => 0, manifest, provider, requestClassGate: qualifiedTestRequestClassGate() });
     return { service, rows, calls };
   }
@@ -163,7 +165,8 @@ describe("hybrid service still handles a source-backed request (Packet 11C Task 
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const request = await realSourceBackedRequest();
-    const { service, rows, calls } = hybridHarness(AI_ACTIVATION_MANIFEST);
+    // Packet 11C English activation: the shipped manifest now enables EXPLAIN_PATTERN, so NOT_ACTIVATED is the injected 11A manifest.
+    const { service, rows, calls } = hybridHarness(DETERMINISTIC_ONLY_TEST_MANIFEST);
     const result = await service.execute(request);
     expect(result).toMatchObject({ kind: "COMPOSED", source: "DETERMINISTIC", mode: "NOT_ACTIVATED", reason: "TASK_DISABLED", limitationCopyComplete: true });
     // The slot planner projects the source-backed request locally; the projector must keep doing so.

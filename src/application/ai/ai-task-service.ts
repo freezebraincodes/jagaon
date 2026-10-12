@@ -1,5 +1,5 @@
 import { aiTaskRequestSchema, type AiReasonCode, type AiTaskOutput, type AiTaskRequest, type ProviderTaskRequest } from "@/domain/ai";
-import { AI_ACTIVATION_MANIFEST, resolveAiTaskActivation, type AiActivationManifest } from "./ai-activation-manifest";
+import { AI_DETERMINISTIC_ONLY_MANIFEST, resolveAiTaskActivation, type AiActivationManifest } from "./ai-activation-manifest";
 import { addUsage, buildAuditRow, callOnce, NO_USAGE, type Attempts } from "./ai-call-support";
 import { createDeterministicFallback, type AiFallbackResult } from "./ai-fallbacks";
 import { renderExplainLimitations, type RenderedLimitation } from "./ai-meaning-registry";
@@ -14,8 +14,14 @@ import { projectProviderTaskPayload } from "./detached-payload-projector";
  * checks activation and profile, projects the detached payload, optionally
  * invokes the injected provider within the bundle's attempt and time ceilings,
  * validates the whole result, appends exactly one minimal audit row and returns
- * the accepted output or the task's deterministic fallback. With the shipped
- * 11A manifest every task is deterministic-only, so no provider is ever called.
+ * the accepted output or the task's deterministic fallback. Without an injected
+ * manifest it uses the deterministic-only manifest (`AI_DETERMINISTIC_ONLY_MANIFEST`,
+ * every task DETERMINISTIC_ONLY), so no provider is ever called. Packet 11C English
+ * activation (owner decisions Q and A, I-8 review follow-up): this legacy service
+ * sends record values, so it deliberately does NOT default to the shipped
+ * `AI_ACTIVATION_MANIFEST` (which enables the value-blind hybrid shell path); only
+ * an explicitly injected manifest (the offline evaluation harness, tests) enables a
+ * task here.
  */
 
 export type AiTaskExecutionResult =
@@ -42,7 +48,7 @@ export type AiTaskServiceDependencies = Readonly<{
 }>;
 
 export function createAiTaskService(dependencies: AiTaskServiceDependencies): AiTaskService {
-  const manifest = dependencies.manifest ?? AI_ACTIVATION_MANIFEST;
+  const manifest = dependencies.manifest ?? AI_DETERMINISTIC_ONLY_MANIFEST;
 
   async function invoke(request: AiTaskRequest, bundle: AiTaskRuntimeBundle, payload: ProviderTaskRequest, provider: AiProviderPort, attempts: Attempts, signal: AbortSignal | undefined): Promise<{ kind: "ACCEPTED"; output: AiTaskOutput } | { kind: "REJECTED"; reason: AiReasonCode }> {
     const budget = bundle.executionBudget;
