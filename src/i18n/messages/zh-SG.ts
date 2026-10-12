@@ -623,7 +623,8 @@ export const zhSGMessages: AppMessages = {
     notRecordedLegend: "未记录",
     chartDescription: (recorded, positions, unit) =>
       `图表显示${positions}个位置中的${recorded}个读数记录，单位为${unit}。没有记录的位置标为未记录。`,
-    chartSlotsNote: "每天显示两个位置：早上和晚上。内容按记录显示。",
+    // Owner decision 2026-10-12: every reading is drawn; the note says how. Human acceptance pending.
+    chartSlotsNote: "每天显示两个位置：早上（中午12点前）和晚上。每个已记录的读数各有一条柱。",
     recordedDataTag: "您记录的数据",
     factsTitle: "这些记录显示",
     periodRange: (range) => `${range}`,

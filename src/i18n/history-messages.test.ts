@@ -30,8 +30,8 @@ const STATIC: Record<string, [string, string]> = {
   recordedLegend: ["recorded", "已记录"],
   notRecordedLegend: ["not recorded", "未记录"],
   chartSlotsNote: [
-    "Two display positions per day: morning and evening. Shown as recorded.",
-    "每天显示两个位置：早上和晚上。内容按记录显示。",
+    "Two display positions per day: morning (before 12 pm) and evening. Each recorded reading has its own bar.",
+    "每天显示两个位置：早上（中午12点前）和晚上。每个已记录的读数各有一条柱。",
   ],
   recordedDataTag: ["Your recorded data", "您记录的数据"],
   factsTitle: ["What these records show", "这些记录显示"],

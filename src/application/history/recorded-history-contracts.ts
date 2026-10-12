@@ -39,8 +39,11 @@ const chartPositionSchema = z.discriminatedUnion("state", [
     date: localDateSchema,
     position: positionSchema,
     state: z.literal("RECORDED"),
+    /** The latest reading's value in this position. */
     valueMmolL: decimalStringSchema,
     readingCount: z.number().int().positive().safe(),
+    /** Every reading with a value in this position, in time order: the chart draws each one, never only the latest. */
+    readings: z.array(z.strictObject({ valueMmolL: decimalStringSchema, at: instantSchema })).min(1),
   }),
   // A missing position has no value: it is never drawn as zero.
   z.strictObject({ date: localDateSchema, position: positionSchema, state: z.literal("NOT_RECORDED") }),

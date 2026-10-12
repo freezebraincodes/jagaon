@@ -26,6 +26,29 @@ function ready(view: RecordedHistoryView) {
 }
 
 describe("Recorded-history query port", () => {
+  it("keeps every reading in a display position, in time order, not only the latest (owner decision 2026-10-12)", async () => {
+    const { journal, history } = await setup();
+    await reading(journal, "2026-09-29", "07:10", "6.2");
+    await reading(journal, "2026-09-29", "13:05", "9.1", "BEFORE_LUNCH");
+    await reading(journal, "2026-09-29", "18:40", "7.3", "BEFORE_DINNER");
+    const projection = ready(await history.load({ period: "THIS_WEEK" })).projection;
+    expect(projection.readingCount).toBe(3);
+    const evening = projection.chart.find((p) => p.date === "2026-09-29" && p.position === "EVENING");
+    // The afternoon reading is drawn beside the evening one; the latest value stays the position's own.
+    expect(evening).toEqual({
+      date: "2026-09-29",
+      position: "EVENING",
+      state: "RECORDED",
+      valueMmolL: "7.3",
+      readingCount: 2,
+      readings: [
+        { valueMmolL: "9.1", at: local("2026-09-29", "13:05").occurrence.instantUtc },
+        { valueMmolL: "7.3", at: local("2026-09-29", "18:40").occurrence.instantUtc },
+      ],
+    });
+    expect(projection.chart.find((p) => p.date === "2026-09-29" && p.position === "MORNING")).toMatchObject({ readings: [{ valueMmolL: "6.2" }] });
+  });
+
   it("projects this week's counts, range, slot counts, positions and stamps from latest revisions", async () => {
     const { journal, history } = await setup();
     await reading(journal, "2026-09-28", "07:30", "6.1");
@@ -47,7 +70,14 @@ describe("Recorded-history query port", () => {
     ]);
     // Six full days plus Sunday morning; Sunday evening has not begun.
     expect(projection.chart).toHaveLength(13);
-    expect(projection.chart[0]).toEqual({ date: "2026-09-28", position: "MORNING", state: "RECORDED", valueMmolL: "6.1", readingCount: 1 });
+    expect(projection.chart[0]).toEqual({
+      date: "2026-09-28",
+      position: "MORNING",
+      state: "RECORDED",
+      valueMmolL: "6.1",
+      readingCount: 1,
+      readings: [{ valueMmolL: "6.1", at: local("2026-09-28", "07:30").occurrence.instantUtc }],
+    });
     expect(projection.chart[3]).toEqual({ date: "2026-09-29", position: "EVENING", state: "NOT_RECORDED" });
     expect(projection.chart.find((p) => p.date === "2026-10-01" && p.position === "EVENING")).toMatchObject({ state: "RECORDED", valueMmolL: "8.4" });
     expect(projection.notRecordedPositions).toHaveLength(8);

@@ -249,6 +249,7 @@ export function createRecordedHistoryQuery(database: JagaOnDatabase, dependencie
               state: "RECORDED",
               valueMmolL: storedMmolValue(valued.at(-1)!.reading.payload) as never,
               readingCount: here.length,
+              readings: valued.map((entry) => ({ valueMmolL: storedMmolValue(entry.reading.payload) as never, at: entry.point.instant as never })),
             });
           } else {
             chart.push({ date, position, state: "NOT_RECORDED" });

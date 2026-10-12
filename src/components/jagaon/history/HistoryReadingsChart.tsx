@@ -2,6 +2,7 @@
 
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { HistoryChartPosition, HistoryPeriod } from "@/application/history/recorded-history-contracts";
+import { formatSingaporeTime } from "../journal/singapore-time";
 import { formatChartDay, formatShortDate } from "./history-format";
 
 type Props = {
@@ -22,14 +23,17 @@ const UNIT = "mmol/L";
  * table below carries every position, value and missing position.
  * CR-11 (AC-20z): a recorded 0.0 keeps a thin solid bar (drawn, never mistaken
  * for a not-recorded outline) and its stored text in the table.
+ * Owner decision 2026-10-12: every reading is drawn. A position with several
+ * readings shows one bar per reading, side by side in time order, within the
+ * position's own width; the table lists each reading with its time.
  */
 export function HistoryReadingsChart({ messages, locale, period, chart, headingId }: Props) {
   const msg = messages.history;
-  const values = chart.flatMap((position) => (position.state === "RECORDED" ? [Number(position.valueMmolL)] : []));
+  const values = chart.flatMap((position) => (position.state === "RECORDED" ? position.readings.map((reading) => Number(reading.valueMmolL)) : []));
   const axisMax = Math.max(10, Math.ceil(Math.max(0, ...values) / 5) * 5);
   const ticks = Array.from({ length: axisMax / 5 + 1 }, (_, index) => index * 5);
   const days = [...new Set(chart.map((position) => position.date))];
-  const recordedCount = chart.filter((position) => position.state === "RECORDED").length;
+  const recordedCount = chart.reduce((total, position) => total + (position.state === "RECORDED" ? position.readings.length : 0), 0);
   const descriptionId = `${headingId}-description`;
 
   return (
@@ -60,18 +64,32 @@ export function HistoryReadingsChart({ messages, locale, period, chart, headingI
             <div key={date} className="history-day">
               {chart
                 .filter((position) => position.date === date)
-                .map((position) =>
-                  position.state === "RECORDED" ? (
-                    <span
-                      key={position.position}
-                      className={`history-bar history-bar--recorded${Number(position.valueMmolL) === 0 ? " history-bar--zero" : ""}`}
-                      data-value={position.valueMmolL}
-                      style={{ height: `${(Number(position.valueMmolL) / axisMax) * 100}%` }}
-                    />
-                  ) : (
-                    <span key={position.position} className="history-bar history-bar--missing" />
-                  ),
-                )}
+                .map((position) => (
+                  <span
+                    key={position.position}
+                    className="history-slot"
+                    data-position={position.position}
+                    // Several readings take a larger share of the day (and a wider limit), so each bar stays visible.
+                    style={
+                      position.state === "RECORDED" && position.readings.length > 1
+                        ? { flexGrow: position.readings.length, maxWidth: `${Math.min(position.readings.length, 3)}rem` }
+                        : undefined
+                    }
+                  >
+                    {position.state === "RECORDED" ? (
+                      position.readings.map((reading, index) => (
+                        <span
+                          key={index}
+                          className={`history-bar history-bar--recorded${Number(reading.valueMmolL) === 0 ? " history-bar--zero" : ""}`}
+                          data-value={reading.valueMmolL}
+                          style={{ height: `${(Number(reading.valueMmolL) / axisMax) * 100}%` }}
+                        />
+                      ))
+                    ) : (
+                      <span className="history-bar history-bar--missing" />
+                    )}
+                  </span>
+                ))}
             </div>
           ))}
         </div>
@@ -101,14 +119,23 @@ export function HistoryReadingsChart({ messages, locale, period, chart, headingI
             </tr>
           </thead>
           <tbody>
-            {chart.map((position) => (
-              <tr key={`${position.date}-${position.position}`}>
-                <th scope="row">
-                  {`${formatShortDate(locale, position.date)}${locale === "zh-SG" ? "" : " "}${msg.positionLabels[position.position]}`}
-                </th>
-                <td>{position.state === "RECORDED" ? position.valueMmolL : msg.notRecordedLegend}</td>
-              </tr>
-            ))}
+            {chart.flatMap((position) => {
+              const label = `${formatShortDate(locale, position.date)}${locale === "zh-SG" ? "" : " "}${msg.positionLabels[position.position]}`;
+              if (position.state !== "RECORDED") {
+                return [
+                  <tr key={`${position.date}-${position.position}`}>
+                    <th scope="row">{label}</th>
+                    <td>{msg.notRecordedLegend}</td>
+                  </tr>,
+                ];
+              }
+              return position.readings.map((reading, index) => (
+                <tr key={`${position.date}-${position.position}-${index}`}>
+                  <th scope="row">{`${label}${locale === "zh-SG" ? "，" : ", "}${formatSingaporeTime(locale, reading.at)}`}</th>
+                  <td>{reading.valueMmolL}</td>
+                </tr>
+              ));
+            })}
           </tbody>
         </table>
       </div>

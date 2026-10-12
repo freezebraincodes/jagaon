@@ -81,11 +81,11 @@ function readyView(overrides: Partial<Extract<RecordedHistoryView, { status: "RE
         { slot: "BEFORE_DINNER", count: 1 },
       ],
       chart: [
-        { date: "2026-09-28", position: "MORNING", state: "RECORDED", valueMmolL: "6.1", readingCount: 1 },
-        { date: "2026-09-28", position: "EVENING", state: "RECORDED", valueMmolL: "8.4", readingCount: 1 },
-        { date: "2026-09-29", position: "MORNING", state: "RECORDED", valueMmolL: "6.4", readingCount: 1 },
+        { date: "2026-09-28", position: "MORNING", state: "RECORDED", valueMmolL: "6.1", readingCount: 1, readings: [{ valueMmolL: "6.1", at: "2026-09-27T23:30:00.000Z" }] },
+        { date: "2026-09-28", position: "EVENING", state: "RECORDED", valueMmolL: "8.4", readingCount: 1, readings: [{ valueMmolL: "8.4", at: "2026-09-28T10:30:00.000Z" }] },
+        { date: "2026-09-29", position: "MORNING", state: "RECORDED", valueMmolL: "6.4", readingCount: 1, readings: [{ valueMmolL: "6.4", at: "2026-09-28T23:30:00.000Z" }] },
         { date: "2026-09-29", position: "EVENING", state: "NOT_RECORDED" },
-        { date: "2026-09-30", position: "MORNING", state: "RECORDED", valueMmolL: "5.9", readingCount: 1 },
+        { date: "2026-09-30", position: "MORNING", state: "RECORDED", valueMmolL: "5.9", readingCount: 1, readings: [{ valueMmolL: "5.9", at: "2026-09-29T23:30:00.000Z" }] },
         { date: "2026-09-30", position: "EVENING", state: "NOT_RECORDED" },
       ],
       notRecordedPositions: [

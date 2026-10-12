@@ -3894,10 +3894,20 @@ button.summary-tile:hover:not(:disabled) {
   gap: 2px;
 }
 
-.history-bar {
+.history-slot {
   flex: 1 1 0;
   max-width: 1rem;
   min-width: 2px;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1px;
+}
+
+.history-bar {
+  flex: 1 1 0;
+  min-width: 1px;
   border-radius: 3px 3px 0 0;
 }
 

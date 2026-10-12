@@ -640,7 +640,8 @@ export const enSGMessages: AppMessages = {
     notRecordedLegend: "not recorded",
     chartDescription: (recorded, positions, unit) =>
       `Chart of ${recorded} recorded readings across ${positions} display positions, in ${unit}. Missing positions are labelled not recorded.`,
-    chartSlotsNote: "Two display positions per day: morning and evening. Shown as recorded.",
+    // Owner decision 2026-10-12: every reading is drawn; the note says how.
+    chartSlotsNote: "Two display positions per day: morning (before 12 pm) and evening. Each recorded reading has its own bar.",
     recordedDataTag: "Your recorded data",
     factsTitle: "What these records show",
     periodRange: (range) => `${range}`,
