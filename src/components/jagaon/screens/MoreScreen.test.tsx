@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/get-messages";
 import { HelpScreen } from "./HelpScreen";
 import { MoreScreen } from "./MoreScreen";
+import { MyNotesScreen } from "./MyNotesScreen";
 
 afterEach(() => cleanup());
 
@@ -24,11 +25,10 @@ function renderMore(navigate = vi.fn()) {
 }
 
 describe("MoreScreen", () => {
-  it("adds a distinct Data and backup destination and keeps Export to other apps unchanged", () => {
+  it("adds a distinct Data and backup destination", () => {
     const navigate = renderMore();
     fireEvent.click(screen.getByRole("button", { name: new RegExp(messages.packet10.more.data) }));
     expect(navigate).toHaveBeenCalledWith("DATA_BACKUP");
-    expect(screen.getByRole("group", { name: messages.more.exportApps })).toHaveAttribute("aria-disabled", "true");
   });
 
   it("offers only enabled Packet 6 destinations", () => {
@@ -64,33 +64,34 @@ describe("MoreScreen", () => {
     }
   });
 
-  it("shows later-packet destinations as disabled placeholders that do nothing", () => {
+  it("opens My notes in place of the Reminders placeholder, and hides the settings and destinations that do not exist yet (owner decision 2026-10-12)", () => {
     const navigate = renderMore();
-    for (const label of [messages.more.reminders]) {
-      const tile = screen.getByRole("button", { name: label });
-      expect(tile).toHaveAttribute("aria-disabled", "true");
-      expect(tile).toHaveAccessibleDescription(messages.today.futureFeature);
-      fireEvent.click(tile);
+    fireEvent.click(screen.getByRole("button", { name: messages.myNotes.title }));
+    expect(navigate).toHaveBeenCalledWith("MY_NOTES");
+    expect(screen.queryByRole("button", { name: messages.more.reminders })).toBeNull();
+    expect(screen.queryByRole("group", { name: messages.more.exportApps })).toBeNull();
+    expect(screen.queryByText(messages.more.exportApps)).toBeNull();
+    expect(screen.queryByRole("group", { name: messages.more.textSize })).toBeNull();
+    expect(screen.queryByRole("switch", { name: messages.more.extraContrast })).toBeNull();
+    expect(screen.queryByText(messages.more.extraContrast)).toBeNull();
+    // Nothing left on More is an inoperable placeholder.
+    expect(document.querySelectorAll('[aria-disabled="true"]')).toHaveLength(0);
+  });
+
+  it("My notes shows its title and an empty-state line in both locales, and stores nothing yet", () => {
+    for (const locale of ["en-SG", "zh-SG"] as const) {
+      const localized = getMessages(locale);
+      render(<MyNotesScreen messages={localized} />);
+      expect(screen.getByRole("heading", { level: 1, name: localized.myNotes.title })).toBeInTheDocument();
+      expect(screen.getByText(localized.myNotes.empty)).toBeInTheDocument();
+      cleanup();
     }
-    expect(navigate).not.toHaveBeenCalled();
+    expect(getMessages("zh-SG").myNotes.title).toBe("我的笔记");
+  });
 
-    const exportRow = screen.getByRole("group", { name: messages.more.exportApps });
-    expect(exportRow).toHaveAttribute("aria-disabled", "true");
-    expect(exportRow).toHaveTextContent(messages.shared.unavailable);
-
-    const textSize = screen.getByRole("group", { name: messages.more.textSize });
-    expect(textSize).toHaveAttribute("aria-disabled", "true");
-    expect(within(textSize).getByRole("button", { name: messages.more.smallerText })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    expect(within(textSize).getByRole("button", { name: messages.more.largerText })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    const contrast = screen.getByRole("switch", { name: messages.more.extraContrast });
-    expect(contrast).toHaveAttribute("aria-checked", "false");
-    expect(contrast).toHaveAttribute("aria-disabled", "true");
+  it("names Prepare for my appointment as Today does (owner decision 2026-10-12)", () => {
+    renderMore();
+    expect(screen.getByRole("button", { name: "Prepare for my appointment" })).toBeInTheDocument();
   });
 
   it("states units and the demo boundary without changing them", () => {

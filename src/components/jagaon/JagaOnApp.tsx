@@ -11,6 +11,7 @@ import { DEMO_BOUNDARY_PLACEMENT } from "@/components/demo/demo-boundary-placeme
 import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-fixture";
 import { TOP_LEVEL_SCREENS, type ScreenId } from "./screen-manifest";
 import { RecordedHistoryScreen } from "./screens/RecordedHistoryScreen";
+import { MyNotesScreen } from "./screens/MyNotesScreen";
 import { MedicationScheduleScreen } from "./screens/MedicationScheduleScreen";
 import {
   createAppointmentNoteSelectionRepository,
@@ -1091,6 +1092,8 @@ export function JagaOnApp({
             goBack={goBack}
           />
         );
+      case "MY_NOTES":
+        return <MyNotesScreen messages={messages} />;
       case "TELL_JAGAON": {
         if (!runtime) return <p role="status">{messages.shared.loading}</p>;
         const voice = runtime.voice;

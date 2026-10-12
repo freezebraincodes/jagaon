@@ -216,7 +216,8 @@ describe("Packet 9B care-organisation copy (09-bilingual-copy-matrix.md Sections
 
   it("ships every approved Section 3 row with the exact matrix wording", () => {
     const rows: Array<[keyof typeof en.carePreparation, string, string]> = [
-      ["title", "Prepare for my visit", "为复诊做准备"],
+      // Owner decision 2026-10-12: "appointment", as on Today.
+      ["title", "Prepare for my appointment", "为复诊做准备"],
       ["appointmentEnteredByYou", "Appointment entered by you", "预约由你输入"],
       ["appointmentUnverified", "Details not verified by the clinic", "资料未经诊所核实"],
       ["actionsTag", "Your actions", "你的操作"],

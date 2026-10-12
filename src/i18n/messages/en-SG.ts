@@ -48,6 +48,11 @@ export const enSGMessages: AppMessages = {
   },
   // ai-history-fallback.11c.1: owner-decided wording (owner UI decision U12, 2026-10-09, owner-ui-decisions-2026-10-09.md, verbatim). Not
   // an APPROVED_PACKET_11 row.
+  // Owner decision 2026-10-12: My notes replaces the Reminders tile on More; details to follow.
+  myNotes: {
+    title: "My notes",
+    empty: "Notes about how you feel will appear here.",
+  },
   aiHistoryFallback: {
     unavailableAfterRequest: "AI wording is unavailable. Your records are unchanged; standard wording is shown.",
   },
@@ -444,7 +449,8 @@ export const enSGMessages: AppMessages = {
     helpInfo: "Help and emergency information",
     // Packet 6 v1 convergence (needs bilingual review)
     healthChecks: "My health checks",
-    prepareVisit: "Prepare for my visit",
+    // Owner decision 2026-10-12: "appointment", as on Today.
+    prepareVisit: "Prepare for my appointment",
     reminders: "Reminders",
     foodInformation: "Food information",
     foodInformationBody: "General, user-opened information",
@@ -891,7 +897,8 @@ export const enSGMessages: AppMessages = {
     saved: "Saved",
   },
   carePreparation: {
-    title: "Prepare for my visit",
+    // Owner decision 2026-10-12: "appointment", as on Today.
+    title: "Prepare for my appointment",
     appointmentEnteredByYou: "Appointment entered by you",
     appointmentUnverified: "Details not verified by the clinic",
     actionsTag: "Your actions",

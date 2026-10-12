@@ -15,6 +15,9 @@ import {
   TrashIcon,
 } from "../primitives/Icons";
 
+/** Owner decision 2026-10-12: Text size and Extra contrast are hidden until they exist (they were shown as unavailable). */
+const SHOW_LATER_SETTINGS = false;
+
 export type SettingsScreenProps = {
   messages: AppMessages;
   locale: SupportedLocale;
@@ -100,22 +103,27 @@ export function SettingsScreen({
         <Banner variant="error">{messages.shared.storageUnavailable}</Banner>
       ) : null}
 
-      {/* Text size is a later setting; shown as in frame 12 but not operable. */}
-      <div className="setting-card setting-card--future" role="group" aria-labelledby="text-size-title" aria-disabled="true">
-        <p className="eyebrow" id="text-size-title">
-          {more.textSize}
-        </p>
-        <div className="text-size-row">
-          <button type="button" className="stepper-button" aria-label={more.smallerText} aria-disabled="true">
-            <span aria-hidden="true">A−</span>
-          </button>
-          <p className="text-size-sample">{more.textSizeSample}</p>
-          <button type="button" className="stepper-button" aria-label={more.largerText} aria-disabled="true">
-            <span aria-hidden="true">A+</span>
-          </button>
-        </div>
-        <p className="provenance-line">{messages.today.futureFeature}</p>
-      </div>
+      {/* Owner decision 2026-10-12: hidden until text size exists. */}
+      {SHOW_LATER_SETTINGS ? (
+        <>
+          {/* Text size is a later setting; shown as in frame 12 but not operable. */}
+          <div className="setting-card setting-card--future" role="group" aria-labelledby="text-size-title" aria-disabled="true">
+            <p className="eyebrow" id="text-size-title">
+              {more.textSize}
+            </p>
+            <div className="text-size-row">
+              <button type="button" className="stepper-button" aria-label={more.smallerText} aria-disabled="true">
+                <span aria-hidden="true">A−</span>
+              </button>
+              <p className="text-size-sample">{more.textSizeSample}</p>
+              <button type="button" className="stepper-button" aria-label={more.largerText} aria-disabled="true">
+                <span aria-hidden="true">A+</span>
+              </button>
+            </div>
+            <p className="provenance-line">{messages.today.futureFeature}</p>
+          </div>
+        </>
+      ) : null}
 
       <div className="setting-row">
         <LanguageIcon size={26} className="icon setting-icon" />
@@ -158,20 +166,23 @@ export function SettingsScreen({
         </div>
       ) : null}
 
-      <div className="setting-row setting-row--future" role="group" aria-labelledby="contrast-title" aria-disabled="true">
-        <ContrastIcon size={26} className="icon setting-icon" />
-        <span className="setting-text">
-          <span className="setting-title" id="contrast-title">
-            {more.extraContrast}
+      {/* Owner decision 2026-10-12: hidden until extra contrast exists. */}
+      {SHOW_LATER_SETTINGS ? (
+        <div className="setting-row setting-row--future" role="group" aria-labelledby="contrast-title" aria-disabled="true">
+          <ContrastIcon size={26} className="icon setting-icon" />
+          <span className="setting-text">
+            <span className="setting-title" id="contrast-title">
+              {more.extraContrast}
+            </span>
+            <span className="setting-body">{more.extraContrastBody}</span>
+            <span className="setting-body">{messages.today.futureFeature}</span>
           </span>
-          <span className="setting-body">{more.extraContrastBody}</span>
-          <span className="setting-body">{messages.today.futureFeature}</span>
-        </span>
-        <span className="switch" role="switch" aria-checked="false" aria-disabled="true" aria-labelledby="contrast-title">
-          <span className="switch-label">{more.off}</span>
-          <span className="switch-track" aria-hidden="true" />
-        </span>
-      </div>
+          <span className="switch" role="switch" aria-checked="false" aria-disabled="true" aria-labelledby="contrast-title">
+            <span className="switch-label">{more.off}</span>
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </div>
+      ) : null}
 
       <div className="setting-row" role="group" aria-labelledby="units-title">
         <RulerIcon size={26} className="icon setting-icon" />

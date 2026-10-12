@@ -11,6 +11,7 @@ import {
   PACKET_9C_CHILD_SCREENS,
   PACKET_10_CHILD_SCREENS,
   PACKET_13_CHILD_SCREENS,
+  MY_NOTES_CHILD_SCREENS,
   ONBOARDING_ROUTES,
   type ScreenId,
 } from "./screen-manifest";
@@ -56,6 +57,7 @@ describe("screen-manifest", () => {
       ...PACKET_9C_CHILD_SCREENS,
       ...PACKET_10_CHILD_SCREENS,
       ...PACKET_13_CHILD_SCREENS,
+      ...MY_NOTES_CHILD_SCREENS,
     ]);
   });
 
@@ -88,7 +90,9 @@ describe("screen-manifest", () => {
     expect(PACKET_10_CHILD_SCREENS).toEqual(["DATA_BACKUP"]);
     // Packet 13 slice: one Tell JagaOn destination, reached from Today.
     expect(PACKET_13_CHILD_SCREENS).toEqual(["TELL_JAGAON"]);
-    expect(ALL_SCREENS.size).toBe(19);
+    // Owner decision 2026-10-12: My notes adds exactly MY_NOTES (reached from More).
+    expect(MY_NOTES_CHILD_SCREENS).toEqual(["MY_NOTES"]);
+    expect(ALL_SCREENS.size).toBe(20);
     expect(ALL_SCREENS.has("MEDICATION_SCHEDULE")).toBe(true);
     expect(ALL_SCREENS.has("HISTORY")).toBe(true);
     expect(ALL_SCREENS.has("MY_MEDICINES")).toBe(true);

@@ -1,16 +1,15 @@
 "use client";
 
-import type { ReactNode } from "react";
 import { type AppMessages } from "@/i18n/types";
 import type { ScreenId } from "../screen-manifest";
 import {
-  BellIcon,
   BookIcon,
   CalendarCheckIcon,
   ChevronRightIcon,
   ClipboardIcon,
   LifebuoyIcon,
   LockIcon,
+  PencilIcon,
   PillIcon,
   ShareIcon,
 } from "../primitives/Icons";
@@ -21,20 +20,8 @@ type MoreScreenProps = Omit<SettingsScreenProps, "messages" | "goBack"> & {
   navigate: (screen: ScreenId, params?: Record<string, string>) => void;
 };
 
-/** A later-packet destination: visible as in frame 12, but not operable. */
-function FutureTile({ icon, label, laterId }: { icon: ReactNode; label: string; laterId: string }) {
-  return (
-    <button
-      type="button"
-      className="more-tile more-tile--future"
-      aria-disabled="true"
-      aria-describedby={laterId}
-    >
-      {icon}
-      <span className="more-tile-label">{label}</span>
-    </button>
-  );
-}
+/** Owner decision 2026-10-12: "Export to other apps" is hidden until it exists (it was shown as unavailable). */
+const SHOW_EXPORT_TO_OTHER_APPS = false;
 
 export function MoreScreen({ messages, navigate, ...settings }: MoreScreenProps) {
   const msg = messages.more;
@@ -68,11 +55,11 @@ export function MoreScreen({ messages, navigate, ...settings }: MoreScreenProps)
             <ClipboardIcon size={30} className="icon more-tile-icon" />
             <span className="more-tile-label">{msg.prepareVisit}</span>
           </button>
-          <FutureTile
-            icon={<BellIcon size={30} className="icon more-tile-icon" />}
-            label={msg.reminders}
-            laterId={laterId}
-          />
+          {/* Owner decision 2026-10-12: My notes replaces the Reminders placeholder tile. */}
+          <button type="button" className="more-tile" onClick={() => navigate("MY_NOTES")}>
+            <PencilIcon size={30} className="icon more-tile-icon" />
+            <span className="more-tile-label">{messages.myNotes.title}</span>
+          </button>
         </div>
 
         <button type="button" className="more-row" onClick={() => navigate("NEARBY_FOOD")}>
@@ -100,21 +87,24 @@ export function MoreScreen({ messages, navigate, ...settings }: MoreScreenProps)
           </span>
           <ChevronRightIcon size={22} className="icon more-row-chevron" />
         </button>
-        <div
-          className="more-row more-row--future"
-          role="group"
-          aria-labelledby="more-export-title"
-          aria-disabled="true"
-        >
-          <ShareIcon size={30} className="icon more-row-icon" />
-          <span className="more-row-text">
-            <span className="more-row-label" id="more-export-title">
-              {msg.exportApps}
+        {SHOW_EXPORT_TO_OTHER_APPS ? (
+          <div
+            className="more-row more-row--future"
+            role="group"
+            aria-labelledby="more-export-title"
+            aria-disabled="true"
+            aria-describedby={laterId}
+          >
+            <ShareIcon size={30} className="icon more-row-icon" />
+            <span className="more-row-text">
+              <span className="more-row-label" id="more-export-title">
+                {msg.exportApps}
+              </span>
+              <span className="more-row-body">{msg.exportBody}</span>
             </span>
-            <span className="more-row-body">{msg.exportBody}</span>
-          </span>
-          <span className="status-pill">{messages.shared.unavailable}</span>
-        </div>
+            <span className="status-pill">{messages.shared.unavailable}</span>
+          </div>
+        ) : null}
       </section>
 
       <SettingsScreen messages={messages} {...settings} />

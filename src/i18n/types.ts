@@ -1032,6 +1032,8 @@ export type AppMessages = {
   aiWording: AiWordingMessages;
   /** Owner UI decision U12: the history fallback line after an attempted remote request (ai-history-fallback.11c.1). */
   aiHistoryFallback: AiHistoryFallbackMessages;
+  /** Owner decision 2026-10-12: My notes, reached from More (first version: the destination only). */
+  myNotes: { title: string; empty: string };
   /** Owner decision 2026-10-12 (AI credit dialog): the used-up AI credit dialog (en owner wording; zh drafts, acceptance deferred). */
   aiCreditLimit: AiCreditLimitMessages;
   /** Voice transcription slice (voice-copy.13s.1; human acceptance pending). */

@@ -116,7 +116,7 @@ describe("Packet 9B manifest", () => {
     const en = getMessages("en-SG");
     const zh = getMessages("zh-SG");
     expect([en.preventiveCare.title, zh.preventiveCare.title]).toEqual(["My health checks", "我的健康检查"]);
-    expect([en.carePreparation.title, zh.carePreparation.title]).toEqual(["Prepare for my visit", "为复诊做准备"]);
+    expect([en.carePreparation.title, zh.carePreparation.title]).toEqual(["Prepare for my appointment", "为复诊做准备"]);
     expect([en.more.healthChecks, en.more.prepareVisit]).toEqual(expect.arrayContaining([expect.any(String), expect.any(String)]));
   });
 });

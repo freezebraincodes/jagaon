@@ -49,6 +49,11 @@ export const zhSGMessages: AppMessages = {
   },
   // ai-history-fallback.11c.1: owner-decided wording (owner UI decision U12, 2026-10-09, owner-ui-decisions-2026-10-09.md, verbatim). Not
   // an APPROVED_PACKET_11 row.
+  // Owner decision 2026-10-12: My notes (human acceptance pending).
+  myNotes: {
+    title: "我的笔记",
+    empty: "关于您感受的笔记会显示在这里。",
+  },
   aiHistoryFallback: {
     unavailableAfterRequest: "AI 措辞暂时无法使用。您的记录没有改变；现显示标准措辞。",
   },
