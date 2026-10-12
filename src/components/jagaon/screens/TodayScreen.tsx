@@ -52,6 +52,8 @@ type TodayScreenProps = {
   /** Packet 10A: permanent deletion of the latest recorded reading (frame 10). */
   recordDeletion?: RecordDeletionPort;
   onRecordDeleted?: () => void;
+  /** Opens the History tab (as the bottom navigation does). Without it, "View history" stays disabled. */
+  onOpenHistory?: () => void;
 };
 
 type BookletSlot = {
@@ -122,6 +124,7 @@ export function TodayScreen({
   now = new Date(),
   recordDeletion,
   onRecordDeleted,
+  onOpenHistory,
 }: TodayScreenProps) {
   const [deleting, setDeleting] = useState(false);
   const deleteOpener = useRef<HTMLButtonElement>(null);
@@ -285,7 +288,13 @@ export function TodayScreen({
                 {messages.packet10.deletion.deleteRecordAction}
               </button>
             ) : null}
-            <button type="button" className="text-link" disabled aria-disabled="true">
+            <button
+              type="button"
+              className="text-link"
+              onClick={onOpenHistory}
+              disabled={!onOpenHistory}
+              aria-disabled={onOpenHistory ? undefined : "true"}
+            >
               {msg.viewHistory}
               <ChevronRightIcon size={18} />
             </button>

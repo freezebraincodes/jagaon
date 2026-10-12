@@ -29,7 +29,7 @@ const journal: TodayJournalViewModel = {
   ],
 };
 
-function setup(props?: { locale?: "en-SG" | "zh-SG"; navigate?: (screen: ScreenId) => void }) {
+function setup(props?: { locale?: "en-SG" | "zh-SG"; navigate?: (screen: ScreenId) => void; onOpenHistory?: () => void }) {
   const locale = props?.locale ?? "en-SG";
   const messages = getMessages(locale);
   const fixture = createDemoScenarioFixture();
@@ -43,6 +43,7 @@ function setup(props?: { locale?: "en-SG" | "zh-SG"; navigate?: (screen: ScreenI
       journal={journal}
       navigate={navigate}
       now={NOW}
+      onOpenHistory={props?.onOpenHistory}
     />,
   );
 
@@ -230,14 +231,23 @@ describe("TodayScreen", () => {
     expect(getByText(messages.shared.storageUnavailable)).toBeInTheDocument();
   });
 
-  it("disables the View history link because history is a later-packet destination", () => {
+  it("opens the History tab from View history on the latest reading", () => {
     const navigate = vi.fn();
-    const { messages, getByRole } = setup({ navigate });
+    const onOpenHistory = vi.fn();
+    const { messages, getByRole } = setup({ navigate, onOpenHistory });
+    const link = getByRole("button", { name: messages.today.viewHistory });
+    expect(link).toBeEnabled();
+    expect(link).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(link);
+    expect(onOpenHistory).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("keeps View history disabled when no History destination is given", () => {
+    const { messages, getByRole } = setup();
     const link = getByRole("button", { name: messages.today.viewHistory });
     expect(link).toBeDisabled();
     expect(link).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(link);
-    expect(navigate).not.toHaveBeenCalled();
   });
 
   it("shows only the care dates the person entered, with a link to Prepare for my visit", () => {

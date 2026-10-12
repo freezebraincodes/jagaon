@@ -891,6 +891,7 @@ export function JagaOnApp({
             navigate={navigate}
             recordDeletion={runtime?.recordDeletion}
             onRecordDeleted={() => void refreshToday()}
+            onOpenHistory={() => switchTab("HISTORY")}
           />
         );
       case "LOG_GLUCOSE":
