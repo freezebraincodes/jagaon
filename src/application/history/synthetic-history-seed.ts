@@ -1,23 +1,19 @@
 import type { Instant } from "@/domain/shared/time";
 import type { JournalCommandService, JournalCommitResult } from "@/application/journal/journal-contracts";
+import { PREPARED_DEMO_HISTORY_ROWS, type PreparedDemoHistoryRow } from "./prepared-demo-history-data";
 
 /**
- * Deterministic synthetic history for the Packet 7A Recorded-history demo.
+ * Deterministic synthetic history for the prepared demo profile (Packet 7A Recorded history; owner instruction 2026-10-12).
  *
- * The plan is a pure function of the seed instant: 42 local days of
- * before-breakfast and before-dinner readings with deliberate gaps, routine
- * meals, walks and one corrected reading time. It is written only through
- * the journal command boundary, never as unchecked rows, and only into an
- * empty demo database. All values are synthetic and carry no clinical meaning.
+ * The entries come from the static data set in `prepared-demo-history-data.ts` (fixed values and varied, fixed local times); each row's
+ * `daysAgo` and local time are placed relative to the LOCAL Singapore date of the seed instant (the moment the profile is prepared), so
+ * the newest entry is always yesterday and nothing is dated today or later. It is written only through the journal command boundary,
+ * never as unchecked rows, and only into an empty demo database. All values are synthetic and carry no clinical meaning.
  */
 
 const HOME_OFFSET_MINUTES = 480;
 const DAY_MS = 86_400_000;
-const SEED_DAYS = 42;
-
-const REFERENCE_BREAKFAST = ["5.9", "6.2", "6.0", "5.8", "6.3", "6.1", "5.7"];
-const RECENT_BREAKFAST = ["7.1", "7.4", "7.0", "7.6", "7.2", "7.5", "7.3"];
-const DINNER = ["7.9", "8.2", "7.8", "8.4", "8.0", "7.7", "8.3"];
+const LOCAL_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 export type SyntheticHistoryEntry =
   | {
@@ -31,36 +27,32 @@ export type SyntheticHistoryEntry =
   | { kind: "MEAL"; occurredAt: Instant; label: string; slot: "BREAKFAST" | "LUNCH" }
   | { kind: "ACTIVITY"; occurredAt: Instant; label: string; durationMinutes: number };
 
-function localInstant(seedAt: Instant, daysBefore: number, hour: number, minute: number): Instant {
+/** Local midnight (as a UTC instant in ms) of the seed instant's Singapore date. */
+function localMidnightMs(seedAt: Instant): number {
   const localNow = new Date(Date.parse(seedAt) + HOME_OFFSET_MINUTES * 60_000);
-  const localMidnight = Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate());
-  return new Date(localMidnight - daysBefore * DAY_MS + (hour * 60 + minute - HOME_OFFSET_MINUTES) * 60_000).toISOString() as Instant;
+  return Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate()) - HOME_OFFSET_MINUTES * 60_000;
 }
 
-export function planSyntheticHistory(seedAt: Instant): SyntheticHistoryEntry[] {
-  const entries: SyntheticHistoryEntry[] = [];
-  for (let d = SEED_DAYS - 1; d >= 0; d -= 1) {
-    if (d % 9 !== 4) {
-      const correcting = d === 2;
-      entries.push({
-        kind: "GLUCOSE",
-        occurredAt: localInstant(seedAt, d, 7, correcting ? 25 : 40 + (d % 3) * 5),
-        value: d >= 14 ? REFERENCE_BREAKFAST[d % 7]! : RECENT_BREAKFAST[d % 7]!,
-        slot: "BEFORE_BREAKFAST",
-        ...(correcting ? { correctedTo: localInstant(seedAt, d, 7, 40) } : {}),
-      });
-    }
-    if (d % 5 !== 2) {
-      entries.push({ kind: "GLUCOSE", occurredAt: localInstant(seedAt, d, 18, 30), value: DINNER[d % 7]!, slot: "BEFORE_DINNER" });
-    }
-    if (d <= 20 && d % 2 === 0) entries.push({ kind: "MEAL", occurredAt: localInstant(seedAt, d, 8, 10), label: "Kaya toast", slot: "BREAKFAST" });
-    if (d <= 20 && d % 3 === 0) entries.push({ kind: "MEAL", occurredAt: localInstant(seedAt, d, 12, 30), label: "Chicken rice", slot: "LUNCH" });
-    if (d <= 13 && d % 3 !== 2) {
-      entries.push({ kind: "ACTIVITY", occurredAt: localInstant(seedAt, d, 9, 0), label: "Morning walk", durationMinutes: 28 });
-    }
+/** The exact instant of local `time` on the Singapore date `daysAgo` days before the seed instant's local date. */
+function localInstant(seedAt: Instant, daysAgo: number, time: string): Instant {
+  const match = LOCAL_TIME.exec(time);
+  if (!Number.isInteger(daysAgo) || daysAgo < 1 || !match) throw new Error("SYNTHETIC_SCENARIO_DATA_INVALID");
+  return new Date(localMidnightMs(seedAt) - daysAgo * DAY_MS + (Number(match[1]) * 60 + Number(match[2])) * 60_000).toISOString() as Instant;
+}
+
+function entryOf(row: PreparedDemoHistoryRow, seedAt: Instant): SyntheticHistoryEntry {
+  const occurredAt = localInstant(seedAt, row.daysAgo, row.time);
+  if (row.kind === "GLUCOSE") {
+    return { kind: "GLUCOSE", occurredAt, value: row.value, slot: row.slot, ...(row.correctedTime ? { correctedTo: localInstant(seedAt, row.daysAgo, row.correctedTime) } : {}) };
   }
-  return entries
-    .filter((entry) => Date.parse(entry.occurredAt) < Date.parse(seedAt))
+  if (row.kind === "MEAL") return { kind: "MEAL", occurredAt, label: row.label, slot: row.slot };
+  return { kind: "ACTIVITY", occurredAt, label: row.label, durationMinutes: row.durationMinutes };
+}
+
+export function planSyntheticHistory(seedAt: Instant, rows: readonly PreparedDemoHistoryRow[] = PREPARED_DEMO_HISTORY_ROWS): SyntheticHistoryEntry[] {
+  // Nothing is dated on the seed's local day or later (and so never after the seed instant): `daysAgo` is at least 1.
+  return rows
+    .map((row) => entryOf(row, seedAt))
     .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt));
 }
 

@@ -25,8 +25,9 @@ import {
  * Packet 11C C7, target 1: the PRODUCTION build as is. Packet 11C English activation (owner decisions Q and A, 2026-10-12): the shipped
  * manifest remote-enables the history explanation and the care-summary wording, and the shipped request-class records qualify the six
  * en-SG classes only (the six zh-SG classes stay PENDING). So in en-SG the History explanation asks the per-request disclosure first,
- * and in zh-SG it explains with the standard wording at once; the seeded care previews map to no qualified class, so no care AI action
- * appears in either locale. No test here accepts a disclosure: a tripwire fails the test if /api/ai/* is ever requested. Synthetic
+ * and in zh-SG it explains with the standard wording at once. Owner demo override (owner decision 2026-10-12: English AI care drafts
+ * beyond the tested shapes): an en-SG care preview within the limits OFFERS the care AI action even though it maps to no evaluated
+ * class; zh-SG never does. Offering it sends nothing. No test here accepts a disclosure: a tripwire fails the test if /api/ai/* is ever requested. Synthetic
  * data only. Technical evidence, not owner approval.
  */
 
@@ -82,9 +83,10 @@ for (const locale of LOCALES) {
       const article = page.locator("article.printable-care-summary");
       await expect(article).toContainText(question);
       await expect(article.getByRole("heading", { level: 2, name: m.careSummary.questionsHeading })).toBeVisible();
-      await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(0);
+      // Owner demo override: offered in en-SG (outside the evaluated classes), never in zh-SG; nothing is sent by offering it.
+      await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(locale === "en-SG" ? 1 : 0);
       await expectNoHorizontalOverflow(page);
-      await captureState(page, testInfo, context, "care-question-preview", ["patient-authored question saved with 'Add my own question' (READY_TO_ASK) and ticked", "preview shows it under the questions heading, in the patient's own words", "no AI action (shipped build: this preview's request is not a qualified class)"], article);
+      await captureState(page, testInfo, context, "care-question-preview", ["patient-authored question saved with 'Add my own question' (READY_TO_ASK) and ticked", "preview shows it under the questions heading, in the patient's own words", locale === "en-SG" ? "care AI action offered (owner demo override), nothing sent" : "no AI action (zh-SG)"], article);
       await page.getByRole("button", { name: m.careSummary.approveAction }).click();
       await page.getByRole("button", { name: m.careSummary.printAction }).click();
       await expect.poll(() => page.evaluate(() => (window as unknown as { __c7PrintCalls?: number }).__c7PrintCalls ?? 0)).toBe(1);
@@ -111,9 +113,9 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
       // Packet 11C English activation (owner decisions Q and A; deliberate; was "deterministic only: no disclosure …" in both locales):
       // en-SG asks the disclosure first and Cancel keeps the standard wording; zh-SG never shows a dialog. Nothing is ever sent.
       const remoteOffered = locale === "en-SG";
-      test(`shipped activation: ${remoteOffered ? "History disclosure first, Cancel keeps the standard wording" : "no History disclosure (class PENDING)"}; no care AI action on the seeded data; no AI marking; private-mode setting present; nothing sent (${locale}, ${viewport.label})${smoke}`, async ({ page, browserName }, testInfo) => {
+      test(`shipped activation: ${remoteOffered ? "History disclosure first, Cancel keeps the standard wording" : "no History disclosure (class PENDING)"}; ${remoteOffered ? "care AI action offered on the seeded data (owner demo override), not accepted" : "no care AI action"}; no AI marking; private-mode setting present; nothing sent (${locale}, ${viewport.label})${smoke}`, async ({ page, browserName }, testInfo) => {
         const context: EvidenceContext = { target: "production", locale, viewport: viewport.label, engine: browserName };
-        planStates(testInfo, context, [...(remoteOffered ? ["history-disclosure-first"] : []), "history-deterministic", "settings-private-toggle", "care-preview-no-ai-action", "care-print-no-marking"]);
+        planStates(testInfo, context, [...(remoteOffered ? ["history-disclosure-first"] : []), "history-deterministic", "settings-private-toggle", "care-preview-ai-action", "care-print-no-marking"]);
         const tripwire = await shellTripwire(page);
         await installFocusProbe(page);
         await stubWindowPrint(page);
@@ -166,16 +168,17 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await keep.scrollIntoViewIfNeeded();
         await captureState(page, testInfo, context, "settings-private-toggle", ["checkbox present with its label and description", "toggled on and off with Space", "no horizontal overflow"], page.getByRole("region", { name: m.more.settingsHeading }));
 
-        // Care: the seeded glucose-readings preview is too large to send (not remote-eligible), so it has no AI action in either locale;
-        // the printed artifact carries no AI marking.
+        // Care: the seeded glucose-readings preview (the 14-day visit period of the prepared demo data) is of a class outside the evaluated
+        // classes (NO_DEFINITION). Owner demo override: the shipped gate admits it in en-SG, so the AI action is OFFERED there (nothing
+        // sent unless accepted, and no test here accepts); zh-SG never. The printed artifact carries no AI marking.
         const article = await openCarePreview(page, m);
-        await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(remoteOffered ? 1 : 0);
         await expect(page.getByRole("dialog")).toHaveCount(0);
         await expect(article).not.toContainText(m.ai.demoTag);
         await expect(article).not.toContainText(m.ai.resultCheck);
         await expect(page.getByText(m.ai.careSummary.resultTitle)).toHaveCount(0);
         await expectNoHorizontalOverflow(page);
-        await captureState(page, testInfo, context, "care-preview-no-ai-action", ["no 'Organise with AI' action", "no dialog", "no AI marking in the preview", "no horizontal overflow"], article);
+        await captureState(page, testInfo, context, "care-preview-ai-action", [remoteOffered ? "'Organise with AI' offered (owner demo override), not accepted" : "no 'Organise with AI' action (zh-SG)", "no dialog", "no AI marking in the preview", "no horizontal overflow"], article);
 
         await page.getByRole("button", { name: m.careSummary.approveAction }).click();
         await page.getByRole("button", { name: m.careSummary.printAction }).click();

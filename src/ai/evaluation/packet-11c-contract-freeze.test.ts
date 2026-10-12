@@ -301,7 +301,9 @@ const FROZEN = Object.freeze({
       pendingLocales: ["zh-SG"],
       pendingWithoutEvidenceOrSignOff: 6,
     },
-    qualificationModuleSha256OutsideRecords: "97d7a222a65e57aadb2f9f9f75c7e6c7a19c7726737ea138f766579b2058b0f1",
+    // Owner demo override (owner decision 2026-10-12: English AI care drafts beyond the tested shapes): the gate wrapper and its switch
+    // were added outside the records literal; the records, definitions and contract are unchanged.
+    qualificationModuleSha256OutsideRecords: "c39bd2b493e180af5eb6b34895abaaec371be4e39767096466a287045740f26e",
     shippedGateAdmissibleTasks: ["EXPLAIN_PATTERN", "DRAFT_CARE_PREPARATION_SUMMARY"],
   },
   // CL3 re-freeze (C3, owner decision C3; label introduced in RF): disclosure acceptance belongs to ONE explicit request (its decision

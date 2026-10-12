@@ -251,7 +251,9 @@ for (const locale of LOCALES) {
         await expect(page.getByRole("heading", { level: 1, name: m.careSummary.title })).toBeVisible();
         const article = page.locator("article.printable-care-summary");
         await expect(article).toContainText(question);
-        await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(0);
+        // Owner demo override (owner decision 2026-10-12): an en-SG care preview is offered the AI action even outside the evaluated
+        // classes; never zh-SG. This journey never accepts it, so nothing is sent.
+        await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(locale === "en-SG" ? 1 : 0);
         await expectNoHorizontalOverflow(page);
         await page.getByRole("button", { name: m.careSummary.approveAction }).click();
         await page.getByRole("button", { name: m.careSummary.printAction }).click();

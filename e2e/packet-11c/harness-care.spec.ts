@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { AppMessages } from "@/i18n/types";
 import {
+  openHistory,
   activeName,
   captureState,
   evidencePath,
@@ -263,8 +264,8 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         const shell = await interceptShellRoute(page);
         const m = await startPreparedProfile(page, HARNESS_URL, locale, "?records=pending");
         await expect(page.locator("[data-c7-records=pending]")).toHaveCount(1);
-        await page.getByRole("navigation").getByRole("button", { name: m.shared.navHistory }).click();
-        const actionButton = page.getByRole("button", { name: m.history.explanation.action }).first();
+        // "Last week" via the shared helper: the prepared data ends yesterday, so "This week" is empty on a Monday.
+        const actionButton = await openHistory(page, m);
         await actionButton.click();
         const panel = page.getByRole("region", { name: m.history.explanation.title });
         await expect(panel.getByRole("status")).not.toBeEmpty();
@@ -284,14 +285,14 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
       // offered first; Cancel sends nothing) and refuse the zh-SG one (PENDING: no disclosure). The seeded insulin preview (with the
       // seeded appointment) is not an evaluated class, so it has no care AI action in either locale.
       const shippedQualifies = locale === "en-SG";
-      test(`shipped records (test manifest): ${shippedQualifies ? "en-SG history class qualified, disclosure first" : "zh-SG history class PENDING, no disclosure"}; no care AI action on the seeded preview; nothing sent (${locale}, ${viewport.label})`, async ({ page, browserName }, testInfo) => {
+      test(`shipped records (test manifest): ${shippedQualifies ? "en-SG history class qualified, disclosure first" : "zh-SG history class PENDING, no disclosure"}; ${shippedQualifies ? "care AI action offered on the seeded preview (owner demo override)" : "no care AI action on the seeded preview"}; nothing sent (${locale}, ${viewport.label})`, async ({ page, browserName }, testInfo) => {
         const context: EvidenceContext = { target: "harness", locale, viewport: viewport.label, engine: browserName };
         planStates(testInfo, context, ["shipped-records-history", "shipped-records-care"]);
         const shell = await interceptShellRoute(page);
         const m = await startPreparedProfile(page, HARNESS_URL, locale, "?records=shipped");
         await expect(page.locator("[data-c7-records=shipped]")).toHaveCount(1);
-        await page.getByRole("navigation").getByRole("button", { name: m.shared.navHistory }).click();
-        await page.getByRole("button", { name: m.history.explanation.action }).first().click();
+        // "Last week" via the shared helper: the prepared data ends yesterday, so "This week" is empty on a Monday.
+        await (await openHistory(page, m)).click();
         const panel = page.getByRole("region", { name: m.history.explanation.title });
         if (shippedQualifies) {
           const dialog = page.getByRole("dialog", { name: m.ai.remoteTitle });
@@ -306,10 +307,12 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         await expect(panel.getByText(m.ai.remoteNotAccepted)).toHaveCount(shippedQualifies ? 1 : 0);
         await captureState(page, testInfo, context, "shipped-records-history", [shippedQualifies ? "en-SG: disclosure shown first, Cancel: standard wording with the not-used line" : "zh-SG: no disclosure, standard wording", "0 POSTs"], panel);
         const article = await openCarePreview(page, m, "insulinRecords");
-        await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(0);
+        // Owner demo override (owner decision 2026-10-12: English AI care drafts beyond the tested shapes): the shipped gate offers the
+        // action for this en-SG preview even though it is not an evaluated class; never in zh-SG. Not accepted here: nothing is sent.
+        await expect(page.getByRole("button", { name: m.ai.careSummary.action })).toHaveCount(shippedQualifies ? 1 : 0);
         await expect(article).not.toContainText(m.ai.demoTag);
         await expectNoHorizontalOverflow(page);
-        await captureState(page, testInfo, context, "shipped-records-care", ["seeded insulin preview (with the appointment) is not an evaluated class: no 'Organise with AI' action", "no AI marking"], article);
+        await captureState(page, testInfo, context, "shipped-records-care", [shippedQualifies ? "seeded insulin preview (with the appointment) is not an evaluated class: 'Organise with AI' offered by the owner demo override, not accepted" : "zh-SG: no 'Organise with AI' action", "no AI marking"], article);
         expect(shell.calls).toHaveLength(0);
       });
     });

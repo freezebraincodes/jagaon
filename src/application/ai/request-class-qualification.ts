@@ -16,9 +16,10 @@ import { AI_REQUEST_CLASS_CONTRACT, AI_REQUEST_CLASS_DEFINITIONS, type AiRequest
  *   contract (three EXPLAIN_PATTERN, three DRAFT_CARE_PREPARATION_SUMMARY) are QUALIFIED by the owner's sign-off under the revised
  *   English demo protocol (evidenceRef names the protocol record). That sign-off is a WAIVER of the manual human review, not a completed
  *   human-review PASS: the recorded run verdict stays FAIL [HUMAN_REVIEW_PENDING, BLOCKED_CONTENT_REVIEW_PENDING]. The six zh-SG classes
- *   stay PENDING with no evidence, so every Chinese request (and any request outside the six English classes) falls back to the
- *   deterministic composition before any disclosure or send. No code path sets QUALIFIED: the records are a reviewed literal, never
- *   computed at runtime.
+ *   stay PENDING with no evidence, so every Chinese request (and any EXPLAIN_PATTERN request outside the three English classes) falls
+ *   back to the deterministic composition before any disclosure or send. The one exception is the owner demo override (below, owner
+ *   decision 2026-10-12): the SHIPPED gate also admits en-SG DRAFT_CARE_PREPARATION_SUMMARY requests outside the evaluated classes; it
+ *   never sets QUALIFIED. No code path sets QUALIFIED: the records are a reviewed literal, never computed at runtime.
  * - The rule (`requestClassQualification`): a request is admitted only when its class is defined under the CURRENT contract and exactly
  *   one schema-valid record names it with status QUALIFIED and the current contract digest. Anything else (no definition, no record,
  *   several records, an invalid record, a record for another contract, PENDING) is NOT qualified: an invalid or stale record is treated as
@@ -163,5 +164,40 @@ export const AI_REQUEST_CLASS_QUALIFICATION_RECORDS: readonly AiRequestClassQual
 );
 
 export const SHIPPED_REQUEST_CLASS_REGISTRY: AiRequestClassRegistry = Object.freeze({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS });
-/** The production gate: the shipped definitions and records (only the six en-SG classes are admitted; every zh-SG class is PENDING). */
-export const SHIPPED_REQUEST_CLASS_GATE: AiRequestClassGate = createRequestClassGate(SHIPPED_REQUEST_CLASS_REGISTRY);
+
+/**
+ * Owner demo override (owner decision 2026-10-12, confirmed in the owner's own words: "allow English AI care drafts for summaries that
+ * were not in the tested shapes (owner demo override; History stays tested-only; Chinese stays off)"). The hackathon demo profile's care
+ * summaries never match an evaluated care class, so an en-SG DRAFT_CARE_PREPARATION_SUMMARY request is admitted even when its class is
+ * not QUALIFIED. Only the class gate is relaxed, and only for that task and locale: EXPLAIN_PATTERN stays qualified-only, every zh-SG
+ * request stays refused, an unreadable request stays refused, and every other check is unchanged (value-blind request, the 32-fact cap
+ * and the planner's wording budget, output validation and meaning rules, deterministic fallback, the disclosure, "Keep wording on this
+ * device", the server switch, origin, access, spend and rate checks). Set `enabled` to false to return to tested shapes only.
+ */
+export const OWNER_DEMO_EN_CARE_DRAFT_OVERRIDE = Object.freeze({
+  enabled: true,
+  decision: "owner decision 2026-10-12: English AI care drafts beyond the tested shapes (History stays tested-only; Chinese stays off)",
+  taskType: "DRAFT_CARE_PREPARATION_SUMMARY" as const,
+  locale: "en-SG" as const,
+});
+type OwnerDemoEnCareDraftOverride = Readonly<{ enabled: boolean; decision: string; taskType: ShellTask; locale: AiLocale }>;
+
+/** Wraps a gate with the owner demo override: an en-SG care refusal with a computed class becomes an admission; all else passes through. */
+export function withOwnerDemoEnCareDraftOverride(gate: AiRequestClassGate, override: OwnerDemoEnCareDraftOverride = OWNER_DEMO_EN_CARE_DRAFT_OVERRIDE): AiRequestClassGate {
+  if (!override.enabled) return gate;
+  return Object.freeze({
+    admit(request: ShellTaskRequest): AiRequestClassAdmission {
+      const admission = gate.admit(request);
+      if (admission.admitted || admission.classId === null) return admission;
+      if (request.taskType !== override.taskType || request.locale !== override.locale) return admission;
+      return Object.freeze({ admitted: true as const, classId: admission.classId });
+    },
+    anyAdmissible: (taskType: ShellTask): boolean => gate.anyAdmissible(taskType),
+  });
+}
+
+/**
+ * The production gate: the shipped definitions and records (the six en-SG classes are QUALIFIED; every zh-SG class is PENDING), with the
+ * owner demo override for English care drafts (above).
+ */
+export const SHIPPED_REQUEST_CLASS_GATE: AiRequestClassGate = withOwnerDemoEnCareDraftOverride(createRequestClassGate(SHIPPED_REQUEST_CLASS_REGISTRY));

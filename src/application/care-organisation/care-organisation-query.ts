@@ -46,8 +46,11 @@ const FACT_GROUP_RECORD_TYPE = Object.freeze({ GLUCOSE: "GLUCOSE_READING", INSUL
 
 const HOME_OFFSET_MS = 8 * 3_600_000;
 const DAY_MS = 86_400_000;
-/** Ordinary preparation period: the 30 local days ending today (within the 180-day maximum). */
-export const VISIT_PREPARATION_PERIOD_DAYS = 30;
+/**
+ * Ordinary preparation period: the 14 local days ending today (within the 180-day maximum). Owner instruction 2026-10-12: was 30; 14 days
+ * keep an ordinary visit summary's readings within what one care-summary wording request may carry.
+ */
+export const VISIT_PREPARATION_PERIOD_DAYS = 14;
 
 const localDateOf = (instant: string) => new Date(Date.parse(instant) + HOME_OFFSET_MS).toISOString().slice(0, 10);
 const localMidnightUtc = (localDate: string) => new Date(Date.parse(`${localDate}T00:00:00.000Z`) - HOME_OFFSET_MS).toISOString() as Instant;

@@ -98,12 +98,13 @@ for (const viewportKey of Object.keys(VIEWPORTS) as ViewportKey[]) {
         const m = await startPreparedProfile(page, HARNESS_URL, locale);
         const action = await openHistory(page, m);
 
-        // Tab order from the top of the document reaches the period control, the explanation action and the screen's own actions.
+        // Tab order from the top of the document reaches the period control (its checked option: openHistory selects "Last week", since
+        // the prepared demo data ends yesterday), the explanation action and the screen's own actions.
         await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
         const keys = tabKeys(browserName);
         const sequence = await focusSequence(page, 40, keys.next);
         const actionName = `button|${m.history.explanation.action}`;
-        for (const expected of [`input:radio|${m.history.periodThisWeek}`, actionName, `button|${m.history.addFacts}`, `button|${m.history.selectFacts}`, `button|${m.shared.navToday}`, `button|${m.shared.navMore}`]) {
+        for (const expected of [`input:radio|${m.history.periodLastWeek}`, actionName, `button|${m.history.addFacts}`, `button|${m.history.selectFacts}`, `button|${m.shared.navToday}`, `button|${m.shared.navMore}`]) {
           expect(sequence.some((name) => name.startsWith(expected)), `${expected} in ${sequence.join(" > ")}`).toBe(true);
         }
         await action.focus();

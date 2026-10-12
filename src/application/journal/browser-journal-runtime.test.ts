@@ -66,10 +66,11 @@ describe("browser journal runtime", () => {
     expect(view.status).toBe("READY");
     if (view.status !== "READY") throw new Error("ready");
     expect(view.comparisons.map((fact) => [fact.factId, fact.kind])).toEqual([
-      ["COMPARISON:BEFORE_BREAKFAST", "HIGHER"],
-      ["NO_MATERIAL:BEFORE_DINNER", "NO_MATERIAL"],
+      // The prepared demo data (owner instruction 2026-10-12) shows an improvement before breakfast (was HIGHER) and has too few recent
+      // before-dinner readings for a governed before-dinner statement (was NO_MATERIAL:BEFORE_DINNER).
+      ["COMPARISON:BEFORE_BREAKFAST", "LOWER"],
     ]);
-    // Chicken rice recurs every third day and never passes the familiar-item gate.
+    // Chicken rice is recorded too rarely in the prepared data to pass the familiar-item gate.
     expect(view.projection.repeated.map((fact) => [fact.kind, fact.label])).toEqual([
       ["ITEM", "Kaya toast"],
       ["CONTEXT", "Morning walk"],

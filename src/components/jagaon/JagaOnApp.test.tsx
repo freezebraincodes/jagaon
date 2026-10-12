@@ -1762,7 +1762,9 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     return screen.findByRole("article");
   }
 
-  it("shipped manifest and records, a preview outside the evaluated classes: no AI action, dialog, audit row or network call at startup, preview, approval or print", async () => {
+  // Owner demo override (owner decision 2026-10-12: English AI care drafts beyond the tested shapes): an en-SG preview outside the
+  // evaluated classes now OFFERS the AI action; offering it sends nothing, writes no audit row and opens no dialog.
+  it("shipped manifest and records, an en-SG preview outside the evaluated classes: the AI action is offered (owner demo override), but no dialog, audit row or network call at startup, preview, approval or print", async () => {
     const en = getMessages("en-SG");
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
@@ -1772,10 +1774,12 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     await toCarePreview();
     const approve = (await screen.findByRole("button", { name: en.careSummary.approveAction })) as HTMLButtonElement;
     await waitFor(() => expect(approve.disabled).toBe(false));
-    expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: en.ai.careSummary.action })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(approve);
     fireEvent.click(await screen.findByRole("button", { name: en.careSummary.printAction }));
     await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    // The action is offered only on an unapproved preview: gone after approval and print.
     expect(screen.queryByRole("button", { name: en.ai.careSummary.action })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByText(en.ai.careSummary.resultTitle)).not.toBeInTheDocument();

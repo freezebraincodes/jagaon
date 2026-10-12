@@ -286,11 +286,13 @@ describe("Packet 11C Addendum C, C1: an unqualified request class is refused bef
     expect(await call(post(shellRequest(EN)), { requestClassGate: spy, activationManifest: DETERMINISTIC_ONLY_TEST_MANIFEST, fetcher: deepseek() })).toMatchObject({ status: 200, body: { kind: "FAILED", reason: "TASK_DISABLED", notSentToProvider: true } });
     expect(admit).not.toHaveBeenCalled();
   });
-  it("an approved class outside the definitions (other care section counts) is refused; a gate that throws refuses", async () => {
+  it("a care class outside the definitions: en-SG is admitted by the owner demo override, zh-SG is refused, and the tested-shapes-only gate refuses both; a gate that throws refuses", async () => {
+    // Owner demo override (owner decision 2026-10-12: English AI care drafts beyond the tested shapes; History stays tested-only;
+    // Chinese stays off): the shipped gate admits an en-SG care request whose class has no definition.
     const defined = new Set(AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.classId));
     const unseen: ShellTaskRequest[] = [];
-    for (const shape of ["MISSING_DATA", "RICH"] as const) {
-      const current = (await renderDeterministicCareSummary(syntheticCareDraft(shape, "en-SG"))).payload;
+    for (const [shape, locale] of [["MISSING_DATA", "en-SG"], ["RICH", "en-SG"], ["MISSING_DATA", "zh-SG"], ["RICH", "zh-SG"]] as const) {
+      const current = (await renderDeterministicCareSummary(syntheticCareDraft(shape, locale))).payload;
       const built = buildCareSummaryAiRequest({ current, requestId: "33333333-3333-4333-8333-333333333333", requestedAt: NOW });
       if (built.kind !== "READY") continue;
       const planned = planSlots(built.request, AI_HYBRID_RUNTIME_BUNDLES.DRAFT_CARE_PREPARATION_SUMMARY);
@@ -298,14 +300,31 @@ describe("Packet 11C Addendum C, C1: an unqualified request class is refused bef
       const request = projectShellTaskRequest(planned.plan);
       if (!defined.has(requestClassIdentity(request).classId)) unseen.push(request);
     }
-    expect(unseen.length).toBeGreaterThan(0);
+    expect(unseen.filter((request) => request.locale === "en-SG").length).toBeGreaterThan(0);
+    expect(unseen.filter((request) => request.locale === "zh-SG").length).toBeGreaterThan(0);
+    const testedShapesOnly = createRequestClassGate({ definitions: AI_REQUEST_CLASS_DEFINITIONS, records: AI_REQUEST_CLASS_QUALIFICATION_RECORDS });
     for (const request of unseen) {
+      // Without the override (tested shapes only): refused before any credential read, in both locales.
+      {
+        const { environment, reads } = recordingEnvironment();
+        const fetcher = deepseek();
+        const response = await createAiShellHandler({ environment, fetcher, activationManifest: ENABLED, requestClassGate: testedShapesOnly })(post(request));
+        expect([response.status, await response.json()]).toEqual([403, REFUSED]);
+        expect(credentialReads(reads)).toEqual([]);
+        expect(fetcher).not.toHaveBeenCalled();
+      }
+      // The shipped gate (with the override): en-SG goes past the class gate to the one bounded call; zh-SG stays refused.
       const { environment, reads } = recordingEnvironment();
       const fetcher = deepseek();
       const response = await createAiShellHandler({ environment, fetcher, activationManifest: ENABLED })(post(request));
-      expect([response.status, await response.json()]).toEqual([403, REFUSED]);
-      expect(credentialReads(reads)).toEqual([]);
-      expect(fetcher).not.toHaveBeenCalled();
+      if (request.locale === "en-SG") {
+        expect(response.status).toBe(200);
+        expect(fetcher).toHaveBeenCalledTimes(1);
+      } else {
+        expect([response.status, await response.json()]).toEqual([403, REFUSED]);
+        expect(credentialReads(reads)).toEqual([]);
+        expect(fetcher).not.toHaveBeenCalled();
+      }
     }
     const throwing: AiRequestClassGate = { admit: () => { throw new Error("broken"); }, anyAdmissible: () => true };
     expect(await call(post(shellRequest(EN)), { requestClassGate: throwing })).toMatchObject({ status: 403, body: REFUSED });

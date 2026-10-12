@@ -77,6 +77,10 @@ export async function openTab(page: Page, name: string): Promise<void> {
 export async function openHistory(page: Page, m: AppMessages): Promise<Locator> {
   await openTab(page, m.shared.navHistory);
   await expect(page.getByRole("heading", { level: 1, name: m.history.title })).toBeVisible();
+  // The prepared demo data ends yesterday (owner instruction 2026-10-12), so "This week" holds no reading on a Monday; "Last week"
+  // always does, whatever the day or time the test runs.
+  await page.getByRole("radio", { name: m.history.periodLastWeek }).check({ force: true });
+  await expect(page.getByRole("radio", { name: m.history.periodLastWeek })).toBeChecked();
   const action = page.getByRole("button", { name: m.history.explanation.action }).first();
   await expect(action).toBeVisible();
   return action;
@@ -84,8 +88,9 @@ export async function openHistory(page: Page, m: AppMessages): Promise<Locator> 
 
 /**
  * Today → "Prepare for appointment" → tick one record group → "Preview summary". The harness uses the insulin records (10 records): a
- * care request within the remote budget, so its class can be qualified; the 50 glucose readings make a remote-ineligible request
- * (BUDGET_EXCEEDED, composed deterministically), which never offers the AI action.
+ * care request within the remote budget, so its class can be qualified. The glucose readings of the prepared demo data's 14-day visit
+ * period (11 readings; owner instruction 2026-10-12) make a remote-eligible request of a class outside the evaluated classes
+ * (NO_DEFINITION); the owner demo override (owner decision 2026-10-12) admits it in en-SG, so the AI action is offered there, never in zh-SG.
  */
 export async function openCarePreview(page: Page, m: AppMessages, group: "glucoseReadings" | "insulinRecords" = "glucoseReadings"): Promise<Locator> {
   await openTab(page, m.shared.navToday);

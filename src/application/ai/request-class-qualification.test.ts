@@ -9,11 +9,13 @@ import {
   AI_REQUEST_CLASS_QUALIFICATION_RECORDS,
   aiRequestClassQualificationRecordSchema,
   createRequestClassGate,
+  OWNER_DEMO_EN_CARE_DRAFT_OVERRIDE,
   requestClassId,
   requestClassIdentity,
   requestClassQualification,
   SHIPPED_REQUEST_CLASS_GATE,
   SHIPPED_REQUEST_CLASS_REGISTRY,
+  withOwnerDemoEnCareDraftOverride,
 } from "./request-class-qualification";
 import { pendingTestRequestClassGate, qualifiedTestRequestClassGate, testDefinition, testQualifiedRecord, TEST_ONLY_QUALIFICATION } from "./request-class-test-support";
 
@@ -136,6 +138,44 @@ describe("Packet 11C C1 qualification records (separate from the immutable defin
     expect(SHIPPED_REQUEST_CLASS_GATE.admit(unseen)).toMatchObject({ admitted: false, reason: "NO_DEFINITION" });
     // Never throws: an unreadable request is not admitted.
     expect(SHIPPED_REQUEST_CLASS_GATE.admit({ ...ORDINARY, slots: undefined } as never)).toEqual({ admitted: false, classId: null, reason: "REQUEST_UNREADABLE" });
+  });
+
+  describe("owner demo override (owner decision 2026-10-12): English AI care drafts beyond the tested shapes", () => {
+    const EN_CARE = projectShellTaskRequest(plannedFixture("p11.draft-care-preparation-summary.en-sg.ordinary").plan);
+    const unseenEnCare = { ...EN_CARE, fields: EN_CARE.fields.slice(0, -1) };
+    const unseenZhCare = { ...CARE, fields: CARE.fields.slice(0, -1) };
+    const unseenEnExplain = { ...ORDINARY, fields: ORDINARY.fields.slice(0, -1) };
+
+    it("is one explicit switch: enabled, English care drafts only", () => {
+      expect(OWNER_DEMO_EN_CARE_DRAFT_OVERRIDE).toEqual({
+        enabled: true,
+        decision: "owner decision 2026-10-12: English AI care drafts beyond the tested shapes (History stays tested-only; Chinese stays off)",
+        taskType: "DRAFT_CARE_PREPARATION_SUMMARY",
+        locale: "en-SG",
+      });
+      expect(Object.isFrozen(OWNER_DEMO_EN_CARE_DRAFT_OVERRIDE)).toBe(true);
+    });
+
+    it("the shipped gate admits an en-SG care request of an untested class, and still refuses zh-SG care and an untested en-SG explanation", () => {
+      expect(requestClassIdentity(unseenEnCare).locale).toBe("en-SG");
+      expect(SHIPPED_REQUEST_CLASS_GATE.admit(unseenEnCare)).toEqual({ admitted: true, classId: requestClassIdentity(unseenEnCare).classId });
+      expect(SHIPPED_REQUEST_CLASS_GATE.admit(unseenZhCare)).toMatchObject({ admitted: false, reason: "NO_DEFINITION" });
+      expect(SHIPPED_REQUEST_CLASS_GATE.admit(CARE)).toMatchObject({ admitted: false, reason: "PENDING" });
+      expect(SHIPPED_REQUEST_CLASS_GATE.admit(unseenEnExplain)).toMatchObject({ admitted: false, reason: "NO_DEFINITION" });
+    });
+
+    it("the wrapper only turns an en-SG care refusal into an admission; everything else passes through unchanged", () => {
+      const pendingGate = pendingTestRequestClassGate();
+      const wrapped = withOwnerDemoEnCareDraftOverride(pendingGate);
+      expect(wrapped.admit(EN_CARE)).toEqual({ admitted: true, classId: requestClassIdentity(EN_CARE).classId });
+      expect(wrapped.admit(CARE)).toEqual(pendingGate.admit(CARE));
+      expect(wrapped.admit(ORDINARY)).toEqual(pendingGate.admit(ORDINARY));
+      // An unreadable request stays refused (no class can be computed).
+      expect(wrapped.admit({ ...EN_CARE, slots: undefined } as never)).toEqual({ admitted: false, classId: null, reason: "REQUEST_UNREADABLE" });
+      expect(wrapped.anyAdmissible("EXPLAIN_PATTERN")).toBe(pendingGate.anyAdmissible("EXPLAIN_PATTERN"));
+      // Disabled: the wrapped gate is returned as is.
+      expect(withOwnerDemoEnCareDraftOverride(pendingGate, { ...OWNER_DEMO_EN_CARE_DRAFT_OVERRIDE, enabled: false })).toBe(pendingGate);
+    });
   });
 
   it("a registry with an owner QUALIFIED record admits exactly that class (and makes its task admissible)", () => {

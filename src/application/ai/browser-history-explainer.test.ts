@@ -21,7 +21,7 @@ import { planSlots } from "./language/slot-planner";
 import { createAiHybridTaskService } from "./ai-hybrid-task-service";
 import { createAiInvocationAuditRepository } from "./ai-audit-persistence";
 import { AI_REQUEST_CLASS_DEFINITIONS } from "./request-class-definitions";
-import { createRequestClassGate, requestClassIdentity, SHIPPED_REQUEST_CLASS_GATE } from "./request-class-qualification";
+import { createRequestClassGate, requestClassIdentity, SHIPPED_REQUEST_CLASS_GATE, SHIPPED_REQUEST_CLASS_REGISTRY } from "./request-class-qualification";
 // Packet 11C Addendum C (C1): every activated (test manifest) path below also injects test-only QUALIFIED records. Packet 11C English
 // activation (owner decisions Q and A): the shipped records qualify the six en-SG classes and the shipped manifest enables both tasks;
 // tests whose subject is "not activated" or "not qualified" inject DETERMINISTIC_ONLY_TEST_MANIFEST or pendingTestRequestClassGate().
@@ -699,11 +699,24 @@ describe("browser AI assistance: care-summary wording (Packet 11C B4b)", () => {
   // Packet 11C English activation (owner decisions Q and A; was: "shipped manifest ... TASK_DISABLED"): the shipped manifest enables the
   // care task, but this preview's shape (an appointment, one reading and one question) is not an evaluated class: never available, no
   // disclosure; an explicit request keeps the deterministic preview, one REQUEST_CLASS_NOT_QUALIFIED row, no POST.
-  it("shipped manifest and records, a preview outside the evaluated classes: never available, never a disclosure; an explicit request keeps the deterministic preview, one audit row, no POST", async () => {
+  // Owner demo override (owner decision 2026-10-12): the SHIPPED gate offers this en-SG preview (first case); the tested-shapes-only
+  // gate (override off) keeps the earlier fail-closed behaviour (second case).
+  it("shipped manifest and records, an en-SG preview outside the evaluated classes: offered by the owner demo override, the disclosure first, nothing sent by offering it", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const care = await careSetup();
     const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, now: () => LATER }).careSummary!;
+    expect(wording.available(care.payload)).toBe(true);
+    expect(await wording.disclosureRequired(care.payload)).toBe(true);
+    expect(await care.audits.list()).toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("tested-shapes-only gate (override off), a preview outside the evaluated classes: never available, never a disclosure; an explicit request keeps the deterministic preview, one audit row, no POST", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const care = await careSetup();
+    const wording = createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: care.carePreparation, audit: care.audits, requestClassGate: createRequestClassGate(SHIPPED_REQUEST_CLASS_REGISTRY), now: () => LATER }).careSummary!;
     expect(wording.available(care.payload)).toBe(false);
     expect(await wording.disclosureRequired(care.payload)).toBe(false);
     expect(await wording.compose({ snapshotRef: care.snapshotRef, locale: "en-SG", disclosure: "ACCEPTED" })).toEqual({ kind: "KEPT_DETERMINISTIC", reason: "TASK_DISABLED" });
@@ -1374,17 +1387,25 @@ describe("browser AI assistance: AI credit limit (Owner decision 2026-10-12, AI 
  * Packet 11C English activation (owner decisions Q and A, 2026-10-12): integrated check I-5 of the English AI readiness request (§5).
  * Offline: the transport is an injected fake route (the global fetch is a spy that must stay unused); never a provider. Nothing is
  * injected into the wiring but its ports and the fake route, so the SHIPPED manifest and the SHIPPED request-class gate decide.
- * - History, over the demo dataset the app opens with (a new local dataset is seeded with the synthetic scenario; the prepared demo
- *   profile only completes onboarding): the before-breakfast comparison's en-SG request is class a00d8ad5… (QUALIFIED). The disclosure is
- *   required first; a request without its own decision sends nothing; an accepted one is exactly one value-blind POST of that class. In
- *   zh-SG it is class c54c7d67… (PENDING): no disclosure, the standard wording, nothing sent.
+ * - History, over the demo dataset the app opens with (a new local dataset is seeded with the prepared demo data, which ends yesterday;
+ *   the prepared demo profile only completes onboarding), at the demo clocks Mon 12 Oct 2026 08:40 SGT and Tue 13 Oct 2026 14:00 SGT:
+ *   nothing is dated today or later, "Last week" and "30 days" have readings, and the before-breakfast comparison (LOWER) is the one
+ *   governed statement. Its en-SG request is class a00d8ad5… (QUALIFIED). The disclosure is required first; a request without its own
+ *   decision sends nothing; an accepted one is exactly one value-blind POST of that class. In zh-SG it is class c54c7d67… (PENDING): no
+ *   disclosure, the standard wording, nothing sent.
  * - Care: an en-SG preview of the evaluated ORDINARY shape (one reading, one question, no appointment) is class 5d0c75ce… (QUALIFIED):
  *   offered, disclosure first, one POST of that class when accepted; the same preview in zh-SG (8de6bc4e…, PENDING) is never offered or
- *   sent. The demo dataset's OWN care selections map to no evaluated class (the glucose group alone is too many facts to send; every other
- *   group or question combination has its own section counts): never offered, nothing sent (fail closed; readiness blocker 3).
+ *   sent. The demo dataset's OWN care selections (the 14-day visit period, with the seeded appointment) are within the fact limit and,
+ *   except for every group at once (TOO_MANY_FACTS), remote-eligible, but map to no evaluated class (NO_DEFINITION): with the shipped gate
+ *   they are never offered and nothing is sent (fail closed).
  */
 describe("Packet 11C English activation, I-5: the shipped manifest and gate over the demo flows (offline, fake route)", () => {
   const LATER = "2026-10-04T02:05:00.000Z" as Instant;
+  /** The demo clocks: Mon 12 Oct 2026 08:40 SGT and Tue 13 Oct 2026 14:00 SGT (the demo cutoff), with each one's local today and yesterday. */
+  const DEMO_CLOCKS = [
+    { label: "Mon 12 Oct 08:40 SGT", at: "2026-10-12T00:40:00.000Z" as Instant, today: "2026-10-12", yesterday: "2026-10-11", thisWeek: "EMPTY" },
+    { label: "Tue 13 Oct 14:00 SGT", at: "2026-10-13T06:00:00.000Z" as Instant, today: "2026-10-13", yesterday: "2026-10-12", thisWeek: "READY" },
+  ] as const;
   const EN_EXPLAIN = "a00d8ad562619f605ca03fe406c18abe095410db4d6f53cca02f68601104910d";
   const ZH_EXPLAIN = "c54c7d6754b5a791ab4e5732e82e6e9d8f4e235bd8004484db25f7f1558d9dac";
   const EN_CARE_ORDINARY = "5d0c75cef363c190e726f5cb055f4f9b6b265b76b7f8779b612467203ac6adca";
@@ -1409,27 +1430,40 @@ describe("Packet 11C English activation, I-5: the shipped manifest and gate over
     });
   }
   /** The demo dataset the app opens with: a new local dataset, seeded with the synthetic scenario (the runtime's default). */
-  async function demoRuntime() {
+  async function demoRuntime(at: Instant = LATER) {
     const name = `i5-demo-${crypto.randomUUID()}`;
     names.push(name);
-    const runtime = await createBrowserJournalRuntime(name, { now: () => LATER });
+    const runtime = await createBrowserJournalRuntime(name, { now: () => at });
     opened.push(runtime);
     return runtime;
   }
 
-  it("History: the demo comparison's en-SG request is admitted (a00d8ad5…), disclosure first, one POST of that class when accepted; zh-SG is never admitted", async () => {
+  it.each(DEMO_CLOCKS)("History ($label): the prepared data ends yesterday; the demo comparison's en-SG request is admitted (a00d8ad5…), disclosure first, one POST of that class when accepted; zh-SG is never admitted", async ({ at, today, yesterday, thisWeek }) => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    const runtime = await demoRuntime();
-    const view = await runtime.history.load({ period: "THIS_WEEK" });
-    expect(view.status === "READY" && view.comparisons.map((fact) => fact.factId)).toEqual(["COMPARISON:BEFORE_BREAKFAST", "NO_MATERIAL:BEFORE_DINNER"]);
+    const runtime = await demoRuntime(at);
+    // Nothing is dated today or later: the newest recorded position is yesterday's ("30 days" ends today).
+    const thirty = await runtime.history.load({ period: "THIRTY_DAYS" });
+    if (thirty.status !== "READY") throw new Error(thirty.status);
+    const recordedDates = thirty.projection.chart.filter((position) => position.state === "RECORDED").map((position) => position.date).sort();
+    expect(recordedDates.at(-1)).toBe(yesterday);
+    expect(recordedDates.every((date) => date < today)).toBe(true);
+    expect(thirty.projection.readingCount).toBe(33);
+    // "Last week" and "30 days" have readings on any day; "This week" is empty on a Monday (the data ends yesterday).
+    const lastWeek = await runtime.history.load({ period: "LAST_WEEK" });
+    expect(lastWeek.status).toBe("READY");
+    expect((await runtime.history.load({ period: "THIS_WEEK" })).status).toBe(thisWeek);
+    // The one governed statement: before breakfast, recent readings lower than the reference period's (the improvement).
+    for (const view of [thirty, lastWeek]) {
+      expect(view.status === "READY" && view.comparisons.map((fact) => [fact.factId, fact.kind, fact.recent, fact.reference, fact.correctionUpdated])).toEqual([["COMPARISON:BEFORE_BREAKFAST", "LOWER", "6.1", "7.5", true]]);
+    }
     const factId = "COMPARISON:BEFORE_BREAKFAST";
     expect(await explainClassOfFact(runtime.history, factId, "en-SG")).toBe(EN_EXPLAIN);
     expect(await explainClassOfFact(runtime.history, factId, "zh-SG")).toBe(ZH_EXPLAIN);
     const fetcher = fakeDemoRoute();
     const before = vi.mocked(createAiHybridTaskService).mock.calls.length;
     const log = audit();
-    const explainer = createBrowserAiAssistance({ history: runtime.history, carePreparation: runtime.carePreparation, audit: log.port, fetcher, now: () => LATER }).history;
+    const explainer = createBrowserAiAssistance({ history: runtime.history, carePreparation: runtime.carePreparation, audit: log.port, fetcher, now: () => at }).history;
     // Nothing injected: the one service runs on the shipped manifest and the shipped gate.
     const deps = vi.mocked(createAiHybridTaskService).mock.calls.slice(before).map((call) => call[0]);
     expect(deps.map((dep) => [dep.manifest, dep.requestClassGate])).toEqual([[AI_ACTIVATION_MANIFEST, SHIPPED_REQUEST_CLASS_GATE]]);
@@ -1500,52 +1534,88 @@ describe("Packet 11C English activation, I-5: the shipped manifest and gate over
     expect(fetchSpy).not.toHaveBeenCalled();
   }, 60_000);
 
-  it("Care over the demo dataset: its own selections map to no evaluated class (fail closed): never offered, no disclosure, nothing sent", async () => {
+  it.each(DEMO_CLOCKS)("Care over the demo dataset ($label, 14-day visit period): outside the evaluated classes, en-SG is offered by the owner demo override (disclosure first, one value-blind POST when accepted, the AI-assisted preview); zh-SG and over-budget selections never", async ({ at }) => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    const runtime = await demoRuntime();
+    const runtime = await demoRuntime(at);
+    const asked = await runtime.careOrganisation.commands.createCareQuestion({ questionText: { text: "Should I keep checking before breakfast every day? (demo)", language: "en-SG" } });
+    if (asked.kind !== "COMMITTED") throw new Error("question");
     const visit = await runtime.careOrganisation.query.loadVisitPreparation();
-    if (visit.status !== "READY") throw new Error(visit.status);
+    if (visit.status !== "READY" || !visit.appointment) throw new Error("visit");
+    // The 14 local days ending today; the seeded appointment; the patient's question.
+    expect(Math.round((Date.parse(visit.period.endAtExclusive) - Date.parse(visit.period.startAt)) / 86_400_000)).toBe(14);
+    expect(visit.factGroups.map((group) => [group.key, group.sources.length])).toEqual([["GLUCOSE", 11], ["INSULIN", 10], ["MEALS", 10], ["WALKS", 8]]);
+    expect(visit.questions).toHaveLength(1);
     const fetcher = fakeDemoRoute();
-    const wording = createBrowserAiAssistance({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit, fetcher, now: () => LATER }).careSummary!;
+    const wording = createBrowserAiAssistance({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit, fetcher, now: () => at }).careSummary!;
     const evaluated = new Set(AI_REQUEST_CLASS_DEFINITIONS.map((definition) => definition.classId));
+    const appointment = { recordType: "APPOINTMENT" as const, recordId: visit.appointment.recordId, revisionId: visit.appointment.revisionId };
+    const question = { recordType: "CARE_QUESTION" as const, recordId: visit.questions[0]!.recordId, revisionId: visit.questions[0]!.revisionId };
+    const selections: Array<[string, readonly string[], boolean]> = [
+      ["GLUCOSE + question", ["GLUCOSE"], true],
+      ["every group + question", ["GLUCOSE", "INSULIN", "MEALS", "WALKS"], true],
+      ["GLUCOSE", ["GLUCOSE"], false],
+      ["INSULIN", ["INSULIN"], false],
+      ["MEALS", ["MEALS"], false],
+      ["WALKS", ["WALKS"], false],
+    ];
     const outcomes: string[] = [];
+    let demoSnapshot: Parameters<typeof wording.compose>[0]["snapshotRef"] | null = null;
     for (const locale of ["en-SG", "zh-SG"] as const) {
-      // Each record group the screen offers, on its own, with the seeded appointment (the screen always includes it).
-      for (const group of visit.factGroups.filter((entry) => entry.sources.length > 0)) {
+      // Each selection with the seeded appointment (the screen always includes it).
+      for (const [label, keys, withQuestion] of selections) {
         const prepared = await runtime.carePreparation.commands.prepare({
           locale,
           period: visit.period,
-          appointment: visit.appointment ? { recordType: "APPOINTMENT", recordId: visit.appointment.recordId, revisionId: visit.appointment.revisionId } : null,
-          groups: [{ key: group.key, sources: group.sources }],
-          questions: [],
-          notSelected: visit.factGroups.filter((entry) => entry.key !== group.key).flatMap((entry) => entry.sources),
+          appointment,
+          groups: visit.factGroups.filter((entry) => keys.includes(entry.key)).map((entry) => ({ key: entry.key, sources: entry.sources })),
+          questions: withQuestion ? [question] : [],
+          notSelected: visit.factGroups.filter((entry) => !keys.includes(entry.key)).flatMap((entry) => entry.sources),
         });
         if (prepared.kind !== "COMMITTED") throw new Error(JSON.stringify(prepared));
         const view = await runtime.carePreparation.query.loadSummary(prepared.recordId);
         if (view.status !== "READY") throw new Error("ready");
-        const built = buildCareSummaryAiRequest({ current: view.payload, requestId: "33333333-3333-4333-8333-333333333333", requestedAt: LATER });
+        const built = buildCareSummaryAiRequest({ current: view.payload, requestId: "33333333-3333-4333-8333-333333333333", requestedAt: at });
         let outcome: string = built.kind === "READY" ? "READY" : built.reason;
         if (built.kind === "READY") {
           const planned = planSlots(built.request, resolveAiHybridBundle("DRAFT_CARE_PREPARATION_SUMMARY", locale));
-          outcome = planned.kind !== "PLANNED" || planned.plan.remote.eligible !== true ? "NOT_REMOTE_ELIGIBLE" : evaluated.has(requestClassIdentity(projectShellTaskRequest(planned.plan)).classId) ? "EVALUATED_CLASS" : "NO_DEFINITION";
+          const classOutcome = planned.kind !== "PLANNED" || planned.plan.remote.eligible !== true ? "NOT_REMOTE_ELIGIBLE" : evaluated.has(requestClassIdentity(projectShellTaskRequest(planned.plan)).classId) ? "EVALUATED_CLASS" : "NO_DEFINITION";
+          outcome = `${built.request.facts.length} facts, ${classOutcome}`;
         }
-        outcomes.push(`${locale} ${group.key}: ${outcome}`);
-        expect(wording.available(view.payload), `${locale} ${group.key}`).toBe(false);
-        expect(await wording.disclosureRequired(view.payload), `${locale} ${group.key}`).toBe(false);
+        outcomes.push(`${locale} ${label}: ${outcome}`);
+        // Owner demo override (owner decision 2026-10-12): an en-SG care request within the limits is offered even of no evaluated class.
+        const offered = locale === "en-SG" && /facts, (NO_DEFINITION|EVALUATED_CLASS)$/.test(outcome);
+        expect(wording.available(view.payload), `${locale} ${label}`).toBe(offered);
+        expect(await wording.disclosureRequired(view.payload), `${locale} ${label}`).toBe(offered);
+        if (locale === "en-SG" && label === "GLUCOSE + question") demoSnapshot = { recordId: prepared.recordId, expectedRevisionId: prepared.revisionId, expectedRevisionNumber: prepared.revisionNumber };
       }
     }
+    // GLUCOSE + question: 11 readings, the appointment (service and date) and the question = 14 facts, 18 under the 32-fact limit and
+    // within the English remote wording budget. Every group at once reaches the 32-fact limit and exceeds the remote wording budget
+    // (one more fact is TOO_MANY_FACTS): the standard wording is kept. Insulin records are never sent (only the appointment's 2 facts).
     expect(outcomes).toEqual([
-      "en-SG GLUCOSE: TOO_MANY_FACTS",
-      "en-SG INSULIN: NO_DEFINITION",
-      "en-SG MEALS: NO_DEFINITION",
-      "en-SG WALKS: NO_DEFINITION",
-      "zh-SG GLUCOSE: TOO_MANY_FACTS",
-      "zh-SG INSULIN: NO_DEFINITION",
-      "zh-SG MEALS: NO_DEFINITION",
-      "zh-SG WALKS: NO_DEFINITION",
+      "en-SG GLUCOSE + question: 14 facts, NO_DEFINITION",
+      "en-SG every group + question: 32 facts, NOT_REMOTE_ELIGIBLE",
+      "en-SG GLUCOSE: 13 facts, NO_DEFINITION",
+      "en-SG INSULIN: 2 facts, NO_DEFINITION",
+      "en-SG MEALS: 12 facts, NO_DEFINITION",
+      "en-SG WALKS: 10 facts, NO_DEFINITION",
+      "zh-SG GLUCOSE + question: 14 facts, NO_DEFINITION",
+      "zh-SG every group + question: 32 facts, NOT_REMOTE_ELIGIBLE",
+      "zh-SG GLUCOSE: 13 facts, NO_DEFINITION",
+      "zh-SG INSULIN: 2 facts, NO_DEFINITION",
+      "zh-SG MEALS: 12 facts, NO_DEFINITION",
+      "zh-SG WALKS: 10 facts, NO_DEFINITION",
     ]);
+    // Nothing is sent by being offered; the demo selection (GLUCOSE + question, en-SG): no POST without the request's own decision,
+    // then exactly one value-blind POST when accepted, and the AI-assisted (REPLACED) preview.
     expect(fetcher).not.toHaveBeenCalled();
+    if (!demoSnapshot) throw new Error("demo snapshot");
+    expect((await wording.compose({ snapshotRef: demoSnapshot, locale: "en-SG" })).kind).toBe("KEPT_DETERMINISTIC");
+    expect(fetcher).not.toHaveBeenCalled();
+    expect((await wording.compose({ snapshotRef: demoSnapshot, locale: "en-SG", disclosure: "ACCEPTED" })).kind).toBe("REPLACED");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0]![1].body as string).not.toMatch(/\d\.\d|mmol|keep checking|revisionId|recordId|\d{4}-\d{2}-\d{2}/);
     expect(fetchSpy).not.toHaveBeenCalled();
   }, 60_000);
 });

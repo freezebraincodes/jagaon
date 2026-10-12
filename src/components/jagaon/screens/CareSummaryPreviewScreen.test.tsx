@@ -24,6 +24,7 @@ import type { PrintPort } from "../care-preparation/PrintPort";
 import { CareSummaryPreviewScreen, type CareSummaryAiWordingOutcome, type CareSummaryAiWordingPort } from "./CareSummaryPreviewScreen";
 // Packet 11C Addendum C (C1): the activated paths inject test-only QUALIFIED records (independent of the shipped records).
 import { qualifiedTestRequestClassGate } from "@/application/ai/request-class-test-support";
+import { createRequestClassGate, SHIPPED_REQUEST_CLASS_REGISTRY } from "@/application/ai/request-class-qualification";
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;
 const originalKeyRange = Dexie.dependencies.IDBKeyRange;
@@ -473,14 +474,16 @@ async function aiPrepared(locale: SupportedLocale = "en-SG") {
 }
 
 describe("Care-summary preview: AI wording action (Packet 11C B4b)", () => {
-  it("is absent without the wording port, and while the care task is not activated (shipped manifest: nothing offered or sent)", async () => {
+  // Owner demo override (owner decision 2026-10-12): the SHIPPED gate offers en-SG care drafts beyond the tested shapes (covered in
+  // JagaOnApp.test.tsx and the I-5 tests); this case keeps the tested-shapes-only gate (override off) to prove the fail-closed path.
+  it("is absent without the wording port, and with the tested-shapes-only gate for a preview outside the evaluated classes (nothing offered or sent)", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     try {
       for (const shippedPort of [false, true]) {
         const { h, recordId } = await prepared();
         const audit = { append: vi.fn(async () => undefined) };
-        const port = shippedPort ? createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands: h.service }, audit }).careSummary : null;
+        const port = shippedPort ? createBrowserAiAssistance({ history: { load: vi.fn(), loadExplainablePattern: vi.fn() }, carePreparation: { query: h.query, commands: h.service }, audit, requestClassGate: createRequestClassGate(SHIPPED_REQUEST_CLASS_REGISTRY) }).careSummary : null;
         const view = renderAi(h, recordId, port);
         // Before and after approval: no action, no dialog, no AI label; the ordinary preview flow is unchanged.
         await screen.findByRole("article");
