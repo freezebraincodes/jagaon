@@ -425,7 +425,8 @@ export const enSGMessages: AppMessages = {
     liveMapLoading: "Loading map\u2026",
     oneMapAttribution: "Map data by OneMap \u00b7 Singapore Land Authority",
     oneMapPrivacy: "OneMap privacy and terms",
-    liveGeocoderUnavailable: "Live location search is unavailable. Try a 6-digit postal code or the dated demo data.",
+    // Owner decision 2026-10-12: no synthetic fallback; the bundled HPB list is searched instead.
+    liveGeocoderUnavailable: "No place in the HPB list matches that search. Try a 6-digit postal code, a street, an area or a mall name.",
     mapTilesUnavailable: "The map could not be loaded. The same places remain available in the list.",
     governedDatasetSource: "HPB Healthier Dining Partners \u00b7 data.gov.sg",
     governedDatasetDate: (date) => `Dataset date: ${date}`,

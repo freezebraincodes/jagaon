@@ -619,19 +619,9 @@ function FoodStateView({
     case "LOCATION_NOT_FOUND":
       return <Banner variant="info">{msg.noResultsTitle}</Banner>;
 
-    // Live search unavailable: say so, and show only clearly labelled demo places.
+    // No live search and no HPB-listed match: say so and what to try (owner decision 2026-10-12: no synthetic places).
     case "GEOCODER_UNAVAILABLE":
-      return (
-        <>
-          <Banner variant="warning">{msg.liveGeocoderUnavailable}</Banner>
-          {state.fallback ? (
-            <>
-              <Banner variant="info">{msg.syntheticFallbackActive}</Banner>
-              <VenueList messages={messages} locale={locale} results={state.fallback} onSelect={controller.selectPlace} />
-            </>
-          ) : null}
-        </>
-      );
+      return <Banner variant="warning">{msg.liveGeocoderUnavailable}</Banner>;
 
     // State 10: the directory cannot be used; no venue is invented.
     case "DIRECTORY_UNAVAILABLE":

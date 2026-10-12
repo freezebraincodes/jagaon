@@ -34,7 +34,8 @@ export type NearbyFoodScreenState =
   | { kind: "AMBIGUOUS"; query: string; candidates: ResolvedLocation[] }
   | { kind: "NO_RESULTS"; results: ResultSet }
   | { kind: "LOCATION_NOT_FOUND"; query: string }
-  | { kind: "GEOCODER_UNAVAILABLE"; fallback: ResultSet | null }
+  /** Owner decision 2026-10-12: no synthetic places are ever shown; the screen says what to try instead. */
+  | { kind: "GEOCODER_UNAVAILABLE" }
   | { kind: "DIRECTORY_UNAVAILABLE" }
   | { kind: "VENUE_DETAILS"; place: NearbyFoodPlace; results: ResultSet; returnTo: Extract<NearbyFoodScreenState, { kind: "RESULTS" }> };
 
@@ -63,7 +64,7 @@ export function createNearbyFoodController(port: NearbyFoodDiscoveryPort): Nearb
   let state: NearbyFoodScreenState = { kind: "IDLE" };
   let filters: NearbyFoodFilters = NO_FOOD_FILTERS;
   /** Current search scope, so a filter change can re-run it. */
-  let scope: { kind: "ORIGIN"; origin: Coordinates; view: "map" | "list" } | { kind: "SYNTHETIC" } | null = null;
+  let scope: { kind: "ORIGIN"; origin: Coordinates; view: "map" | "list" } | null = null;
   let active: AbortController | null = null;
   const listeners = new Set<() => void>();
 
@@ -100,13 +101,6 @@ export function createNearbyFoodController(port: NearbyFoodDiscoveryPort): Nearb
     }
   }
 
-  async function runSyntheticFallback(signal: AbortSignal): Promise<ResultSet | null> {
-    scope = { kind: "SYNTHETIC" };
-    const result = await port.findSyntheticFallback(filters);
-    if (signal.aborted || result.kind !== "RESULTS") return null;
-    return { places: result.places, directory: result.directory, origin: { latitude: 0, longitude: 0 }, source: "SYNTHETIC_FALLBACK" };
-  }
-
   return Object.freeze({
     getState: () => state,
     getFilters: () => filters,
@@ -136,12 +130,13 @@ export function createNearbyFoodController(port: NearbyFoodDiscoveryPort): Nearb
               set({ kind: "LOCATION_NOT_FOUND", query });
               return;
             case "UNAVAILABLE":
-              set({ kind: "GEOCODER_UNAVAILABLE", fallback: await runSyntheticFallback(signal) });
+              scope = null;
+              set({ kind: "GEOCODER_UNAVAILABLE" });
               return;
           }
         } catch (error) {
           if (isAbort(error) || signal.aborted) return;
-          set({ kind: "GEOCODER_UNAVAILABLE", fallback: null });
+          set({ kind: "GEOCODER_UNAVAILABLE" });
         }
       })();
     },
@@ -186,12 +181,6 @@ export function createNearbyFoodController(port: NearbyFoodDiscoveryPort): Nearb
         return;
       }
       const signal = begin();
-      if (current.kind === "SYNTHETIC") {
-        void runSyntheticFallback(signal).then((fallback) => {
-          if (!signal.aborted) set({ kind: "GEOCODER_UNAVAILABLE", fallback });
-        });
-        return;
-      }
       const view = state.kind === "RESULTS" ? state.view : current.view;
       void runSearch(current.origin, view, signal);
     },
@@ -204,7 +193,7 @@ export function createNearbyFoodController(port: NearbyFoodDiscoveryPort): Nearb
 
     selectPlace(placeId: string) {
       const from = state;
-      const results = from.kind === "RESULTS" ? from.results : from.kind === "GEOCODER_UNAVAILABLE" ? from.fallback : null;
+      const results = from.kind === "RESULTS" ? from.results : null;
       const place = results?.places.find((entry) => entry.id === placeId);
       if (!results || !place) return;
       const returnTo: Extract<NearbyFoodScreenState, { kind: "RESULTS" }> =

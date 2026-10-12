@@ -410,7 +410,8 @@ export const zhSGMessages: AppMessages = {
     liveMapLoading: "正在加载地图…",
     oneMapAttribution: "地图资料由 OneMap · 新加坡土地管理局提供",
     oneMapPrivacy: "OneMap 隐私与条款",
-    liveGeocoderUnavailable: "实时地点搜索暂时无法使用。请尝试输入六位数邮政编码，或使用注明日期的演示资料。",
+    // Owner decision 2026-10-12: no synthetic fallback. Human acceptance pending.
+    liveGeocoderUnavailable: "HPB 名单中没有与此搜索相符的地点。请尝试输入六位数邮政编码、街道、地区或商场名称。",
     mapTilesUnavailable: "地图无法加载。您仍可在列表中查看相同地点。",
     governedDatasetSource: "保健促进局较健康餐饮伙伴 · data.gov.sg",
     governedDatasetDate: (date) => `数据集日期：${date}`,

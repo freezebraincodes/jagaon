@@ -160,8 +160,8 @@ describe("Packet 9A food copy (09-bilingual-copy-matrix.md Section 1)", () => {
     expect([en.liveMapLoading, zh.liveMapLoading]).toEqual(["Loading map…", "正在加载地图…"]);
     expect([en.oneMapAttribution, zh.oneMapAttribution]).toEqual(["Map data by OneMap · Singapore Land Authority", "地图资料由 OneMap · 新加坡土地管理局提供"]);
     expect([en.oneMapPrivacy, zh.oneMapPrivacy]).toEqual(["OneMap privacy and terms", "OneMap 隐私与条款"]);
-    expect(en.liveGeocoderUnavailable).toBe("Live location search is unavailable. Try a 6-digit postal code or the dated demo data.");
-    expect(zh.liveGeocoderUnavailable).toBe("实时地点搜索暂时无法使用。请尝试输入六位数邮政编码，或使用注明日期的演示资料。");
+    expect(en.liveGeocoderUnavailable).toBe("No place in the HPB list matches that search. Try a 6-digit postal code, a street, an area or a mall name.");
+    expect(zh.liveGeocoderUnavailable).toBe("HPB 名单中没有与此搜索相符的地点。请尝试输入六位数邮政编码、街道、地区或商场名称。");
     expect([en.mapTilesUnavailable, zh.mapTilesUnavailable]).toEqual(["The map could not be loaded. The same places remain available in the list.", "地图无法加载。您仍可在列表中查看相同地点。"]);
     expect([en.governedDatasetSource, zh.governedDatasetSource]).toEqual(["HPB Healthier Dining Partners · data.gov.sg", "保健促进局较健康餐饮伙伴 · data.gov.sg"]);
     expect([en.governedDatasetDate("2026-10-02"), zh.governedDatasetDate("2026-10-02")]).toEqual(["Dataset date: 2026-10-02", "数据集日期：2026-10-02"]);

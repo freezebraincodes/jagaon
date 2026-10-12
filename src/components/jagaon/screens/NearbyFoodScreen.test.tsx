@@ -249,20 +249,19 @@ describe("NearbyFoodScreen on the provider-neutral port", () => {
     expect(screen.getByRole("link", { name: "Healthier Eateries" })).toHaveAttribute("href", "https://data.gov.sg/datasets/d_2925c2ccf75d1c135c2d469e0de3cee6/view");
   });
 
-  it("reports missing live search honestly and shows only labelled synthetic demo places", async () => {
+  it("reports a search with no live result and no HPB match honestly, and never shows synthetic places (owner decision 2026-10-12)", async () => {
     const discovery = port({ profile: hybridProfile, resolveManualLocation: async () => ({ kind: "UNAVAILABLE", reason: "NOT_CONFIGURED" }) as LocationResolution });
     show(discovery);
     search("Toa Payoh");
     expect(await screen.findByText(en.food.liveGeocoderUnavailable)).toBeInTheDocument();
-    expect(screen.getByText(en.food.syntheticFallbackActive)).toBeInTheDocument();
-    const list = screen.getByRole("list", { name: en.food.resultsCount(5) });
-    for (const item of list.querySelectorAll<HTMLElement>(":scope > li")) {
-      // Owner decision 2026-10-12: names carry no "(demo)" suffix; the "(synthetic)"
-      // address still labels every fixture place.
-      expect(item).toHaveTextContent("(synthetic)");
-      expect(item).toHaveTextContent(en.food.noGovernedAttribute);
-    }
-    expect(screen.getByText(en.food.syntheticDirectorySource)).toBeInTheDocument();
+    expect(screen.queryByText(en.food.syntheticFallbackActive)).toBeNull();
+    expect(screen.queryByText(en.food.syntheticDirectorySource)).toBeNull();
+    expect(screen.queryByText(/\(synthetic\)/)).toBeNull();
+    expect(discovery.findSyntheticFallback).not.toHaveBeenCalled();
+    expect(discovery.findNearby).not.toHaveBeenCalled();
+    // A filter change after it searches nothing and still shows no synthetic place.
+    fireEvent.click(within(screen.getByRole("group", { name: en.food.distanceLabel })).getAllByRole("button")[0]!);
+    expect(discovery.findSyntheticFallback).not.toHaveBeenCalled();
     expect(discovery.findNearby).not.toHaveBeenCalled();
   });
 
