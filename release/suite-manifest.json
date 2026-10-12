@@ -280,6 +280,7 @@
             "src/backup/strict-json.test.ts",
             "src/backup/web-crypto-port.test.ts",
             "src/components/demo/DemoBoundaryNotice.test.tsx",
+            "src/components/demo/demo-boundary-placement.test.ts",
             "src/components/jagaon/JagaOnApp.restore-marker.test.tsx",
             "src/components/jagaon/JagaOnApp.test.tsx",
             "src/components/jagaon/ai/AiDisclosureDialog.test.tsx",

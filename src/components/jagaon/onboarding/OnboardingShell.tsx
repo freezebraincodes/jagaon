@@ -16,11 +16,13 @@ type OnboardingShellProps = {
   onBack?: () => void;
   /** Polite announcement (save, language change, recovery). */
   announcement?: string;
+  /** The compact demo boundary; where it shows is set by `DEMO_BOUNDARY_PLACEMENT` (owner decision 2026-10-12: hidden). */
+  showBoundary?: boolean;
   children: ReactNode;
 };
 
 /**
- * Onboarding frame: compact bilingual demo boundary, optional back button
+ * Onboarding frame: compact bilingual demo boundary (per `DEMO_BOUNDARY_PLACEMENT`), optional back button
  * and five-step progress, a single main region, and a polite live region.
  * The journal's bottom navigation is never rendered here.
  */
@@ -30,6 +32,7 @@ export function OnboardingShell({
   step = null,
   onBack,
   announcement = "",
+  showBoundary = false,
   children,
 }: OnboardingShellProps) {
   const mainRef = useRef<HTMLElement>(null);
@@ -49,13 +52,15 @@ export function OnboardingShell({
 
   return (
     <div className="onboarding">
-      <aside className="onboarding-boundary" aria-label={messages.onboarding.compactBoundary}>
-        <FlaskIcon size={20} />
-        <div>
-          <p lang="en-SG">{getMessages("en-SG").onboarding.compactBoundary}</p>
-          <p lang="zh-SG">{getMessages("zh-SG").onboarding.compactBoundary}</p>
-        </div>
-      </aside>
+      {showBoundary ? (
+        <aside className="onboarding-boundary" aria-label={messages.onboarding.compactBoundary}>
+          <FlaskIcon size={20} />
+          <div>
+            <p lang="en-SG">{getMessages("en-SG").onboarding.compactBoundary}</p>
+            <p lang="zh-SG">{getMessages("zh-SG").onboarding.compactBoundary}</p>
+          </div>
+        </aside>
+      ) : null}
       <main ref={mainRef} className="onboarding-main" data-onboarding-view={viewKey}>
         {onBack || step ? (
           <div className="onboarding-topbar">

@@ -1,5 +1,6 @@
 "use client";
 
+import { DEMO_BOUNDARY_PLACEMENT } from "@/components/demo/demo-boundary-placement";
 import { useCallback, useState } from "react";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import { getMessages } from "@/i18n/get-messages";
@@ -319,6 +320,7 @@ export function OnboardingFlow({
     <OnboardingShell
       messages={messages}
       viewKey={`${route}:${editingId ?? ""}`}
+      showBoundary={DEMO_BOUNDARY_PLACEMENT === "EVERY_SCREEN" || (DEMO_BOUNDARY_PLACEMENT === "WELCOME" && route === "WELCOME")}
       step={step}
       onBack={back ? () => go(back) : undefined}
       announcement={announcement}

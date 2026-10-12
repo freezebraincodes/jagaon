@@ -472,6 +472,14 @@ describe("JagaOnApp journal integration", () => {
     expect((await screen.findAllByText("6.8")).length).toBeGreaterThan(0);
   });
 
+  it("shows no demo boundary banner on Today (owner decision 2026-10-12: DEMO_BOUNDARY_PLACEMENT hidden)", async () => {
+    const en = getMessages("en-SG");
+    render(<JagaOnApp runtimeFactory={vi.fn(async () => fakeRuntime())} onboardingRepositoryFactory={completed()} appointmentNoteStorageFactory={() => createMemoryOnboardingStorage()} />);
+    await screen.findByRole("button", { name: en.today.recordReading });
+    expect(screen.queryByRole("complementary", { name: "Public demo boundary notice" })).not.toBeInTheDocument();
+    expect(screen.queryByText(en.shared.demoBoundary)).not.toBeInTheDocument();
+  });
+
   it("completes the Packet 6 bilingual journal journey and clears it with delete-all", async () => {
     const en = getMessages("en-SG");
     const zh = getMessages("zh-SG");

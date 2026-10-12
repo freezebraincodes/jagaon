@@ -7,6 +7,7 @@ import { getMessages } from "@/i18n/get-messages";
 import type { AppMessages } from "@/i18n/types";
 import { CURRENT_RELEASE_PROFILE } from "@/config/release-profile";
 import { DemoBoundaryNotice } from "@/components/demo/DemoBoundaryNotice";
+import { DEMO_BOUNDARY_PLACEMENT } from "@/components/demo/demo-boundary-placement";
 import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-fixture";
 import { TOP_LEVEL_SCREENS, type ScreenId } from "./screen-manifest";
 import { RecordedHistoryScreen } from "./screens/RecordedHistoryScreen";
@@ -1088,6 +1089,9 @@ export function JagaOnApp({
     }
   }
 
+  // The demo boundary banner on the app's screens: only when `DEMO_BOUNDARY_PLACEMENT` is EVERY_SCREEN (owner decision 2026-10-12: hidden).
+  const everyScreenBoundary = DEMO_BOUNDARY_PLACEMENT === "EVERY_SCREEN" ? <DemoBoundaryNotice /> : null;
+
   // --- Release profile guard ---
   if (CURRENT_RELEASE_PROFILE !== "HACKATHON_DEMO") {
     return (
@@ -1104,7 +1108,7 @@ export function JagaOnApp({
   if (deletionInFlight) {
     return (
       <>
-        <DemoBoundaryNotice />
+        {everyScreenBoundary}
         <main className="app-main">
           <DeletionInProgress messages={messages} waitingForTab={deletionInFlight.waitingForTab} />
         </main>
@@ -1116,7 +1120,7 @@ export function JagaOnApp({
     // Restore offered from the recovery shell (frames 09 and 12) without a runtime.
     return (
       <>
-        <DemoBoundaryNotice />
+        {everyScreenBoundary}
         <main className="app-main app-main--child">
           <RestoreBackupPanel
             messages={messages}
@@ -1137,7 +1141,7 @@ export function JagaOnApp({
   if (storageLock) {
     return (
       <>
-        <DemoBoundaryNotice />
+        {everyScreenBoundary}
         <main className="app-main app-main--child">
           <IntegrityShell
             messages={messages}
@@ -1155,7 +1159,7 @@ export function JagaOnApp({
   if (phase.kind === "LOADING") {
     return (
       <>
-        <DemoBoundaryNotice />
+        {everyScreenBoundary}
         <main className="app-main">
           <p role="status">{messages.shared.loading}</p>
         </main>
@@ -1194,7 +1198,7 @@ export function JagaOnApp({
 
   return (
     <>
-      <DemoBoundaryNotice />
+      {everyScreenBoundary}
       <AppShell
         messages={messages}
         currentScreen={current.screen}

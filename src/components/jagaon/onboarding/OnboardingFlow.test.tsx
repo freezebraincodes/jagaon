@@ -83,13 +83,23 @@ describe("onboarding welcome", () => {
     setup();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 1, name: en.onboarding.welcomeTitle })).toBeInTheDocument();
-    expect(screen.getByText(en.onboarding.compactBoundary)).toBeInTheDocument();
-    expect(screen.getByText(getMessages("zh-SG").onboarding.compactBoundary)).toBeInTheDocument();
+    // Owner decision 2026-10-12: the demo boundary is hidden (DEMO_BOUNDARY_PLACEMENT), Welcome included.
+    expect(screen.queryByText(en.onboarding.compactBoundary)).not.toBeInTheDocument();
+    expect(screen.queryByText(getMessages("zh-SG").onboarding.compactBoundary)).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: en.settings.english })).toBeChecked();
     expect(screen.getByRole("button", { name: en.onboarding.startSetup })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: en.onboarding.usePrepared })).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+  });
+
+  it("shows no demo boundary on Welcome or the setup steps (owner decision 2026-10-12: DEMO_BOUNDARY_PLACEMENT hidden)", () => {
+    setup();
+    expect(screen.queryByRole("complementary", { name: en.onboarding.compactBoundary })).not.toBeInTheDocument();
+    click(en.onboarding.startSetup);
+    expect(progress()).toHaveAttribute("aria-valuenow", "1");
+    expect(screen.queryByRole("complementary", { name: en.onboarding.compactBoundary })).not.toBeInTheDocument();
+    expect(screen.queryByText(en.onboarding.compactBoundary)).not.toBeInTheDocument();
   });
 
   it("persists a complete in-progress state when language changes on Welcome", () => {
