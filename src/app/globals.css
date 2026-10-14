@@ -6269,6 +6269,18 @@ button.summary-tile:hover:not(:disabled) {
   flex: 1 1 9rem;
 }
 
+/* Owner decision 2026-10-15: typing to Tell JagaOn. */
+.voice-typing-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.voice-typing-form textarea.input {
+  min-height: 7.5rem;
+}
+
 /* Owner decision 2026-10-15: the closing line after a chat about a good feeling. */
 .feelings-chat-closing {
   margin: 0;

@@ -40,6 +40,11 @@ export type VoiceScreenCopy = Readonly<{
   /** W-6a: the listening-limit notice, for both providers (EN owner-approved 2026-10-11; ZH draft). */
   /** `notShown`: text was captured but nothing was understood and no transcript is displayed (round 6). */
   limit: Readonly<{ captured: string; empty: string; notShown: string }>;
+  /**
+   * Owner decision 2026-10-15: typing to Tell JagaOn. The typed words go through the same on-device checks and cards as speech; no
+   * voice notice is needed (no audio leaves the device).
+   */
+  typing: Readonly<{ start: string; label: string; hint: string; submit: string; transcriptLabel: string }>;
   /** Terminology review Critical #1: the minimal "Words JagaOn remembers" section (list, change, forget). Human acceptance pending. */
   terms: Readonly<{
     heading: string;
@@ -189,6 +194,14 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       // Round 6: owner-approved wording, 2026-10-11 (verbatim).
       notShown: "Listening stopped at the 60-second limit. Nothing has been saved.",
     },
+    // Owner decision 2026-10-15.
+    typing: {
+      start: "Type to JagaOn",
+      label: "What would you like to tell JagaOn?",
+      hint: "For example: “My sugar was 6.8 before breakfast” or “I feel tired today”. Nothing is saved until you check it.",
+      submit: "Continue",
+      transcriptLabel: "What you typed (not saved)",
+    },
     remote: {
       offer: "Ask AI to help read what you said",
       title: "Send what you said to AI?",
@@ -290,6 +303,14 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       // Round 6: draft, pending owner review (Chinese acceptance deferred).
       notShown: "已在 60 秒上限时停止聆听。尚未保存任何内容。",
     },
+    // Drafts (English only for the hackathon).
+    typing: {
+      start: "输入给 JagaOn",
+      label: "您想告诉 JagaOn 什么？",
+      hint: "例如：“早餐前血糖 6.8” 或 “我今天觉得累”。检查之前不会保存任何内容。",
+      submit: "继续",
+      transcriptLabel: "您输入的内容（未保存）",
+    },
     remote: {
       offer: "请 AI 帮忙理解您说的话",
       title: "要把您说的话发送给 AI 吗？",
@@ -384,6 +405,7 @@ export function voiceScreenCopy(messages: AppMessages, locale: SupportedLocale):
     medicineInfo: messages.voice.medicineInfo,
     remote: pending.remote,
     limit: pending.limit,
+    typing: pending.typing,
     // English only (see VOICE_WEB_SPEECH_COPY): the ZH screen never reaches a Web Speech session.
     webSpeech: VOICE_WEB_SPEECH_COPY["en-SG"],
     terms: pending.terms,
