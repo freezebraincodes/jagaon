@@ -256,6 +256,20 @@ h1[tabindex="-1"]:focus {
   z-index: 100;
 }
 
+/* iPhone (owner feedback 2026-10-14): when a mobile browser's own toolbar slides away while scrolling (Chrome on iOS), a strip can open
+   below a fixed bar and show the page through it. The bar's background continues below its bottom edge, so that strip is always the
+   bar's colour and the bar reads as attached to the screen edge. It sits off-screen otherwise and takes no input. */
+.app-nav::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 100vh;
+  background-color: var(--card);
+  pointer-events: none;
+}
+
 .app-nav-inner {
   display: flex;
   width: 100%;
