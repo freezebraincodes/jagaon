@@ -950,6 +950,21 @@ export function JagaOnApp({
             locale={locale}
             fixture={fixture}
             goBack={goBack}
+            addCareQuestion={
+              runtime
+                ? async (text) => {
+                    // Owner decision 2026-10-14: the same save as "Add my own question" in Prepare for my appointment, linked to the
+                    // next recorded appointment when there is one; it starts unticked there.
+                    const visit = await runtime.careOrganisation.query.loadVisitPreparation();
+                    const appointment = visit.status === "READY" ? visit.appointment : null;
+                    const result = await runtime.careOrganisation.commands.createCareQuestion({
+                      questionText: { text, language: "und" },
+                      ...(appointment ? { relatedAppointment: { recordType: "APPOINTMENT", recordId: appointment.recordId, revisionId: appointment.revisionId } } : {}),
+                    });
+                    return result.kind === "COMMITTED";
+                  }
+                : undefined
+            }
           />
         );
       case "NEARBY_FOOD":

@@ -272,6 +272,8 @@ export type MedicationMessages = {
   provenanceDocument: string;
   sampleQuestionLabel: string;
   addQuestion: string;
+  /** Owner decision 2026-10-14: shown after the question is saved to Prepare for my appointment. */
+  questionAdded: string;
   sourceHistory: string;
 };
 

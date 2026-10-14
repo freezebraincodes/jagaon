@@ -342,6 +342,8 @@ export const zhSGMessages: AppMessages = {
     provenanceDocument: "从处方文件转录",
     sampleQuestionLabel: "示例问题——是您的问题，不是 JagaOn 的建议",
     addQuestion: "为医生或药剂师添加问题",
+    // Owner decision 2026-10-14; draft, human acceptance pending.
+    questionAdded: "已添加到“为预约做准备”中的问题。",
     sourceHistory: "来源记录",
   },
   food: {

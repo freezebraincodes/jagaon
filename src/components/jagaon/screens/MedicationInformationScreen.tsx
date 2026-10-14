@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { DemoPatientProfile } from "@/application/governed/demo-scenario-fixture";
 import { createMedicationInformationAdapter } from "@/application/governed/medication-information-adapter";
 import { labelAndValue } from "../locale-format";
 import { sourceLabel } from "../onboarding/medicine-labels";
+import { CareQuestionEditor } from "../care-organisation/CareQuestionEditor";
 import {
   BookIcon,
   ChevronRightIcon,
@@ -23,15 +24,39 @@ type MedicationInformationScreenProps = {
   locale: SupportedLocale;
   fixture: DemoPatientProfile;
   goBack: () => void;
+  /**
+   * Owner decision 2026-10-14: "Add a question for my doctor or pharmacist" saves her own question to Prepare for my appointment
+   * (unticked), as "Add my own question" does there. Without it the action stays the disabled placeholder.
+   */
+  addCareQuestion?: (text: string) => Promise<boolean>;
 };
 
 export function MedicationInformationScreen({
   messages,
   locale,
   fixture,
+  addCareQuestion,
 }: MedicationInformationScreenProps) {
   const msg = messages.medication;
   const adapter = useMemo(() => createMedicationInformationAdapter(), []);
+  const [asking, setAsking] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [addedFor, setAddedFor] = useState<string | null>(null);
+
+  async function saveQuestion(text: string) {
+    if (!addCareQuestion || asking === null) return;
+    setBusy(true);
+    setFailed(false);
+    const saved = await addCareQuestion(text).catch(() => false);
+    setBusy(false);
+    if (!saved) {
+      setFailed(true);
+      return;
+    }
+    setAddedFor(asking);
+    setAsking(null);
+  }
 
   return (
     <div className="screen-page medication-screen">
@@ -157,20 +182,44 @@ export function MedicationInformationScreen({
                     </li>
                   ))}
                 </ul>
-                <button
-                  type="button"
-                  className="action-row"
-                  disabled
-                  aria-disabled="true"
-                  aria-describedby={`${ids.actions}-later`}
-                >
-                  <QuestionIcon size={24} />
-                  <span>{msg.addQuestion}</span>
-                  <ChevronRightIcon size={20} />
-                </button>
-                <p className="provenance-line" id={`${ids.actions}-later`}>
-                  {messages.today.futureFeature}
-                </p>
+                {addCareQuestion ? (
+                  <>
+                    <button
+                      type="button"
+                      className="action-row"
+                      onClick={() => {
+                        setFailed(false);
+                        setAsking(rx.medicationRecordId);
+                      }}
+                    >
+                      <QuestionIcon size={24} />
+                      <span>{msg.addQuestion}</span>
+                      <ChevronRightIcon size={20} />
+                    </button>
+                    {addedFor === rx.medicationRecordId ? (
+                      <p className="provenance-line" role="status">
+                        {msg.questionAdded}
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="action-row"
+                      disabled
+                      aria-disabled="true"
+                      aria-describedby={`${ids.actions}-later`}
+                    >
+                      <QuestionIcon size={24} />
+                      <span>{msg.addQuestion}</span>
+                      <ChevronRightIcon size={20} />
+                    </button>
+                    <p className="provenance-line" id={`${ids.actions}-later`}>
+                      {messages.today.futureFeature}
+                    </p>
+                  </>
+                )}
                 <details className="source-history">
                   <summary>
                     <HistoryIcon size={22} />
@@ -196,6 +245,9 @@ export function MedicationInformationScreen({
       </div>
 
       <Notice>{msg.generalLimit}</Notice>
+      {asking !== null && addCareQuestion ? (
+        <CareQuestionEditor messages={messages} initialText={null} busy={busy} failed={failed} onSave={(text) => void saveQuestion(text)} onClose={() => setAsking(null)} />
+      ) : null}
     </div>
   );
 }
