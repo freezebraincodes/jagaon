@@ -21,8 +21,14 @@
  * - the extractor never looks for a feeling in a question, in a clause that is a glucose, meal or medicine fact, or in a clause
  *   that was redirected; the distress gate always runs first and a distress transcript never reaches this module.
  * - Missed on purpose (stays "not understood"): "I don't feel well" ("well" is not a cue), "tired" alone with nothing else.
+ *
+ * voice-feeling-cues.2 (owner request 2026-10-15, good moments and a few more feelings): proud, excited, grateful, thankful, glad,
+ * hopeful, motivated, confident, content, cheerful and peaceful (HAPPY_GOOD); scared, afraid and frightened (WORRIED). The new words
+ * are feelings whatever follows ("excited about my holiday", "grateful for my family"); only the ambiguous everyday words (happy, good,
+ * great, fine, okay, better, relieved, calm) keep the follower rule. "That" after one of those is a feeling when she said "I feel" or
+ * "I'm" first ("I feel happy that my sugar has been in control"); "happy that you came" without them stays not a feeling.
  */
-export const VOICE_FEELING_CUES_VERSION = "voice-feeling-cues.1";
+export const VOICE_FEELING_CUES_VERSION = "voice-feeling-cues.2";
 
 export const VOICE_FEELING_GROUPS = ["TIRED", "WORRIED", "STRESSED", "SAD_LOW", "HAPPY_GOOD"] as const;
 export type VoiceFeelingGroup = (typeof VOICE_FEELING_GROUPS)[number];
@@ -65,6 +71,21 @@ export const VOICE_FEELING_CUES: Readonly<{ version: typeof VOICE_FEELING_CUES_V
     cue("better", "HAPPY_GOOD"),
     cue("relieved", "HAPPY_GOOD"),
     cue("calm", "HAPPY_GOOD"),
+    // voice-feeling-cues.2
+    cue("proud", "HAPPY_GOOD"),
+    cue("excited", "HAPPY_GOOD"),
+    cue("grateful", "HAPPY_GOOD"),
+    cue("thankful", "HAPPY_GOOD"),
+    cue("glad", "HAPPY_GOOD"),
+    cue("hopeful", "HAPPY_GOOD"),
+    cue("motivated", "HAPPY_GOOD"),
+    cue("confident", "HAPPY_GOOD"),
+    cue("content", "HAPPY_GOOD"),
+    cue("cheerful", "HAPPY_GOOD"),
+    cue("peaceful", "HAPPY_GOOD"),
+    cue("scared", "WORRIED"),
+    cue("afraid", "WORRIED"),
+    cue("frightened", "WORRIED"),
   ]),
 });
 
@@ -91,6 +112,8 @@ const TIME_WORDS: readonly (readonly string[])[] = Object.freeze([
   ["today"], ["tonight"], ["now"], ["lately"], ["recently"], ["right", "now"], ["this", "morning"], ["this", "afternoon"], ["this", "evening"], ["this", "week"], ["all", "day"], ["these", "days"], ["at", "the", "moment"],
 ]);
 const HAPPY_NOT_FEELING_FOLLOWERS = new Set(["with", "to", "for", "about", "if", "that", "by"]);
+/** voice-feeling-cues.2: the everyday words the follower rule applies to ("happy to help", "fine with rice", "good for you"). */
+const AMBIGUOUS_GOOD_WORDS = new Set(["happy", "good", "great", "fine", "okay", "better", "relieved", "calm"]);
 const LOW_NOT_FEELING_FOLLOWERS = new Set(["to", "on", "at", "in", "from", "by", "the", "there", "here", "for", "under", "below", "than", "stairs", "town"]);
 
 type CueHit = Readonly<{ cue: FeelingCue; start: number; end: number; nextIndex: number }>;
@@ -108,11 +131,14 @@ function cueAt(tokens: readonly Token[], index: number): CueHit | null {
 }
 const timeWordAt = (tokens: readonly Token[], index: number) => TIME_WORDS.some((words) => words.every((word, offset) => tokens[index + offset]?.word === word));
 
-/** A cue followed by a word that makes it something other than a feeling ("fine with rice", "down at the market"). */
-function notAFeeling(hit: CueHit, tokens: readonly Token[]): boolean {
+/**
+ * A cue followed by a word that makes it something other than a feeling ("fine with rice", "down at the market"). `ownFeeling`: she
+ * said "I feel" or "I'm" before it, so "that" introduces what the feeling is about ("I feel happy that …").
+ */
+function notAFeeling(hit: CueHit, tokens: readonly Token[], ownFeeling = false): boolean {
   const next = tokens[hit.nextIndex]?.word;
   if (next === undefined) return false;
-  if (hit.cue.group === "HAPPY_GOOD" && HAPPY_NOT_FEELING_FOLLOWERS.has(next)) return true;
+  if (AMBIGUOUS_GOOD_WORDS.has(hit.cue.key) && HAPPY_NOT_FEELING_FOLLOWERS.has(next) && !(next === "that" && ownFeeling)) return true;
   if ((hit.cue.key === "down" || hit.cue.key === "low") && LOW_NOT_FEELING_FOLLOWERS.has(next)) return true;
   return false;
 }
@@ -150,7 +176,7 @@ export function matchVoiceFeeling(segment: string, continuation = false): VoiceF
     else if (INTENSIFIERS.has(word)) intensifier = true;
     else if (!LEADS.has(word)) return null;
   }
-  if (first === null || notAFeeling(first, tokens)) return null;
+  if (first === null || notAFeeling(first, tokens, feel || contracted || (subject && aux))) return null;
   const timeAfter = timeWordAt(tokens, first.nextIndex);
   const stated = continuation || feel || (subject && (aux || contracted)) || timeAfter || (!subject && intensifier && first.cue.group !== "HAPPY_GOOD");
   if (!stated) return null;
@@ -160,7 +186,7 @@ export function matchVoiceFeeling(segment: string, continuation = false): VoiceF
   for (let next = first.nextIndex; next < tokens.length; ) {
     const hit = cueAt(tokens, next);
     if (hit) {
-      if (notAFeeling(hit, tokens)) break;
+      if (notAFeeling(hit, tokens, true)) break;
       keys.push(gapNegated ? `not-${hit.cue.key}` : hit.cue.key);
       end = hit.end;
       gapNegated = false;
