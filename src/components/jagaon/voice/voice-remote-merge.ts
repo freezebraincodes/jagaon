@@ -28,16 +28,18 @@ import {
  *   returns it to an unstated unit (the default applies only to an unambiguous reading).
  * - 13s.6: a local FEELING_NOTE or ACTIVITY_NOTE is never altered, and a remote fact over its text is dropped (its words stay hers);
  *   a remote candidate of either kind fails the contract (DETERMINISTIC only), so the whole remote result is not used.
+ * - 13s.7: so is a local MEDICINE_INFO_REQUEST (kept exactly; a remote fact over its sentence is dropped), and a remote candidate of
+ *   that kind fails the contract too. (The app never asks remote extraction about a transcript holding one.)
  */
 const SAFETY: readonly VoiceAmbiguityReason[] = ["NEGATION", "UNCERTAINTY", "CORRECTION", "OTHER_PERSON", "MULTIPLE_NUMBERS"];
 const TRANSCRIPT_WIDE: readonly VoiceAmbiguityReason[] = ["CORRECTION", "OTHER_PERSON"];
 const MMOL = /mmol|毫摩尔|millimole/i;
 
-type Fact = Exclude<VoiceCandidate, { kind: "UNSUPPORTED_SPAN" | "FEELING_NOTE" | "ACTIVITY_NOTE" }>;
+type Fact = Exclude<VoiceCandidate, { kind: "UNSUPPORTED_SPAN" | "FEELING_NOTE" | "ACTIVITY_NOTE" | "MEDICINE_INFO_REQUEST" }>;
 const overlaps = (left: VoiceCandidate, right: VoiceCandidate) => left.span.start < right.span.end && right.span.start < left.span.end;
 const isFact = (candidate: VoiceCandidate): candidate is Fact => candidate.kind === "GLUCOSE_READING" || candidate.kind === "MEAL_NOTE" || candidate.kind === "MEDICATION_OCCURRENCE";
-/** 13s.6: her feeling or activity, recognised on the device only; kept exactly as it is. */
-const isOwnNote = (candidate: VoiceCandidate) => candidate.kind === "FEELING_NOTE" || candidate.kind === "ACTIVITY_NOTE";
+/** 13s.6: her feeling or activity (13s.7: or her medicine-information request), recognised on the device only; kept exactly as it is. */
+const isOwnNote = (candidate: VoiceCandidate) => candidate.kind === "FEELING_NOTE" || candidate.kind === "ACTIVITY_NOTE" || candidate.kind === "MEDICINE_INFO_REQUEST";
 
 function withReasons(candidate: Fact, extra: readonly VoiceAmbiguityReason[]): Fact {
   const reasons = new Set<VoiceAmbiguityReason>([...candidate.ambiguity, ...extra.filter((reason) => SAFETY.includes(reason))]);

@@ -2,11 +2,12 @@ import { z } from "zod";
 import { MMOL_CONFIRMATION_TRIGGER, isMmolEntryValue, mmolEntryNeedsConfirmation } from "./glucose-entry-format";
 import { VOICE_ACTIVITY_CATEGORIES, VOICE_ACTIVITY_MAX_MINUTES } from "./voice-activity-cues";
 import { VOICE_DISTRESS_CUES_VERSION, VOICE_DISTRESS_CUE_KEYS } from "./voice-distress-gate";
+import { isVoiceMedicineInfoName } from "./voice-medicine-info-cues";
 import { VOICE_VOCABULARY_VERSION } from "./voice-vocabulary";
 
 /**
- * Packet 13 (P13S, owner scope expansion 2026-10-09): the closed voice candidate and analysis contracts, `voice-contract.13s.6`
- * (13s.3, 13s.4, 13s.5 and 13s.6 changes are listed below the version constants).
+ * Packet 13 (P13S, owner scope expansion 2026-10-09): the closed voice candidate and analysis contracts, `voice-contract.13s.7`
+ * (13s.3, 13s.4, 13s.5, 13s.6 and 13s.7 changes are listed below the version constants).
  * FROZEN INTERFACE: stream 1 maps its validated remote transcript extraction into THIS union (`source: "REMOTE_EXTRACTION"`); the
  * deterministic extractor produces `source: "DETERMINISTIC"`. Change only by a coordinated version bump.
  *
@@ -34,10 +35,12 @@ import { VOICE_VOCABULARY_VERSION } from "./voice-vocabulary";
  *   words, trimmed). DETERMINISTIC only; no state, no ambiguity (it is saved, edited or skipped as her note, never as a health fact).
  * - ACTIVITY_NOTE (13s.6): an activity she reported, `category` (the activity-event categories), `label` (her own words) and
  *   `durationMinutes` (only when said; 1–1440) or null. DETERMINISTIC only; no state, no ambiguity.
+ * - MEDICINE_INFO_REQUEST (13s.7): she asked for general information about one named medicine ("Tell me about my Metformin"),
+ *   `name` (her words for it). DETERMINISTIC only; no state, no ambiguity; never a fact and never saved.
  * - UNSUPPORTED_SPAN: a part of the utterance that is not understood (shown as such, never dropped, never interpreted).
  */
-export const VOICE_CONTRACT_VERSION = "voice-contract.13s.6";
-export const VOICE_EXTRACTOR_VERSION = "voice-extractor.13s.6";
+export const VOICE_CONTRACT_VERSION = "voice-contract.13s.7";
+export const VOICE_EXTRACTOR_VERSION = "voice-extractor.13s.7";
 /*
  * voice-contract.13s.3 (owner decisions 2026-10-09 ~14:55, #2–#4; safety re-review fixes):
  * - MEDICATION_OCCURRENCE gains `reportedAmount: { valueText, unitText } | null`: an amount the person REPORTED for an occurrence
@@ -61,6 +64,11 @@ export const VOICE_EXTRACTOR_VERSION = "voice-extractor.13s.6";
  * - Two new kinds, FEELING_NOTE and ACTIVITY_NOTE, produced ONLY by the deterministic extractor (`voice-feeling-cues.1`,
  *   `voice-activity-cues.1`). A REMOTE_EXTRACTION candidate of either kind is invalid (`DETERMINISTIC_ONLY_KIND`), so remote extraction
  *   can never add or alter one. Neither carries a state or ambiguity reasons. The distress gate still runs before both.
+ * voice-contract.13s.7 (owner decision 2026-10-14, HSA preview "Tell me about my medicine"):
+ * - A new kind, MEDICINE_INFO_REQUEST { name }, produced ONLY by the deterministic extractor (`voice-medicine-info-cues.1`) and only
+ *   when the caller asks for it (HSA-bounded mode off); a REMOTE_EXTRACTION candidate of this kind is invalid
+ *   (`DETERMINISTIC_ONLY_KIND`). It is never a fact: the review contract refuses to save it (NOT_A_FACT) and the app never sends a
+ *   transcript holding one to remote extraction. The distress gate and the dose/treatment redirect still run first.
  */
 export { VOICE_VOCABULARY_VERSION };
 /** 13s.4 (CR-11): the shared new-entry value format, re-exported so the pure extractor depends only on its own contract module. */
@@ -207,17 +215,27 @@ const activitySchema = z
   })
   .strict();
 
+/** 13s.7: a request for general information about one named medicine (her words for the name; never a fact). */
+const medicineInfoRequestSchema = z
+  .object({ kind: z.literal("MEDICINE_INFO_REQUEST"), ...base, name: z.string().refine(isVoiceMedicineInfoName, { message: "NAME_INVALID" }) })
+  .strict();
+
 const ALLOWED_REASONS: Readonly<Record<"GLUCOSE_READING" | "MEAL_NOTE" | "MEDICATION_OCCURRENCE", readonly VoiceAmbiguityReason[]>> = Object.freeze({
   GLUCOSE_READING: ["UNIT_UNSTATED", "NEGATION", "UNCERTAINTY", "CORRECTION", "OTHER_PERSON", "MULTIPLE_NUMBERS"],
   MEAL_NOTE: ["NEGATION", "UNCERTAINTY", "CORRECTION", "OTHER_PERSON"],
   MEDICATION_OCCURRENCE: ["NEGATION", "UNCERTAINTY", "CORRECTION", "OTHER_PERSON", "MEDICINE_UNRESOLVED", "STATUS_UNCLEAR"],
 });
 
-export const voiceCandidateSchema = z.discriminatedUnion("kind", [glucoseSchema, mealSchema, medicationSchema, feelingSchema, activitySchema, unsupportedSchema]).superRefine((candidate, context) => {
+export const voiceCandidateSchema = z.discriminatedUnion("kind", [glucoseSchema, mealSchema, medicationSchema, feelingSchema, activitySchema, medicineInfoRequestSchema, unsupportedSchema]).superRefine((candidate, context) => {
   const issue = (message: string) => context.addIssue({ code: z.ZodIssueCode.custom, message });
   if (codePointLength(candidate.sourcePhrase) !== candidate.span.end - candidate.span.start) issue("PHRASE_SPAN_MISMATCH");
   if (candidate.source === "DETERMINISTIC" && candidate.producerVersion !== VOICE_VOCABULARY_VERSION) issue("PRODUCER_VERSION_MISMATCH");
   if (candidate.kind === "UNSUPPORTED_SPAN") return;
+  // 13s.7: a medicine-information request is recognised only by the fixed rules on the device.
+  if (candidate.kind === "MEDICINE_INFO_REQUEST") {
+    if (candidate.source !== "DETERMINISTIC") issue("DETERMINISTIC_ONLY_KIND");
+    return;
+  }
   // 13s.6: a feeling or an activity is recognised only by the fixed rules on the device; remote extraction never adds or alters one.
   if (candidate.kind === "FEELING_NOTE" || candidate.kind === "ACTIVITY_NOTE") {
     if (candidate.source !== "DETERMINISTIC") issue("DETERMINISTIC_ONLY_KIND");
@@ -248,6 +266,8 @@ export type VoiceUnsupportedSpan = Extract<VoiceCandidate, { kind: "UNSUPPORTED_
 /** 13s.6: a feeling she stated, and an activity she reported (deterministic only; no state or ambiguity). */
 export type VoiceFeelingCandidate = Extract<VoiceCandidate, { kind: "FEELING_NOTE" }>;
 export type VoiceActivityCandidate = Extract<VoiceCandidate, { kind: "ACTIVITY_NOTE" }>;
+/** 13s.7: a request for general information about one named medicine (deterministic only; never a fact). */
+export type VoiceMedicineInfoRequestCandidate = Extract<VoiceCandidate, { kind: "MEDICINE_INFO_REQUEST" }>;
 export type VoiceFactCandidate = VoiceGlucoseCandidate | VoiceMealCandidate | VoiceMedicationCandidate;
 
 /** True when the candidate's span and phrase are exactly the transcript's code points (required for REMOTE_EXTRACTION too). */

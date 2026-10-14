@@ -205,6 +205,11 @@ export const zhSGMessages: AppMessages = {
         OTHER: "运动",
       },
     },
+    // HSA preview (owner decision 2026-10-14, "Tell me about my medicine"): draft, human acceptance pending.
+    medicineInfo: {
+      heading: "药物信息",
+      openInMyMedicines: "在“我的药物”中打开",
+    },
   },
   shared: {
     appName: "JagaOn",

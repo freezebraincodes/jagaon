@@ -204,6 +204,11 @@ export const enSGMessages: AppMessages = {
         OTHER: "Exercise",
       },
     },
+    // HSA preview (owner decision 2026-10-14, "Tell me about my medicine"): new wording, human acceptance pending.
+    medicineInfo: {
+      heading: "Medicine information",
+      openInMyMedicines: "Open in My medicines",
+    },
   },
   shared: {
     appName: "JagaOn",

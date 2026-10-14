@@ -120,3 +120,26 @@ describe("13s.6: a feeling or an activity is never added or altered by remote ex
     if (merged.kind === "MERGED") expect(merged.analysis.candidates.map((candidate) => [candidate.kind, candidate.source])).toEqual([["FEELING_NOTE", "DETERMINISTIC"], ["MEAL_NOTE", "REMOTE_EXTRACTION"]]);
   });
 });
+
+describe("13s.7 (HSA preview): a medicine-information request is never added or altered by remote extraction", () => {
+  const TEXT = "Tell me about my Metformin";
+  const withRequest = () => {
+    const result = analyseTranscript(TEXT, "en", { medicines: DIRECTORY, medicineInformationRequests: true });
+    if (result.kind !== "ANALYSED") throw new Error(result.kind);
+    return result;
+  };
+
+  it("a remote fact over the request is dropped; the local request stays exactly as it was", () => {
+    const localRequest = withRequest();
+    expect(localRequest.candidates.map((candidate) => candidate.kind)).toEqual(["MEDICINE_INFO_REQUEST"]);
+    const remoteMeal = { kind: "MEAL_NOTE", ...REMOTE, ...at(TEXT, "Metformin"), slot: "UNSTATED", itemText: "Metformin", state: "UNDERSTOOD", ambiguity: [] };
+    const merged = mergeRemoteCandidates({ local: localRequest, remote: [remoteMeal], transcript: TEXT, language: "en", directory: DIRECTORY });
+    expect(merged.kind).toBe("MERGED");
+    if (merged.kind === "MERGED") expect(merged.analysis.candidates).toEqual(localRequest.candidates);
+  });
+
+  it("a remote MEDICINE_INFO_REQUEST fails the contract, so the whole remote result is not used", () => {
+    const remote = { kind: "MEDICINE_INFO_REQUEST", ...REMOTE, ...at(TEXT, TEXT), name: "Metformin" };
+    expect(mergeRemoteCandidates({ local: withRequest(), remote: [remote], transcript: TEXT, language: "en", directory: DIRECTORY })).toEqual({ kind: "LOCAL_KEPT" });
+  });
+});

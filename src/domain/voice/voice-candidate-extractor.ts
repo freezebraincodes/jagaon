@@ -19,6 +19,7 @@ import {
   type VoiceCandidate,
   type VoiceLanguage,
   type VoiceMealSlot,
+  type VoiceMedicineInfoRequestCandidate,
   type VoiceMedicationRef,
   type VoiceMedicineRef,
   type VoiceOccurrenceStatus,
@@ -27,6 +28,7 @@ import { classifyVoiceAdviceRedirect, voiceWordMatcher } from "./voice-advice-re
 import { matchVoiceActivity } from "./voice-activity-cues";
 import { VOICE_DISTRESS_CUES_VERSION, detectVoiceDistress } from "./voice-distress-gate";
 import { matchVoiceFeeling } from "./voice-feeling-cues";
+import { matchVoiceMedicineInfoRequest } from "./voice-medicine-info-cues";
 import {
   EN_MEDICINE_PHRASE_STOPWORDS,
   EN_PRONOUN_ONE_PREFIXES,
@@ -73,6 +75,13 @@ import {
  * STATEMENT is never redirected for "worried" or "exercise" (the redirect needs a question form), so it becomes a feeling or activity
  * card. "After my walk my sugar was 6.1" stays one glucose reading (a time reference, and the reading's clause).
  * Anything else with words or numbers is an UNSUPPORTED_SPAN (shown as not understood; never dropped, never interpreted).
+ * Medicine-information requests (13s.7, owner decision 2026-10-14, HSA preview; English only; only with
+ * `medicineInformationRequests: true`): a whole sentence that asks for general information about one medicine she or JagaOn knows
+ * by name (`voice-medicine-info-cues.1`: "Tell me about my Metformin", "What is metformin?", "What's Lantus for?") becomes one
+ * MEDICINE_INFO_REQUEST and no other candidate. Priority: the distress gate first, then the dose/treatment redirect (any redirect in
+ * the transcript means no request is offered: "How much metformin should I take" stays a redirect), then the length limit. Such a
+ * sentence still counts as other words for the C1 backstop below, exactly as when it was not understood. Without the option (the
+ * default; HSA-bounded mode on) nothing changes: these sentences stay not understood.
  *
  * 13s.3 (safety re-review Cr1–Cr4, I1–I3, M2, M4; owner decisions #2–#4):
  * - Cr1: only first person, fillers, times or qualifier words may precede the glucose cue in its clause; anything else (kid, auntie,
@@ -129,9 +138,15 @@ export type VoiceAnalysisOptions = Readonly<{
    * unambiguous, positively stated reading with no spoken unit is proposed in mmol/L with `unitSource: "APP_DEFAULT"`.
    */
   glucoseEntryUnit?: "MMOL_PER_L" | null;
+  /**
+   * 13s.7 (HSA preview): recognise requests for general information about a named medicine (MEDICINE_INFO_REQUEST). The app passes
+   * true only while HSA-bounded mode is off; absent or false keeps the earlier behaviour exactly.
+   */
+  medicineInformationRequests?: boolean;
 }>;
 /** Internal: clauses already shown as a redirected question (no fact from them, no medicine occurrence beside them). */
-type InternalScope = Readonly<{ exclude: readonly Range[]; withoutMedication: boolean }>;
+/** 13s.7: `otherWords` marks excluded medicine-information sentences, which still count as other words for the C1 backstop. */
+type InternalScope = Readonly<{ exclude: readonly Range[]; withoutMedication: boolean; otherWords?: boolean }>;
 const NO_SCOPE: InternalScope = Object.freeze({ exclude: [], withoutMedication: false });
 
 const EMPTY_DIRECTORY: VoiceMedicineDirectory = Object.freeze({ terms: [], names: [] });
@@ -1149,7 +1164,8 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
   for (const draft of glucoseDrafts) {
     const { reasons } = draft;
     // 13s.6: a feeling or activity clause counts here exactly as before, when it was not understood.
-    const otherWords = unsupported.length > 0 || noteRanges.length > 0;
+    // 13s.7: so does a medicine-information request (it was not understood before).
+    const otherWords = unsupported.length > 0 || noteRanges.length > 0 || scopeOptions.otherWords === true;
     if (otherWords) reasons.add("UNCERTAINTY");
     // Owner default-unit boundary (#2): the app's entry unit only for an otherwise unambiguous reading inside the app-default window
     // (review I2: "sugar 72" stays UNIT_UNSTATED; 13s.4: the person then confirms the unit explicitly); it never clears another reason.
@@ -1187,8 +1203,22 @@ export function analyseTranscript(transcript: string, language: VoiceLanguage, o
   if (redirect.kind === "REDIRECT" && codePointLength(text) > VOICE_TRANSCRIPT_MAX_CODE_POINTS) return redirected();
   if (codePointLength(text) > VOICE_TRANSCRIPT_MAX_CODE_POINTS) return Object.freeze({ kind: "TRANSCRIPT_TOO_LONG", language, candidates: [], extractorVersion: VOICE_EXTRACTOR_VERSION });
   if (redirect.kind === "NONE") {
-    const extraction = extractVoiceCandidates(text, language, options);
-    return Object.freeze({ kind: "ANALYSED", language, candidates: [...extraction.candidates], truncated: extraction.truncated, redirect: null, extractorVersion: VOICE_EXTRACTOR_VERSION });
+    // 13s.7 (HSA preview): whole sentences asking about a named medicine, only when the caller asks for them.
+    const requests = options.medicineInformationRequests === true ? medicineInfoRequests(text, language, options.medicines ?? EMPTY_DIRECTORY) : [];
+    if (requests.length === 0) {
+      const extraction = extractVoiceCandidates(text, language, options);
+      return Object.freeze({ kind: "ANALYSED", language, candidates: [...extraction.candidates], truncated: extraction.truncated, redirect: null, extractorVersion: VOICE_EXTRACTOR_VERSION });
+    }
+    const extraction = extractVoiceCandidates(text, language, options, { exclude: requests.map((request) => request.range), withoutMedication: false, otherWords: true });
+    const candidates = [...extraction.candidates, ...requests.map((request) => request.candidate)].sort((left, right) => left.span.start - right.span.start);
+    return Object.freeze({
+      kind: "ANALYSED",
+      language,
+      candidates: candidates.slice(0, VOICE_MAX_CANDIDATES),
+      truncated: extraction.truncated || candidates.length > VOICE_MAX_CANDIDATES,
+      redirect: null,
+      extractorVersion: VOICE_EXTRACTOR_VERSION,
+    });
   }
   // Mixed safety content (owner requirement 6): the question clauses are shown as the redirect; the facts of the OTHER clauses are
   // offered separately, never a medicine occurrence. When no clause can be separated as the question, or nothing factual remains,
@@ -1205,6 +1235,31 @@ export function analyseTranscript(transcript: string, language: VoiceLanguage, o
     redirect: Object.freeze({ category, messageKey: voiceRedirectMessageKey(category), transcribedNoteKey: VOICE_REDIRECT_TRANSCRIBED_NOTE_KEY }),
     extractorVersion: VOICE_EXTRACTOR_VERSION,
   });
+}
+
+/**
+ * 13s.7 (HSA preview): the sentences that are, as a whole, a request for general information about one named medicine (English only),
+ * with the candidate each one gives. Known names: `voice-medicine-info-cues.1` plus her own medicine names and remembered terms.
+ */
+function medicineInfoRequests(text: string, language: VoiceLanguage, directory: VoiceMedicineDirectory): Array<{ range: Range; candidate: VoiceMedicineInfoRequestCandidate }> {
+  if (language !== "en") return [];
+  const known = [...directory.names.map((entry) => entry.name), ...directory.terms.map((entry) => entry.phrase)];
+  const found: Array<{ range: Range; candidate: VoiceMedicineInfoRequestCandidate }> = [];
+  let cursor = 0;
+  for (const boundary of [...sentenceBoundaries(text), text.length]) {
+    const range = trimRange(text, cursor, boundary);
+    cursor = boundary + 1;
+    if (!range) continue;
+    const sentence = text.slice(range.start, range.end);
+    const name = matchVoiceMedicineInfoRequest(sentence, known);
+    if (name === null || codePointLength(sentence) > VOICE_SOURCE_PHRASE_MAX_CODE_POINTS) continue;
+    const start = codePointLength(text.slice(0, range.start));
+    found.push({
+      range,
+      candidate: Object.freeze({ kind: "MEDICINE_INFO_REQUEST", span: Object.freeze({ start, end: start + codePointLength(sentence) }), sourcePhrase: sentence, source: "DETERMINISTIC", producerVersion: VOICE_VOCABULARY_VERSION, name }),
+    });
+  }
+  return found;
 }
 
 /**

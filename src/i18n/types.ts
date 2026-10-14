@@ -1085,6 +1085,14 @@ export type VoiceMessages = {
     /** Short display names of the activity-event categories ("Walk · 30 minutes"). */
     categories: Readonly<Record<"WALKING" | "FLEXIBILITY_OR_MOBILITY" | "STRENGTH" | "AEROBIC" | "HOUSEHOLD_ACTIVITY" | "OTHER", string>>;
   };
+  /**
+   * HSA preview (owner decision 2026-10-14, "Tell me about my medicine"): the medicine information card in the review area (only while
+   * HSA-bounded mode is off). en-SG: new wording, human acceptance pending; zh-SG: drafts, human acceptance pending.
+   */
+  medicineInfo: {
+    heading: string;
+    openInMyMedicines: string;
+  };
 };
 
 /**
