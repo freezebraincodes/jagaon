@@ -41,6 +41,11 @@ export type VoiceScreenCopy = Readonly<{
   /** `notShown`: text was captured but nothing was understood and no transcript is displayed (round 6). */
   limit: Readonly<{ captured: string; empty: string; notShown: string }>;
   /**
+   * Owner decision 2026-10-15: typing to Tell JagaOn. The typed words go through the same on-device checks and cards as speech; no
+   * voice notice is needed (no audio leaves the device).
+   */
+  typing: Readonly<{ start: string; label: string; hint: string; submit: string; transcriptLabel: string }>;
+  /**
    * Owner decision 2026-10-15: Tencent speech's daily demo minutes are used up (the server refused MINUTES_EXHAUSTED). `useBrowser` is
    * offered only when the browser's speech recognition is enabled and supported here.
    */
@@ -195,6 +200,14 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       notShown: "Listening stopped at the 60-second limit. Nothing has been saved.",
     },
     // Owner decision 2026-10-15.
+    typing: {
+      start: "Type to JagaOn",
+      label: "What would you like to tell JagaOn?",
+      hint: "For example: “My sugar was 6.8 before breakfast” or “I feel tired today”. Nothing is saved until you check it.",
+      submit: "Continue",
+      transcriptLabel: "What you typed (not saved)",
+    },
+    // Owner decision 2026-10-15.
     dailyLimit: {
       title: "Today's voice limit is used up",
       body: "Tencent speech has reached this demo's limit for today. You can use your browser's speech recognition instead, type your entry, or try again tomorrow.",
@@ -304,6 +317,13 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       notShown: "已在 60 秒上限时停止聆听。尚未保存任何内容。",
     },
     // Drafts (English only for the hackathon).
+    typing: {
+      start: "输入给 JagaOn",
+      label: "您想告诉 JagaOn 什么？",
+      hint: "例如：“早餐前血糖 6.8” 或 “我今天觉得累”。检查之前不会保存任何内容。",
+      submit: "继续",
+      transcriptLabel: "您输入的内容（未保存）",
+    },
     dailyLimit: {
       title: "今天的语音使用量已用完",
       body: "腾讯语音已达到本演示今天的上限。您可以改用浏览器的语音识别、输入记录，或明天再试。",
@@ -405,6 +425,7 @@ export function voiceScreenCopy(messages: AppMessages, locale: SupportedLocale):
     medicineInfo: messages.voice.medicineInfo,
     remote: pending.remote,
     limit: pending.limit,
+    typing: pending.typing,
     dailyLimit: pending.dailyLimit,
     // English only (see VOICE_WEB_SPEECH_COPY): the ZH screen never reaches a Web Speech session.
     webSpeech: VOICE_WEB_SPEECH_COPY["en-SG"],

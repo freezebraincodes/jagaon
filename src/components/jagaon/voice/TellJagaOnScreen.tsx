@@ -7,7 +7,7 @@ import { createVoiceSessionController, type VoiceSessionController, type VoiceSe
 import type { VoiceTranscriberPort } from "@/application/voice/voice-transcriber-port";
 import type { VoiceAccessMode, VoiceProviderId, VoiceProviderResolution } from "@/application/voice/voice-provider-selection";
 import { analyseTranscript, type VoiceMedicineDirectory } from "@/domain/voice/voice-candidate-extractor";
-import type { VoiceAnalysis, VoiceCandidate, VoiceLanguage, VoiceMedicationRef, VoiceRedirectCategory } from "@/domain/voice/voice-contracts";
+import { VOICE_TRANSCRIPT_MAX_CODE_POINTS, type VoiceAnalysis, type VoiceCandidate, type VoiceLanguage, type VoiceMedicationRef, type VoiceRedirectCategory } from "@/domain/voice/voice-contracts";
 import { gateRemoteTranscriptExtraction } from "@/domain/voice/voice-remote-extraction-gate";
 import { createHelpInformationAdapter, telHref, whatsAppHref } from "@/application/governed/help-information-adapter";
 import type { FeelingsChatPort } from "@/application/feelings-chat/feelings-chat-port";
@@ -22,6 +22,7 @@ import type { FeelingsChatVoice } from "../feelings/FeelingsChatVoiceAnswer";
 import type { FeelingsChatStorage } from "../feelings/feelings-chat-storage";
 import { ContactLink } from "../primitives/ContactLink";
 import { AmbulanceIcon, MessageIcon, PhoneIcon } from "../primitives/Icons";
+import { TextareaField } from "../primitives/Field";
 import { ModalDialog } from "../primitives/ModalDialog";
 import { ScreenHeader } from "../primitives/ScreenHeader";
 import type { VoiceMedicineOption } from "./MedicineClarificationDialog";
@@ -179,8 +180,10 @@ type Phase =
   | { kind: "CHECKING" }
   | { kind: "DISCLOSURE" }
   | { kind: "SESSION" }
-  | { kind: "REVIEW"; transcript: string; analysis: Extract<VoiceAnalysis, { kind: "ANALYSED" }>; sessionToken: number; medicines: readonly VoiceMedicineOption[]; directory: VoiceMedicineDirectory; generation: number }
-  | { kind: "REDIRECT"; transcript: string; category: VoiceRedirectCategory }
+  // Owner decision 2026-10-15: typing to Tell JagaOn (no audio, no voice notice); the typed words take the same path as speech.
+  | { kind: "TYPING"; declined?: true }
+  | { kind: "REVIEW"; transcript: string; analysis: Extract<VoiceAnalysis, { kind: "ANALYSED" }>; sessionToken: number; medicines: readonly VoiceMedicineOption[]; directory: VoiceMedicineDirectory; generation: number; typed?: true }
+  | { kind: "REDIRECT"; transcript: string; category: VoiceRedirectCategory; typed?: true }
   // Owner decision 2026-10-14: no transcript is kept in this phase.
   | { kind: "DISTRESS" }
   | { kind: "ENDED"; reason: Ended };
@@ -333,6 +336,61 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
     };
   }, []);
 
+  /**
+   * The one analysis path for spoken and typed words: the deterministic analysis (distress gate first), then the distress screen, the
+   * redirect, "not understood" or the review cards. `typed`: the words were typed (Owner decision 2026-10-15); `sessionToken` is then
+   * the typed entry's own number, checked by the review contract exactly like a voice session's.
+   */
+  const showAnalysis = useCallback(
+    async (transcript: string, sessionToken: number, typed: boolean, discardWords: () => void) => {
+      try {
+        const [directory, medicines] = await Promise.all([terminology.directory(language), terminology.activeMedicines()]);
+        const analysis = analyseTranscript(transcript, language, { medicines: directory, glucoseEntryUnit, medicineInformationRequests: !bounded });
+        if (!mounted.current) return;
+        if (analysis.kind === "DISTRESS") {
+          discardWords();
+          setEndNotice(null);
+          return setPhase({ kind: "DISTRESS" });
+        }
+        const typedMark = typed ? ({ typed: true } as const) : {};
+        if (analysis.kind === "REDIRECT") return setPhase({ kind: "REDIRECT", transcript, category: analysis.category, ...typedMark });
+        if (analysis.kind !== "ANALYSED" || analysis.candidates.length === 0) return setPhase({ kind: "ENDED", reason: "NOT_UNDERSTOOD" });
+        setRemote("IDLE");
+        setAnySaved(false);
+        setPhase({ kind: "REVIEW", transcript, analysis, sessionToken, medicines: medicines.map((entry) => ({ medication: entry.medication, name: entry.names[0] ?? "" })).filter((entry) => entry.name.length > 0), directory, generation: 0, ...typedMark });
+      } catch {
+        if (mounted.current) setPhase({ kind: "ENDED", reason: "NOT_UNDERSTOOD" });
+      }
+    },
+    [terminology, language, glucoseEntryUnit, bounded],
+  );
+
+  // Owner decision 2026-10-15: each typed entry gets its own number; only the latest typed entry's cards can be saved (as a voice
+  // session's cards can be saved only while that session is the current, completed one).
+  const typedEntry = useRef(0);
+  const [typedText, setTypedText] = useState("");
+  const typedRef = useRef<HTMLTextAreaElement>(null);
+  function startTyping(declined = false) {
+    controller.current?.discardTranscript();
+    dispatchDisclosure({ type: "RESET" });
+    setSnapshot(null);
+    setEndNotice(null);
+    setAnySaved(false);
+    setTypedText("");
+    setPhase(declined ? { kind: "TYPING", declined: true } : { kind: "TYPING" });
+  }
+  function submitTyped() {
+    const text = typedText.trim();
+    if (phase.kind !== "TYPING" || text.length === 0) return;
+    typedEntry.current += 1;
+    const token = typedEntry.current;
+    setTypedText("");
+    void showAnalysis(text, token, true, () => undefined);
+  }
+  useEffect(() => {
+    if (phase.kind === "TYPING") typedRef.current?.focus();
+  }, [phase.kind]);
+
   const finishSession = useCallback(
     async (session: VoiceSessionController, next: VoiceSessionSnapshot) => {
       if (next.state !== "COMPLETED") {
@@ -345,25 +403,9 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         // The "60-second" limit wording is true only when the effective limit was 60 s; any other limit is the plain stop path.
         setEndNotice(next.endedBy === "PROVIDER" ? { kind: "PROVIDER", captured } : next.endedBy === "LIMIT" && next.limitSeconds === 60 ? { kind: "LIMIT", captured } : null);
       }
-      try {
-        const [directory, medicines] = await Promise.all([terminology.directory(language), terminology.activeMedicines()]);
-        const analysis = analyseTranscript(transcript, language, { medicines: directory, glucoseEntryUnit, medicineInformationRequests: !bounded });
-        if (!mounted.current) return;
-        if (analysis.kind === "DISTRESS") {
-          session.discardTranscript();
-          setEndNotice(null);
-          return setPhase({ kind: "DISTRESS" });
-        }
-        if (analysis.kind === "REDIRECT") return setPhase({ kind: "REDIRECT", transcript, category: analysis.category });
-        if (analysis.kind !== "ANALYSED" || analysis.candidates.length === 0) return setPhase({ kind: "ENDED", reason: "NOT_UNDERSTOOD" });
-        setRemote("IDLE");
-        setAnySaved(false);
-        setPhase({ kind: "REVIEW", transcript, analysis, sessionToken: next.sessionToken, medicines: medicines.map((entry) => ({ medication: entry.medication, name: entry.names[0] ?? "" })).filter((entry) => entry.name.length > 0), directory, generation: 0 });
-      } catch {
-        if (mounted.current) setPhase({ kind: "ENDED", reason: "NOT_UNDERSTOOD" });
-      }
+      await showAnalysis(transcript, next.sessionToken, false, () => session.discardTranscript());
     },
-    [terminology, language, glucoseEntryUnit, bounded],
+    [showAnalysis],
   );
 
   async function accept() {
@@ -411,9 +453,10 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
     if (outcome.kind === "REFUSED" && mounted.current) setPhase({ kind: "ENDED", reason: "UNAVAILABLE" });
   }
 
+  // Owner decision 2026-10-15: "Type instead" on the voice notice opens the typing box (the microphone stays off).
   function decline() {
     dispatchDisclosure({ type: "DECLINE" });
-    setPhase({ kind: "ENDED", reason: "DECLINED" });
+    startTyping(true);
   }
 
   function discard() {
@@ -436,7 +479,9 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
     if (phase.kind !== "REVIEW") return "REJECTED";
     const current = controller.current?.snapshot();
     const known = phase.medicines.map((entry) => entry.medication);
-    const review = reviewVoiceCandidates({ analysis: phase.analysis, reviewedSessionToken: phase.sessionToken, currentSession: { sessionToken: current?.sessionToken ?? -1, state: current?.state ?? "IDLE" }, knownMedications: known, decisions: [decision] });
+    // A typed entry is "completed" once submitted; it is current only while it is the latest typed entry.
+    const currentSession = phase.typed ? { sessionToken: typedEntry.current, state: "COMPLETED" as const } : { sessionToken: current?.sessionToken ?? -1, state: current?.state ?? "IDLE" };
+    const review = reviewVoiceCandidates({ analysis: phase.analysis, reviewedSessionToken: phase.sessionToken, currentSession, knownMedications: known, decisions: [decision] });
     // CR-11: a refusal (for example a reading above 50 mmol/L without the card's "Save as shown") saves nothing and says so.
     if (review.kind !== "INTENTS" || review.intents.length !== 1) return "REJECTED";
     touch();
@@ -577,6 +622,11 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
   const statusText =
     phase.kind === "CHECKING"
       ? copy.state.checking
+      : phase.kind === "TYPING"
+      ? // M-5: after "Type instead" on the notice, say plainly that voice was not turned on.
+        phase.declined
+        ? copy.state.declined
+        : ""
       : phase.kind === "SESSION"
       ? snapshot?.state === "LISTENING"
         ? copy.state.listening
@@ -622,6 +672,12 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
             {copy.review.tellAgain}
           </button>
         ) : null}
+        {/* Owner decision 2026-10-15: typing works in every browser, with or without a microphone. */}
+        {phase.kind === "TYPING" ? null : (
+          <button type="button" className="btn btn-outline btn-wide" onClick={() => startTyping()}>
+            {copy.typing.start}
+          </button>
+        )}
         <button type="button" className="btn btn-secondary btn-wide" onClick={() => onManualEntry("GLUCOSE")}>
           {copy.review.manualReading}
         </button>
@@ -696,10 +752,38 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         </section>
       ) : null}
 
+      {phase.kind === "TYPING" ? (
+        <section className="voice-typing">
+          <form
+            className="voice-typing-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitTyped();
+            }}
+          >
+            <TextareaField
+              ref={typedRef}
+              label={copy.typing.label}
+              hint={copy.typing.hint}
+              value={typedText}
+              maxLength={VOICE_TRANSCRIPT_MAX_CODE_POINTS}
+              rows={4}
+              onChange={(event) => setTypedText(event.target.value)}
+            />
+            <button type="submit" className="btn btn-primary btn-wide" disabled={typedText.trim().length === 0}>
+              {copy.typing.submit}
+            </button>
+          </form>
+          {/* N-1: the manual-entry chooser here too ("Tell JagaOn again" is the way back to the microphone). */}
+          {chooser}
+          <div className="voice-actions">{backToToday}</div>
+        </section>
+      ) : null}
+
       {phase.kind === "REVIEW" ? (
         <section className="voice-review">
           {endNoticeFor("TRANSCRIPT_SHOWN")}
-          <h2 className="voice-section-label">{copy.review.transcriptLabel}</h2>
+          <h2 className="voice-section-label">{phase.typed ? copy.typing.transcriptLabel : copy.review.transcriptLabel}</h2>
           <p className="voice-transcript">{phase.transcript}</p>
           {remoteOffered && remote === "IDLE" ? (
             <button type="button" className="btn btn-outline btn-wide voice-remote-offer" onClick={() => setRemote("ASKING")}>
@@ -818,11 +902,12 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
       {phase.kind === "REDIRECT" ? (
         <section className="voice-redirect-only">
           {endNoticeFor("TRANSCRIPT_SHOWN")}
-          <h2 className="voice-section-label">{copy.review.transcriptLabel}</h2>
+          <h2 className="voice-section-label">{phase.typed ? copy.typing.transcriptLabel : copy.review.transcriptLabel}</h2>
           <p className="voice-transcript">{phase.transcript}</p>
           <div className="notice voice-redirect" role="note">
             <p>{redirectBody(phase.category)}</p>
-            <p>{webSpeech ? copy.webSpeech.transcribedNote : copy.redirect.transcribedNote}</p>
+            {/* Typed words never went to a speech service, so the "transcribed by" note is for speech only. */}
+            {phase.typed ? null : <p>{webSpeech ? copy.webSpeech.transcribedNote : copy.redirect.transcribedNote}</p>}
           </div>
           {chooser}
           <div className="voice-actions">

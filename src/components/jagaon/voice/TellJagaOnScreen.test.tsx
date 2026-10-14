@@ -198,6 +198,66 @@ describe("Tell JagaOn screen", () => {
     }
   });
 
+  describe("owner decision 2026-10-15: typing to Tell JagaOn", () => {
+    const typeAndContinue = (context: ReturnType<typeof setup>, text: string) => {
+      fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${context.pending.typing.label}`) }), { target: { value: text } });
+      fireEvent.click(screen.getByRole("button", { name: context.pending.typing.submit }));
+    };
+
+    it("\"Type instead\" on the notice opens the typing box; typed words get the same cards, labelled as typed; no microphone is used", async () => {
+      const context = setup();
+      fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
+      expect(screen.getByRole("status")).toHaveTextContent(context.pending.state.declined);
+      const box = screen.getByRole("textbox", { name: new RegExp(`^${context.pending.typing.label}`) });
+      expect(document.activeElement).toBe(box);
+      expect(screen.getByRole("button", { name: context.pending.typing.submit })).toBeDisabled();
+      // The manual-entry chooser stays available (N-1), without a second "Type to JagaOn".
+      expect(screen.getByRole("button", { name: context.pending.review.tellAgain })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: context.pending.typing.start })).toBeNull();
+      typeAndContinue(context, "my sugar level is 8.2 I had chicken rice for lunch");
+      expect(await screen.findByText(context.pending.typing.transcriptLabel)).toBeInTheDocument();
+      expect(screen.queryByText(context.messages.voice.review.transcriptLabel)).toBeNull();
+      expect(screen.getByText(context.pending.card.glucose)).toBeInTheDocument();
+      expect(screen.getByText(context.pending.card.meal)).toBeInTheDocument();
+      expect(context.loadTranscriber).not.toHaveBeenCalled();
+    });
+
+    it("a typed card saves through the same review contract", async () => {
+      const context = setup();
+      fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
+      typeAndContinue(context, "I had chicken rice for lunch");
+      const card = (await screen.findByText(context.pending.card.meal)).closest("article, section, div") as HTMLElement;
+      fireEvent.click(within(card.parentElement ?? card).getAllByRole("button", { name: context.pending.card.save })[0]!);
+      await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledTimes(1));
+      expect(context.onSaveFacts.mock.calls[0]![0]).toMatchObject({ kind: "MEAL" });
+    });
+
+    it("typed distress goes straight to the helplines and nothing is shown or saved", async () => {
+      const context = setup();
+      fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
+      typeAndContinue(context, "I don't want to live anymore");
+      expect(await screen.findByRole("heading", { name: context.messages.voice.distress.message })).toBeInTheDocument();
+      expect(screen.queryByText("I don't want to live anymore")).toBeNull();
+      expect(context.onSaveFacts).not.toHaveBeenCalled();
+    });
+
+    it("works without voice: when voice is unavailable the chooser offers \"Type to JagaOn\"", async () => {
+      const context = setup({ voiceAvailable: false });
+      fireEvent.click(screen.getByRole("button", { name: context.pending.typing.start }));
+      typeAndContinue(context, "Walked 30 minutes after dinner");
+      expect(await screen.findByText(context.messages.voice.activity.heading)).toBeInTheDocument();
+      expect(context.loadTranscriber).not.toHaveBeenCalled();
+    });
+
+    it("a typed redirect does not claim the words went to a speech service", async () => {
+      const context = setup();
+      fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
+      typeAndContinue(context, "How much insulin should I take?");
+      expect(await screen.findByText(context.pending.typing.transcriptLabel)).toBeInTheDocument();
+      expect(screen.queryByText(context.messages.voice.redirect.transcribedNote)).toBeNull();
+    });
+  });
+
   it("owner decision 2026-10-15: Tencent speech's daily limit used up opens a dialog that can switch to the browser's speech recognition", async () => {
     const copy = VOICE_SCREEN_PENDING_COPY["en-SG"].dailyLimit;
     let useWebSpeech = false;
@@ -887,6 +947,7 @@ describe("Tell JagaOn screen", () => {
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
       expect(screen.getByRole("status")).toHaveTextContent(context.pending.state.declined);
+      // Owner decision 2026-10-15: "Type instead" opens the typing box; "Tell JagaOn again" is the way back to the microphone.
       fireEvent.click(screen.getByRole("button", { name: context.pending.review.tellAgain }));
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
       expect(checkAvailability).toHaveBeenCalledTimes(2);
