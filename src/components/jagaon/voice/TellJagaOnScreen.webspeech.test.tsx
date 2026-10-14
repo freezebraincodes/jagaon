@@ -163,7 +163,7 @@ describe("Tell JagaOn with Web Speech (draft copy pending owner approval)", () =
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.state.stop }));
       await screen.findByRole("button", { name: context.pending.card.save });
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
-      fireEvent.click(await screen.findByRole("button", { name: context.messages.voice.entry }));
+      fireEvent.click(await screen.findByRole("button", { name: context.pending.review.tellAgain }));
     }
     expect(context.resolveProvider).toHaveBeenCalledTimes(3);
   });
@@ -516,7 +516,7 @@ describe("Round 7: an earlier session's save never hides the next session's end 
     await waitFor(() => expect(screen.getByText(context.pending.card.saved)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
     await waitFor(() => expect(screen.getByText(context.pending.state.doneSaved)).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: context.messages.voice.entry }));
+    fireEvent.click(screen.getByRole("button", { name: context.pending.review.tellAgain }));
     await accept(context);
     return context;
   }
@@ -647,7 +647,7 @@ describe("optional passcode in Tell JagaOn (Owner decision 2026-10-12, optional 
         fireEvent.click(screen.getByRole("button", { name: context.messages.voice.state.stop }));
         await screen.findByRole("button", { name: context.pending.card.save });
         fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
-        fireEvent.click(await screen.findByRole("button", { name: context.messages.voice.entry }));
+        fireEvent.click(await screen.findByRole("button", { name: context.pending.review.tellAgain }));
       }
       expect(context.loadTranscriber).toHaveBeenCalledTimes(2);
     });

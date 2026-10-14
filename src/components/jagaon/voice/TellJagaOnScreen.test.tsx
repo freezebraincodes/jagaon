@@ -141,6 +141,22 @@ describe("Tell JagaOn screen", () => {
     expect(context.onSaveFacts).not.toHaveBeenCalled();
   });
 
+  it("offers Tell JagaOn again first under Type another entry, on the review and after a cancel, and it starts again (owner decision 2026-10-14)", async () => {
+    const context = setup({ text: "My sugar was 6.8 mmol" });
+    await speakAndStop(context);
+    const firstAction = () => within(screen.getByText(context.pending.review.manualHeading).closest("section")!).getAllByRole("button")[0]!;
+    await screen.findByText(context.pending.review.manualHeading);
+    expect(firstAction()).toHaveTextContent(context.pending.review.tellAgain);
+    fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
+    expect(await screen.findByText(context.messages.voice.state.cancelled)).toBeInTheDocument();
+    expect(firstAction()).toHaveTextContent(context.pending.review.tellAgain);
+    // Only one start-again button on the cancelled screen.
+    expect(screen.getAllByRole("button", { name: context.pending.review.tellAgain })).toHaveLength(1);
+    fireEvent.click(firstAction());
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(context.onSaveFacts).not.toHaveBeenCalled();
+  });
+
   it("discard and leave-out never save", async () => {
     const context = setup({ text: "My sugar was 6.8 mmol" });
     await speakAndStop(context);
@@ -346,7 +362,7 @@ describe("Tell JagaOn screen", () => {
 
     // Next session (same profile): the remembered term is reused, no question; the fact still needs its own Save.
     fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
-    fireEvent.click(await screen.findByRole("button", { name: context.messages.voice.entry }));
+    fireEvent.click(await screen.findByRole("button", { name: context.pending.review.tellAgain }));
     await speakAndStop(context);
     expect(await screen.findByText("Apidra (demo)")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: context.pending.card.chooseMedicine })).toBeNull();
@@ -838,7 +854,7 @@ describe("Tell JagaOn screen", () => {
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
       expect(screen.getByRole("status")).toHaveTextContent(context.pending.state.declined);
-      fireEvent.click(screen.getByRole("button", { name: context.messages.voice.entry }));
+      fireEvent.click(screen.getByRole("button", { name: context.pending.review.tellAgain }));
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
       expect(checkAvailability).toHaveBeenCalledTimes(2);
     });
@@ -973,7 +989,7 @@ describe("Tell JagaOn screen", () => {
       expect(context.onSaveFacts).not.toHaveBeenCalled();
       // Next session: the word is no longer reused; the question appears again.
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
-      fireEvent.click(await screen.findByRole("button", { name: context.messages.voice.entry }));
+      fireEvent.click(await screen.findByRole("button", { name: context.pending.review.tellAgain }));
       await speakAndStop(context);
       expect(await screen.findByRole("button", { name: context.pending.card.chooseMedicine })).toBeInTheDocument();
     });
@@ -994,7 +1010,7 @@ describe("Tell JagaOn screen", () => {
       expect(await within(details).findByText(context.pending.terms.meaning("grey pen", "Lantus (demo)"))).toBeInTheDocument();
       expect(context.terminology.change).toHaveBeenCalledWith({ recordId: "00000000-0000-4000-8000-0000000000a2", expectedRevisionId: "00000000-0000-4000-8000-0000000000b2", medication: DARK });
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
-      fireEvent.click(await screen.findByRole("button", { name: context.messages.voice.entry }));
+      fireEvent.click(await screen.findByRole("button", { name: context.pending.review.tellAgain }));
       await speakAndStop(context);
       expect(await screen.findByText("Lantus (demo)")).toBeInTheDocument();
       expect(context.onSaveFacts).not.toHaveBeenCalled();

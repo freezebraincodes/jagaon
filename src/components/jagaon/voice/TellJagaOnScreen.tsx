@@ -569,8 +569,12 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
               }[phase.reason]
             : "";
 
-  // Finding N-1: the screen-level manual-entry chooser. Each button opens its existing entry flow blank (nothing from the transcript is
-  // carried over and nothing is saved); it never restarts voice or contacts a provider. The type is the person's choice, never guessed.
+  // Finding N-1: the screen-level manual-entry chooser. Each entry button opens its existing entry flow blank (nothing from the transcript
+  // is carried over and nothing is saved). The type is the person's choice, never guessed.
+  // Owner decision 2026-10-14: "Tell JagaOn again" comes first, so she can speak again when the result is unclear or after a cancel. It
+  // restarts the voice flow from its start (the same path as before, including the consent step), and is offered only when voice can
+  // run here.
+  const canTellAgain = voiceAvailable && !(phase.kind === "ENDED" && (phase.reason === "UNAVAILABLE" || phase.reason === "UNSUPPORTED"));
   const chooserId = `${passcodeId}-manual`;
   const chooser = (
     <section className="voice-manual" aria-labelledby={chooserId}>
@@ -578,6 +582,11 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         {copy.review.manualHeading}
       </h2>
       <div className="voice-actions">
+        {canTellAgain ? (
+          <button type="button" className="btn btn-outline btn-wide" onClick={restart}>
+            {copy.review.tellAgain}
+          </button>
+        ) : null}
         <button type="button" className="btn btn-secondary btn-wide" onClick={() => onManualEntry("GLUCOSE")}>
           {copy.review.manualReading}
         </button>
@@ -777,14 +786,7 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         <section className="voice-ended">
           {phase.reason === "NOT_UNDERSTOOD" ? endNoticeFor("NOTHING_UNDERSTOOD") : null}
           {chooser}
-          <div className="voice-actions">
-            {voiceAvailable && phase.reason !== "UNAVAILABLE" && phase.reason !== "UNSUPPORTED" ? (
-              <button type="button" className="btn btn-outline btn-wide" onClick={restart}>
-                {copy.title}
-              </button>
-            ) : null}
-            {backToToday}
-          </div>
+          <div className="voice-actions">{backToToday}</div>
         </section>
       ) : null}
 

@@ -19,6 +19,8 @@ export type VoiceScreenCopy = Readonly<{
       backToToday: string;
       /** Finding N-1 (owner-approved 2026-10-10): the screen-level manual-entry chooser; each label is its destination's own title. */
       manualHeading: string;
+      /** Owner decision 2026-10-14: the first action of the chooser starts a new voice session. */
+      tellAgain: string;
       manualReading: string;
       manualMeal: string;
       manualMedicine: string;
@@ -150,7 +152,7 @@ export const VOICE_WEB_SPEECH_COPY: Readonly<{ "en-SG": WebSpeechCopy }> = Objec
 type PendingCopy = Omit<VoiceScreenCopy, "title" | "passcodeLabel" | "close" | "disclosure" | "state" | "review" | "redirect" | "distress" | "feeling" | "activity" | "remote" | "terms" | "webSpeech" | "limit"> &
   Readonly<{
     state: Readonly<{ starting: string; accessDenied: string; checking: string; declined: string; doneSaved: string }>;
-    review: Readonly<{ notUnderstoodHeading: string; notUnderstoodBody: string; backToToday: string; manualHeading: string }>;
+    review: Readonly<{ notUnderstoodHeading: string; notUnderstoodBody: string; backToToday: string; manualHeading: string; tellAgain: string }>;
     redirect: Readonly<{ healthBody: string }>;
     remote: VoiceScreenCopy["remote"];
     terms: VoiceScreenCopy["terms"];
@@ -174,6 +176,8 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       // every screen that shows it (owner's decision, 2026-10-11).
       backToToday: "Back to Today",
       manualHeading: "Type another entry",
+      // Owner decision 2026-10-14.
+      tellAgain: "Tell JagaOn again",
     },
     redirect: { healthBody: "JagaOn can record what you report, but cannot assess whether a reading is dangerous or recommend treatment. Please check with your care team." },
     // W-6a: owner-approved wording, 2026-10-11 (verbatim).
@@ -273,6 +277,8 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       // Finding N-1 (owner-approved 2026-10-10): see the EN rows.
       backToToday: "返回“今天”",
       manualHeading: "输入其他内容",
+      // Owner decision 2026-10-14; draft, human acceptance pending.
+      tellAgain: "再次告诉 JagaOn",
     },
     redirect: { healthBody: "JagaOn 可以记录您报告的内容，但无法评估读数是否危险，也无法建议治疗。请向您的医护团队确认。" },
     // W-6a: ZH for the TRTC limit notice only (the screen copy requires both locales). Draft, pending owner review.
