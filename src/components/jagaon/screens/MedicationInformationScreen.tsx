@@ -7,6 +7,7 @@ import { createMedicationInformationAdapter } from "@/application/governed/medic
 import { labelAndValue } from "../locale-format";
 import { sourceLabel } from "../onboarding/medicine-labels";
 import { CareQuestionEditor } from "../care-organisation/CareQuestionEditor";
+import { MedicineGeneralInfoPreview } from "../medicine-info/MedicineGeneralInfoPreview";
 import {
   BookIcon,
   ChevronRightIcon,
@@ -115,7 +116,11 @@ export function MedicationInformationScreen({
                     </div>
                   </details>
                 ) : (
-                  <p className="medication-text">{msg.infoUnavailable}</p>
+                  <>
+                    <p className="medication-text">{msg.infoUnavailable}</p>
+                    {/* HSA preview (owner decision 2026-10-14): only when HSA-bounded mode is off; renders nothing otherwise. */}
+                    <MedicineGeneralInfoPreview messages={messages} locale={locale} name={rx.displayName} />
+                  </>
                 )}
               </section>
 

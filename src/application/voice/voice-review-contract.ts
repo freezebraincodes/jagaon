@@ -19,7 +19,7 @@ import { VOICE_ACTIVITY_CATEGORIES } from "@/domain/voice/voice-activity-cues";
 import type { VoiceSessionState } from "./voice-session-controller";
 
 /**
- * Packet 13 (P13S): from reviewed candidates plus the person's explicit per-fact decisions to closed save intents, `voice-review.13s.6`.
+ * Packet 13 (P13S): from reviewed candidates plus the person's explicit per-fact decisions to closed save intents, `voice-review.13s.7`.
  * Each fact is decided separately; nothing is an intent without an explicit SAVE decision for that fact.
  *
  * Rules (review C3 and the owner requirements):
@@ -46,13 +46,15 @@ import type { VoiceSessionState } from "./voice-session-controller";
  *   becomes an ACTIVITY intent (the recognised category; her label, edited or as recognised, 1–160 code points; the duration in whole
  *   minutes 1–1440, edited or as said, or null) that the app saves with the existing activity command. Neither has a reason to
  *   resolve; an answer is ignored, and an edit of another kind is refused (EDIT_KIND_MISMATCH).
+ * - 13s.7 (owner decision 2026-10-14, HSA preview): a MEDICINE_INFO_REQUEST ("Tell me about my Metformin") is never a fact: a SAVE
+ *   decision for it is refused (NOT_A_FACT), so it never becomes an intent.
  * - A REDIRECT or over-long analysis, a session that did not complete or a review of an older session yields nothing; a redirect
  *   NOTICE beside separated facts does not block those facts. Malformed decisions refuse the whole review (fail closed).
  * Remembering a term is a separate decision (terminology service); it never creates or depends on an intent.
  * It imports no journal or storage code: the app maps intents to the existing commands (recordGlucose, recordMeal,
  * recordMedicationEvent). recordGlucose has NO format or confirmation check of its own, which is why this contract applies them.
  */
-export const VOICE_REVIEW_CONTRACT_VERSION = "voice-review.13s.6";
+export const VOICE_REVIEW_CONTRACT_VERSION = "voice-review.13s.7";
 
 /** An intent's value: the stored new-entry form, exactly one decimal (13s.4). An edit's value: the shared entry format (≤ 1 decimal). */
 const INTENT_VALUE = z.string().refine(isFormattedMmolEntry, { message: "VALUE_FORMAT" });
@@ -142,7 +144,8 @@ function glucose(valueText: string, unitSource: "SPOKEN" | "APP_DEFAULT" | "PERS
 
 /** The intent for one SAVE decision, or the closed reason it cannot be saved. Exported for the per-card review screen. */
 export function intentForDecision(candidate: VoiceCandidate, decision: Extract<VoiceFactDecision, { action: "SAVE" }>, knownMedications: readonly VoiceMedicationRef[]): { intent: VoiceSaveIntent } | { reason: VoiceFactRejection } {
-  if (candidate.kind === "UNSUPPORTED_SPAN") return { reason: "NOT_A_FACT" };
+  // 13s.7: a medicine-information request is never a fact, never saved.
+  if (candidate.kind === "UNSUPPORTED_SPAN" || candidate.kind === "MEDICINE_INFO_REQUEST") return { reason: "NOT_A_FACT" };
   // 13s.6: a feeling or an activity is saved as she recognised or edited it (her words are the record); nothing to resolve.
   if (candidate.kind === "FEELING_NOTE") {
     if (decision.edit && decision.edit.kind !== "FEELING_NOTE") return { reason: "EDIT_KIND_MISMATCH" };

@@ -101,7 +101,7 @@ describe("limits", () => {
 });
 
 describe("distress gate first (owner decision 2026-10-14)", () => {
-  const DISTRESS = { kind: "DISTRESS", candidates: [], cuesVersion: "voice-distress-cues.1", extractorVersion: "voice-extractor.13s.6" } as const;
+  const DISTRESS = { kind: "DISTRESS", candidates: [], cuesVersion: "voice-distress-cues.1", extractorVersion: "voice-extractor.13s.7" } as const;
   const distress = (text: string, language: "en" | "zh" = "en") => {
     const result = analyseTranscript(text, language);
     expect(voiceAnalysisSchema.safeParse(result).success, text).toBe(true);

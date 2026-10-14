@@ -105,6 +105,29 @@ export const zhSGMessages: AppMessages = {
     setDate: "设定日期",
     note: "预览：根据您记录的检查和标准间隔计算。需要做什么由您的护理团队决定。",
   },
+  // HSA preview (owner decision 2026-10-14): "Get general information with AI". Every row is a draft, human acceptance pending
+  // (English-only demo scope; present for type completeness).
+  hsaMedicineInfo: {
+    getButton: "用 AI 获取一般信息",
+    noticeTitle: "用 AI 获取一般信息",
+    noticeBody: (name) => `JagaOn 将向 AI 服务查询“${name}”的一般信息。只会发送药物名称，绝不发送您的用药指示、读数或姓名。结果是一般信息，不是建议。`,
+    noticeContinue: "继续",
+    noticeCancel: "取消",
+    loading: "正在查询一般信息…",
+    cardTag: "AI 生成的一般信息",
+    cardTitle: (name) => `关于这种药物：${name}`,
+    usedForLabel: "一般用途",
+    howTakenLabel: "一般用法",
+    generatedOn: (date) => `AI 生成于 ${date}`,
+    searchHealthHub: "在 HealthHub 搜索",
+    opensInNewTab: "（在新标签页打开）",
+    caution: "AI 可能出错。请向药剂师确认。这不会更改您记录的用药指示。",
+    refresh: "刷新",
+    refreshFailed: "目前无法刷新。以下是之前查询的信息。",
+    noReliableInfo: "JagaOn 找不到这个名称的可靠一般信息。请向药剂师确认。",
+    unavailable: "目前无法查询一般信息。请稍后再试。",
+    creditLimitBody: "此演示今天的 AI 额度已用完。没有查询一般信息。",
+  },
   // Owner decision 2026-10-12: My notes (human acceptance pending).
   myNotes: {
     title: "我的笔记",
@@ -224,6 +247,11 @@ export const zhSGMessages: AppMessages = {
         HOUSEHOLD_ACTIVITY: "家务或园艺",
         OTHER: "运动",
       },
+    },
+    // HSA preview (owner decision 2026-10-14, "Tell me about my medicine"): draft, human acceptance pending.
+    medicineInfo: {
+      heading: "药物信息",
+      openInMyMedicines: "在“我的药物”中打开",
     },
   },
   shared: {

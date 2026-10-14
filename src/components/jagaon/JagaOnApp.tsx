@@ -1172,6 +1172,8 @@ export function JagaOnApp({
             // Owner decision 2026-10-14 (design §3.1 steps 4–7): "Talk it through" opens the feelings chat; the note goes to the
             // personal-note service and her doctor question to the existing care-question command (linked to the next appointment).
             feelingsChat={runtime.notes ? { chat: feelingsChatPort, ...createFeelingsChatStorage({ notes: runtime.notes.commands, careOrganisation: runtime.careOrganisation }) } : undefined}
+            // HSA preview (owner decision 2026-10-14): the medicine information card's "Open in My medicines".
+            onOpenMyMedicines={() => navigate("MY_MEDICINES")}
             onClose={() => switchTab("TODAY")}
           />
         );
