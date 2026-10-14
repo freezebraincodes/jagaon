@@ -194,7 +194,7 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       manualHeading: "Add another entry",
       // Owner decision 2026-10-14.
       // Owner decision 2026-10-15: one button for speaking or typing (the voice notice offers "Type instead").
-      tellAgain: "Speak or type to JagaOn",
+      tellAgain: "Speak or Type to Tell JagaOn",
     },
     redirect: { healthBody: "JagaOn can record what you report, but cannot assess whether a reading is dangerous or recommend treatment. Please check with your care team." },
     // W-6a: owner-approved wording, 2026-10-11 (verbatim).
@@ -313,7 +313,7 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       backToToday: "返回“今天”",
       manualHeading: "添加其他记录",
       // Owner decision 2026-10-14; draft, human acceptance pending.
-      tellAgain: "说话或输入给 JagaOn",
+      tellAgain: "说话或输入，告诉 JagaOn",
     },
     redirect: { healthBody: "JagaOn 可以记录您报告的内容，但无法评估读数是否危险，也无法建议治疗。请向您的医护团队确认。" },
     // W-6a: ZH for the TRTC limit notice only (the screen copy requires both locales). Draft, pending owner review.
