@@ -44,6 +44,9 @@ import {
   type VoiceProviderResolution,
 } from "@/application/voice/voice-provider-selection";
 import { createVoiceJournalSave, createVoiceSaveWithRefresh } from "./voice/voice-journal-save";
+import { createFeelingsChatStorage } from "./feelings/feelings-chat-storage";
+import { createFeelingsChatClient } from "@/application/feelings-chat/feelings-chat-client";
+import type { FeelingsChatPort } from "@/application/feelings-chat/feelings-chat-port";
 import type { VoiceTranscriberPort } from "@/application/voice/voice-transcriber-port";
 import {
   createBrowserJournalRuntime,
@@ -168,6 +171,11 @@ type JagaOnAppProps = {
   webSpeechSupported?: () => boolean;
   devSettingsEnabled?: boolean;
   voicePreferenceStorageFactory?: () => DemoOnboardingStoragePort;
+  /**
+   * Tell JagaOn understands more (owner decision 2026-10-14): the feelings chat port. Default: the browser client of the same-origin
+   * route POST /api/ai/feelings (no passcode: the route has none of its own). Injected in tests (the fake port; never a live call).
+   */
+  feelingsChatPortFactory?: () => FeelingsChatPort;
 };
 
 /**
@@ -221,6 +229,11 @@ const UNAVAILABLE_TERMINOLOGY = Object.freeze({
   forget: async () => Object.freeze({ kind: "FAILED" }),
 });
 
+/** The feelings chat's production port: one client of the same-origin route, created once per app (it calls nothing until a chat turn). */
+function defaultFeelingsChatPort(): FeelingsChatPort {
+  return createFeelingsChatClient();
+}
+
 /** Completion of a delete-all is handled once, by the app-level port wrapper. */
 const noop = () => undefined;
 
@@ -245,8 +258,10 @@ export function JagaOnApp({
   webSpeechSupported = browserWebSpeechSupported,
   devSettingsEnabled = DEV_SETTINGS_ENABLED,
   voicePreferenceStorageFactory = createBrowserOnboardingStorage,
+  feelingsChatPortFactory = defaultFeelingsChatPort,
 }: JagaOnAppProps = {}) {
   const printPort = useMemo(() => printPortFactory(), [printPortFactory]);
+  const feelingsChatPort = useMemo(() => feelingsChatPortFactory(), [feelingsChatPortFactory]);
   const appointmentNotes = useMemo<AppointmentNoteSelectionRepository>(
     () =>
       createAppointmentNoteSelectionRepository(
@@ -1093,12 +1108,24 @@ export function JagaOnApp({
           />
         );
       case "MY_NOTES":
-        return <MyNotesScreen messages={messages} />;
+        // Owner decision 2026-10-14 (My notes): the stored notes and the existing permanent deletion of one note.
+        if (!runtime) return <p role="status">{messages.shared.loading}</p>;
+        return <MyNotesScreen messages={messages} locale={locale} notes={runtime.notes ? { query: runtime.notes.query, deletion: runtime.recordDeletion } : undefined} />;
       case "TELL_JAGAON": {
         if (!runtime) return <p role="status">{messages.shared.loading}</p>;
         const voice = runtime.voice;
         // Packet 13 (Q13-6, HELD by the integration gate until the re-review approves): one confirmed fact → the existing command.
-        const saveFact = voice ? createVoiceJournalSave({ commands: runtime.commands, recordMedicationEvent: voice.recordMedicationEvent, now: () => new Date().toISOString() as never }) : null;
+        // Owner decision 2026-10-14 (Tell JagaOn understands more): a feeling saved as a note goes to the personal-note service, an
+        // activity to the existing activity command.
+        const saveFact = voice
+          ? createVoiceJournalSave({
+              commands: runtime.commands,
+              recordMedicationEvent: voice.recordMedicationEvent,
+              recordActivity: runtime.commands.recordActivity,
+              notes: runtime.notes?.commands,
+              now: () => new Date().toISOString() as never,
+            })
+          : null;
         return (
           <TellJagaOnScreen
             messages={messages}
@@ -1121,6 +1148,9 @@ export function JagaOnApp({
             // Finding N-1: a card or the chooser opens that existing entry screen blank (no parameters, nothing carried over); Back to Today
             // is a separate exit to the Today tab.
             onManualEntry={(kind) => navigate(kind === "GLUCOSE" ? "LOG_GLUCOSE" : kind === "MEAL" ? "LOG_MEAL" : "MEDICATION_SCHEDULE")}
+            // Owner decision 2026-10-14 (design §3.1 steps 4–7): "Talk it through" opens the feelings chat; the note goes to the
+            // personal-note service and her doctor question to the existing care-question command (linked to the next appointment).
+            feelingsChat={runtime.notes ? { chat: feelingsChatPort, ...createFeelingsChatStorage({ notes: runtime.notes.commands, careOrganisation: runtime.careOrganisation }) } : undefined}
             onClose={() => switchTab("TODAY")}
           />
         );

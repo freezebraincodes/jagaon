@@ -92,6 +92,11 @@ describe("voice review → save intents (multi-fact, review C3)", () => {
       expect(review(text, [save(0, { answers: { status: "TAKEN" } })], language), text).toEqual(rejectedOnly("NEEDS_EDIT"));
     }
     for (const [text, language] of [["How many units should I inject?", "en"], ["我应该打几个单位？", "zh"]] as const) expect(review(text, [], language), text).toEqual({ kind: "NO_INTENT", reason: "REDIRECTED" });
+    // Owner decision 2026-10-14: a distress analysis never yields an intent, even with a save decision.
+    for (const [text, language] of [["My sugar was 6.8 mmol and I want to die", "en"], ["血糖六点八，I can't go on", "zh"]] as const) {
+      expect(review(text, [save(0)], language), text).toEqual({ kind: "NO_INTENT", reason: "DISTRESS" });
+      expect(review(text, [], language), text).toEqual({ kind: "NO_INTENT", reason: "DISTRESS" });
+    }
     // An edit carries no amount: the person's edit is the medicine and status only.
     expect(review("I injected 10 units of my dark pen", [save(0, { edit: { kind: "MEDICATION_OCCURRENCE", medication: DARK, status: "TAKEN" } })])).toEqual({
       kind: "INTENTS",
@@ -212,5 +217,49 @@ describe("voice review → save intents (multi-fact, review C3)", () => {
     const source = readFileSync(join(process.cwd(), "src/application/voice/voice-review-contract.ts"), "utf8");
     const imports = [...source.matchAll(/from\s+["']([^"']+)["']/g)].map((match) => match[1]!);
     expect(imports.filter((specifier) => /journal|storage|dexie|backup|react/.test(specifier))).toEqual([]);
+  });
+});
+
+describe("13s.6: feelings and activities (owner decision 2026-10-14)", () => {
+  it("a FEELING_NOTE becomes a FEELING_NOTE intent with her words and the cue keys; an edit replaces the words (trimmed)", () => {
+    expect(review("Feeling tired and a bit worried today.", [save(0)])).toEqual({
+      kind: "INTENTS",
+      intents: [{ candidateIndex: 0, intent: { kind: "FEELING_NOTE", text: "Feeling tired and a bit worried today.", cueKeys: ["tired", "worried"] } }],
+      rejected: [],
+    });
+    expect(review("Feeling tired", [save(0, { edit: { kind: "FEELING_NOTE", text: "  Tired after a long night.  " } })])).toMatchObject({ intents: [{ intent: { kind: "FEELING_NOTE", text: "Tired after a long night.", cueKeys: ["tired"] } }] });
+    expect(review("Feeling tired", [save(0, { edit: { kind: "FEELING_NOTE", text: "   " } })])).toMatchObject({ kind: "NO_INTENT", rejected: [{ reason: "TEXT_INVALID" }] });
+    expect(review("Feeling tired", [save(0, { edit: { kind: "FEELING_NOTE", text: "x".repeat(1001) } })])).toMatchObject({ kind: "NO_INTENT", rejected: [{ reason: "TEXT_INVALID" }] });
+    expect(review("Feeling tired", [save(0, { edit: { kind: "MEAL_NOTE", slot: null, itemText: "rice" } })])).toMatchObject({ kind: "NO_INTENT", rejected: [{ reason: "EDIT_KIND_MISMATCH" }] });
+    expect(review("Feeling tired", [{ candidateIndex: 0, action: "SKIP" }])).toEqual({ kind: "NO_INTENT", reason: "NO_CONFIRMATION" });
+  });
+
+  it("an ACTIVITY_NOTE becomes an ACTIVITY intent; an edit replaces the label and the duration (or clears it)", () => {
+    expect(review("Walked 30 minutes after dinner", [save(0)])).toEqual({
+      kind: "INTENTS",
+      intents: [{ candidateIndex: 0, intent: { kind: "ACTIVITY", category: "WALKING", label: "Walked 30 minutes after dinner", durationMinutes: 30 } }],
+      rejected: [],
+    });
+    expect(review("Walked 30 minutes after dinner", [save(0, { edit: { kind: "ACTIVITY_NOTE", label: "Walk by the river", durationMinutes: 45 } })])).toMatchObject({ intents: [{ intent: { kind: "ACTIVITY", category: "WALKING", label: "Walk by the river", durationMinutes: 45 } }] });
+    expect(review("Walked 30 minutes after dinner", [save(0, { edit: { kind: "ACTIVITY_NOTE", label: "Walked", durationMinutes: null } })])).toMatchObject({ intents: [{ intent: { durationMinutes: null } }] });
+    expect(review("Walked 30 minutes after dinner", [save(0, { edit: { kind: "ACTIVITY_NOTE", label: " ", durationMinutes: null } })])).toMatchObject({ kind: "NO_INTENT", rejected: [{ reason: "TEXT_INVALID" }] });
+    // A duration outside 1–1440 whole minutes is a malformed decision (the whole review is refused, fail closed).
+    for (const durationMinutes of [0, 1441, 2.5]) expect(review("Walked 30 minutes", [save(0, { edit: { kind: "ACTIVITY_NOTE", label: "Walked", durationMinutes } })]), String(durationMinutes)).toEqual({ kind: "NO_INTENT", reason: "INVALID_DECISIONS" });
+  });
+
+  it("a feeling, an activity and a reading in one utterance are each decided separately; distress still yields nothing", () => {
+    const result = review("Walked 30 minutes. My sugar was 6.8 mmol. Feeling good.", [save(0), save(2)]);
+    expect(result).toMatchObject({ kind: "INTENTS", intents: [{ candidateIndex: 0, intent: { kind: "ACTIVITY" } }, { candidateIndex: 2, intent: { kind: "FEELING_NOTE", cueKeys: ["good"] } }] });
+    expect(review("I feel so tired I want to die", [save(0)])).toEqual({ kind: "NO_INTENT", reason: "DISTRESS" });
+  });
+
+  it("the intent schema accepts only her trimmed words, valid cue keys and whole minutes", () => {
+    expect(voiceSaveIntentSchema.safeParse({ kind: "FEELING_NOTE", text: "Tired", cueKeys: ["tired"] }).success).toBe(true);
+    expect(voiceSaveIntentSchema.safeParse({ kind: "FEELING_NOTE", text: " Tired", cueKeys: ["tired"] }).success).toBe(false);
+    expect(voiceSaveIntentSchema.safeParse({ kind: "FEELING_NOTE", text: "Tired", cueKeys: [] }).success).toBe(false);
+    expect(voiceSaveIntentSchema.safeParse({ kind: "FEELING_NOTE", text: "Tired", cueKeys: ["Tired"] }).success).toBe(false);
+    expect(voiceSaveIntentSchema.safeParse({ kind: "ACTIVITY", category: "WALKING", label: "Walk", durationMinutes: null }).success).toBe(true);
+    expect(voiceSaveIntentSchema.safeParse({ kind: "ACTIVITY", category: "DANCING", label: "Walk", durationMinutes: null }).success).toBe(false);
+    expect(voiceSaveIntentSchema.safeParse({ kind: "ACTIVITY", category: "WALKING", label: "Walk", durationMinutes: 0 }).success).toBe(false);
   });
 });

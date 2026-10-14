@@ -29,6 +29,8 @@ export const RECORD_TYPES = [
   "BODY_MEASUREMENT",
   "PREVENTIVE_CARE_RECORD",
   "CONTEXT_WINDOW",
+  // Owner decision 2026-10-14: a note the patient chose to keep about how she feels (My notes).
+  "PERSONAL_NOTE",
 
   // Intelligence outputs
   "LEARNED_KNOWLEDGE",
@@ -95,6 +97,7 @@ export const recordOwnerByType: Readonly<Record<RecordType, AuthoritativeOwner>>
     BODY_MEASUREMENT: "HEALTH_RECORDS",
     PREVENTIVE_CARE_RECORD: "HEALTH_RECORDS",
     CONTEXT_WINDOW: "HEALTH_RECORDS",
+    PERSONAL_NOTE: "HEALTH_RECORDS",
 
     LEARNED_KNOWLEDGE: "LEARNING_ENGINE",
 

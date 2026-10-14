@@ -130,4 +130,26 @@ describe("MoreScreen", () => {
     expect(screen.getByText(messages.help.publicInfoUnavailable)).toBeInTheDocument();
     expect(screen.queryByText(/1777/)).not.toBeInTheDocument();
   });
+
+  it("owner decision 2026-10-14: lists emotional support lines (SOS, mindline) after the general contacts, with sources and check date", () => {
+    render(<HelpScreen messages={messages} goBack={vi.fn()} />);
+
+    const section = screen.getByRole("region", { name: "Emotional support (Singapore)" });
+    const general = screen.getByRole("region", { name: messages.help.generalContacts });
+    expect(general.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const expected = [
+      ["SOS: call 1767", "tel:1767"],
+      ["SOS: WhatsApp CareText 9151 1767", "https://wa.me/6591511767"],
+      ["mindline: call 1771", "tel:1771"],
+      ["mindline: WhatsApp 6669 1771", "https://wa.me/6566691771"],
+    ] as const;
+    for (const [name, href] of expected) expect(within(section).getByRole("link", { name: new RegExp(`^${name}`) })).toHaveAttribute("href", href);
+    expect(within(section).getAllByText(/24 hours/)).toHaveLength(2);
+    expect(within(section).getAllByText(/Round the clock/)).toHaveLength(2);
+    expect(within(section).getByRole("link", { name: messages.help.sosWebsite })).toHaveAttribute("href", "https://www.sos.org.sg/");
+    expect(within(section).getByRole("link", { name: messages.help.mindlineWebsite })).toHaveAttribute("href", "https://www.mindline.sg/");
+    expect(within(section).getByText(new RegExp(messages.shared.reviewedOn("2026-10-14")))).toBeInTheDocument();
+    // The retired IMH line is not listed.
+    expect(screen.queryByText(/6389\s?2222/)).not.toBeInTheDocument();
+  });
 });

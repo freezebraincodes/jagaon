@@ -91,3 +91,32 @@ describe("remote extraction merge (local analysis is the floor)", () => {
     expect(inside.analysis.candidates.map((candidate) => candidate.kind)).toEqual(["GLUCOSE_READING", "MEDICATION_OCCURRENCE"]);
   });
 });
+
+describe("13s.6: a feeling or an activity is never added or altered by remote extraction", () => {
+  const FEELING = "Feeling tired and a bit worried today";
+  it("a remote fact over her feeling or activity is dropped; the local cards stay exactly as they were", () => {
+    const merged = merge(FEELING, [{ kind: "MEAL_NOTE", ...REMOTE, ...at(FEELING, "tired and a bit worried"), slot: "UNSTATED", itemText: "tired", state: "UNDERSTOOD", ambiguity: [] }]);
+    expect(merged.kind).toBe("MERGED");
+    if (merged.kind === "MERGED") expect(merged.analysis.candidates).toEqual(local(FEELING).candidates);
+    const activity = "Walked 30 minutes after dinner";
+    const overActivity = merge(activity, [{ kind: "MEAL_NOTE", ...REMOTE, ...at(activity, "after dinner"), slot: "DINNER", itemText: null, state: "UNDERSTOOD", ambiguity: [] }]);
+    expect(overActivity.kind).toBe("MERGED");
+    if (overActivity.kind === "MERGED") expect(overActivity.analysis.candidates).toEqual(local(activity).candidates);
+  });
+
+  it("a remote FEELING_NOTE or ACTIVITY_NOTE fails the contract, so the whole remote result is not used", () => {
+    const text = "My sugar was 6.8 mmol, had laksa";
+    const remoteFeeling = { kind: "FEELING_NOTE", ...REMOTE, ...at(text, "had laksa"), cueKeys: ["happy"], text: "had laksa" };
+    const remoteActivity = { kind: "ACTIVITY_NOTE", ...REMOTE, ...at(text, "had laksa"), category: "WALKING", label: "had laksa", durationMinutes: null };
+    expect(merge(text, [remoteFeeling])).toEqual({ kind: "LOCAL_KEPT" });
+    expect(merge(text, [remoteActivity])).toEqual({ kind: "LOCAL_KEPT" });
+  });
+
+  it("other text beside a feeling still takes a remote fact", () => {
+    const text = "Feeling tired, had laksa";
+    expect(local(text).candidates.map((candidate) => candidate.kind)).toEqual(["FEELING_NOTE", "UNSUPPORTED_SPAN"]);
+    const merged = merge(text, [{ kind: "MEAL_NOTE", ...REMOTE, ...at(text, "had laksa"), slot: "UNSTATED", itemText: "laksa", state: "UNDERSTOOD", ambiguity: [] }]);
+    expect(merged.kind).toBe("MERGED");
+    if (merged.kind === "MERGED") expect(merged.analysis.candidates.map((candidate) => [candidate.kind, candidate.source])).toEqual([["FEELING_NOTE", "DETERMINISTIC"], ["MEAL_NOTE", "REMOTE_EXTRACTION"]]);
+  });
+});

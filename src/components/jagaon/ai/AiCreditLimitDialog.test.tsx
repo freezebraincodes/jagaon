@@ -17,9 +17,10 @@ import type { AiDisclosureFlow } from "./AiDisclosureDialog";
 afterEach(() => cleanup());
 
 describe("AiCreditLimitDialog (Owner decision 2026-10-12, AI credit dialog)", () => {
-  it.each<[AiDisclosureFlow, string]>([
+  it.each<[AiDisclosureFlow | "FEELINGS_CHAT", string]>([
     ["CARE_SUMMARY", "This demo has used up its AI credit for today. Your summary uses the standard wording instead."],
     ["PATTERN", "This demo has used up its AI credit for today. The explanation uses the standard wording instead."],
+    ["FEELINGS_CHAT", "This demo has used up its AI credit for today. JagaOn's standard questions are used instead."],
   ])("en-SG %s: the owner's exact wording, one OK action, a modal dialog named and described", (flow, text) => {
     render(<AiCreditLimitDialog messages={getMessages("en-SG")} flow={flow} onClose={vi.fn()} />);
     const dialog = screen.getByRole("dialog");

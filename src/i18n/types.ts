@@ -1,5 +1,6 @@
 export type { SupportedLocale } from "../domain/patient-settings/locale";
 import type { Packet10Messages } from "./packet10-types";
+import type { NoteThemeKey } from "../domain/notes/note-themes";
 export type { Packet10Messages } from "./packet10-types";
 
 // ---------------------------------------------------------------------------
@@ -418,6 +419,19 @@ export type HelpMessages = {
   // Packet 6 v1 convergence (needs bilingual review)
   generalContacts: string;
   publicInfoUnavailable: string;
+  /** Owner decision 2026-10-14 (distress safety): emotional support contacts. English owner-approved; Chinese drafts. */
+  emotionalSupportHeading: string;
+  sosCall: string;
+  sosWhatsApp: string;
+  sosProvider: string;
+  sosHours: string;
+  mindlineCall: string;
+  mindlineWhatsApp: string;
+  mindlineProvider: string;
+  mindlineHours: string;
+  emotionalSupportVerify: string;
+  sosWebsite: string;
+  mindlineWebsite: string;
 };
 
 /** Packet 6A synthetic onboarding (frames 14–31; needs bilingual review). */
@@ -992,6 +1006,8 @@ export type AiCreditLimitMessages = {
   title: string;
   careSummaryBody: string;
   historyBody: string;
+  /** Tell JagaOn understands more (2026-10-14): the feelings chat continues with JagaOn's standard questions. */
+  feelingsChatBody: string;
   ok: string;
 };
 
@@ -1019,6 +1035,90 @@ export type VoiceMessages = {
     discard: string;
   };
   redirect: { body: string; transcribedNote: string };
+  /**
+   * Owner decision 2026-10-14 (distress safety): the only content shown when a distress cue was said. English owner-approved; Chinese
+   * drafts (human acceptance pending). Each contact row is a separate link; the numbers are part of the text.
+   */
+  distress: {
+    message: string;
+    sosCall: string;
+    sosWhatsApp: string;
+    sosHours: string;
+    mindlineCall: string;
+    mindlineWhatsApp: string;
+    mindlineHours: string;
+    danger: string;
+    trustedPerson: string;
+  };
+  /**
+   * Owner decision 2026-10-14 (Tell JagaOn understands more, design §3.1 step 3): the Feeling card. English owner-scoped; Chinese drafts
+   * (human acceptance pending; feelings are recognised in English only). The kind sentence shown after saving comes from the reviewed
+   * bank (`note-kind-sentences`), not from here.
+   */
+  feeling: {
+    heading: string;
+    textLabel: string;
+    saveAsNote: string;
+    talkItThrough: string;
+    skip: string;
+    savedToNotes: string;
+    notSaved: string;
+    skipped: string;
+    textRequired: string;
+  };
+  /** Owner decision 2026-10-14 (design §4): the Activity card. English owner-scoped; Chinese drafts (human acceptance pending). */
+  activity: {
+    heading: string;
+    labelLabel: string;
+    durationLabel: string;
+    durationHint: string;
+    durationInvalid: string;
+    noDuration: string;
+    save: string;
+    skip: string;
+    saved: string;
+    notSaved: string;
+    skipped: string;
+    labelRequired: string;
+    /** Short display names of the activity-event categories ("Walk · 30 minutes"). */
+    categories: Readonly<Record<"WALKING" | "FLEXIBILITY_OR_MOBILITY" | "STRENGTH" | "AEROBIC" | "HOUSEHOLD_ACTIVITY" | "OTHER", string>>;
+  };
+};
+
+/**
+ * Tell JagaOn understands more (design §3.1): the feelings chat dialog. en-SG: the AI notice is the owner's approved wording
+ * (2026-10-14), the rest is new wording; zh-SG: drafts, human acceptance pending (English-only hackathon scope).
+ */
+export type FeelingsChatMessages = {
+  title: string;
+  notice: string;
+  continue: string;
+  saveWithoutAi: string;
+  you: string;
+  jagaon: string;
+  answerLabel: string;
+  send: string;
+  skip: string;
+  endChat: string;
+  loading: string;
+  questionAnnouncement: (question: string) => string;
+  fallbackNotice: string;
+  creditLimitNotice: string;
+  wrapUpTitle: string;
+  summaryLabel: string;
+  summaryHint: string;
+  doctorQuestionTitle: string;
+  doctorQuestionHint: string;
+  addToQuestions: string;
+  noThanks: string;
+  questionAdded: string;
+  questionNotAdded: string;
+  saveNote: string;
+  dontSave: string;
+  saving: string;
+  saved: string;
+  saveFailed: string;
+  done: string;
 };
 
 export type AppMessages = {
@@ -1033,7 +1133,26 @@ export type AppMessages = {
   /** Owner UI decision U12: the history fallback line after an attempted remote request (ai-history-fallback.11c.1). */
   aiHistoryFallback: AiHistoryFallbackMessages;
   /** Owner decision 2026-10-12: My notes, reached from More (first version: the destination only). */
-  myNotes: { title: string; empty: string };
+  myNotes: {
+    title: string;
+    empty: string;
+    /** Owner decision 2026-10-14 (personal notes): the stored notes list, this week's themes and deleting one note. */
+    loading: string;
+    unavailable: string;
+    themesHeading: string;
+    /** One line per recurring theme, e.g. "Sleep came up in 3 notes this week." (`theme` is a `themeLabels` value). */
+    themeCount: (theme: string, count: number) => string;
+    /** Descriptive labels only (never causes or diagnoses), keyed by the closed note theme keys. */
+    themeLabels: Readonly<Record<NoteThemeKey, string>>;
+    themesLabel: string;
+    conversation: string;
+    speakerJagaOn: string;
+    speakerYou: string;
+    deleteNote: string;
+    /** The record label shown in the existing permanent-deletion dialog. */
+    noteRecordLabel: string;
+    deleted: string;
+  };
   /** Owner decision 2026-10-12 (AI credit dialog): the used-up AI credit dialog (en owner wording; zh drafts, acceptance deferred). */
   aiCreditLimit: AiCreditLimitMessages;
   /** Voice transcription slice (voice-copy.13s.1; human acceptance pending). */
@@ -1055,4 +1174,6 @@ export type AppMessages = {
   preventiveCare: PreventiveCareMessages;
   carePreparation: CarePreparationMessages;
   careSummary: CareSummaryMessages;
+  /** Tell JagaOn understands more: the feelings chat dialog (en notice owner-approved 2026-10-14; zh drafts, acceptance pending). */
+  feelingsChat: FeelingsChatMessages;
 };

@@ -7,14 +7,25 @@ import { createVoiceSessionController, type VoiceSessionController, type VoiceSe
 import type { VoiceTranscriberPort } from "@/application/voice/voice-transcriber-port";
 import type { VoiceAccessMode, VoiceProviderId, VoiceProviderResolution } from "@/application/voice/voice-provider-selection";
 import { analyseTranscript, type VoiceMedicineDirectory } from "@/domain/voice/voice-candidate-extractor";
-import type { VoiceAnalysis, VoiceCandidate, VoiceFactCandidate, VoiceLanguage, VoiceMedicationRef, VoiceRedirectCategory } from "@/domain/voice/voice-contracts";
+import type { VoiceAnalysis, VoiceCandidate, VoiceLanguage, VoiceMedicationRef, VoiceRedirectCategory } from "@/domain/voice/voice-contracts";
 import { gateRemoteTranscriptExtraction } from "@/domain/voice/voice-remote-extraction-gate";
+import { createHelpInformationAdapter, telHref, whatsAppHref } from "@/application/governed/help-information-adapter";
+import type { FeelingsChatPort } from "@/application/feelings-chat/feelings-chat-port";
+import { isFeelingsChatCreditLimit } from "@/application/feelings-chat/feelings-chat-route-contract";
+import { detectVoiceDistress } from "@/domain/voice/voice-distress-gate";
 import { mergeRemoteCandidates } from "./voice-remote-merge";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
+import { AiCreditLimitDialog } from "../ai/AiCreditLimitDialog";
+import { FeelingsChatDialog, type FeelingsChatNote } from "../feelings/FeelingsChatDialog";
+import type { FeelingsChatStorage } from "../feelings/feelings-chat-storage";
+import { ContactLink } from "../primitives/ContactLink";
+import { AmbulanceIcon, MessageIcon, PhoneIcon } from "../primitives/Icons";
 import { ModalDialog } from "../primitives/ModalDialog";
 import { ScreenHeader } from "../primitives/ScreenHeader";
 import type { VoiceMedicineOption } from "./MedicineClarificationDialog";
+import { VoiceActivityCard } from "./VoiceActivityCard";
 import { VoiceFactCard, type VoiceFactOutcome } from "./VoiceFactCard";
+import { VoiceFeelingCard, type VoiceTalkItThroughInput } from "./VoiceFeelingCard";
 import { RememberedTermsSection } from "./RememberedTermsSection";
 import { voiceScreenCopy } from "./voice-screen-copy";
 
@@ -55,6 +66,20 @@ import { voiceScreenCopy } from "./voice-screen-copy";
  *   demo passcode (`passcodeRequired`; absent means required, fail safe). Not required: the disclosure shows no passcode field, its
  *   primary action is enabled at once (consent → microphone), nothing is held in memory and the loader is told `{ passcodeRequired:
  *   false }`, so the clients send no passcode header. Required: unchanged. The server checks either way.
+ * - Owner decision 2026-10-14 (distress safety): when the analysis is DISTRESS (the deterministic distress gate runs first), the screen
+ *   shows ONLY the calm safety message with the helplines (SOS, mindline, 995) and the exit: no transcript, fact card, "not captured"
+ *   list, redirect, manual-entry chooser, remembered terms or remote-extraction offer. The transcript is dropped at once and nothing is
+ *   saved (`onSaveFacts` is never reachable). Focus moves to the message, which is also announced as an alert.
+ * - Owner decision 2026-10-14 (Tell JagaOn understands more): a FEELING_NOTE shows the Feeling card (her words; Save as a note; Skip;
+ *   Talk it through only when `onTalkItThrough` is given) and an ACTIVITY_NOTE the Activity card (summary, editable label and
+ *   minutes; Save; Skip). Both save through the same review contract and `onSaveFacts` as every other card.
+ * - Owner decision 2026-10-14 (design §3.1 steps 4–7, the feelings chat): with `feelingsChat`, the Feeling card's "Talk it through" opens
+ *   the chat dialog with the card's (edited) words and cue keys. The distress gate (`detectVoiceDistress`) runs on every answer; a match
+ *   closes the chat and shows THIS screen's distress phase (the same safety message and helplines, nothing saved, the Feeling card not
+ *   saved, the transcript dropped). "Add to my questions" adds a care question and keeps its exact revision for this chat; "Save note"
+ *   saves the note linked to it (or to nothing). After a save in the chat the Feeling card shows it saved, so it cannot be saved twice.
+ *   When a turn fell back because the demo's AI credit is used up, the AI credit-limit dialog is shown once per chat (the chat waits
+ *   for its OK, then continues with the bank's questions).
  */
 export type VoiceRememberedTerm = Readonly<{ recordId: string; revisionId: string; language: VoiceLanguage; phrase: string; medication: VoiceMedicationRef | null }>;
 export type VoiceTerminologyPort = Readonly<{
@@ -116,6 +141,16 @@ export type TellJagaOnScreenProps = Readonly<{
    * failure keeps the local result. Absent: never offered.
    */
   remoteExtraction?: VoiceRemoteExtraction;
+  /**
+   * Owner decision 2026-10-14 (design §3.1 step 4): the feelings chat, opened from a Feeling card's "Talk it through" with her (edited)
+   * words and the recognised cue keys. Absent: the Feeling card offers only "Save as a note" and "Skip".
+   */
+  onTalkItThrough?: (feeling: VoiceTalkItThroughInput) => void;
+  /**
+   * Owner decision 2026-10-14 (design §3.1 steps 4–7): the feelings chat. `chat` is the browser client of /api/ai/feelings (or a fake
+   * port in tests); the storage adds the doctor question and saves the note. When given, it takes precedence over `onTalkItThrough`.
+   */
+  feelingsChat?: Readonly<{ chat: FeelingsChatPort } & FeelingsChatStorage>;
   timers?: VoiceTimers;
   startTimeoutMs?: number;
   maxSessionSeconds?: number;
@@ -128,6 +163,8 @@ type Phase =
   | { kind: "SESSION" }
   | { kind: "REVIEW"; transcript: string; analysis: Extract<VoiceAnalysis, { kind: "ANALYSED" }>; sessionToken: number; medicines: readonly VoiceMedicineOption[]; directory: VoiceMedicineDirectory; generation: number }
   | { kind: "REDIRECT"; transcript: string; category: VoiceRedirectCategory }
+  // Owner decision 2026-10-14: no transcript is kept in this phase.
+  | { kind: "DISTRESS" }
   | { kind: "ENDED"; reason: Ended };
 
 const DEFAULT_TIMERS: VoiceTimers = Object.freeze({
@@ -142,6 +179,35 @@ function endedFor(snapshot: VoiceSessionSnapshot): Ended {
   if (snapshot.failureReason === "UNSUPPORTED_BROWSER") return "UNSUPPORTED";
   if (snapshot.failureReason === "CREDENTIAL_REFUSED" && snapshot.credentialRefusal === "ACCESS_DENIED") return "ACCESS_DENIED";
   return "UNAVAILABLE";
+}
+
+/**
+ * Owner decision 2026-10-14 (the feelings chat): one chat's port with the AI credit-limit dialog. The first turn of the chat that fell
+ * back because the demo's AI credit is used up waits for the dialog's OK (or the turn's cancellation) before the chat shows the bank's
+ * question, so the two dialogs never contest focus; later turns of the same chat show no second dialog.
+ */
+function withCreditLimitDialog(inner: FeelingsChatPort, open: (release: () => void) => void, closed: () => void): FeelingsChatPort {
+  let shown = false;
+  return Object.freeze({
+    nextTurn: async (request, signal) => {
+      const result = await inner.nextTurn(request, signal);
+      if (shown || result.source !== "REVIEWED_BANK" || !isFeelingsChatCreditLimit(result.reason) || signal?.aborted) return result;
+      shown = true;
+      await new Promise<void>((resolve) => {
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          signal?.removeEventListener("abort", release);
+          closed();
+          resolve();
+        };
+        signal?.addEventListener("abort", release);
+        open(release);
+      });
+      return result;
+    },
+  });
 }
 
 export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
@@ -261,6 +327,11 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         const [directory, medicines] = await Promise.all([terminology.directory(language), terminology.activeMedicines()]);
         const analysis = analyseTranscript(transcript, language, { medicines: directory, glucoseEntryUnit });
         if (!mounted.current) return;
+        if (analysis.kind === "DISTRESS") {
+          session.discardTranscript();
+          setEndNotice(null);
+          return setPhase({ kind: "DISTRESS" });
+        }
         if (analysis.kind === "REDIRECT") return setPhase({ kind: "REDIRECT", transcript, category: analysis.category });
         if (analysis.kind !== "ANALYSED" || analysis.candidates.length === 0) return setPhase({ kind: "ENDED", reason: "NOT_UNDERSTOOD" });
         setRemote("IDLE");
@@ -353,6 +424,7 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
     return result.kind === "SAVED" ? "SAVED" : "NOT_SAVED";
   }
 
+  // Owner decision 2026-10-14: only a REVIEW can offer remote extraction, and the gate withholds any distress transcript as well.
   const remoteOffered = phase.kind === "REVIEW" && props.remoteExtraction !== undefined && !anySaved && phase.analysis.redirect === null && gateRemoteTranscriptExtraction(phase.transcript, language).kind === "PERMIT";
 
   async function askRemote() {
@@ -380,6 +452,65 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
     } finally {
       if (remoteAbort.current === abort) remoteAbort.current = null;
     }
+  }
+
+  // Owner decision 2026-10-14 (the feelings chat): the open chat (for one Feeling card), the cards saved from a chat, the care question
+  // added in the open chat, and the AI credit-limit dialog (once per chat).
+  const feelingsChat = props.feelingsChat;
+  const [chat, setChat] = useState<Readonly<{ cardKey: string; text: string; cueKeys: readonly string[]; port: FeelingsChatPort }> | null>(null);
+  const [savedInChat, setSavedInChat] = useState<ReadonlySet<string>>(() => new Set());
+  const chatCareQuestion = useRef<Awaited<ReturnType<FeelingsChatStorage["addDoctorQuestion"]>>>(null);
+  const chatSaved = useRef(false);
+  // The open AI credit-limit dialog: its OK releases the chat turn waiting behind it.
+  const [creditLimit, setCreditLimit] = useState<Readonly<{ release: () => void }> | null>(null);
+
+  function openChat(cardKey: string, feeling: VoiceTalkItThroughInput) {
+    if (!feelingsChat || savedInChat.has(cardKey)) return;
+    touch();
+    chatCareQuestion.current = null;
+    chatSaved.current = false;
+    const port = withCreditLimitDialog(feelingsChat.chat, (release) => setCreditLimit({ release }), () => setCreditLimit(null));
+    setChat({ cardKey, text: feeling.text, cueKeys: feeling.cueKeys, port });
+  }
+
+  // Closing the chat unmounts the dialog, which cancels its turn in flight; a credit-limit dialog waiting on that turn is released then.
+  function closeChat() {
+    const open = chat;
+    if (open && chatSaved.current) setSavedInChat((saved) => new Set([...saved, open.cardKey]));
+    chatSaved.current = false;
+    chatCareQuestion.current = null;
+    setChat(null);
+  }
+
+  /** Distress in the chat: the chat closes and this screen's distress phase shows; nothing is saved and the transcript is dropped. */
+  function chatDistress() {
+    chatSaved.current = false;
+    chatCareQuestion.current = null;
+    setChat(null);
+    remoteAbort.current?.abort();
+    controller.current?.discardTranscript();
+    setEndNotice(null);
+    setPhase({ kind: "DISTRESS" });
+  }
+
+  async function addChatDoctorQuestion(text: string): Promise<boolean> {
+    if (!feelingsChat) return false;
+    const added = await feelingsChat.addDoctorQuestion(text);
+    if (added === null) return false;
+    chatCareQuestion.current = added;
+    touch();
+    setAnySaved(true);
+    return true;
+  }
+
+  async function saveChatNote(note: FeelingsChatNote): Promise<boolean> {
+    if (!feelingsChat || chatSaved.current) return false;
+    const saved = await feelingsChat.saveNote(note, chatCareQuestion.current);
+    if (!saved) return false;
+    chatSaved.current = true;
+    touch();
+    setAnySaved(true);
+    return true;
   }
 
   async function rememberTerm(phrase: string, choice: VoiceMedicineOption): Promise<boolean> {
@@ -422,7 +553,9 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         ? copy.review.heading
         : phase.kind === "REDIRECT"
           ? redirectBody(phase.category)
-          : phase.kind === "ENDED"
+          : phase.kind === "DISTRESS"
+            ? "" // The safety message is its own alert (below); nothing else is announced.
+            : phase.kind === "ENDED"
             ? {
                 DECLINED: copy.state.declined,
                 CANCELLED: copy.state.cancelled,
@@ -436,8 +569,12 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
               }[phase.reason]
             : "";
 
-  // Finding N-1: the screen-level manual-entry chooser. Each button opens its existing entry flow blank (nothing from the transcript is
-  // carried over and nothing is saved); it never restarts voice or contacts a provider. The type is the person's choice, never guessed.
+  // Finding N-1: the screen-level manual-entry chooser. Each entry button opens its existing entry flow blank (nothing from the transcript
+  // is carried over and nothing is saved). The type is the person's choice, never guessed.
+  // Owner decision 2026-10-14: "Tell JagaOn again" comes first, so she can speak again when the result is unclear or after a cancel. It
+  // restarts the voice flow from its start (the same path as before, including the consent step), and is offered only when voice can
+  // run here.
+  const canTellAgain = voiceAvailable && !(phase.kind === "ENDED" && (phase.reason === "UNAVAILABLE" || phase.reason === "UNSUPPORTED"));
   const chooserId = `${passcodeId}-manual`;
   const chooser = (
     <section className="voice-manual" aria-labelledby={chooserId}>
@@ -445,6 +582,11 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         {copy.review.manualHeading}
       </h2>
       <div className="voice-actions">
+        {canTellAgain ? (
+          <button type="button" className="btn btn-outline btn-wide" onClick={restart}>
+            {copy.review.tellAgain}
+          </button>
+        ) : null}
         <button type="button" className="btn btn-secondary btn-wide" onClick={() => onManualEntry("GLUCOSE")}>
           {copy.review.manualReading}
         </button>
@@ -457,6 +599,13 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
       </div>
     </section>
   );
+  // Owner decision 2026-10-14: the helplines come from the Help screen's reviewed contact information.
+  const help = useMemo(() => createHelpInformationAdapter().getHelpInformation(), []);
+  const distressHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (phase.kind === "DISTRESS") distressHeading.current?.focus();
+  }, [phase.kind]);
+
   // A separate exit, not a manual-entry action.
   const backToToday = (
     <button type="button" className="btn btn-ghost btn-wide" onClick={onClose}>
@@ -530,10 +679,23 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
             </div>
           ) : null}
           {phase.analysis.candidates.map((candidate, index) =>
-            candidate.kind === "UNSUPPORTED_SPAN" ? null : (
+            candidate.kind === "UNSUPPORTED_SPAN" ? null : candidate.kind === "FEELING_NOTE" ? (
+              <VoiceFeelingCard
+                key={`${phase.sessionToken}-${phase.generation}-${index}`}
+                candidate={candidate}
+                index={index}
+                copy={copy}
+                onDecide={decideFact}
+                onInteract={touch}
+                onTalkItThrough={feelingsChat ? (feeling) => openChat(`${phase.sessionToken}-${phase.generation}-${index}`, feeling) : props.onTalkItThrough}
+                savedInChat={savedInChat.has(`${phase.sessionToken}-${phase.generation}-${index}`)}
+              />
+            ) : candidate.kind === "ACTIVITY_NOTE" ? (
+              <VoiceActivityCard key={`${phase.sessionToken}-${phase.generation}-${index}`} candidate={candidate} index={index} copy={copy} onDecide={decideFact} onInteract={touch} />
+            ) : (
               <VoiceFactCard
                 key={`${phase.sessionToken}-${phase.generation}-${index}`}
-                candidate={candidate as VoiceFactCandidate}
+                candidate={candidate}
                 index={index}
                 copy={copy}
                 language={language}
@@ -567,6 +729,21 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         </section>
       ) : null}
 
+      {phase.kind === "REVIEW" && chat ? (
+        <FeelingsChatDialog
+          messages={messages}
+          initialText={chat.text}
+          cueKeys={chat.cueKeys}
+          chat={chat.port}
+          detectDistress={(text) => detectVoiceDistress(text).kind === "DISTRESS"}
+          onDistress={chatDistress}
+          onSave={saveChatNote}
+          onAddDoctorQuestion={addChatDoctorQuestion}
+          onClose={closeChat}
+        />
+      ) : null}
+      {creditLimit ? <AiCreditLimitDialog messages={messages} flow="FEELINGS_CHAT" onClose={creditLimit.release} /> : null}
+
       {phase.kind === "REDIRECT" ? (
         <section className="voice-redirect-only">
           {endNoticeFor("TRANSCRIPT_SHOWN")}
@@ -586,18 +763,30 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         </section>
       ) : null}
 
+      {phase.kind === "DISTRESS" ? (
+        <section className="voice-distress" aria-labelledby={`${passcodeId}-distress`}>
+          <div className="voice-distress-message" role="alert">
+            <h2 id={`${passcodeId}-distress`} ref={distressHeading} tabIndex={-1} className="voice-distress-heading">
+              {copy.distress.message}
+            </h2>
+          </div>
+          <div className="voice-distress-contacts">
+            <ContactLink href={telHref(help.sosNumber)} icon={<PhoneIcon size={28} />} action={copy.distress.sosCall} detail={copy.distress.sosHours} number={help.sosNumber} />
+            <ContactLink href={whatsAppHref(help.sosWhatsAppNumber)} icon={<MessageIcon size={28} />} action={copy.distress.sosWhatsApp} number={help.sosWhatsAppNumber} stacked external />
+            <ContactLink href={telHref(help.mindlineNumber)} icon={<PhoneIcon size={28} />} action={copy.distress.mindlineCall} detail={copy.distress.mindlineHours} number={help.mindlineNumber} />
+            <ContactLink href={whatsAppHref(help.mindlineWhatsAppNumber)} icon={<MessageIcon size={28} />} action={copy.distress.mindlineWhatsApp} number={help.mindlineWhatsAppNumber} stacked external />
+            <ContactLink href={telHref(help.emergencyNumber)} icon={<AmbulanceIcon size={28} />} action={copy.distress.danger} number={help.emergencyNumber} emphasis />
+          </div>
+          <p className="voice-distress-closing">{copy.distress.trustedPerson}</p>
+          <div className="voice-actions">{backToToday}</div>
+        </section>
+      ) : null}
+
       {phase.kind === "ENDED" ? (
         <section className="voice-ended">
           {phase.reason === "NOT_UNDERSTOOD" ? endNoticeFor("NOTHING_UNDERSTOOD") : null}
           {chooser}
-          <div className="voice-actions">
-            {voiceAvailable && phase.reason !== "UNAVAILABLE" && phase.reason !== "UNSUPPORTED" ? (
-              <button type="button" className="btn btn-outline btn-wide" onClick={restart}>
-                {copy.title}
-              </button>
-            ) : null}
-            {backToToday}
-          </div>
+          <div className="voice-actions">{backToToday}</div>
         </section>
       ) : null}
 
