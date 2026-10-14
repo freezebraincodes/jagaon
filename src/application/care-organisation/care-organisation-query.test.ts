@@ -85,6 +85,25 @@ describe("Screen 09 preventive-care projection", () => {
     expect(view.items[2]!.status).toBe("SCHEDULED");
   });
 
+  it("relays every reported completion by catalogue key for the HSA preview, planned or not, without changing any item", async () => {
+    const h = await setup();
+    await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids });
+    let view = await h.query.loadPreventiveCare();
+    if (view.status !== "READY") throw new Error("ready");
+    // The seed's earlier eye screening and blood test are reported without a plan; the foot check against its item.
+    expect(view.reportedCompletions).toEqual([
+      { catalogueEntryKey: "BLOOD_TEST", localDate: "2026-05-12" },
+      { catalogueEntryKey: "EYE_SCREENING", localDate: "2025-09-09" },
+      { catalogueEntryKey: "FOOT_CHECK", localDate: "2026-09-14" },
+    ]);
+    // An undone report is no longer relayed.
+    const record = view.items[2]!.currentRecord!;
+    await h.service.undoPreventiveOutcome({ recordId: record.recordId, expectedRevisionId: record.revisionId, expectedRevisionNumber: record.revisionNumber });
+    view = await h.query.loadPreventiveCare();
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.reportedCompletions!.map((entry) => entry.catalogueEntryKey)).toEqual(["BLOOD_TEST", "EYE_SCREENING"]);
+  });
+
   it("keeps a report through a correction but not through a superseding new plan", async () => {
     const h = await setup();
     await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids });
