@@ -272,7 +272,7 @@ describe.each(["en-SG", "zh-SG"] as const)("Tell JagaOn manual-entry chooser (N-
             }
             if (heading === m.schedule.title) {
               // Medication schedule keeps the person's existing medicines (it is not cleared).
-              expect(await screen.findAllByText(/Nocturin pen/, {}, { timeout: 30_000 })).not.toHaveLength(0);
+              expect(await screen.findAllByText(/Lantus/, {}, { timeout: 30_000 })).not.toHaveLength(0);
             }
             await homeViaTabs();
           }

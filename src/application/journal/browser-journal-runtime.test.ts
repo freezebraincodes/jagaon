@@ -216,10 +216,10 @@ describe("browser journal runtime", () => {
     const seeded = await runtime.medicationSchedule.load({ locale: "en-SG", medicationRecordIds: scope });
     if (seeded.status !== "READY") throw new Error("ready");
     expect(seeded.occasions.map((entry) => [entry.section, entry.medicineName, entry.scheduledTime])).toEqual([
-      ["YESTERDAY", "Nocturin pen", "21:00"],
-      ["TODAY", "Nocturin pen", "21:00"],
+      ["YESTERDAY", "Lantus", "21:00"],
+      ["TODAY", "Lantus", "21:00"],
     ]);
-    expect(seeded.withoutFixedTime).toEqual([{ medicineName: "Veltora pen" }]);
+    expect(seeded.withoutFixedTime).toEqual([{ medicineName: "Apidra" }]);
     expect(seeded.counts.map((count) => [count.optionKey, count.occasionCount])).toEqual([
       ["ROUTINE_CHANGED", 2],
       ["AWAY_FROM_HOME", 1],

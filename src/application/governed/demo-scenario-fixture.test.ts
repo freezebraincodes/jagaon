@@ -14,15 +14,15 @@ describe("demo-scenario-fixture", () => {
     expect(fixture.displayNameZh).toBe("Mdm Tan");
     expect(fixture.defaultLocale).toBe("en-SG");
     expect(fixture.recordedPrescriptions.map((p) => p.displayName)).toEqual([
-      "Nocturin pen",
-      "Veltora pen",
+      "Lantus",
+      "Apidra",
     ]);
   });
 
   it("uses governed content keys only for the exact catalogue mappings", () => {
-    const [nocturin, veltora] = fixture.recordedPrescriptions;
-    expect(nocturin).toMatchObject({ medicationId: "insulin-glargine", genericName: "insulin glargine", hasReviewedInfo: true });
-    expect(veltora).toMatchObject({ medicationId: "insulin-aspart", genericName: "insulin aspart", hasReviewedInfo: true });
+    const [lantus, apidra] = fixture.recordedPrescriptions;
+    expect(lantus).toMatchObject({ medicationId: "insulin-glargine", genericName: "insulin glargine", hasReviewedInfo: true });
+    expect(apidra).toMatchObject({ medicationId: "insulin-glulisine", genericName: "insulin glulisine", hasReviewedInfo: true });
   });
 
   it("projects a completed setup verbatim, leaving unknown facts null", () => {

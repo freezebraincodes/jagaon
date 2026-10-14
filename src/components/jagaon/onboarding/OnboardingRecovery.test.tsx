@@ -34,7 +34,7 @@ describe("frame 22 — required medicine name", () => {
     click(en.shared.continue);
     expect(screen.getByRole("alert")).toHaveTextContent(en.onboarding.nameRequired);
 
-    fireEvent.click(screen.getByRole("radio", { name: /Nocturin pen/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Lantus/ }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     click(en.shared.continue);
     expect(heading(en.onboarding.directionsTitle)).toBeInTheDocument();
@@ -50,10 +50,10 @@ describe("frame 25 — removal confirmation", () => {
 
   it("opens an alert dialog on the safe action and cancels with Escape back to the card", () => {
     const { saves } = toList();
-    const remove = screen.getByRole("button", { name: en.onboarding.removeNamed("Nocturin pen") });
+    const remove = screen.getByRole("button", { name: en.onboarding.removeNamed("Lantus") });
     fireEvent.click(remove);
     const dialog = screen.getByRole("alertdialog", { name: en.onboarding.removeTitle });
-    expect(dialog).toHaveTextContent(en.onboarding.removeBody("Nocturin pen"));
+    expect(dialog).toHaveTextContent(en.onboarding.removeBody("Lantus"));
     expect(within(dialog).getByRole("button", { name: en.onboarding.keepIt })).toHaveFocus();
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
@@ -63,7 +63,7 @@ describe("frame 25 — removal confirmation", () => {
 
   it("removes only after confirmation and shows the empty list", () => {
     const { saves } = toList();
-    click(en.onboarding.removeNamed("Nocturin pen"));
+    click(en.onboarding.removeNamed("Lantus"));
     click(en.onboarding.removeMedicine);
     expect(saves.at(-1)!.medicines).toEqual([]);
     expect(screen.getByText(en.onboarding.emptyTitle)).toBeInTheDocument();
@@ -77,13 +77,13 @@ describe("frames 26 and 30 — resume and restart", () => {
     expect(screen.getByText(en.onboarding.resumeBody(4, en.onboarding.stepDirections))).toBeInTheDocument();
     const kept = screen.getByRole("region", { name: en.onboarding.kept });
     expect(kept).toHaveTextContent("Preferred name: Mdm Tan");
-    expect(kept).toHaveTextContent("1 medicine: Nocturin pen");
-    expect(screen.getByText(en.onboarding.continueAtStep(en.onboarding.directionsFor("Nocturin pen"), 4))).toBeInTheDocument();
+    expect(kept).toHaveTextContent("1 medicine: Lantus");
+    expect(screen.getByText(en.onboarding.continueAtStep(en.onboarding.directionsFor("Lantus"), 4))).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(en.onboarding.resumedAnnouncement);
     click(en.onboarding.continueFromStep(4));
     expect(heading(en.onboarding.directionsTitle)).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: en.insulin.medicineLabel })).toHaveTextContent("Nocturin pen");
+    expect(screen.getByRole("textbox", { name: en.insulin.medicineLabel })).toHaveTextContent("Lantus");
   });
 
   it("restart confirmation traps focus, cancels with Escape and returns focus", () => {
@@ -203,7 +203,7 @@ describe("frame 29 — language switched mid-setup", () => {
     fireEvent.click(screen.getByRole("radio", { name: en.settings.chinese }));
     click(zh.shared.continue);
     click(zh.shared.continue);
-    expect(screen.getByText("Nocturin pen")).toBeInTheDocument();
+    expect(screen.getByText("Lantus")).toBeInTheDocument();
     expect(screen.getByText("Inject 12 units every night")).toBeInTheDocument();
   });
 });

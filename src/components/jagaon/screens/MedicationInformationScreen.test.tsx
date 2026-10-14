@@ -31,7 +31,9 @@ describe("MedicationInformationScreen", () => {
         name: messages.medication.recordedHeading,
       });
 
-      expect(reviewed).toHaveTextContent(messages.shared.reviewedOn("2026-10-02"));
+      // Each leaflet carries its own review date: glargine 2026-10-02, glulisine (Apidra) 2026-10-14.
+      const reviewedDate = prescription.medicationId === "insulin-glulisine" ? "2026-10-14" : "2026-10-02";
+      expect(reviewed).toHaveTextContent(messages.shared.reviewedOn(reviewedDate));
       expect(within(reviewed).getByRole("link", { name: `${messages.shared.source}: HealthHub` }))
         .toHaveAttribute("href", expect.stringContaining("healthhub.sg"));
       expect(recorded).toHaveTextContent(prescription.recordedDirection!);

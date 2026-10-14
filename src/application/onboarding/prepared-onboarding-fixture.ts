@@ -26,7 +26,7 @@ function fromCatalogue(
 }
 
 const PREPARED_MEDICINES: readonly DemoOnboardingMedicine[] = Object.freeze([
-  fromCatalogue("nocturin-pen-demo", {
+  fromCatalogue("lantus-demo", {
     id: "00000000-0000-4000-8000-000000000101",
     form: "Pre-filled pen",
     strength: "100 units/mL",
@@ -36,7 +36,7 @@ const PREPARED_MEDICINES: readonly DemoOnboardingMedicine[] = Object.freeze([
     verbatimDirections: "Inject 12 units every night at 9 pm (demo label)",
     source: "PRESCRIPTION_LABEL",
   }),
-  fromCatalogue("veltora-pen-demo", {
+  fromCatalogue("apidra-demo", {
     id: "00000000-0000-4000-8000-000000000103",
     form: "Pre-filled pen",
     strength: "100 units/mL",

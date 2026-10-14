@@ -846,7 +846,7 @@ describe("JagaOnApp onboarding startup gate", () => {
     start(onboardingStorage({ ...createPreparedOnboardingState("zh-SG", NOW), preferredName: "陈女士（示例）" }));
     expect(await screen.findByRole("heading", { level: 1, name: zh.today.greeting("陈女士（示例）") })).toBeInTheDocument();
     expect(screen.getByRole("navigation")).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Nocturin pen" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Lantus" })).toBeInTheDocument();
   });
 
   it("opens a neutral Today with no medicines after an explicit skip, and adds one from there", async () => {
@@ -868,16 +868,16 @@ describe("JagaOnApp onboarding startup gate", () => {
     fireEvent.click(screen.getByRole("button", { name: en.onboarding.addMedicine }));
     expect(screen.getByRole("heading", { level: 1, name: en.medication.screenTitle })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: en.onboarding.addMedicine }));
-    fireEvent.click(screen.getByRole("radio", { name: /Veltora pen/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Apidra/ }));
     fireEvent.click(screen.getByRole("button", { name: en.shared.continue }));
     fireEvent.click(screen.getByRole("button", { name: en.onboarding.saveRecorded }));
     expect(screen.getByRole("heading", { level: 1, name: en.medication.screenTitle })).toBeInTheDocument();
     const saved = JSON.parse(storage.storage.getItem(DEMO_ONBOARDING_STORAGE_KEY)!);
     expect(saved).toMatchObject({ status: "COMPLETED" });
-    expect(saved.medicines[0]).toMatchObject({ displayName: "Veltora pen", reviewedContentKey: "insulin-aspart" });
+    expect(saved.medicines[0]).toMatchObject({ displayName: "Apidra", reviewedContentKey: "insulin-glulisine" });
 
     fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
-    expect(screen.getByRole("group", { name: "Veltora pen" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Apidra" })).toBeInTheDocument();
   });
 
   it("enters the journal from completion and hands Review my medicines to My medicines", async () => {

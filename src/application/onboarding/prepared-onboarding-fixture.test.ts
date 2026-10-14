@@ -16,7 +16,7 @@ describe("prepared onboarding fixture", () => {
 
   it("uses the same fictional catalogue and evidence mappings as the manual flow", () => {
     const state = createPreparedOnboardingState("en-SG", "2026-10-02T08:00:00.000Z");
-    expect(state.medicines.map((m) => m.displayName)).toEqual(["Nocturin pen", "Veltora pen"]);
+    expect(state.medicines.map((m) => m.displayName)).toEqual(["Lantus", "Apidra"]);
     for (const medicine of state.medicines) {
       const entry = findDemoCatalogueEntry(medicine.catalogueKey)!;
       expect(medicine.genericName).toBe(entry.genericName);

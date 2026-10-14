@@ -73,7 +73,7 @@ export function barrierPresentation(presentationKey = "p-1", presentedAt: string
     surface: "DIALOG",
     locale: "en-SG",
     content: {
-      leadIn: "You recorded Skipped for Nocturin pen (demo) on 2 Oct. Answering is optional.",
+      leadIn: "You recorded Skipped for Lantus (demo) on 2 Oct. Answering is optional.",
       question: "Would you like to record anything that made this difficult?",
       options: [
         { optionKey: "FORGOT", label: "Forgot" },

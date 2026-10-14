@@ -21,8 +21,8 @@ function fakeTerminology(): VoiceTerminologyPort & { terms: FakeTerm[]; remember
   let next = 0;
   const id = () => `00000000-0000-4000-8000-${String(++next).padStart(12, "0")}`;
   const medicines = [
-    { medication: DARK, names: ["Nocturin pen (demo)"] },
-    { medication: GREY, names: ["Veltora pen (demo)"] },
+    { medication: DARK, names: ["Lantus (demo)"] },
+    { medication: GREY, names: ["Apidra (demo)"] },
   ];
   return {
     terms,
@@ -269,8 +269,8 @@ describe("Tell JagaOn screen", () => {
     await speakAndStop(context);
     fireEvent.click(await screen.findByRole("button", { name: context.pending.card.chooseMedicine }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByLabelText("Veltora pen (demo)"));
-    fireEvent.click(within(dialog).getByLabelText(context.pending.card.rememberLabel("grey pen", "Veltora pen (demo)")));
+    fireEvent.click(within(dialog).getByLabelText("Apidra (demo)"));
+    fireEvent.click(within(dialog).getByLabelText(context.pending.card.rememberLabel("grey pen", "Apidra (demo)")));
     fireEvent.click(within(dialog).getByRole("button", { name: context.pending.card.chooseMedicine }));
     await waitFor(() => expect(context.terminology.remember).toHaveBeenCalledWith({ language: "en", phrase: "grey pen", medication: GREY }));
     // Remembering records nothing.
@@ -283,7 +283,7 @@ describe("Tell JagaOn screen", () => {
     fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
     fireEvent.click(await screen.findByRole("button", { name: context.messages.voice.entry }));
     await speakAndStop(context);
-    expect(await screen.findByText("Veltora pen (demo)")).toBeInTheDocument();
+    expect(await screen.findByText("Apidra (demo)")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: context.pending.card.chooseMedicine })).toBeNull();
     expect(context.onSaveFacts).toHaveBeenCalledTimes(1);
   });
@@ -302,7 +302,7 @@ describe("Tell JagaOn screen", () => {
     expect(screen.queryByText(saving.pending.card.amountNotSaved)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: saving.pending.card.chooseMedicine }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByLabelText("Veltora pen (demo)"));
+    fireEvent.click(within(dialog).getByLabelText("Apidra (demo)"));
     fireEvent.click(within(dialog).getByRole("button", { name: saving.pending.card.chooseMedicine }));
     fireEvent.click(await screen.findByRole("button", { name: saving.pending.card.save }));
     await waitFor(() => expect(saving.onSaveFacts).toHaveBeenCalledWith({ kind: "MEDICATION_EVENT", medication: GREY, status: "TAKEN", reportedAmount: { valueText: "10", unitText: "units" } }));
@@ -893,9 +893,9 @@ describe("Tell JagaOn screen", () => {
       const context = setup({ text: "I injected my grey pen" });
       context.terminology.terms.push({ recordId: "00000000-0000-4000-8000-0000000000a1", revisionId: "00000000-0000-4000-8000-0000000000b1", language: "en", phrase: "grey pen", medication: GREY });
       await speakAndStop(context);
-      expect(await screen.findByText("Veltora pen (demo)")).toBeInTheDocument();
+      expect(await screen.findByText("Apidra (demo)")).toBeInTheDocument();
       const details = openTerms(context.pending.terms.heading);
-      expect(await within(details).findByText(context.pending.terms.meaning("grey pen", "Veltora pen (demo)"))).toBeInTheDocument();
+      expect(await within(details).findByText(context.pending.terms.meaning("grey pen", "Apidra (demo)"))).toBeInTheDocument();
       fireEvent.click(within(details).getByRole("button", { name: `${context.pending.terms.forget} “grey pen”` }));
       const dialog = screen.getByRole("dialog");
       expect(dialog).toHaveTextContent(context.pending.terms.forgetTitle);
@@ -917,21 +917,21 @@ describe("Tell JagaOn screen", () => {
       const context = setup({ text: "I injected my grey pen" });
       context.terminology.terms.push({ recordId: "00000000-0000-4000-8000-0000000000a2", revisionId: "00000000-0000-4000-8000-0000000000b2", language: "en", phrase: "grey pen", medication: GREY });
       await speakAndStop(context);
-      await screen.findByText("Veltora pen (demo)");
+      await screen.findByText("Apidra (demo)");
       const details = openTerms(context.pending.terms.heading);
       fireEvent.click(await within(details).findByRole("button", { name: `${context.pending.terms.change} “grey pen”` }));
       const dialog = screen.getByRole("dialog");
       expect(dialog).toHaveTextContent(context.pending.terms.changeTitle("grey pen"));
-      fireEvent.click(within(dialog).getByLabelText("Nocturin pen (demo)"));
+      fireEvent.click(within(dialog).getByLabelText("Lantus (demo)"));
       expect(within(dialog).queryByRole("checkbox")).toBeNull();
       fireEvent.click(within(dialog).getByRole("button", { name: context.pending.card.chooseMedicine }));
       expect(await within(details).findByText(context.pending.terms.changed)).toBeInTheDocument();
-      expect(await within(details).findByText(context.pending.terms.meaning("grey pen", "Nocturin pen (demo)"))).toBeInTheDocument();
+      expect(await within(details).findByText(context.pending.terms.meaning("grey pen", "Lantus (demo)"))).toBeInTheDocument();
       expect(context.terminology.change).toHaveBeenCalledWith({ recordId: "00000000-0000-4000-8000-0000000000a2", expectedRevisionId: "00000000-0000-4000-8000-0000000000b2", medication: DARK });
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
       fireEvent.click(await screen.findByRole("button", { name: context.messages.voice.entry }));
       await speakAndStop(context);
-      expect(await screen.findByText("Nocturin pen (demo)")).toBeInTheDocument();
+      expect(await screen.findByText("Lantus (demo)")).toBeInTheDocument();
       expect(context.onSaveFacts).not.toHaveBeenCalled();
     });
 
@@ -939,20 +939,20 @@ describe("Tell JagaOn screen", () => {
       const context = setup({ locale: "zh-SG", text: "我打了灰色的笔" });
       context.terminology.terms.push({ recordId: "00000000-0000-4000-8000-0000000000a3", revisionId: "00000000-0000-4000-8000-0000000000b3", language: "zh", phrase: "灰色的笔", medication: GREY });
       await speakAndStop(context);
-      await screen.findByText("Veltora pen (demo)");
+      await screen.findByText("Apidra (demo)");
       const details = openTerms(context.pending.terms.heading);
       fireEvent.click(await within(details).findByRole("button", { name: `${context.pending.terms.change} “灰色的笔”` }));
       context.terminology.terms[0]!.revisionId = "00000000-0000-4000-8000-0000000000c3";
       const dialog = screen.getByRole("dialog");
-      fireEvent.click(within(dialog).getByLabelText("Nocturin pen (demo)"));
+      fireEvent.click(within(dialog).getByLabelText("Lantus (demo)"));
       fireEvent.click(within(dialog).getByRole("button", { name: context.pending.card.chooseMedicine }));
       expect(await within(details).findByText(context.pending.terms.stale)).toBeInTheDocument();
-      expect(await within(details).findByText(context.pending.terms.meaning("灰色的笔", "Veltora pen (demo)"))).toBeInTheDocument();
+      expect(await within(details).findByText(context.pending.terms.meaning("灰色的笔", "Apidra (demo)"))).toBeInTheDocument();
       fireEvent.click(within(details).getByRole("button", { name: `${context.pending.terms.forget} “灰色的笔”` }));
       fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(context.terminology.forget).not.toHaveBeenCalled();
-      expect(within(details).getByText(context.pending.terms.meaning("灰色的笔", "Veltora pen (demo)"))).toBeInTheDocument();
+      expect(within(details).getByText(context.pending.terms.meaning("灰色的笔", "Apidra (demo)"))).toBeInTheDocument();
     });
 
     it("terminology review #2: a medicine phrase with a time or amount word is never offered for remembering", async () => {
@@ -960,7 +960,7 @@ describe("Tell JagaOn screen", () => {
       await speakAndStop(context);
       fireEvent.click(await screen.findByRole("button", { name: context.pending.card.chooseMedicine }));
       const dialog = await screen.findByRole("dialog");
-      fireEvent.click(within(dialog).getByLabelText("Veltora pen (demo)"));
+      fireEvent.click(within(dialog).getByLabelText("Apidra (demo)"));
       expect(within(dialog).queryByRole("checkbox")).toBeNull();
     });
   });
