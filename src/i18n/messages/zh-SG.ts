@@ -62,6 +62,16 @@ export const zhSGMessages: AppMessages = {
     previewTag: "预览",
     moreBadgeLabel: (count) => `${count} 项护理检查到期`,
   },
+  // Owner decision 2026-10-14 (HSA-bounded mode, PREVIEW): draft, human acceptance pending (English-only demo scope).
+  hsaMealIdeas: {
+    headingBreakfast: "早餐饮食建议",
+    headingLunch: "午餐饮食建议",
+    headingDinner: "晚餐饮食建议",
+    intro: "人们常尝试的较低升糖指数替换：",
+    swapJoin: "可改为",
+    findPlaces: "查找附近较健康的餐饮地点",
+    note: "仅为一般建议，并非饮食计划。",
+  },
   // Owner decision 2026-10-12: My notes (human acceptance pending).
   myNotes: {
     title: "我的笔记",

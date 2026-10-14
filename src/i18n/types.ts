@@ -1147,6 +1147,17 @@ export type AppMessages = {
     previewTag: string;
     moreBadgeLabel: (count: number) => string;
   };
+  /** Owner decision 2026-10-14 (HSA-bounded mode, PREVIEW): the Today "Meal ideas" tile; the swaps themselves are static English data. */
+  hsaMealIdeas: {
+    headingBreakfast: string;
+    headingLunch: string;
+    headingDinner: string;
+    intro: string;
+    /** Read between the two halves of a swap by screen readers (the arrow is hidden). */
+    swapJoin: string;
+    findPlaces: string;
+    note: string;
+  };
   /** Owner decision 2026-10-12: My notes, reached from More (first version: the destination only). */
   myNotes: {
     title: string;

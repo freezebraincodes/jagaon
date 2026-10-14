@@ -39,6 +39,7 @@ import {
 import { storedGlucoseContextLabel } from "../journal/glucose-context";
 import { labelAndValue } from "../locale-format";
 import { sourceLabel } from "../onboarding/medicine-labels";
+import { MealIdeasCard } from "../hsa/MealIdeasCard";
 
 type TodayScreenProps = {
   messages: AppMessages;
@@ -435,6 +436,9 @@ export function TodayScreen({
           </p>
         </div>
       </section>
+
+      {/* Owner decision 2026-10-14: PREVIEW meal ideas, shown only while HSA-bounded mode is off. */}
+      <MealIdeasCard messages={messages} now={now} navigate={navigate} />
 
       <section className="today-card" aria-labelledby="care-planning-heading">
         <h2 id="care-planning-heading" className="eyebrow">
