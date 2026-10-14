@@ -62,6 +62,16 @@ export const enSGMessages: AppMessages = {
     previewTag: "Preview",
     moreBadgeLabel: (count) => `${count} care ${count === 1 ? "check" : "checks"} due`,
   },
+  // Owner decision 2026-10-14 (HSA-bounded mode, PREVIEW): the Today "Meal ideas" tile.
+  hsaMealIdeas: {
+    headingBreakfast: "Meal ideas for breakfast",
+    headingLunch: "Meal ideas for lunch",
+    headingDinner: "Meal ideas for dinner",
+    intro: "Lower-GI swaps people often try:",
+    swapJoin: "instead, try",
+    findPlaces: "Find healthier places nearby",
+    note: "General ideas, not a diet plan.",
+  },
   // Owner decision 2026-10-12: My notes replaces the Reminders tile on More; details to follow.
   myNotes: {
     title: "My notes",
