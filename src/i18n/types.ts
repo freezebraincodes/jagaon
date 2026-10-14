@@ -1021,6 +1021,42 @@ export type VoiceMessages = {
   redirect: { body: string; transcribedNote: string };
 };
 
+/**
+ * Tell JagaOn understands more (design §3.1): the feelings chat dialog. en-SG: the AI notice is the owner's approved wording
+ * (2026-10-14), the rest is new wording; zh-SG: drafts, human acceptance pending (English-only hackathon scope).
+ */
+export type FeelingsChatMessages = {
+  title: string;
+  notice: string;
+  continue: string;
+  saveWithoutAi: string;
+  you: string;
+  jagaon: string;
+  answerLabel: string;
+  send: string;
+  skip: string;
+  endChat: string;
+  loading: string;
+  questionAnnouncement: (question: string) => string;
+  fallbackNotice: string;
+  creditLimitNotice: string;
+  wrapUpTitle: string;
+  summaryLabel: string;
+  summaryHint: string;
+  doctorQuestionTitle: string;
+  doctorQuestionHint: string;
+  addToQuestions: string;
+  noThanks: string;
+  questionAdded: string;
+  questionNotAdded: string;
+  saveNote: string;
+  dontSave: string;
+  saving: string;
+  saved: string;
+  saveFailed: string;
+  done: string;
+};
+
 export type AppMessages = {
   /** Packet 10 data, backup, restore, deletion and integrity copy. */
   packet10: Packet10Messages;
@@ -1055,4 +1091,6 @@ export type AppMessages = {
   preventiveCare: PreventiveCareMessages;
   carePreparation: CarePreparationMessages;
   careSummary: CareSummaryMessages;
+  /** Tell JagaOn understands more: the feelings chat dialog (en notice owner-approved 2026-10-14; zh drafts, acceptance pending). */
+  feelingsChat: FeelingsChatMessages;
 };

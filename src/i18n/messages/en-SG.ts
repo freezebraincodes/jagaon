@@ -992,4 +992,38 @@ export const enSGMessages: AppMessages = {
     // Packet 11C B1a (D3), new wording, human acceptance pending.
     templateSuperseded: "This summary was made with an earlier version of JagaOn. Prepare it again before you approve it.",
   },
+  // Tell JagaOn understands more (design §3.1): the feelings chat dialog. `notice`, `continue` and `saveWithoutAi` are the owner's
+  // approved wording (2026-10-14); the rest is new wording, human acceptance pending.
+  feelingsChat: {
+    title: "Talk it through",
+    notice:
+      "To ask you follow-up questions, JagaOn sends what you write in this chat to an AI service. It does not send your readings, medicines or name. Do not enter real patient information in this hackathon demo.",
+    continue: "Continue",
+    saveWithoutAi: "Save as a note without AI",
+    you: "You",
+    jagaon: "JagaOn",
+    answerLabel: "Your answer",
+    send: "Send",
+    skip: "Skip",
+    endChat: "End chat",
+    loading: "JagaOn is thinking…",
+    questionAnnouncement: (question) => `JagaOn asks: ${question}`,
+    fallbackNotice: "Using JagaOn's standard questions.",
+    creditLimitNotice: "This demo has used up its AI credit for today, so JagaOn is using its standard questions.",
+    wrapUpTitle: "Your note",
+    summaryLabel: "Summary for your note",
+    summaryHint: "You can change this before you save.",
+    doctorQuestionTitle: "A question for your doctor",
+    doctorQuestionHint: "In your own words. You can change it.",
+    addToQuestions: "Add to my questions",
+    noThanks: "No, thanks",
+    questionAdded: "Added to your questions in Prepare for my appointment.",
+    questionNotAdded: "Could not add the question. Please try again.",
+    saveNote: "Save note",
+    dontSave: "Don't save",
+    saving: "Saving…",
+    saved: "Saved to My notes.",
+    saveFailed: "Could not save the note. Please try again.",
+    done: "Done",
+  },
 };

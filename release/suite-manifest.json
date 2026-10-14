@@ -293,6 +293,7 @@
             "src/components/jagaon/data/DataBackupScreen.test.tsx",
             "src/components/jagaon/data/RestoreBackupPanel.test.tsx",
             "src/components/jagaon/data/data-components.test.tsx",
+            "src/components/jagaon/feelings/FeelingsChatDialog.test.tsx",
             "src/components/jagaon/history/HistoryReadingsChart.test.tsx",
             "src/components/jagaon/history/PatternExplanationPanel.test.tsx",
             "src/components/jagaon/nearby-food/OneMapView.test.tsx",
