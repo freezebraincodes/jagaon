@@ -536,7 +536,9 @@ describe("Packet 11B Kie server-only boundary", () => {
   it("builds every Kie Responses request in the one retention-safe adapter used by the route and the live runners", () => {
     const builders = all("src").filter((file) => /stream:\s*false/.test(readFileSync(join(PROJECT_ROOT, file), "utf8")));
     // Packet 13 (P13X): plus the transcript-extraction body builder (its own prompt/schema; same stream/store literals, pinned there).
-    expect(builders).toEqual(["src/ai/kie/kie-responses-provider.ts", "src/ai/transcript-extraction/transcript-extraction-request.ts"]);
+    // Tell JagaOn understands more (owner-approved design 2026-10-14, deliberate): plus the feelings-chat body builder (its own prompt and
+    // schema; the same stream/store literals, pinned below; server-only, reached only from POST /api/ai/feelings).
+    expect(builders).toEqual(["src/ai/feelings-chat/feelings-chat-request.ts", "src/ai/kie/kie-responses-provider.ts", "src/ai/transcript-extraction/transcript-extraction-request.ts"]);
     for (const builder of builders) expect(readFileSync(join(PROJECT_ROOT, builder), "utf8")).toMatch(/stream: false,\s*store: false,/);
     for (const file of ["src/ai/evaluation/packet-11-live-kie.test.ts", "src/ai/evaluation/packet-11-live-latency.test.ts"]) {
       const source = readFileSync(join(PROJECT_ROOT, file), "utf8");
