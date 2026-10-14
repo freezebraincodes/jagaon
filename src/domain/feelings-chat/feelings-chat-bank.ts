@@ -7,7 +7,8 @@ import { voiceFeelingGroupOf, type VoiceFeelingGroup } from "../voice/voice-feel
  * never written by AI; the fallback questions are used whenever the AI is off, unavailable or its reply is rejected. English only (the
  * hackathon scope); the dialog shows these exact strings.
  */
-export const FEELINGS_CHAT_BANK_VERSION = "feelings-chat-bank.1";
+/** feelings-chat-bank.2 (owner-approved 2026-10-15): a warmer good-feeling sentence, the encouragement lines and the closing line. */
+export const FEELINGS_CHAT_BANK_VERSION = "feelings-chat-bank.2";
 
 export const KIND_SENTENCE_KEYS = Object.freeze(["SAD_OR_LOW", "STRESSED", "TIRED", "WORRIED", "HAPPY_OR_GOOD", "OTHER"] as const);
 export type KindSentenceKey = (typeof KIND_SENTENCE_KEYS)[number];
@@ -18,9 +19,31 @@ export const KIND_SENTENCES: Readonly<Record<KindSentenceKey, string>> = Object.
   WORRIED: "It sounds like something has been on your mind. Thank you for sharing it.",
   STRESSED: "That sounds like a lot to carry. Thank you for telling me.",
   SAD_OR_LOW: "I'm sorry today feels hard. Thank you for sharing how you feel.",
-  HAPPY_OR_GOOD: "It's good to hear that. Thank you for sharing it.",
+  HAPPY_OR_GOOD: "That's wonderful to hear. Well done for keeping it up.",
   OTHER: "Thank you for telling me how you feel.",
 });
+
+/**
+ * Owner decision 2026-10-15 (feelings-chat-bank.2): when she asks for encouragement or motivation in the chat, JagaOn shows ONE of
+ * these reviewed lines (once per chat) before its next question. Never written by AI; nothing about sugar, results or what to do.
+ */
+export const ENCOURAGEMENT_LINES: Readonly<{ GOOD: string; HARD: string }> = Object.freeze({
+  GOOD: "You've been showing up for yourself, and that's worth being proud of.",
+  HARD: "Things feel hard right now, and it still took courage to talk about it.",
+});
+
+/** Owner decision 2026-10-15: the closing line on the note screen after a chat about a good feeling (shown, not saved). */
+export const GOOD_FEELING_CLOSING_LINE = "Well done. Noticing what's going well matters.";
+
+/** Her words ask for encouragement or motivation ("can you give me some encouragement", "motivate me", "cheer me up"). */
+export function asksForEncouragement(text: string): boolean {
+  return /(?<![a-z])(?:encourage(?:ment)?|motivate|motivation|cheer\s+me\s+up|pep\s+talk|say\s+something\s+(?:nice|positive|kind)|kind\s+words|positive\s+words)(?![a-z])/i.test(text);
+}
+
+/** The encouragement line for this chat: the good-feeling line after a good feeling, the other line otherwise. */
+export function encouragementLineFor(kindKey: KindSentenceKey): string {
+  return kindKey === "HAPPY_OR_GOOD" ? ENCOURAGEMENT_LINES.GOOD : ENCOURAGEMENT_LINES.HARD;
+}
 
 /** The owner-approved fallback questions by turn, exact. */
 export const FALLBACK_QUESTIONS: readonly string[] = Object.freeze([

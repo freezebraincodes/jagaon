@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FeelingsChatPort, FeelingsChatTurnResult } from "@/application/feelings-chat/feelings-chat-port";
 import { isFeelingsChatCreditLimit } from "@/application/feelings-chat/feelings-chat-route-contract";
-import { fallbackQuestion, feelingsChatBankReply, kindSentenceFor } from "@/domain/feelings-chat/feelings-chat-bank";
+import { GOOD_FEELING_CLOSING_LINE, asksForEncouragement, encouragementLineFor, fallbackQuestion, feelingsChatBankReply, kindSentenceFor } from "@/domain/feelings-chat/feelings-chat-bank";
 import { FEELINGS_CHAT_MAX_TURNS, FEELINGS_CHAT_MESSAGE_MAX_CHARS, FEELINGS_CHAT_TASK, isFeelingsChatSafetyStop, type FeelingsChatMessage } from "@/domain/feelings-chat/feelings-chat-contract";
 import { FEELINGS_CHAT_PROMPT_VERSION } from "@/domain/feelings-chat/feelings-chat-prompt";
 import type { NoteThemeKey } from "@/domain/notes/note-themes";
@@ -103,6 +103,8 @@ export function FeelingsChatDialog({ messages, initialText, cueKeys, chat, detec
   const [announcement, setAnnouncement] = useState("");
   // True while "Speak my answer" is open (notice, recording); Send, Skip and End chat wait for it.
   const [voiceBusy, setVoiceBusy] = useState(false);
+  // Owner decision 2026-10-15: the reviewed encouragement line is shown at most once per chat (it keeps a saved note within 7 lines).
+  const [encouraged, setEncouraged] = useState(false);
 
   const mounted = useRef(true);
   const inFlight = useRef<AbortController | null>(null);
@@ -214,6 +216,12 @@ export function FeelingsChatDialog({ messages, initialText, cueKeys, chat, detec
     if (text.length > 0) {
       chatHistory = [...history, { role: "jagaon_question", text: question }, { role: "patient", text }];
       chatTurns = [...turns, { role: "PATIENT", text, source: "PATIENT" }];
+      // Owner decision 2026-10-15: she asked for encouragement: JagaOn's reviewed line answers first (never sent to the AI).
+      if (!encouraged && asksForEncouragement(text)) {
+        const line = encouragementLineFor(kind.key);
+        chatTurns = [...chatTurns, { role: "JAGAON_KIND_SENTENCE", text: line, source: "REVIEWED_BANK" }];
+        setEncouraged(true);
+      }
     }
     // A skipped question is kept in her note but not sent again: the history she sends keeps alternating.
     setHistory(chatHistory);
@@ -407,6 +415,8 @@ export function FeelingsChatDialog({ messages, initialText, cueKeys, chat, detec
     >
       {transcript}
       {notices}
+      {/* Owner decision 2026-10-15: a closing line after a chat about a good feeling (shown only; not part of the saved note). */}
+      {kind.key === "HAPPY_OR_GOOD" ? <p className="feelings-chat-closing">{GOOD_FEELING_CLOSING_LINE}</p> : null}
       <TextareaField ref={summaryRef} label={t.summaryLabel} hint={t.summaryHint} value={summary} maxLength={1000} rows={2} onChange={(event) => setSummary(event.target.value)} />
       {doctorOffered ? (
         <div className="feelings-chat-doctor-question">
