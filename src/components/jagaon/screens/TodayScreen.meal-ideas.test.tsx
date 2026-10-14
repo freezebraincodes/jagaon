@@ -88,6 +88,23 @@ describe("Today meal ideas (HSA preview)", () => {
     for (const item of items) expect(swaps.map((swap) => swap.from)).toContain(item.querySelector(".meal-ideas-from")?.textContent);
   });
 
+  it("owner decision 2026-10-15: Show other ideas (top right) moves on by three swaps per tap and never repeats within the meal's list", async () => {
+    store.set(HSA_BOUNDED_MODE_STORAGE_KEY, "off");
+    show(BREAKFAST);
+    const card = (await screen.findByRole("heading", { name: en.hsaMealIdeas.headingBreakfast })).closest("section")!;
+    expect(en.hsaMealIdeas.intro).toBe("Healthier swaps people often try:");
+    const refresh = within(card).getByRole("button", { name: en.hsaMealIdeas.refresh });
+    const shown = () => within(card).getAllByRole("listitem").map((item) => item.querySelector(".meal-ideas-from")?.textContent);
+    const seen = new Set(shown());
+    for (let tap = 1; tap < MEAL_IDEAS.BREAKFAST.length / 3; tap += 1) {
+      fireEvent.click(refresh);
+      const now = shown();
+      expect(now).toEqual(pickMealIdeas(MEAL_IDEAS.BREAKFAST, BREAKFAST, 3, tap).map((swap) => swap.from));
+      for (const from of now) seen.add(from);
+    }
+    expect(seen.size).toBe(MEAL_IDEAS.BREAKFAST.length);
+  });
+
   it("OFF: Find healthier places nearby opens Food information with Higher in wholegrains chosen", async () => {
     store.set(HSA_BOUNDED_MODE_STORAGE_KEY, "off");
     const { navigate } = show(LUNCH);

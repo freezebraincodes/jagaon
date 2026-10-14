@@ -36,11 +36,15 @@ export function mealIdeaSlotAt(now: Date): MealIdeaSlot {
   return "DINNER";
 }
 
-/** `count` swaps for the given Singapore day, rotating through the list by day. */
-export function pickMealIdeas(swaps: readonly MealSwap[], now: Date, count: number = MEAL_IDEAS_SHOWN): MealSwap[] {
+/**
+ * `count` swaps for the given Singapore day, rotating through the list by day. Owner decision 2026-10-15: `step` is how many times she
+ * tapped "Show other ideas"; each tap moves on by `count` (wrapping), so every swap of the meal is reached before any repeats.
+ */
+export function pickMealIdeas(swaps: readonly MealSwap[], now: Date, count: number = MEAL_IDEAS_SHOWN, step = 0): MealSwap[] {
   if (swaps.length === 0 || count <= 0) return [];
   const shown = Math.min(count, swaps.length);
   const { dayNumber } = singaporeWallClock(now);
-  const start = (((dayNumber * shown) % swaps.length) + swaps.length) % swaps.length;
+  const steps = Number.isSafeInteger(step) && step > 0 ? step : 0;
+  const start = ((((dayNumber + steps) * shown) % swaps.length) + swaps.length) % swaps.length;
   return Array.from({ length: shown }, (_, index) => swaps[(start + index) % swaps.length]!);
 }
