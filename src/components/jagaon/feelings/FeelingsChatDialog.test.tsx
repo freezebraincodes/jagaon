@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFakeFeelingsChatPort, type FakeFeelingsChatStep } from "@/application/feelings-chat/feelings-chat-fake-port";
-import { FALLBACK_QUESTIONS, KIND_SENTENCES } from "@/domain/feelings-chat/feelings-chat-bank";
+import { ENCOURAGEMENT_LINES, FALLBACK_QUESTIONS, GOOD_FEELING_CLOSING_LINE, KIND_SENTENCES } from "@/domain/feelings-chat/feelings-chat-bank";
 import { getMessages } from "@/i18n/get-messages";
 import { FeelingsChatDialog, type FeelingsChatNote } from "./FeelingsChatDialog";
 
@@ -270,5 +270,41 @@ describe("FeelingsChatDialog", () => {
         else expect(value.length, `${locale}.${key}`).toBeGreaterThan(0);
       }
     }
+  });
+
+  it("owner decision 2026-10-15: asking for encouragement shows the reviewed line once, before the next question; it is saved but never sent", async () => {
+    const { port, onSave } = setup([ask(Q1), ask(Q2), WRAP], { cueKeys: ["proud"] });
+    fireEvent.click(button(t.continue));
+    expect(screen.getByText(KIND_SENTENCES.HAPPY_OR_GOOD)).toBeInTheDocument();
+    await screen.findByText(Q1);
+    await answer("can you give me some encouragement");
+    await screen.findByText(Q2);
+    const lines = screen.getAllByRole("listitem").map((item) => item.textContent);
+    const encouragement = lines.findIndex((line) => line?.includes(ENCOURAGEMENT_LINES.GOOD));
+    expect(encouragement).toBeGreaterThan(lines.findIndex((line) => line?.includes("can you give me some encouragement")));
+    expect(encouragement).toBeLessThan(lines.findIndex((line) => line?.includes(Q2)));
+    // Asking again in the same chat shows no second line.
+    await answer("motivate me");
+    await screen.findByRole("textbox", { name: t.summaryLabel });
+    expect(screen.getAllByText(ENCOURAGEMENT_LINES.GOOD)).toHaveLength(1);
+    // The AI only ever sees her words and its own questions.
+    for (const request of port.requests()) expect(request.messages.map((message) => message.text)).not.toContain(ENCOURAGEMENT_LINES.GOOD);
+    // A good-feeling chat ends with the reviewed closing line.
+    expect(screen.getByText(GOOD_FEELING_CLOSING_LINE)).toBeInTheDocument();
+    fireEvent.click(button(t.saveNote));
+    await screen.findByText(t.saved, { selector: "[role=status]" });
+    const turns = onSave.mock.calls[0]![0].turns;
+    expect(turns).toHaveLength(7);
+    expect(turns[4]).toEqual({ role: "JAGAON_KIND_SENTENCE", text: ENCOURAGEMENT_LINES.GOOD, source: "REVIEWED_BANK" });
+  });
+
+  it("owner decision 2026-10-15: after a difficult feeling the encouragement is the other line, and there is no good-feeling closing line", async () => {
+    setup([ask(Q1), WRAP], { cueKeys: ["down"] });
+    fireEvent.click(button(t.continue));
+    await screen.findByText(Q1);
+    await answer("I need some motivation");
+    expect(await screen.findByText(ENCOURAGEMENT_LINES.HARD)).toBeInTheDocument();
+    await screen.findByRole("textbox", { name: t.summaryLabel });
+    expect(screen.queryByText(GOOD_FEELING_CLOSING_LINE)).toBeNull();
   });
 });

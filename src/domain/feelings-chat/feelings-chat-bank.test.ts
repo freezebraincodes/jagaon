@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { FALLBACK_QUESTIONS, FEELINGS_CHAT_BANK_VERSION, KIND_SENTENCES, fallbackQuestion, feelingsChatBankReply, kindSentenceFor } from "./feelings-chat-bank";
+import { ENCOURAGEMENT_LINES, FALLBACK_QUESTIONS, FEELINGS_CHAT_BANK_VERSION, GOOD_FEELING_CLOSING_LINE, KIND_SENTENCES, asksForEncouragement, encouragementLineFor, fallbackQuestion, feelingsChatBankReply, kindSentenceFor } from "./feelings-chat-bank";
 
 /** Tell JagaOn understands more (design §3.4): the reviewed bank, with the owner-approved wording (2026-10-14) pinned exactly. */
 
-describe("feelings-chat reviewed bank (feelings-chat-bank.1)", () => {
+describe("feelings-chat reviewed bank (feelings-chat-bank.2)", () => {
   it("holds the owner-approved kind sentences and fallback questions, exactly", () => {
-    expect(FEELINGS_CHAT_BANK_VERSION).toBe("feelings-chat-bank.1");
+    expect(FEELINGS_CHAT_BANK_VERSION).toBe("feelings-chat-bank.2");
     expect(KIND_SENTENCES).toEqual({
       TIRED: "That sounds like a tiring day. Thank you for telling me.",
       WORRIED: "It sounds like something has been on your mind. Thank you for sharing it.",
       STRESSED: "That sounds like a lot to carry. Thank you for telling me.",
       SAD_OR_LOW: "I'm sorry today feels hard. Thank you for sharing how you feel.",
-      HAPPY_OR_GOOD: "It's good to hear that. Thank you for sharing it.",
+      HAPPY_OR_GOOD: "That's wonderful to hear. Well done for keeping it up.",
       OTHER: "Thank you for telling me how you feel.",
     });
     expect(FALLBACK_QUESTIONS).toEqual(["What has been on your mind?", "How has this been affecting your day?", "Is there anything you'd like to remember to tell your doctor?"]);
@@ -57,5 +57,22 @@ describe("feelings-chat reviewed bank (feelings-chat-bank.1)", () => {
     const long = feelingsChatBankReply({ turn: 3, maxTurns: 3, messages: [{ role: "patient", text: "word ".repeat(60) }] });
     expect(Array.from(long.summary!).length).toBeLessThanOrEqual(160);
     expect(long.summary!.endsWith("…")).toBe(true);
+  });
+
+  it("feelings-chat-bank.2: the owner-approved encouragement and closing lines, exact", () => {
+    expect(ENCOURAGEMENT_LINES).toEqual({
+      GOOD: "You've been showing up for yourself, and that's worth being proud of.",
+      HARD: "Things feel hard right now, and it still took courage to talk about it.",
+    });
+    expect(GOOD_FEELING_CLOSING_LINE).toBe("Well done. Noticing what's going well matters.");
+    expect(encouragementLineFor("HAPPY_OR_GOOD")).toBe(ENCOURAGEMENT_LINES.GOOD);
+    for (const key of ["SAD_OR_LOW", "STRESSED", "TIRED", "WORRIED", "OTHER"] as const) expect(encouragementLineFor(key)).toBe(ENCOURAGEMENT_LINES.HARD);
+  });
+
+  it("recognises a request for encouragement or motivation, and not a statement of feeling motivated", () => {
+    for (const text of ["can you give me some encouragement", "Motivate me please", "I need some motivation", "cheer me up", "say something nice", "any kind words?", "encourage me"]) {
+      expect(asksForEncouragement(text), text).toBe(true);
+    }
+    for (const text of ["I feel motivated", "my family is encouraging", "I walked every morning", "nice weather"]) expect(asksForEncouragement(text), text).toBe(false);
   });
 });

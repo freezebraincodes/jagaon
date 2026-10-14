@@ -12,13 +12,13 @@ describe("reviewed kind sentences for Save as a note", () => {
       WORRIED: "It sounds like something has been on your mind. Thank you for sharing it.",
       STRESSED: "That sounds like a lot to carry. Thank you for telling me.",
       SAD_LOW: "I'm sorry today feels hard. Thank you for sharing how you feel.",
-      HAPPY_GOOD: "It's good to hear that. Thank you for sharing it.",
+      HAPPY_GOOD: "That's wonderful to hear. Well done for keeping it up.",
       OTHER: "Thank you for telling me how you feel.",
     });
   });
 
   it("is one table with the feelings-chat bank: the same strings, version and choice for every recognised cue", () => {
-    expect(NOTE_KIND_SENTENCES_VERSION).toBe("feelings-chat-bank.1");
+    expect(NOTE_KIND_SENTENCES_VERSION).toBe("feelings-chat-bank.2");
     expect(new Set(Object.values(NOTE_KIND_SENTENCES))).toEqual(new Set(Object.values(KIND_SENTENCES)));
     for (const cue of VOICE_FEELING_CUES.cues) {
       expect(noteKindSentenceFor([cue.key]), cue.key).toBe(kindSentenceFor([cue.key]).text);
@@ -38,7 +38,7 @@ describe("reviewed kind sentences for Save as a note", () => {
     expect(noteKindSentenceFor(["better", "exhausted"])).toBe(NOTE_KIND_SENTENCES.TIRED);
     expect(noteKindSentenceFor(["worried", "calm"])).toBe(NOTE_KIND_SENTENCES.WORRIED);
     expect(noteKindSentenceFor(["okay"])).toBe(NOTE_KIND_SENTENCES.HAPPY_GOOD);
-    // A negated cue has no group: "not good" never gets "It's good to hear that".
+    // A negated cue has no group: "not good" never gets "That's wonderful to hear".
     expect(noteKindSentenceFor(["not-good"])).toBe(NOTE_KIND_SENTENCES.OTHER);
     expect(noteKindSentenceFor(["not-good", "tired"])).toBe(NOTE_KIND_SENTENCES.TIRED);
     expect(noteKindSentenceFor([])).toBe(NOTE_KIND_SENTENCES.OTHER);

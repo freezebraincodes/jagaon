@@ -6269,6 +6269,15 @@ button.summary-tile:hover:not(:disabled) {
   flex: 1 1 9rem;
 }
 
+/* Owner decision 2026-10-15: the closing line after a chat about a good feeling. */
+.feelings-chat-closing {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
 /* Owner decision 2026-10-14: "Speak my answer" in the chat (the voice notice and the recording stay inside the dialog). */
 .feelings-chat-voice {
   display: flex;
