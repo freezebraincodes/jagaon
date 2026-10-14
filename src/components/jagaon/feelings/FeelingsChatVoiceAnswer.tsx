@@ -25,6 +25,8 @@ export type FeelingsChatVoice = Readonly<{
   timers?: VoiceTimers;
   startTimeoutMs?: number;
   maxSessionSeconds?: number;
+  /** Owner decision 2026-10-15: Tencent speech's daily demo minutes used up: may the browser's speech recognition be offered instead. */
+  limitFallback?: Readonly<{ available: () => Promise<boolean>; use: () => void }>;
 }>;
 
 type Props = Readonly<{
@@ -39,7 +41,7 @@ type Props = Readonly<{
 }>;
 
 type Phase =
-  | Readonly<{ kind: "IDLE"; message: string | null }>
+  | Readonly<{ kind: "IDLE"; message: string | null; offerBrowser?: boolean }>
   | Readonly<{ kind: "CHECKING" }>
   | Readonly<{ kind: "CONSENT" }>
   | Readonly<{ kind: "SESSION" }>;
@@ -110,11 +112,27 @@ export function FeelingsChatVoiceAnswer({ voice, labels, disabled, onTranscript,
     };
   }, []);
 
-  function backToIdle(message: string | null) {
+  function backToIdle(message: string | null, offerBrowser = false) {
     dispatchDisclosure({ type: "RESET" });
     setSnapshot(null);
-    setPhase({ kind: "IDLE", message });
+    setPhase({ kind: "IDLE", message, offerBrowser });
     if (message === null) speakRef.current?.focus();
+  }
+
+  /** Owner decision 2026-10-15: Tencent speech's daily demo minutes are used up: say so, and offer the browser's speech if it can run. */
+  async function dailyLimitReached() {
+    let fallback = false;
+    try {
+      fallback = voice.limitFallback ? (await voice.limitFallback.available()) === true : false;
+    } catch {
+      fallback = false;
+    }
+    if (mounted.current) backToIdle(copy.dailyLimit.chatBody, fallback);
+  }
+
+  function switchToBrowserSpeech() {
+    voice.limitFallback?.use();
+    void speak();
   }
 
   async function speak() {
@@ -192,6 +210,7 @@ export function FeelingsChatVoiceAnswer({ voice, labels, disabled, onTranscript,
     }
     if (next.state !== "COMPLETED") {
       session.discardTranscript();
+      if (next.failureReason === "CREDENTIAL_REFUSED" && next.credentialRefusal === "MINUTES_EXHAUSTED") return void dailyLimitReached();
       return backToIdle(next.state === "TIMED_OUT" ? labels.voiceUnavailable : failureMessage(next, labels));
     }
     const text = (session.takeTranscript() ?? "").trim();
@@ -271,6 +290,11 @@ export function FeelingsChatVoiceAnswer({ voice, labels, disabled, onTranscript,
         <p role="status" className="feelings-chat-voice-message">
           {phase.message}
         </p>
+      ) : null}
+      {phase.kind === "IDLE" && phase.offerBrowser ? (
+        <button type="button" className="btn btn-outline btn-wide" disabled={disabled} onClick={switchToBrowserSpeech}>
+          {copy.dailyLimit.useBrowser}
+        </button>
       ) : null}
     </div>
   );
