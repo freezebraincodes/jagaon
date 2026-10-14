@@ -67,11 +67,11 @@ describe("Tell JagaOn: feelings become notes, activities go to the activity log 
         return (await screen.findAllByRole("article", {}, { timeout: 30_000 })) as HTMLElement[];
       };
 
-      // A feeling: one card, no "Talk it through" until the feelings chat is wired, saved as a note.
+      // A feeling: one card, with "Talk it through" (the feelings chat is wired; see JagaOnApp.feelings-chat.test.tsx), saved as a note.
       mount("Feeling tired and a bit worried today.");
       const [feeling] = await speak();
       expect(within(feeling!).getByRole("heading", { name: en.voice.feeling.heading })).toBeInTheDocument();
-      expect(within(feeling!).queryByRole("button", { name: en.voice.feeling.talkItThrough })).toBeNull();
+      expect(within(feeling!).getByRole("button", { name: en.voice.feeling.talkItThrough })).toBeEnabled();
       fireEvent.click(within(feeling!).getByRole("button", { name: en.voice.feeling.saveAsNote }));
       await waitFor(() => expect(within(feeling!).getByText(en.voice.feeling.savedToNotes)).toBeInTheDocument(), { timeout: 30_000 });
       expect(within(feeling!).getByText("That sounds like a tiring day. Thank you for telling me.")).toBeInTheDocument();

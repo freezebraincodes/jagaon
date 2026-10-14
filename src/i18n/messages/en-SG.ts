@@ -85,6 +85,8 @@ export const enSGMessages: AppMessages = {
     title: "AI credit limit reached",
     careSummaryBody: "This demo has used up its AI credit for today. Your summary uses the standard wording instead.",
     historyBody: "This demo has used up its AI credit for today. The explanation uses the standard wording instead.",
+    // Tell JagaOn understands more (2026-10-14): the feelings chat body, new wording (the owner's pattern), human acceptance pending.
+    feelingsChatBody: "This demo has used up its AI credit for today. JagaOn's standard questions are used instead.",
     ok: "OK",
   },
   // voice-copy.13s.1: voice transcription slice. Every row is human acceptance pending; not an approved row.

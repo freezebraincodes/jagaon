@@ -25,12 +25,18 @@ type Props = Readonly<{
   onInteract?: () => void;
   /** The feelings chat (a separate track). Absent: no "Talk it through" button. */
   onTalkItThrough?: (feeling: VoiceTalkItThroughInput) => void;
+  /**
+   * The feeling was saved as a note from the feelings chat ("Talk it through"): the card shows it saved, exactly as after "Save as a
+   * note", so it cannot be saved a second time.
+   */
+  savedInChat?: boolean;
 }>;
 
-export function VoiceFeelingCard({ candidate, index, copy, onDecide, onInteract, onTalkItThrough }: Props) {
+export function VoiceFeelingCard({ candidate, index, copy, onDecide, onInteract, onTalkItThrough, savedInChat = false }: Props) {
   const ids = useId();
   const [text, setText] = useState(candidate.text);
-  const [outcome, setOutcome] = useState<VoiceFactOutcome | "SKIPPED" | null>(null);
+  const [ownOutcome, setOutcome] = useState<VoiceFactOutcome | "SKIPPED" | null>(null);
+  const outcome = savedInChat ? "SAVED" : ownOutcome;
   const [busy, setBusy] = useState(false);
   const statusLine = useRef<HTMLDivElement>(null);
   const done = outcome === "SAVED" || outcome === "SKIPPED";

@@ -86,6 +86,8 @@ export const zhSGMessages: AppMessages = {
     title: "AI 额度已用完",
     careSummaryBody: "此演示今天的 AI 额度已用完。您的摘要改用标准措辞。",
     historyBody: "此演示今天的 AI 额度已用完。说明改用标准措辞。",
+    // Tell JagaOn understands more (2026-10-14): draft, human acceptance pending.
+    feelingsChatBody: "此演示今天的 AI 额度已用完。现改用 JagaOn 的标准问题。",
     ok: "好",
   },
   // voice-copy.13s.1: voice transcription slice. Every row is human acceptance pending; not an approved row.

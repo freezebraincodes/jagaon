@@ -1006,6 +1006,8 @@ export type AiCreditLimitMessages = {
   title: string;
   careSummaryBody: string;
   historyBody: string;
+  /** Tell JagaOn understands more (2026-10-14): the feelings chat continues with JagaOn's standard questions. */
+  feelingsChatBody: string;
   ok: string;
 };
 
