@@ -121,6 +121,26 @@ describe("browser journal runtime", () => {
     expect(await runtime.history.load({ period: "THIRTY_DAYS" })).toEqual(seeded);
   }, INTEGRATION_TIMEOUT_MS);
 
+  it("seeds the prepared demo into a dataset created without it (after Delete all data), once, and never over her records", async () => {
+    const name = `packet-7a-runtime-${crypto.randomUUID()}`;
+    const runtime = await createBrowserJournalRuntime(name, { now: () => NOW, seedSyntheticScenarioOnCreate: false });
+    runtimes.push(runtime);
+    expect((await runtime.query.loadToday()).entries).toEqual([]);
+    await runtime.persistLocale("en-SG");
+
+    expect(await runtime.seedPreparedDemoWhenEmpty()).toBe(true);
+    const view = await runtime.history.load({ period: "THIS_WEEK" });
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.comparisons.map((fact) => [fact.factId, fact.kind])).toEqual([["COMPARISON:BEFORE_BREAKFAST", "LOWER"]]);
+    const visit = await runtime.careOrganisation.query.loadVisitPreparation();
+    expect(visit.status === "READY" && visit.appointment?.payload.appointmentLabel).toBe("Dr Lim, Bukit Merah Polyclinic");
+
+    // A second call (or a dataset with her own records) adds nothing.
+    const before = (await runtime.query.loadToday()).entries.length;
+    expect(await runtime.seedPreparedDemoWhenEmpty()).toBe(false);
+    expect((await runtime.query.loadToday()).entries.length).toBe(before);
+  }, INTEGRATION_TIMEOUT_MS);
+
   it("seeds the Packet 9B health checks and appointment once, keeps patient changes and restores them after reset", async () => {
     const runtime = await open();
     const view = await runtime.careOrganisation.query.loadPreventiveCare();

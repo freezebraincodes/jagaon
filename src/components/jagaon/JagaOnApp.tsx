@@ -366,6 +366,8 @@ export function JagaOnApp({
     { screen: "TODAY" },
   ]);
   const [runtime, setRuntime] = useState<JagaOnRuntime | null>(null);
+  const preparedSeedPending = useRef(false);
+  const [preparedSeedRequest, setPreparedSeedRequest] = useState(0);
   const runtimeRef = useRef<JagaOnRuntime | null>(null);
   /**
    * Packet 11C Addendum C, Task C2 (hybrid spec D11): the patient's "Keep wording on this device" setting. The state drives the More
@@ -707,6 +709,10 @@ export function JagaOnApp({
   const finishOnboarding = useCallback((exit: OnboardingExit) => {
     // Packet 11C C7 finding D1: the finished setup's locale is the setup's own; a runtime that opens later never replaces it.
     onboardingLocaleRef.current = true;
+    if (exit.prepared) {
+      preparedSeedPending.current = true;
+      setPreparedSeedRequest((value) => value + 1);
+    }
     setOnboarding(exit.state);
     setPhase({ kind: "APP" });
     setStack(
@@ -757,6 +763,19 @@ export function JagaOnApp({
     if (!runtime) return;
     setToday(await runtime.query.loadToday());
   }, [runtime]);
+
+  // "Use the prepared demo profile" after "Delete all data": the new dataset was created without the demo records, so add them now
+  // (only into an empty dataset; a first visit's dataset already has them). Runs once the runtime is open.
+  useEffect(() => {
+    if (!runtime || !preparedSeedPending.current) return;
+    preparedSeedPending.current = false;
+    void runtime
+      .seedPreparedDemoWhenEmpty()
+      .then(async (seeded) => {
+        if (seeded && runtimeRef.current === runtime) setToday(await runtime.query.loadToday());
+      })
+      .catch(() => undefined);
+  }, [runtime, preparedSeedRequest]);
 
   /**
    * Each local key is cleared by the repository that owns it
