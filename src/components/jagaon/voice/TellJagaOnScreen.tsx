@@ -104,6 +104,7 @@ export type VoiceTerminologyPort = Readonly<{
   forget?(input: Readonly<{ recordId: string }>): Promise<Readonly<{ kind: string }>>;
 }>;
 
+export type VoiceLimitFallback = Readonly<{ available: () => Promise<boolean>; use: () => void }>;
 export type VoiceSaveOutcome = Readonly<{ kind: "SAVED" }> | Readonly<{ kind: "NOT_SAVED" }>;
 export type VoiceRemoteExtraction = (transcript: string, language: VoiceLanguage, signal: AbortSignal) => Promise<Readonly<{ kind: "CANDIDATES"; candidates: readonly VoiceCandidate[] }> | Readonly<{ kind: "UNAVAILABLE" | "WITHHELD" | "DECLINED" }>>;
 export type VoiceManualEntryKind = "GLUCOSE" | "MEAL" | "MEDICATION";
@@ -162,12 +163,18 @@ export type TellJagaOnScreenProps = Readonly<{
   feelingsChat?: Readonly<{ chat: FeelingsChatPort } & FeelingsChatStorage>;
   /** HSA preview (owner decision 2026-10-14): the medicine information card's "Open in My medicines". Absent: no link. */
   onOpenMyMedicines?: () => void;
+  /**
+   * Owner decision 2026-10-15: when Tencent speech's daily demo minutes are used up, the screen explains it in a dialog and may offer
+   * the browser's speech recognition instead. `available` says whether Web Speech is enabled and supported here; `use` makes the app
+   * prefer it (the screen then restarts, so Web Speech's own notice is shown). Absent: the dialog offers only OK.
+   */
+  voiceLimitFallback?: VoiceLimitFallback;
   timers?: VoiceTimers;
   startTimeoutMs?: number;
   maxSessionSeconds?: number;
 }>;
 
-type Ended = "DECLINED" | "CANCELLED" | "DONE_SAVED" | "TIMED_OUT" | "PERMISSION_DENIED" | "UNSUPPORTED" | "UNAVAILABLE" | "ACCESS_DENIED" | "NOT_UNDERSTOOD";
+type Ended = "DECLINED" | "CANCELLED" | "DONE_SAVED" | "TIMED_OUT" | "PERMISSION_DENIED" | "UNSUPPORTED" | "UNAVAILABLE" | "ACCESS_DENIED" | "NOT_UNDERSTOOD" | "DAILY_LIMIT";
 type Phase =
   | { kind: "CHECKING" }
   | { kind: "DISCLOSURE" }
@@ -189,6 +196,8 @@ function endedFor(snapshot: VoiceSessionSnapshot): Ended {
   if (snapshot.failureReason === "PERMISSION_DENIED") return "PERMISSION_DENIED";
   if (snapshot.failureReason === "UNSUPPORTED_BROWSER") return "UNSUPPORTED";
   if (snapshot.failureReason === "CREDENTIAL_REFUSED" && snapshot.credentialRefusal === "ACCESS_DENIED") return "ACCESS_DENIED";
+  // Owner decision 2026-10-15: Tencent speech's daily demo minutes are used up.
+  if (snapshot.failureReason === "CREDENTIAL_REFUSED" && snapshot.credentialRefusal === "MINUTES_EXHAUSTED") return "DAILY_LIMIT";
   return "UNAVAILABLE";
 }
 
@@ -540,7 +549,7 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
 
   // Owner decision 2026-10-14: the chat's "Speak my answer" uses this screen's own voice setup (provider, notice, loader, limits).
   const chatVoice: FeelingsChatVoice | undefined = voiceAvailable
-    ? { copy, language, resolveProvider: props.resolveProvider, checkAvailability: props.checkAvailability, loadTranscriber, onSessionActivity: props.onSessionActivity, timers: props.timers, startTimeoutMs: props.startTimeoutMs, maxSessionSeconds: props.maxSessionSeconds }
+    ? { copy, language, resolveProvider: props.resolveProvider, checkAvailability: props.checkAvailability, loadTranscriber, onSessionActivity: props.onSessionActivity, timers: props.timers, startTimeoutMs: props.startTimeoutMs, maxSessionSeconds: props.maxSessionSeconds, limitFallback: props.voiceLimitFallback }
     : undefined;
 
   /** 13s.3: the fixed redirect wording is chosen by the redirect's category (never by its message key string). */
@@ -591,6 +600,7 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
                 UNAVAILABLE: copy.state.unavailable,
                 ACCESS_DENIED: copy.state.accessDenied,
                 NOT_UNDERSTOOD: copy.review.nothingFound,
+                DAILY_LIMIT: copy.dailyLimit.body,
               }[phase.reason]
             : "";
 
@@ -630,6 +640,28 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
   useEffect(() => {
     if (phase.kind === "DISTRESS") distressHeading.current?.focus();
   }, [phase.kind]);
+
+  // Owner decision 2026-10-15: the daily-limit dialog, opened when a session ends DAILY_LIMIT; "Use browser speech recognition" only
+  // when Web Speech is enabled and supported here.
+  const limitFallback = props.voiceLimitFallback;
+  const [limitDialog, setLimitDialog] = useState<Readonly<{ fallback: boolean }> | null>(null);
+  const dailyLimitReached = phase.kind === "ENDED" && phase.reason === "DAILY_LIMIT";
+  useEffect(() => {
+    if (!dailyLimitReached) return;
+    let current = true;
+    void Promise.resolve(limitFallback ? limitFallback.available().catch(() => false) : false).then((fallback) => {
+      if (current && mounted.current) setLimitDialog({ fallback: fallback === true });
+    });
+    return () => {
+      current = false;
+      setLimitDialog(null);
+    };
+  }, [dailyLimitReached, limitFallback]);
+  function switchToBrowserSpeech() {
+    setLimitDialog(null);
+    limitFallback?.use();
+    restart();
+  }
 
   // A separate exit, not a manual-entry action.
   const backToToday = (
@@ -827,6 +859,30 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
           {chooser}
           <div className="voice-actions">{backToToday}</div>
         </section>
+      ) : null}
+
+      {dailyLimitReached && limitDialog ? (
+        <ModalDialog
+          className="voice-limit-dialog"
+          title={copy.dailyLimit.title}
+          description={<p>{copy.dailyLimit.body}</p>}
+          onClose={() => setLimitDialog(null)}
+          initialFocusSelector="[data-voice-limit-first]"
+          actions={
+            <>
+              {limitDialog.fallback ? (
+                <button type="button" className="btn btn-primary btn-wide" data-voice-limit-first="" onClick={switchToBrowserSpeech}>
+                  {copy.dailyLimit.useBrowser}
+                </button>
+              ) : null}
+              <button type="button" className="btn btn-outline btn-wide" {...(limitDialog.fallback ? {} : { "data-voice-limit-first": "" })} onClick={() => setLimitDialog(null)}>
+                {copy.dailyLimit.ok}
+              </button>
+            </>
+          }
+        >
+          {null}
+        </ModalDialog>
       ) : null}
 
       {(phase.kind === "REVIEW" || phase.kind === "REDIRECT" || phase.kind === "ENDED") && terminology.list && terminology.change && terminology.forget ? <RememberedTermsSection terminology={terminology} copy={copy} language={language} /> : null}
