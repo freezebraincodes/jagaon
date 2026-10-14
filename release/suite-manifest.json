@@ -442,6 +442,7 @@
           "runner": "vitest",
           "files": [
             "src/app/api/ai/feelings/route.test.ts",
+            "src/app/api/ai/medicine-info/route.test.ts",
             "src/app/api/ai/shell/ai-spend-ledger.test.ts",
             "src/app/api/ai/shell/route-access-spend.test.ts",
             "src/app/api/ai/shell/route-reparse-usage.test.ts",
