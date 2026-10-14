@@ -4,9 +4,9 @@ import { VOICE_ACTIVITY_CUES_VERSION, matchVoiceActivity, voiceActivityDuration,
 import { VOICE_FEELING_CUES, VOICE_FEELING_CUES_VERSION, matchVoiceFeeling, voiceFeelingGroupOf } from "./voice-feeling-cues";
 
 /** Owner decision 2026-10-14 (Tell JagaOn understands more): the fixed cue lists on their own (the extractor wiring is tested in voice-feeling-activity.test.ts). */
-describe("feeling cues (voice-feeling-cues.2)", () => {
+describe("feeling cues (voice-feeling-cues.3)", () => {
   it("is versioned and lists the owner's five cue groups with lowercase keys", () => {
-    expect(VOICE_FEELING_CUES_VERSION).toBe("voice-feeling-cues.2");
+    expect(VOICE_FEELING_CUES_VERSION).toBe("voice-feeling-cues.3");
     expect(VOICE_FEELING_CUES.cues.map((cue) => cue.key)).toEqual([
       "tired", "exhausted", "sleepy", "drained", "worn-out",
       "worried", "anxious", "nervous", "uneasy",
@@ -15,6 +15,7 @@ describe("feeling cues (voice-feeling-cues.2)", () => {
       "happy", "good", "great", "fine", "okay", "better", "relieved", "calm",
       "proud", "excited", "grateful", "thankful", "glad", "hopeful", "motivated", "confident", "content", "cheerful", "peaceful",
       "scared", "afraid", "frightened",
+      "skeptical", "unsure", "uncertain", "doubtful", "confused", "disappointed", "embarrassed", "ashamed", "guilty", "bored", "hurt",
     ]);
     for (const cue of VOICE_FEELING_CUES.cues) expect(cue.key).toMatch(/^[a-z]+(?:[-_][a-z]+)*$/);
     expect(["tired", "worried", "stressed", "low", "okay", "not-good", "unknown"].map(voiceFeelingGroupOf)).toEqual(["TIRED", "WORRIED", "STRESSED", "SAD_LOW", "HAPPY_GOOD", null, null]);
@@ -44,6 +45,23 @@ describe("feeling cues (voice-feeling-cues.2)", () => {
     ];
     for (const [text, keys] of cases) expect(matchVoiceFeeling(text), text).toMatchObject({ cueKeys: keys });
     expect(["proud", "excited", "grateful", "scared", "afraid"].map(voiceFeelingGroupOf)).toEqual(["HAPPY_GOOD", "HAPPY_GOOD", "HAPPY_GOOD", "WORRIED", "WORRIED"]);
+  });
+
+  it("voice-feeling-cues.3: doubt and confusion take the neutral group; symptoms are never feelings", () => {
+    const cases: Array<[string, string[]]> = [
+      ["I feel skeptical about what Dr Lim has told me", ["skeptical"]],
+      ["I'm a bit sceptical", ["skeptical"]],
+      ["I feel unsure and confused", ["unsure", "confused"]],
+      ["I'm disappointed", ["disappointed"]],
+      ["I feel embarrassed and a bit ashamed", ["embarrassed", "ashamed"]],
+      ["I feel guilty", ["guilty"]],
+      ["I'm bored today", ["bored"]],
+      ["I feel hurt by what he said", ["hurt"]],
+      ["I feel uncertain and doubtful", ["uncertain", "doubtful"]],
+    ];
+    for (const [text, keys] of cases) expect(matchVoiceFeeling(text), text).toMatchObject({ cueKeys: keys });
+    expect(["skeptical", "confused", "hurt"].map(voiceFeelingGroupOf)).toEqual(["OTHER", "OTHER", "OTHER"]);
+    for (const text of ["I feel dizzy", "I feel giddy and shaky", "I feel sick", "my leg is hurt"]) expect(matchVoiceFeeling(text), text).toBeNull();
   });
 
   it("voice-feeling-cues.2: \"that\" after an everyday good word is a feeling only after her own \"I feel\" or \"I'm\"", () => {

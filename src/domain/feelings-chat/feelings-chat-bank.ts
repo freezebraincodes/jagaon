@@ -36,6 +36,8 @@ const GROUP_TO_KEY: Readonly<Record<VoiceFeelingGroup, KindSentenceKey>> = Objec
   STRESSED: "STRESSED",
   SAD_LOW: "SAD_OR_LOW",
   HAPPY_GOOD: "HAPPY_OR_GOOD",
+  // voice-feeling-cues.3: doubt, confusion and other feelings take the neutral sentence.
+  OTHER: "OTHER",
 });
 
 /**
