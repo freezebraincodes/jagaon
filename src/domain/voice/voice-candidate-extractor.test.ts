@@ -41,6 +41,20 @@ describe("multi-fact extraction", () => {
     expect(analysed("my sugar is 8 I think", "en").candidates[0]).toMatchObject({ kind: "GLUCOSE_READING", ambiguity: expect.arrayContaining(["UNCERTAINTY"]) });
   });
 
+  it("reads \"a.m.\" / \"p.m.\" as part of a time, not a sentence end, so no stray word makes a reading edit-only (owner report 2026-10-15)", () => {
+    const text = "I had chicken rice for lunch at 01:00 p.m. My glucose level is eight when I tested before lunch. I had taken the duck pen injection.";
+    const result = analysed(text, "en");
+    expect(result.candidates.map((candidate) => candidate.kind)).toEqual(["MEAL_NOTE", "GLUCOSE_READING", "MEDICATION_OCCURRENCE"]);
+    expect(result.candidates[0]).toMatchObject({ slot: "LUNCH", itemText: "chicken rice", sourcePhrase: "I had chicken rice for lunch at 01:00 p.m" });
+    // Only the usual unit confirmation (no unit was said); never edit-only.
+    expect(result.candidates[1]).toMatchObject({ valueText: "8", ambiguity: ["UNIT_UNSTATED"] });
+    for (const reading of ["My sugar was 6.2 at 7 a.m.", "My sugar was 6.2 at 7:30 p.m.", "My sugar was 6.2 at 7 A.M."]) {
+      expect(analysed(reading, "en").candidates, reading).toEqual([expect.objectContaining({ kind: "GLUCOSE_READING", ambiguity: ["UNIT_UNSTATED"] })]);
+    }
+    // Other words after a reading still make it edit-only.
+    expect(analysed("My sugar was 6.2 for a man", "en").candidates[0]).toMatchObject({ ambiguity: expect.arrayContaining(["UNCERTAINTY"]) });
+  });
+
   it('"I need to inject" is never TAKEN; forgot / remembered later / not sure is UNKNOWN', () => {
     for (const text of ["I need to inject my grey pen", "I'm going to take my pill", "I haven't taken my insulin yet"]) expect(analysed(text, "en").candidates[0], text).toMatchObject({ status: "PLANNED" });
     for (const text of ["I forgot my dark pen", "I am not sure I took the white tablet", "maybe I took my pill"]) expect(analysed(text, "en").candidates[0], text).toMatchObject({ status: "UNKNOWN", ambiguity: expect.arrayContaining(["STATUS_UNCLEAR"]) });
