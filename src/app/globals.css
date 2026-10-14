@@ -5903,10 +5903,12 @@ button.summary-tile:hover:not(:disabled) {
 .voice-review,
 .voice-redirect-only,
 .voice-ended,
+.voice-typing,
 .voice-distress {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  /* Owner request 2026-10-15: more room between groups (the main action, "Type another entry", "Back to Today"). */
+  gap: 1.5rem;
 }
 
 /* Owner decision 2026-10-14 (distress safety): a calm message with the Help screen's contact cards; no status colours. */
