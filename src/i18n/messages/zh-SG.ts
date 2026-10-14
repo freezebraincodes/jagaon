@@ -544,6 +544,7 @@ export const zhSGMessages: AppMessages = {
     // Packet 6 v1 convergence (needs bilingual review)
     locationNote: "只有在您点按时才会使用位置。打开此页面不会请求位置。",
     filtersHeading: "筛选",
+    filtersShowing: "正在显示：",
     resetFilters: "重置",
     within: (distance) => `${distance} 以内`,
     cuisineAny: "不限",

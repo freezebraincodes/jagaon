@@ -2933,8 +2933,37 @@ button.summary-tile:hover:not(:disabled) {
 
 .food-filters-summary {
   margin: -10px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
   color: var(--ink-2);
   font-weight: 600;
+}
+
+/* Owner decision 2026-10-15: the active filters as small chips (tapping one opens the filters). */
+.food-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.25rem;
+  padding: 4px 14px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--card);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.food-filter-pill:focus-visible {
+  outline: 3px solid var(--terracotta, var(--ink));
+  outline-offset: 2px;
+}
+
+.food-filters-count {
+  font-variant-numeric: tabular-nums;
 }
 
 .food-filters-panel {
