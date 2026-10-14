@@ -25,6 +25,19 @@ describe("multi-fact extraction", () => {
     expect(result.candidates[2]).toMatchObject({ status: "PLANNED", medicineRef: { kind: "UNRESOLVED", phrase: "grey pen" }, state: "AMBIGUOUS", ambiguity: ["MEDICINE_UNRESOLVED"] });
   });
 
+  it("splits unpunctuated speech after a number when a new first-person statement starts (owner report 2026-10-14)", () => {
+    const spoken = analysed("my sugar level is 8.2 I had chicken rice for lunch", "en");
+    const punctuated = analysed("my sugar level is 8.2. I had chicken rice for lunch", "en");
+    expect(spoken.candidates.map((candidate) => [candidate.kind, candidate.state, candidate.ambiguity])).toEqual(punctuated.candidates.map((candidate) => [candidate.kind, candidate.state, candidate.ambiguity]));
+    expect(spoken.candidates[1]).toMatchObject({ kind: "MEAL_NOTE", slot: "LUNCH", itemText: "chicken rice", sourcePhrase: "I had chicken rice for lunch" });
+    expect(analysed("sugar 6.8 mmol I ate nasi lemak for breakfast", "en").candidates.map((candidate) => [candidate.kind, candidate.state])).toEqual([
+      ["GLUCOSE_READING", "UNDERSTOOD"],
+      ["MEAL_NOTE", "UNDERSTOOD"],
+    ]);
+    // Not a new statement: "I think" still qualifies the reading.
+    expect(analysed("my sugar is 8 I think", "en").candidates[0]).toMatchObject({ kind: "GLUCOSE_READING", ambiguity: expect.arrayContaining(["UNCERTAINTY"]) });
+  });
+
   it('"I need to inject" is never TAKEN; forgot / remembered later / not sure is UNKNOWN', () => {
     for (const text of ["I need to inject my grey pen", "I'm going to take my pill", "I haven't taken my insulin yet"]) expect(analysed(text, "en").candidates[0], text).toMatchObject({ status: "PLANNED" });
     for (const text of ["I forgot my dark pen", "I am not sure I took the white tablet", "maybe I took my pill"]) expect(analysed(text, "en").candidates[0], text).toMatchObject({ status: "UNKNOWN", ambiguity: expect.arrayContaining(["STATUS_UNCLEAR"]) });

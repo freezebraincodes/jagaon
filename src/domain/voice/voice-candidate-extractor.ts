@@ -621,7 +621,9 @@ const QUESTION: Readonly<Record<VoiceLanguage, RegExp>> = Object.freeze({
   // 13s.3 (I3): 多少, 几 and the A-not-A form (疼不疼, 打不打) are questions too.
   zh: /[?？吗]|怎么|什么|为什么|要不要|该不该|能不能|可不可以|多少|几|是否|(\p{Script=Han})不\1/u,
 });
-const EN_CLAUSE_CUT = /[,，、]|\s+(?:and|but)\s+(?=(?:i|then|my|took|had|ate|injected|did|used|also|afterwards|after|before|later)\b)|\s+(?:then|but)\s+/gi;
+// Owner report 2026-10-14: speech recognition often gives no punctuation ("my sugar level is 8.2 I had chicken rice for lunch"), so a
+// number (with its spoken unit, if any) followed by "I" and a new statement's verb also ends the clause.
+const EN_CLAUSE_CUT = /[,，、]|\s+(?:and|but)\s+(?=(?:i|then|my|took|had|ate|injected|did|used|also|afterwards|after|before|later)\b)|\s+(?:then|but)\s+|(?<=\d(?:\s*(?:mmol(?:\s*\/\s*l)?|mg\s*\/\s*dl|units?))?)\s+(?=i\s+(?:had|have|ate|eat|took|take|injected|used|walked|went|did|feel|felt|am|was|also|just)\b)/gi;
 const ZH_CLAUSE_CUT = /[,，、]|然后|但是|可是|不过/g;
 
 function trimRange(text: string, start: number, end: number): Range | null {
