@@ -62,6 +62,8 @@ export const HEALTH_RECORD_COMMAND_NAMES = [
   "RECORD_CONTEXT_WINDOW",
   "CORRECT_HEALTH_RECORD",
   "REVISE_CONTEXT_WINDOW",
+  // Owner decision 2026-10-14: an explicit save of one personal note ("delete" is DELETE_PATIENT_RECORD).
+  "RECORD_PERSONAL_NOTE",
 ] as const;
 
 export type HealthRecordCommandName =
@@ -234,6 +236,8 @@ export const HEALTH_RECORD_EVENT_NAMES = [
   "PREVENTIVE_CARE_OUTCOME_CORRECTED",
   "CONTEXT_WINDOW_RECORDED",
   "CONTEXT_WINDOW_REVISED",
+  // Owner decision 2026-10-14: no consumer; the payload is a closed reason only (never the note).
+  "PERSONAL_NOTE_RECORDED",
 ] as const;
 
 export type HealthRecordEventName =

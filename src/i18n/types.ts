@@ -1,5 +1,6 @@
 export type { SupportedLocale } from "../domain/patient-settings/locale";
 import type { Packet10Messages } from "./packet10-types";
+import type { NoteThemeKey } from "../domain/notes/note-themes";
 export type { Packet10Messages } from "./packet10-types";
 
 // ---------------------------------------------------------------------------
@@ -1061,7 +1062,26 @@ export type AppMessages = {
   /** Owner UI decision U12: the history fallback line after an attempted remote request (ai-history-fallback.11c.1). */
   aiHistoryFallback: AiHistoryFallbackMessages;
   /** Owner decision 2026-10-12: My notes, reached from More (first version: the destination only). */
-  myNotes: { title: string; empty: string };
+  myNotes: {
+    title: string;
+    empty: string;
+    /** Owner decision 2026-10-14 (personal notes): the stored notes list, this week's themes and deleting one note. */
+    loading: string;
+    unavailable: string;
+    themesHeading: string;
+    /** One line per recurring theme, e.g. "Sleep came up in 3 notes this week." (`theme` is a `themeLabels` value). */
+    themeCount: (theme: string, count: number) => string;
+    /** Descriptive labels only (never causes or diagnoses), keyed by the closed note theme keys. */
+    themeLabels: Readonly<Record<NoteThemeKey, string>>;
+    themesLabel: string;
+    conversation: string;
+    speakerJagaOn: string;
+    speakerYou: string;
+    deleteNote: string;
+    /** The record label shown in the existing permanent-deletion dialog. */
+    noteRecordLabel: string;
+    deleted: string;
+  };
   /** Owner decision 2026-10-12 (AI credit dialog): the used-up AI credit dialog (en owner wording; zh drafts, acceptance deferred). */
   aiCreditLimit: AiCreditLimitMessages;
   /** Voice transcription slice (voice-copy.13s.1; human acceptance pending). */

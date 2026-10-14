@@ -67,6 +67,8 @@ import type {
   RecordMedicationEventInput,
 } from "./journal-contracts";
 import { createTerminologyService, type TerminologyService } from "@/application/terminology/terminology-service";
+import { createPersonalNoteService, type PersonalNoteCommandService } from "@/application/notes/personal-note-service";
+import { createPersonalNoteQuery, type PersonalNoteQueryPort } from "@/application/notes/personal-note-query";
 import { createJournalCommandService } from "./journal-command-service";
 import { createJournalQueryService } from "./journal-query-service";
 
@@ -113,6 +115,15 @@ export type JagaOnRuntime = {
   voice?: {
     recordMedicationEvent(input: RecordMedicationEventInput): Promise<JournalCommitResult>;
     terminology: TerminologyService;
+  };
+  /**
+   * Owner decision 2026-10-14 (My notes): save one personal note (an explicit patient save; the feelings chat calls it after approval),
+   * list notes newest first and count this week's themes. Deleting a note is `recordDeletion` with recordType PERSONAL_NOTE.
+   * Optional only so test doubles may omit it; the browser runtime always provides it.
+   */
+  notes?: {
+    commands: PersonalNoteCommandService;
+    query: PersonalNoteQueryPort;
   };
   /** Packet 10B: local encrypted backup export (no network, no write). */
   backup: {
@@ -407,11 +418,18 @@ export async function createBrowserJournalRuntime(
   const aiAudits = createAiInvocationAuditRepository(database);
   // Packet 13 (P13S, Q13-9): "forget" is the existing permanent deletion of the one terminology record (no dependents).
   const terminology = createTerminologyService(database, { now, ids, deletion });
+  // Owner decision 2026-10-14 (My notes): personal notes share the authoritative store; delete-all and demo reset clear them with it.
+  const personalNotes = createPersonalNoteService(database, { now, ids });
+  const personalNoteQuery = createPersonalNoteQuery(database);
   const ports = gate.guard({
     // Append only: the patient-facing runtime never reads, lists or rewrites AI audit rows.
     aiAudit: Object.freeze({ append: aiAudits.append } satisfies AiInvocationAuditPort),
     backup: Object.freeze({ export: backupExport.export }),
     voice: Object.freeze({ recordMedicationEvent: afterCommit(journalCommands.recordMedicationEvent), terminology }),
+    notes: Object.freeze({
+      commands: Object.freeze({ createPersonalNote: personalNotes.createPersonalNote }),
+      query: Object.freeze({ listPersonalNotes: personalNoteQuery.listPersonalNotes, themeCounts: personalNoteQuery.themeCounts }),
+    }),
     recordDeletion: Object.freeze({
       async prepare(target: DeletionTarget) {
         await intelligence;
