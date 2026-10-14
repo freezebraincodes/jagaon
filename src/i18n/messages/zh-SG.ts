@@ -1172,5 +1172,12 @@ export const zhSGMessages: AppMessages = {
     saved: "已保存到“我的笔记”。",
     saveFailed: "无法保存笔记。请再试一次。",
     done: "完成",
+    // Drafts (English only for the hackathon).
+    speakAnswer: "说出我的回答",
+    voiceAdded: "您说的话已放进回答框。请检查后按“发送”。",
+    voiceNothingHeard: "没有听到声音。您可以再试一次，或输入回答。",
+    voiceUnavailable: "现在无法使用语音。您可以输入回答。",
+    voiceNotAllowed: "这个网站不能使用麦克风。您可以输入回答。",
+    voiceAccessDenied: "演示密码不正确。您可以输入回答。",
   },
 };

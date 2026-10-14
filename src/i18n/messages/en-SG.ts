@@ -1196,5 +1196,12 @@ export const enSGMessages: AppMessages = {
     saved: "Saved to My notes.",
     saveFailed: "Could not save the note. Please try again.",
     done: "Done",
+    // Owner decision 2026-10-14: answering by voice.
+    speakAnswer: "Speak my answer",
+    voiceAdded: "Your words are in the answer box. Check them, then tap Send.",
+    voiceNothingHeard: "Nothing was heard. You can try again or type your answer.",
+    voiceUnavailable: "Voice is not available right now. You can type your answer.",
+    voiceNotAllowed: "The microphone is not allowed for this site. You can type your answer.",
+    voiceAccessDenied: "The demo passcode was not accepted. You can type your answer.",
   },
 };

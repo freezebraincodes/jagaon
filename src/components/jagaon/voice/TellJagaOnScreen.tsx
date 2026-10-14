@@ -18,6 +18,7 @@ import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import { AiCreditLimitDialog } from "../ai/AiCreditLimitDialog";
 import { useHsaBoundedMode } from "../hsa/hsa-bounded-mode";
 import { FeelingsChatDialog, type FeelingsChatNote } from "../feelings/FeelingsChatDialog";
+import type { FeelingsChatVoice } from "../feelings/FeelingsChatVoiceAnswer";
 import type { FeelingsChatStorage } from "../feelings/feelings-chat-storage";
 import { ContactLink } from "../primitives/ContactLink";
 import { AmbulanceIcon, MessageIcon, PhoneIcon } from "../primitives/Icons";
@@ -537,6 +538,11 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
     return result.kind === "COMMITTED" || result.kind === "NO_CHANGE";
   }
 
+  // Owner decision 2026-10-14: the chat's "Speak my answer" uses this screen's own voice setup (provider, notice, loader, limits).
+  const chatVoice: FeelingsChatVoice | undefined = voiceAvailable
+    ? { copy, language, resolveProvider: props.resolveProvider, checkAvailability: props.checkAvailability, loadTranscriber, onSessionActivity: props.onSessionActivity, timers: props.timers, startTimeoutMs: props.startTimeoutMs, maxSessionSeconds: props.maxSessionSeconds }
+    : undefined;
+
   /** 13s.3: the fixed redirect wording is chosen by the redirect's category (never by its message key string). */
   const redirectBody = (category: VoiceRedirectCategory) => (category === "HEALTH_QUESTION" ? copy.redirect.healthBody : copy.redirect.body);
   const webSpeech = provider === "WEB_SPEECH";
@@ -772,6 +778,7 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
           onSave={saveChatNote}
           onAddDoctorQuestion={addChatDoctorQuestion}
           onClose={closeChat}
+          voice={chatVoice}
         />
       ) : null}
       {creditLimit ? <AiCreditLimitDialog messages={messages} flow="FEELINGS_CHAT" onClose={creditLimit.release} /> : null}

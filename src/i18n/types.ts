@@ -1129,6 +1129,13 @@ export type FeelingsChatMessages = {
   saved: string;
   saveFailed: string;
   done: string;
+  /** Owner decision 2026-10-14: answer a chat question by voice (Web Speech or TRTC, as in Tell JagaOn). */
+  speakAnswer: string;
+  voiceAdded: string;
+  voiceNothingHeard: string;
+  voiceUnavailable: string;
+  voiceNotAllowed: string;
+  voiceAccessDenied: string;
 };
 
 export type AppMessages = {
