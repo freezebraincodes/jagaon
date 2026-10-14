@@ -27,10 +27,15 @@
  * are feelings whatever follows ("excited about my holiday", "grateful for my family"); only the ambiguous everyday words (happy, good,
  * great, fine, okay, better, relieved, calm) keep the follower rule. "That" after one of those is a feeling when she said "I feel" or
  * "I'm" first ("I feel happy that my sugar has been in control"); "happy that you came" without them stays not a feeling.
+ *
+ * voice-feeling-cues.3 (owner request 2026-10-15, doubt and confusion): skeptical/sceptical, unsure, uncertain, doubtful, confused,
+ * disappointed, embarrassed, ashamed, guilty, bored and hurt, in the OTHER group (the neutral kind sentence). Deliberately NOT a
+ * catch-all "I feel <any word>": "I feel dizzy" or "shaky" can be a symptom (for example of low blood sugar) and must never become a
+ * feelings chat, so symptom words stay out of this list.
  */
-export const VOICE_FEELING_CUES_VERSION = "voice-feeling-cues.2";
+export const VOICE_FEELING_CUES_VERSION = "voice-feeling-cues.3";
 
-export const VOICE_FEELING_GROUPS = ["TIRED", "WORRIED", "STRESSED", "SAD_LOW", "HAPPY_GOOD"] as const;
+export const VOICE_FEELING_GROUPS = ["TIRED", "WORRIED", "STRESSED", "SAD_LOW", "HAPPY_GOOD", "OTHER"] as const;
 export type VoiceFeelingGroup = (typeof VOICE_FEELING_GROUPS)[number];
 
 type FeelingCue = Readonly<{ key: string; group: VoiceFeelingGroup; words: readonly string[] }>;
@@ -86,6 +91,18 @@ export const VOICE_FEELING_CUES: Readonly<{ version: typeof VOICE_FEELING_CUES_V
     cue("scared", "WORRIED"),
     cue("afraid", "WORRIED"),
     cue("frightened", "WORRIED"),
+    // voice-feeling-cues.3
+    cue("skeptical", "OTHER", "skeptical", "sceptical"),
+    cue("unsure", "OTHER"),
+    cue("uncertain", "OTHER"),
+    cue("doubtful", "OTHER"),
+    cue("confused", "OTHER"),
+    cue("disappointed", "OTHER"),
+    cue("embarrassed", "OTHER"),
+    cue("ashamed", "OTHER"),
+    cue("guilty", "OTHER"),
+    cue("bored", "OTHER"),
+    cue("hurt", "OTHER"),
   ]),
 });
 

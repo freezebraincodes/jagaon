@@ -64,6 +64,12 @@ describe("feeling recognition (voice-feeling-cues.1)", () => {
     ["I'm excited about my holiday", "F(excited)"],
     ["I feel grateful for my family", "F(grateful)"],
     ["I'm scared", "F(scared)"],
+    // voice-feeling-cues.3 (owner request 2026-10-15): doubt and confusion.
+    ["I feel skeptical about what Dr Lim has told me", "F(skeptical)"],
+    ["I feel confused", "F(confused)"],
+    // Owner report 2026-10-15: unpunctuated speech, a request before the feeling.
+    ["can you give me some motivation I feel very down", "U(\"can you give me some motivation\") F(down)"],
+    ["my sugar was 8 I feel tired", "G(8 - UNIT_UNSTATED+UNCERTAINTY) F(tired)"],
     ["I'm not tired but worried", "F(not-tired+worried)"],
     ["I'm worried about my sugar", "F(worried)"],
     ["I feel hopeless", "F(hopeless)"],
@@ -98,6 +104,10 @@ describe("feeling recognition (voice-feeling-cues.1)", () => {
     "Tired",
     "I'm going to be fine",
     "Lunch was good",
+    // Owner report 2026-10-15: questions about a feeling stay questions (never a Feeling card).
+    "why do I feel so tired",
+    "when I feel tired I walk",
+    "I feel worried what should I do",
   ];
   for (const text of NEGATIVE) {
     it(`not a feeling: ${JSON.stringify(text)}`, () => {

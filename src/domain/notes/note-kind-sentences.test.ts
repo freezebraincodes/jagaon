@@ -22,7 +22,9 @@ describe("reviewed kind sentences for Save as a note", () => {
     expect(new Set(Object.values(NOTE_KIND_SENTENCES))).toEqual(new Set(Object.values(KIND_SENTENCES)));
     for (const cue of VOICE_FEELING_CUES.cues) {
       expect(noteKindSentenceFor([cue.key]), cue.key).toBe(kindSentenceFor([cue.key]).text);
-      expect(noteKindSentenceFor([cue.key]), cue.key).not.toBe(NOTE_KIND_SENTENCES.OTHER);
+      // voice-feeling-cues.3: doubt and confusion (the OTHER group) take the neutral sentence on purpose.
+      if (cue.group === "OTHER") expect(noteKindSentenceFor([cue.key]), cue.key).toBe(NOTE_KIND_SENTENCES.OTHER);
+      else expect(noteKindSentenceFor([cue.key]), cue.key).not.toBe(NOTE_KIND_SENTENCES.OTHER);
     }
   });
 
