@@ -144,11 +144,11 @@ describe("TodayScreen", () => {
     );
 
     const glargine = getByRole("group", { name: fixture.recordedPrescriptions[0]!.displayName });
-    const aspart = getByRole("group", { name: fixture.recordedPrescriptions[1]!.displayName });
+    const glulisine = getByRole("group", { name: fixture.recordedPrescriptions[1]!.displayName });
     // The domain unit code is labelled in the active locale, never shown raw.
     expect(within(glargine).getByText("8 units")).toBeInTheDocument();
     expect(glargine).not.toHaveTextContent("UNIT ");
-    expect(within(aspart).getByText(messages.today.notRecorded)).toBeInTheDocument();
+    expect(within(glulisine).getByText(messages.today.notRecorded)).toBeInTheDocument();
   });
 
   it("localises the meal slot while preserving the patient-entered item", () => {

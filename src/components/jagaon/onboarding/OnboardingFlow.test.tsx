@@ -131,7 +131,7 @@ describe("onboarding welcome", () => {
     click(en.onboarding.usePrepared);
     expect(saves).toHaveLength(1);
     expect(saves[0]).toMatchObject({ status: "COMPLETED", locale: "en-SG" });
-    expect(saves[0]!.medicines.map((m) => m.displayName)).toEqual(["Nocturin pen", "Veltora pen"]);
+    expect(saves[0]!.medicines.map((m) => m.displayName)).toEqual(["Lantus", "Apidra"]);
     expect(onExit).toHaveBeenCalledWith({ state: saves[0], destination: "TODAY" });
     expect(storage.getItem(DEMO_ONBOARDING_STORAGE_KEY)).not.toBeNull();
   });
@@ -163,12 +163,12 @@ describe("onboarding primary flow", () => {
 
     // Step 3 — fictional selection.
     expect(progress()).toHaveAttribute("aria-valuenow", "3");
-    fireEvent.click(screen.getByRole("radio", { name: /Nocturin pen/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Lantus/ }));
     click(en.shared.continue);
     expect(saves.at(-1)).toMatchObject({ lastCompletedStep: "ADD_MEDICINE" });
     expect(saves.at(-1)!.medicines[0]).toMatchObject({
-      catalogueKey: "nocturin-pen-demo",
-      displayName: "Nocturin pen",
+      catalogueKey: "lantus-demo",
+      displayName: "Lantus",
       genericName: "insulin glargine",
       reviewedContentKey: "insulin-glargine",
       form: null,
@@ -185,7 +185,7 @@ describe("onboarding primary flow", () => {
     // Read-only values wrap under enlarged text, so they are not single-line inputs.
     expect(medicineValue.tagName).not.toBe("INPUT");
     expect(medicineValue).toHaveAttribute("aria-readonly", "true");
-    expect(medicineValue).toHaveTextContent("Nocturin pen");
+    expect(medicineValue).toHaveTextContent("Lantus");
     expect(within(about).getByText(en.medication.glarginePurpose)).toBeInTheDocument();
     expect(within(about).getByText("insulin glargine")).toBeInTheDocument();
     expect(within(about).getByRole("link", { name: /HealthHub/ })).toBeInTheDocument();
@@ -227,7 +227,7 @@ describe("onboarding primary flow", () => {
     click(en.onboarding.startSetup);
     click(en.shared.continue);
     click(en.onboarding.addMedicine);
-    fireEvent.click(screen.getByRole("radio", { name: /Veltora pen/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Apidra/ }));
     click(en.shared.continue);
     click(en.onboarding.saveRecorded);
     click(en.onboarding.finishSetup);
@@ -263,13 +263,13 @@ describe("reviewed-information evidence", () => {
     return store;
   }
 
-  it("shows reviewed aspart content only for Veltora pen with its visible generic", () => {
-    toDirections(/Veltora pen/);
-    expect(screen.getByRole("radio", { name: /Veltora pen/ })).toHaveAccessibleName(/insulin aspart/);
+  it("shows reviewed glulisine content only for Apidra with its visible generic", () => {
+    toDirections(/Apidra/);
+    expect(screen.getByRole("radio", { name: /Apidra/ })).toHaveAccessibleName(/insulin glulisine/);
     click(en.shared.continue);
     const about = screen.getByRole("region", { name: en.medication.aboutThisMedicine });
-    expect(within(about).getByText(en.medication.aspartPurpose)).toBeInTheDocument();
-    expect(within(about).getByText("insulin aspart")).toBeInTheDocument();
+    expect(within(about).getByText(en.medication.glulisinePurpose)).toBeInTheDocument();
+    expect(within(about).getByText("insulin glulisine")).toBeInTheDocument();
   });
 
   it("keeps Glucotab without reviewed information", () => {
@@ -301,7 +301,7 @@ describe("reviewed-information evidence", () => {
   });
 
   it("does not retain a hidden catalogue choice after the search text changes", () => {
-    const { saves } = toDirections(/Nocturin pen/);
+    const { saves } = toDirections(/Lantus/);
     fireEvent.change(screen.getByLabelText(en.onboarding.medicineNameLabel), {
       target: { value: "Oxatril (demo)" },
     });
@@ -316,9 +316,9 @@ describe("reviewed-information evidence", () => {
   });
 
   it("never renders a placeholder token anywhere in the flow", () => {
-    toDirections(/Nocturin pen/);
+    toDirections(/Lantus/);
     click(en.shared.continue);
-    expect(document.body.textContent).not.toMatch(/\{[a-zA-Z]+\}|demo-glargine|demo-aspart/);
+    expect(document.body.textContent).not.toMatch(/\{[a-zA-Z]+\}|demo-glargine|demo-glulisine/);
   });
 });
 

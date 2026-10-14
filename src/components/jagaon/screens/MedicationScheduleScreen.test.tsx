@@ -25,7 +25,7 @@ function occasion(section: "YESTERDAY" | "TODAY", record: ScheduleOccasionView["
     section,
     localDate,
     scheduledTime: "21:00",
-    medicineName: "Nocturin pen (demo)",
+    medicineName: "Lantus (demo)",
     scheduleSource: { kind: "SYNTHETIC_DEMO", date: "2026-08-12" },
     occasion: { medication: ref("m"), prescription: ref("rx"), scheduleKey: "night", expectedAt: `${localDate}T13:00:00.000Z` as never },
     amountUnit: { unit: "UNIT", otherUnitText: null },
@@ -38,7 +38,7 @@ const reviewReminder: ScheduleReminderView = {
   recordId: "r-noct" as never,
   revisionId: "r-noct-2" as never,
   revisionNumber: 2,
-  label: "Nocturin pen (demo)",
+  label: "Lantus (demo)",
   state: "REVIEW_REQUIRED",
   daysOfWeek: ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"],
   times: ["21:30"],
@@ -75,11 +75,11 @@ function ready(overrides: Partial<Extract<MedicationScheduleView, { status: "REA
       occasion("YESTERDAY"),
       occasion("TODAY", { recordId: "e1" as never, revisionId: "e1-1" as never, revisionNumber: 1, state: "TAKEN", amount: { kind: "KNOWN", value: "12", unit: "UNIT", otherUnitText: null }, recordedAt: "2026-10-04T13:10:00.000Z" as never }),
     ],
-    withoutFixedTime: [{ medicineName: "Veltora pen (demo)" }],
+    withoutFixedTime: [{ medicineName: "Apidra (demo)" }],
     window: { startDate: "2026-09-21", endDate: "2026-10-04" },
     counts: [
-      { optionKey: "ROUTINE_CHANGED", occasionCount: 2, evidence: [{ localDate: "2026-09-22", scheduledTime: "21:00", medicineName: "Nocturin pen (demo)" }, { localDate: "2026-09-30", scheduledTime: "21:00", medicineName: "Nocturin pen (demo)" }] },
-      { optionKey: "AWAY_FROM_HOME", occasionCount: 1, evidence: [{ localDate: "2026-09-25", scheduledTime: "21:00", medicineName: "Nocturin pen (demo)" }] },
+      { optionKey: "ROUTINE_CHANGED", occasionCount: 2, evidence: [{ localDate: "2026-09-22", scheduledTime: "21:00", medicineName: "Lantus (demo)" }, { localDate: "2026-09-30", scheduledTime: "21:00", medicineName: "Lantus (demo)" }] },
+      { optionKey: "AWAY_FROM_HOME", occasionCount: 1, evidence: [{ localDate: "2026-09-25", scheduledTime: "21:00", medicineName: "Lantus (demo)" }] },
     ],
     excludedCorrected: 0,
     unrecordedCount: 4,
@@ -94,7 +94,7 @@ const offer: PresentedBarrierQuestion = {
   inquiryRevisionId: "i1-3" as never,
   presentationKey: "p1" as never,
   locale: "en-SG",
-  leadIn: "You recorded Skipped for Nocturin pen (demo) on Sat, 3 Oct. Answering is optional.",
+  leadIn: "You recorded Skipped for Lantus (demo) on Sat, 3 Oct. Answering is optional.",
   question: en.schedule.barrierQuestion,
   options: [
     { optionKey: "FORGOT", label: en.schedule.barrierForgot },
@@ -144,7 +144,7 @@ describe("MedicationScheduleScreen", () => {
     expect(screen.getByText(en.schedule.recordedTaken)).toBeInTheDocument();
     expect(screen.getByText("12 units recorded")).toBeInTheDocument();
     expect(screen.getByText(en.schedule.missingMeaning)).toBeInTheDocument();
-    expect(screen.getByText(en.schedule.noFixedTimeFor("Veltora pen (demo)"))).toBeInTheDocument();
+    expect(screen.getByText(en.schedule.noFixedTimeFor("Apidra (demo)"))).toBeInTheDocument();
 
     // Counts: reviewed options only, with evidence, window, limitation and meaning.
     expect(screen.getByRole("heading", { name: en.schedule.whatRecorded("21 Sept", "4 Oct") })).toBeInTheDocument();
@@ -186,7 +186,7 @@ describe("MedicationScheduleScreen", () => {
     fireEvent.click(opener);
     const dialog = screen.getByRole("dialog", { name: en.schedule.recordTitle });
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(dialog).toHaveAccessibleDescription(/For Nocturin pen \(demo\), scheduled Sat, 3 Oct at 9:00/);
+    expect(dialog).toHaveAccessibleDescription(/For Lantus \(demo\), scheduled Sat, 3 Oct at 9:00/);
     expect(dialog.contains(document.activeElement)).toBe(true);
     // Nothing is preselected.
     for (const radio of within(dialog).getAllByRole("radio")) expect(radio).not.toBeChecked();
@@ -352,7 +352,7 @@ describe("MedicationScheduleScreen", () => {
 
     expect(screen.getByText(en.schedule.reminderReview)).toBeInTheDocument();
     expect(screen.getByText(en.schedule.reminderReviewBody)).toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: en.schedule.reminderToggleLabel("Nocturin pen (demo)") })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: en.schedule.reminderToggleLabel("Lantus (demo)") })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${en.schedule.reminderReviewAction}`) }));
     confirm = screen.getByRole("dialog", { name: en.schedule.reminderConfirmTitle });
     expect(within(confirm).getByText(/9:00/)).toBeInTheDocument();
@@ -389,7 +389,7 @@ describe("MedicationScheduleScreen", () => {
     show(port(), "zh-SG");
     expect(await screen.findByRole("heading", { level: 1, name: zh.schedule.title })).toBeInTheDocument();
     expect(screen.getByText(zh.schedule.notRecorded)).toBeInTheDocument();
-    expect(screen.getAllByText("Nocturin pen (demo)").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Lantus (demo)").length).toBeGreaterThan(0);
     expect(screen.getByText(zh.schedule.countMany(zh.schedule.barrierRoutineChanged, 2))).toBeInTheDocument();
     expect(screen.getByText(zh.schedule.reminderReview)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/Not recorded|Medication schedule/);

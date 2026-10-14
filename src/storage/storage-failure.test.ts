@@ -12,7 +12,7 @@ import {
 import { StorageRowValidationError } from "./storage-row-codec";
 
 const AT = "2026-10-04T02:00:00.000Z" as never;
-const SECRET = "correct horse battery staple 6.2 mmol/L Nocturin";
+const SECRET = "correct horse battery staple 6.2 mmol/L Lantus";
 
 describe("closed storage failure registry (spec 9.1–9.3)", () => {
   it("registers exactly the 31 locked codes with one category, class, retry and message key each", () => {

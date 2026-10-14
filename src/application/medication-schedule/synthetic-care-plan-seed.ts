@@ -25,8 +25,8 @@ import { createInquiryService, type BarrierPresentationCopy } from "@/applicatio
  * deliberately left unrecorded. Nothing is inferred from an unrecorded day.
  */
 
-export const DEMO_NOCTURIN_MEDICATION_ID = "00000000-0000-4000-8000-000000000101";
-export const DEMO_VELTORA_MEDICATION_ID = "00000000-0000-4000-8000-000000000103";
+export const DEMO_LANTUS_MEDICATION_ID = "00000000-0000-4000-8000-000000000101";
+export const DEMO_APIDRA_MEDICATION_ID = "00000000-0000-4000-8000-000000000103";
 
 const HOME_OFFSET_MINUTES = 480;
 const DAY_MS = 86_400_000;
@@ -71,9 +71,9 @@ function localMidnightUtc(seedAt: Instant, daysBefore: number): number {
 
 const at = (ms: number) => new Date(ms).toISOString() as Instant;
 
-function nocturinPrescription(time: string): PrescriptionVersionPayload {
+function lantusPrescription(time: string): PrescriptionVersionPayload {
   return {
-    medication: { recordType: "MEDICATION", recordId: DEMO_NOCTURIN_MEDICATION_ID as RecordId, revisionId: demoRevisionId(DEMO_NOCTURIN_MEDICATION_ID) },
+    medication: { recordType: "MEDICATION", recordId: DEMO_LANTUS_MEDICATION_ID as RecordId, revisionId: demoRevisionId(DEMO_LANTUS_MEDICATION_ID) },
     sourceInstructionText: { text: "Inject 12 units every night at 9 pm (demo label)", language: "en-SG" },
     doseInstruction: { kind: "FIXED", amount: { value: "12" as never, unit: "UNIT" } },
     schedule: { kind: "FIXED_LOCAL_TIMES", entries: [{ scheduleKey: "night", time: time as never }] },
@@ -81,8 +81,8 @@ function nocturinPrescription(time: string): PrescriptionVersionPayload {
   } as PrescriptionVersionPayload;
 }
 
-const VELTORA_PRESCRIPTION = {
-  medication: { recordType: "MEDICATION", recordId: DEMO_VELTORA_MEDICATION_ID as RecordId, revisionId: demoRevisionId(DEMO_VELTORA_MEDICATION_ID) },
+const APIDRA_PRESCRIPTION = {
+  medication: { recordType: "MEDICATION", recordId: DEMO_APIDRA_MEDICATION_ID as RecordId, revisionId: demoRevisionId(DEMO_APIDRA_MEDICATION_ID) },
   sourceInstructionText: { text: "Inject 6 units with meals (demo label)", language: "en-SG" },
   doseInstruction: { kind: "FIXED", amount: { value: "6" as never, unit: "UNIT" } },
   // Event-relative wording: JagaOn never turns it into an invented clock time.
@@ -117,8 +117,8 @@ export async function seedSyntheticCarePlan(input: {
   });
 
   for (const [recordId, catalogueEntryKey, name] of [
-    [DEMO_NOCTURIN_MEDICATION_ID, "nocturin-pen-demo", "Nocturin pen"],
-    [DEMO_VELTORA_MEDICATION_ID, "veltora-pen-demo", "Veltora pen"],
+    [DEMO_LANTUS_MEDICATION_ID, "lantus-demo", "Lantus"],
+    [DEMO_APIDRA_MEDICATION_ID, "apidra-demo", "Apidra"],
   ] as const) {
     committed(
       await carePlan.registerMedication({
@@ -143,8 +143,8 @@ export async function seedSyntheticCarePlan(input: {
   }
   // The first transcription had a typo; it is corrected below, which leaves
   // the reminder that relayed it waiting for the patient's review.
-  const typo = committed(await carePlan.recordPrescriptionVersion({ payload: nocturinPrescription("21:30"), recordedAt: clock }));
-  committed(await carePlan.recordPrescriptionVersion({ payload: VELTORA_PRESCRIPTION, recordedAt: clock }));
+  const typo = committed(await carePlan.recordPrescriptionVersion({ payload: lantusPrescription("21:30"), recordedAt: clock }));
+  committed(await carePlan.recordPrescriptionVersion({ payload: APIDRA_PRESCRIPTION, recordedAt: clock }));
 
   const reminder = (payload: Omit<ReminderPayload, "deliveryPreference">): ReminderPayload => ({ ...payload, deliveryPreference: "IN_APP_ONLY" });
   committed(
@@ -164,7 +164,7 @@ export async function seedSyntheticCarePlan(input: {
       seeded: true,
       patientConfirmed: true,
       payload: reminder({
-        label: { text: "Nocturin pen", language: "und" },
+        label: { text: "Lantus", language: "und" },
         subject: { kind: "MEDICATION", target: { recordType: "PRESCRIPTION_VERSION", recordId: typo.recordId, revisionId: typo.revisionId } },
         schedule: { kind: "WEEKLY_LOCAL", daysOfWeek: [...EVERY_DAY], times: ["21:30" as never], timeZoneId: "Asia/Singapore" },
         state: "ACTIVE",
@@ -190,14 +190,14 @@ export async function seedSyntheticCarePlan(input: {
       recordId: typo.recordId,
       expectedRevisionId: typo.revisionId,
       expectedRevisionNumber: 1,
-      payload: nocturinPrescription("21:00"),
+      payload: lantusPrescription("21:00"),
       seeded: true,
     }),
   );
   await reminders.processPending();
 
   const prescription = { recordType: "PRESCRIPTION_VERSION" as const, recordId: corrected.recordId, revisionId: corrected.revisionId };
-  const medication = { recordType: "MEDICATION" as const, recordId: DEMO_NOCTURIN_MEDICATION_ID as RecordId, revisionId: demoRevisionId(DEMO_NOCTURIN_MEDICATION_ID) };
+  const medication = { recordType: "MEDICATION" as const, recordId: DEMO_LANTUS_MEDICATION_ID as RecordId, revisionId: demoRevisionId(DEMO_LANTUS_MEDICATION_ID) };
   for (const occasion of SEEDED_NIGHT_OCCASIONS) {
     const expectedAt = at(localMidnightUtc(seedAt, occasion.daysBefore) + 21 * 3_600_000);
     clock = at(Date.parse(expectedAt) + 25 * 60_000);

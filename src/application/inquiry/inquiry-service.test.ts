@@ -66,7 +66,7 @@ describe("explicit Skipped record to presented question", () => {
   it("builds an eligible candidate bound to the exact event revision and presents it once", async () => {
     const h = await setup();
     const { saved, question } = await presentFor(h);
-    expect(question.leadIn).toBe("You recorded Skipped for Nocturin pen on 2026-10-02. Answering is optional.");
+    expect(question.leadIn).toBe("You recorded Skipped for Lantus on 2026-10-02. Answering is optional.");
     expect(question.options.map((option) => option.optionKey)).toEqual(["FORGOT", "ROUTINE_CHANGED", "AWAY_FROM_HOME", "ACCESS_DIFFICULTY", "SIDE_EFFECT_CONCERN"]);
     const edges = await h.database.table("reverseDependencies").where("sourceRevisionId").equals(saved.revisionId).toArray();
     expect(edges).toEqual([expect.objectContaining({ owner: "INQUIRY", dependentRecordType: "INQUIRY", dependencyRole: "INQUIRY_BASIS" })]);

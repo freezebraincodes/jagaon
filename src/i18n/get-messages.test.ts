@@ -88,8 +88,9 @@ describe("getMessages", () => {
     expect(zh.medication.glarginePurpose).toBe(
       "Insulin glargine 是一种长效胰岛素，用于降低糖尿病患者的高血糖。",
     );
-    expect(zh.medication.aspartPurpose).toBe(
-      "Insulin aspart 是一种速效胰岛素，用于控制餐后血糖。",
+    // Owner decision 2026-10-14 (Apidra): a DRAFT zh-SG row, not matrix-approved; English-only hackathon scope, acceptance pending.
+    expect(zh.medication.glulisinePurpose).toBe(
+      "Insulin glulisine 是一种速效胰岛素，用于控制餐后血糖。",
     );
     expect(zh.medication.generalLimit).toBe("仅供一般参考，不能取代医护人员的建议。");
     expect(zh.help.accessibleEmergency).toBe(

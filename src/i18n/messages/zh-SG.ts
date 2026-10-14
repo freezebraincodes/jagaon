@@ -314,9 +314,10 @@ export const zhSGMessages: AppMessages = {
       "Insulin glargine 是一种长效胰岛素，用于降低糖尿病患者的高血糖。",
     glargineUse:
       "通常每天一次注射到皮下脂肪组织，可在用餐或不用餐时注射。请遵照医生、护士和产品手册的指示。",
-    aspartPurpose: "Insulin aspart 是一种速效胰岛素，用于控制餐后血糖。",
-    aspartUse:
-      "通常在餐前立即或餐前 15 分钟内注射到皮下脂肪组织。请遵照医生、护士和产品手册的指示。",
+    // Owner decision 2026-10-14: Apidra (insulin glulisine). Draft Chinese; English-only hackathon scope, human acceptance pending.
+    glulisinePurpose: "Insulin glulisine 是一种速效胰岛素，用于控制餐后血糖。",
+    glulisineUse:
+      "通常在餐前即刻或餐前最多 15 分钟注射于皮下。请遵照医生或护士指导的注射方法及产品说明书。",
     generalLimit: "仅供一般参考，不能取代医护人员的建议。",
     recordedVerbatim: "按原记录显示。JagaOn 不会更改或解释这些指示。",
     askHeading: "可询问医生或药剂师的问题",

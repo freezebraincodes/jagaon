@@ -35,7 +35,7 @@ function draft(locale: "en-SG" | "zh-SG" = "en-SG"): CareSummaryDraft {
             state: "MISSED",
             intendedAt: exact("2026-09-30T13:00:00.000Z"),
             amount: null,
-            medication: { ref: ref("MEDICATION", 5), name: "Nocturin pen (demo)" },
+            medication: { ref: ref("MEDICATION", 5), name: "Lantus (demo)" },
           },
         ],
       },
@@ -55,7 +55,7 @@ describe("deterministic care-summary renderer", () => {
     const text = payload.sections.flatMap((section) => section.blocks).map((block) => ("renderedText" in block ? block.renderedText : block.kind === "PATIENT_QUESTION" ? block.originalPatientText.text : "")).join("\n");
     // Exact entered values in time order, never normalised or interpreted.
     expect(text).toContain("Glucose readings\n3 Oct 2026, 7:30 am · 11.2 mmol/L\n3 Oct 2026, 9:00 pm · 6.60 mmol/L");
-    expect(text).toContain("For Nocturin pen (demo), scheduled 30 Sept 2026 at 9:00 pm · Recorded as skipped");
+    expect(text).toContain("For Lantus (demo), scheduled 30 Sept 2026 at 9:00 pm · Recorded as skipped");
     expect(text).toContain("Bishan Park 公园 · 25 min");
     expect(text).toContain("Dr Lim, Bukit Merah Polyclinic · 14 Oct 2026, 9:40 am\nAppointment entered by you · Details not verified by the clinic");
     expect(text).toContain("可以把笔放在包里吗？");

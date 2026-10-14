@@ -12,7 +12,7 @@ const issues = (result: { success: boolean; error?: { issues: { message: string 
   result.success ? [] : result.error!.issues.map((issue) => issue.message);
 
 const reminder = (overrides: Record<string, unknown> = {}) => ({
-  label: { text: "Nocturin pen (demo)", language: "und" },
+  label: { text: "Lantus (demo)", language: "und" },
   subject: { kind: "MEDICATION", target: { recordType: "PRESCRIPTION_VERSION", recordId: ID(1), revisionId: ID(2) } },
   schedule: { kind: "WEEKLY_LOCAL", daysOfWeek: ["MONDAY", "SUNDAY"], times: ["21:00"], timeZoneId: "Asia/Singapore" },
   state: "ACTIVE",

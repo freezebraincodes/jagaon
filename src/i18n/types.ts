@@ -247,8 +247,8 @@ export type MedicationMessages = {
   recordedHeading: string;
   glarginePurpose: string;
   glargineUse: string;
-  aspartPurpose: string;
-  aspartUse: string;
+  glulisinePurpose: string;
+  glulisineUse: string;
   generalLimit: string;
   recordedVerbatim: string;
   askHeading: string;

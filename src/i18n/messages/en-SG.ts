@@ -317,9 +317,10 @@ export const enSGMessages: AppMessages = {
       "Insulin glargine is a long-acting insulin used to lower high blood sugar in people with diabetes.",
     glargineUse:
       "It is usually injected under the skin once daily, with or without food. Follow the technique advised by your doctor or nurse and the product manual.",
-    aspartPurpose:
-      "Insulin aspart is a fast-acting insulin used to control blood sugar after meals.",
-    aspartUse:
+    // Owner decision 2026-10-14: Apidra (insulin glulisine), from HealthHub's insulin glulisine leaflet (checked 2026-10-14).
+    glulisinePurpose:
+      "Insulin glulisine is a fast-acting insulin used to control blood sugar after meals.",
+    glulisineUse:
       "It is usually injected under the skin immediately before or up to 15 minutes before a meal. Follow the technique advised by your doctor or nurse and the product manual.",
     generalLimit:
       "General information only. It does not replace advice from your healthcare professional.",

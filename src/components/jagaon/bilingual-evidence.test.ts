@@ -204,7 +204,7 @@ describe("catalogue wording boundaries", () => {
     for (const locale of ["en-SG", "zh-SG"] as const) {
       const msg = getMessages(locale).onboarding;
       expect(msg.directionsFor("Oxatril (demo)")).toContain("Oxatril (demo)");
-      expect(msg.removeBody("Nocturin pen (demo)")).toContain("Nocturin pen (demo)");
+      expect(msg.removeBody("Lantus (demo)")).toContain("Lantus (demo)");
       expect(msg.editNamed("陈女士（示例）")).toContain("陈女士（示例）");
     }
   });

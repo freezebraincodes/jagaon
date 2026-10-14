@@ -75,7 +75,7 @@ const medicineSchema = z
     effectiveDate: optionalText(DEMO_TEXT_LIMITS.shortFact),
     verbatimDirections: optionalText(DEMO_TEXT_LIMITS.directions),
     source: z.enum(DEMO_MEDICINE_SOURCES),
-    reviewedContentKey: z.enum(["insulin-glargine", "insulin-aspart"]).nullable(),
+    reviewedContentKey: z.enum(["insulin-glargine", "insulin-glulisine"]).nullable(),
   })
   .superRefine((medicine, ctx) => {
     // Every catalogue-derived identity is bound to one exact frozen entry.
@@ -128,7 +128,7 @@ export type DemoOnboardingMedicine = {
   effectiveDate: string | null;
   verbatimDirections: string | null;
   source: DemoMedicineSource;
-  reviewedContentKey: "insulin-glargine" | "insulin-aspart" | null;
+  reviewedContentKey: "insulin-glargine" | "insulin-glulisine" | null;
 };
 
 export type DemoOnboardingStateV1 = {
