@@ -1134,6 +1134,19 @@ export type AppMessages = {
   aiWording: AiWordingMessages;
   /** Owner UI decision U12: the history fallback line after an attempted remote request (ai-history-fallback.11c.1). */
   aiHistoryFallback: AiHistoryFallbackMessages;
+  /** Owner decision 2026-10-14: HSA-bounded mode (setting, preview banner, preview tag, More badge). */
+  hsa: {
+    settingLabel: string;
+    settingBody: string;
+    on: string;
+    off: string;
+    confirmTitle: string;
+    confirmBody: string;
+    confirmAction: string;
+    banner: string;
+    previewTag: string;
+    moreBadgeLabel: (count: number) => string;
+  };
   /** Owner decision 2026-10-12: My notes, reached from More (first version: the destination only). */
   myNotes: {
     title: string;

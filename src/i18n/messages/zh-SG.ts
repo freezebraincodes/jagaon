@@ -49,6 +49,19 @@ export const zhSGMessages: AppMessages = {
   },
   // ai-history-fallback.11c.1: owner-decided wording (owner UI decision U12, 2026-10-09, owner-ui-decisions-2026-10-09.md, verbatim). Not
   // an APPROVED_PACKET_11 row.
+  // Owner decision 2026-10-14: HSA-bounded mode. Draft, human acceptance pending.
+  hsa: {
+    settingLabel: "HSA 范围模式",
+    settingBody: "让 JagaOn 保持在新加坡的健康管理范围内。关闭后可预览需要 HSA 批准的功能（模拟演示）。",
+    on: "开",
+    off: "关",
+    confirmTitle: "要关闭 HSA 范围模式吗？",
+    confirmBody: "预览功能超出 HSA 健康管理范围，仅以模拟数据作演示。",
+    confirmAction: "关闭",
+    banner: "预览模式 · 超出 HSA 健康管理范围",
+    previewTag: "预览",
+    moreBadgeLabel: (count) => `${count} 项护理检查到期`,
+  },
   // Owner decision 2026-10-12: My notes (human acceptance pending).
   myNotes: {
     title: "我的笔记",

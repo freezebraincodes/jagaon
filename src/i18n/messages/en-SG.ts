@@ -48,6 +48,20 @@ export const enSGMessages: AppMessages = {
   },
   // ai-history-fallback.11c.1: owner-decided wording (owner UI decision U12, 2026-10-09, owner-ui-decisions-2026-10-09.md, verbatim). Not
   // an APPROVED_PACKET_11 row.
+  // Owner decision 2026-10-14: HSA-bounded mode (owner-approved name; preview copy from the approved design).
+  hsa: {
+    settingLabel: "HSA-bounded mode",
+    settingBody:
+      "Keeps JagaOn within Singapore's wellness boundary. Turn off to preview features that would need HSA approval (synthetic demo).",
+    on: "On",
+    off: "Off",
+    confirmTitle: "Turn off HSA-bounded mode?",
+    confirmBody: "Preview features go beyond the HSA wellness boundary. They are shown for demonstration with synthetic data only.",
+    confirmAction: "Turn off",
+    banner: "Preview mode · beyond HSA wellness boundary",
+    previewTag: "Preview",
+    moreBadgeLabel: (count) => `${count} care ${count === 1 ? "check" : "checks"} due`,
+  },
   // Owner decision 2026-10-12: My notes replaces the Reminders tile on More; details to follow.
   myNotes: {
     title: "My notes",

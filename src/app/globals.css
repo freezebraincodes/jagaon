@@ -6268,3 +6268,56 @@ button.summary-tile:hover:not(:disabled) {
 .feelings-chat-doctor-question .button-row > .btn {
   flex: 1 1 9rem;
 }
+
+/* HSA-bounded mode (owner decision 2026-10-14): preview banner, preview tag, More badge. */
+.preview-mode-banner {
+  position: sticky;
+  top: 0;
+  z-index: 90;
+  display: block;
+  width: 100%;
+  margin: 0 0 0.5rem;
+  padding: calc(var(--safe-top) + 6px) 12px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff3d6;
+  color: #6b4a00;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
+  cursor: pointer;
+}
+
+.preview-mode-banner:focus-visible {
+  outline: 3px solid var(--terracotta);
+  outline-offset: -3px;
+}
+
+.tag--preview {
+  background: #fff3d6;
+  color: #6b4a00;
+  border: 1px solid #f0d48a;
+}
+
+.app-nav-button {
+  position: relative;
+}
+
+.app-nav-badge {
+  position: absolute;
+  top: 6px;
+  left: calc(50% + 6px);
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #d97706;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.25rem;
+  text-align: center;
+}
