@@ -989,6 +989,7 @@ export function JagaOnApp({
             locale={locale}
             goBack={goBack}
             navigate={navigate}
+            initialAttribute={entry.params?.attribute}
           />
         );
       case "GENERAL_FOOD_INFORMATION":

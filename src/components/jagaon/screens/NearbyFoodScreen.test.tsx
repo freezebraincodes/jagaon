@@ -399,3 +399,34 @@ describe("NearbyFoodScreen on the provider-neutral port", () => {
     expect(screen.queryByText(`${en.food.within("500 m")} · ${en.food.attrWholegrains}`)).toBeNull();
   });
 });
+
+describe("NearbyFoodScreen initial attribute filter (from Today's meal ideas)", () => {
+  function showWith(discovery: NearbyFoodDiscoveryPort, initialAttribute: string | undefined) {
+    render(<NearbyFoodScreen messages={en} locale="en-SG" discovery={discovery} goBack={vi.fn()} navigate={vi.fn()} initialAttribute={initialAttribute} />);
+  }
+
+  it("pre-selects a valid attribute: named while folded, pressed when opened, and used by the first search", async () => {
+    const discovery = port();
+    showWith(discovery, "HIGHER_IN_WHOLEGRAINS");
+    const toggle = screen.getByRole("button", { name: en.food.filtersHeading });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText(en.food.attrWholegrains, { selector: ".food-filters-summary" })).toBeInTheDocument();
+    fireEvent.click(toggle);
+    const attributes = screen.getByRole("group", { name: en.food.attributesLabel });
+    expect(within(attributes).getByRole("button", { name: en.food.attrWholegrains })).toHaveAttribute("aria-pressed", "true");
+    expect(within(attributes).getByRole("button", { name: en.food.attrLowerSugar })).toHaveAttribute("aria-pressed", "false");
+    search("123456");
+    await waitFor(() => expect(discovery.findNearby).toHaveBeenCalled());
+    const [request] = discovery.findNearby.mock.calls[0]!;
+    expect(request.filters).toEqual({ ...NO_FOOD_FILTERS, attribute: "HIGHER_IN_WHOLEGRAINS" });
+  });
+
+  it.each([["NOT_A_FILTER"], ["higher_in_wholegrains"], ["CHINESE"], [""], [undefined]])("ignores %j: no filter chosen", async (value) => {
+    const discovery = port();
+    showWith(discovery, value);
+    expect(document.querySelector(".food-filters-summary")).toBeNull();
+    search("123456");
+    await waitFor(() => expect(discovery.findNearby).toHaveBeenCalled());
+    expect(discovery.findNearby.mock.calls[0]![0].filters).toEqual(NO_FOOD_FILTERS);
+  });
+});
