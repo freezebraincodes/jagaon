@@ -36,6 +36,8 @@ import { StorageFailureScreen } from "./StorageFailureScreen";
 export type OnboardingExit = {
   state: DemoOnboardingStateV1;
   destination: "TODAY" | "MY_MEDICINES" | "MY_MEDICINES_ADD";
+  /** "Use the prepared demo profile": the app also adds the demo records when the dataset is empty (after "Delete all data"). */
+  prepared?: true;
 };
 
 type OnboardingFlowProps = {
@@ -180,7 +182,7 @@ export function OnboardingFlow({
             onStart={() => go("PROFILE")}
             onPrepared={() =>
               commit(createPreparedOnboardingState(locale, now()), (saved) =>
-                onExit({ state: saved, destination: "TODAY" }),
+                onExit({ state: saved, destination: "TODAY", prepared: true }),
               )
             }
           />

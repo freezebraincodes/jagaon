@@ -292,6 +292,7 @@ function fakeRuntime(options?: BrowserJournalRuntimeOptions): JagaOnRuntime {
     // Packet 11C Addendum C (C2): the patient's "Keep wording on this device" setting (default off).
     keepWordingOnDevice: { read: vi.fn(async () => false), persist: vi.fn(async (_keepOnDevice: boolean) => undefined), subscribe: vi.fn((_listener: () => void) => () => undefined) },
     resetDemo,
+    seedPreparedDemoWhenEmpty: vi.fn(async () => false),
     aiAudit: { append: vi.fn(async () => undefined) },
     recordDeletion: { prepare: vi.fn(), confirm: vi.fn() },
     backup: { export: vi.fn() },
@@ -1223,6 +1224,20 @@ describe("durable local-state cleanup across app instances (Corrective Pass C)",
     await deleteEverything();
     expect(await screen.findByText(en.packet10.deletion.deleteAllDone)).toBeInTheDocument();
     expect(dev.disk.marker).toBeNull();
+  });
+
+  it("after delete-all, \"Use the prepared demo profile\" adds the demo records to the new, empty dataset (once)", async () => {
+    const dev = device(true);
+    const onboarding = ownerStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(prepared) }, false);
+    mount(dev, onboarding, ownerStorage({}, false));
+    await deleteEverything();
+    const replacement = await dev.runtimeFactory.mock.results.at(-1)!.value;
+    expect(dev.runtimeFactory.mock.calls.at(-1)![1]).toMatchObject({ seedSyntheticScenarioOnCreate: false });
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.usePrepared }));
+    await screen.findByRole("button", { name: en.today.recordReading });
+    await waitFor(() => expect(replacement.seedPreparedDemoWhenEmpty).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(replacement.seedPreparedDemoWhenEmpty).toHaveBeenCalledTimes(1);
   });
 
   it("E: an ordinary first launch creates no marker and a legitimate setup is never mistaken for stale state", async () => {

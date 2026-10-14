@@ -132,7 +132,7 @@ describe("onboarding welcome", () => {
     expect(saves).toHaveLength(1);
     expect(saves[0]).toMatchObject({ status: "COMPLETED", locale: "en-SG" });
     expect(saves[0]!.medicines.map((m) => m.displayName)).toEqual(["Lantus", "Apidra"]);
-    expect(onExit).toHaveBeenCalledWith({ state: saves[0], destination: "TODAY" });
+    expect(onExit).toHaveBeenCalledWith({ state: saves[0], destination: "TODAY", prepared: true });
     expect(storage.getItem(DEMO_ONBOARDING_STORAGE_KEY)).not.toBeNull();
   });
 });

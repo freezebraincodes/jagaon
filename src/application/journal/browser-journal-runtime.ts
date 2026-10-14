@@ -99,6 +99,11 @@ export type JagaOnRuntime = {
   };
   resetDemo(): Promise<void>;
   /**
+   * "Use the prepared demo profile" on a dataset created without the demo data (after "Delete all data"): adds the synthetic history,
+   * care plan and care organisation, only into an empty dataset (never over records she created). Resolves whether it seeded.
+   */
+  seedPreparedDemoWhenEmpty(): Promise<boolean>;
+  /**
    * Packet 11C B2b: the append-only local AI invocation audit port (the existing Packet 10 `aiInvocationAudits` table), written only by
    * the wired hybrid service, one validated minimised row per explicit request.
    */
@@ -526,6 +531,15 @@ export async function createBrowserJournalRuntime(
       await seedSyntheticScenarioWhenEmpty();
       await seedCareOrganisationWhenMissing();
       await scheduleIntelligence(true);
+    },
+    async seedPreparedDemoWhenEmpty() {
+      await intelligence;
+      await packet8;
+      if ((await database.table("recordHeads").count()) > 0) return false;
+      await seedSyntheticScenarioWhenEmpty();
+      await seedCareOrganisationWhenMissing();
+      await scheduleIntelligence(true);
+      return true;
     },
   });
 
