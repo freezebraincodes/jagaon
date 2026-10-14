@@ -984,7 +984,8 @@ export const enSGMessages: AppMessages = {
     reminderSaved: "Reminder saved",
     reminderFailed: "Couldn’t save this reminder. The previous reminder is unchanged.",
     reminderLimitation: "A reminder records nothing about whether the action happened.",
-    inAppOnly: "Shown only inside this demo",
+    // Owner decision 2026-10-15: say plainly that reminders do not alert (no sound or notification) in this demo.
+    inAppOnly: "This demo doesn't send reminder alerts yet: no sound or notification.",
     amountInputLabel: (unit) => `Amount (${unit})`,
     amountRequired: "Enter the amount, or choose another option.",
     stateRequired: "Choose what you would like to record.",

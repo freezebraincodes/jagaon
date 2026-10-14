@@ -331,6 +331,13 @@ describe("MedicationScheduleScreen", () => {
     await waitFor(() => expect(schedule.removeBarrier).toHaveBeenCalledWith("resp"));
   });
 
+  it("says plainly that reminders send no alerts in this demo (owner decision 2026-10-15)", async () => {
+    show(port());
+    await screen.findByRole("switch", { name: en.schedule.reminderToggleLabel("Morning reading") });
+    expect(en.schedule.inAppOnly).toBe("This demo doesn't send reminder alerts yet: no sound or notification.");
+    expect(screen.getByText(new RegExp(en.schedule.inAppOnly.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))).toHaveTextContent(en.schedule.reminderLimitation);
+  });
+
   it("changes reminders only after explicit confirmation and confirms a review against the recorded time", async () => {
     const schedule = port();
     show(schedule);
