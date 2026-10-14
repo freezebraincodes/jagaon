@@ -962,7 +962,7 @@ export const zhSGMessages: AppMessages = {
     reminderSaved: "提示已保存",
     reminderFailed: "无法保存此提示。原有提示没有更改。",
     reminderLimitation: "提示本身不会记录相关事项是否发生。",
-    inAppOnly: "只会显示在此演示应用内",
+    inAppOnly: "此演示暂不发送提醒通知：没有声音，也没有通知。",
     amountInputLabel: (unit) => `剂量（${unit}）`,
     amountRequired: "请输入剂量，或选择其他选项。",
     stateRequired: "请选择你想记录的内容。",
