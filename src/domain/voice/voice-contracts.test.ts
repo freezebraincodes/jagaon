@@ -28,9 +28,9 @@ const unresolved = Object.freeze({ kind: "MEDICATION_OCCURRENCE", ...origin, sta
 const mapped = Object.freeze({ ...unresolved, medicineRef: { kind: "MAPPED", phrase: "dark pen", medication: MED, via: "TERMINOLOGY" }, state: "UNDERSTOOD", ambiguity: [] });
 const unsupported = Object.freeze({ kind: "UNSUPPORTED_SPAN", ...origin, span: { start: 0, end: 11 }, sourcePhrase: "I was dizzy" });
 
-describe("voice candidate union (voice-contract.13s.5)", () => {
-  it("is version 13s.5 (distress safety, owner decision 2026-10-14; the vocabulary stays 13s.4)", () => {
-    expect([VOICE_CONTRACT_VERSION, VOICE_EXTRACTOR_VERSION, VOICE_VOCABULARY_VERSION]).toEqual(["voice-contract.13s.5", "voice-extractor.13s.5", "voice-vocabulary.13s.4"]);
+describe("voice candidate union (voice-contract.13s.6)", () => {
+  it("is version 13s.6 (feelings and activities, owner decision 2026-10-14; the vocabulary stays 13s.4)", () => {
+    expect([VOICE_CONTRACT_VERSION, VOICE_EXTRACTOR_VERSION, VOICE_VOCABULARY_VERSION]).toEqual(["voice-contract.13s.6", "voice-extractor.13s.6", "voice-vocabulary.13s.4"]);
   });
 
   it("accepts each kind", () => {
@@ -173,5 +173,31 @@ describe("voice candidate union (voice-contract.13s.5)", () => {
     expect(voiceAnalysisSchema.safeParse({ ...distress, redirect: null }).success).toBe(false);
     const { cueKey: _cueKey, ...withoutCue } = distress;
     expect(voiceAnalysisSchema.safeParse(withoutCue).success).toBe(false);
+  });
+});
+
+describe("13s.6: FEELING_NOTE and ACTIVITY_NOTE (owner decision 2026-10-14)", () => {
+  const feeling = Object.freeze({ kind: "FEELING_NOTE", ...origin, span: { start: 0, end: 13 }, sourcePhrase: "Feeling tired", cueKeys: ["tired"], text: "Feeling tired." });
+  const activity = Object.freeze({ kind: "ACTIVITY_NOTE", ...origin, span: { start: 0, end: 17 }, sourcePhrase: "Walked 30 minutes", category: "WALKING", label: "Walked 30 minutes", durationMinutes: 30 });
+
+  it("accepts each new kind, deterministic only", () => {
+    expect(voiceCandidateSchema.safeParse(feeling).success).toBe(true);
+    expect(voiceCandidateSchema.safeParse(activity).success).toBe(true);
+    expect(voiceCandidateSchema.safeParse({ ...activity, durationMinutes: null }).success).toBe(true);
+    for (const candidate of [feeling, activity]) {
+      const remote = voiceCandidateSchema.safeParse({ ...candidate, source: "REMOTE_EXTRACTION", producerVersion: "transcript-extraction.13r.1" });
+      expect(remote.success).toBe(false);
+      if (!remote.success) expect(remote.error.issues.map((issue) => issue.message)).toContain("DETERMINISTIC_ONLY_KIND");
+    }
+  });
+
+  it("refuses malformed cue keys, untrimmed or empty words, unknown categories and durations outside 1–1440 whole minutes", () => {
+    for (const cueKeys of [[], ["Tired"], ["tired out"], ["tired", "tired"], ["x".repeat(33)], Array.from({ length: 13 }, (_, i) => `cue-${"abcdefghijklm"[i]}`)]) expect(voiceCandidateSchema.safeParse({ ...feeling, cueKeys }).success, JSON.stringify(cueKeys)).toBe(false);
+    for (const text of ["", " Feeling tired", "Feeling tired ", "x".repeat(1001)]) expect(voiceCandidateSchema.safeParse({ ...feeling, text }).success, text.slice(0, 20)).toBe(false);
+    expect(voiceCandidateSchema.safeParse({ ...feeling, state: "UNDERSTOOD", ambiguity: [] }).success).toBe(false);
+    for (const durationMinutes of [0, -5, 1441, 2.5]) expect(voiceCandidateSchema.safeParse({ ...activity, durationMinutes }).success, String(durationMinutes)).toBe(false);
+    expect(voiceCandidateSchema.safeParse({ ...activity, category: "DANCING" }).success).toBe(false);
+    expect(voiceCandidateSchema.safeParse({ ...activity, label: " Walked" }).success).toBe(false);
+    expect(voiceCandidateSchema.safeParse({ ...activity, label: "x".repeat(161) }).success).toBe(false);
   });
 });

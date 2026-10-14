@@ -1048,6 +1048,39 @@ export type VoiceMessages = {
     danger: string;
     trustedPerson: string;
   };
+  /**
+   * Owner decision 2026-10-14 (Tell JagaOn understands more, design §3.1 step 3): the Feeling card. English owner-scoped; Chinese drafts
+   * (human acceptance pending; feelings are recognised in English only). The kind sentence shown after saving comes from the reviewed
+   * bank (`note-kind-sentences`), not from here.
+   */
+  feeling: {
+    heading: string;
+    textLabel: string;
+    saveAsNote: string;
+    talkItThrough: string;
+    skip: string;
+    savedToNotes: string;
+    notSaved: string;
+    skipped: string;
+    textRequired: string;
+  };
+  /** Owner decision 2026-10-14 (design §4): the Activity card. English owner-scoped; Chinese drafts (human acceptance pending). */
+  activity: {
+    heading: string;
+    labelLabel: string;
+    durationLabel: string;
+    durationHint: string;
+    durationInvalid: string;
+    noDuration: string;
+    save: string;
+    skip: string;
+    saved: string;
+    notSaved: string;
+    skipped: string;
+    labelRequired: string;
+    /** Short display names of the activity-event categories ("Walk · 30 minutes"). */
+    categories: Readonly<Record<"WALKING" | "FLEXIBILITY_OR_MOBILITY" | "STRENGTH" | "AEROBIC" | "HOUSEHOLD_ACTIVITY" | "OTHER", string>>;
+  };
 };
 
 export type AppMessages = {

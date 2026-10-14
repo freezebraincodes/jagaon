@@ -7,7 +7,7 @@ import { createVoiceSessionController, type VoiceSessionController, type VoiceSe
 import type { VoiceTranscriberPort } from "@/application/voice/voice-transcriber-port";
 import type { VoiceAccessMode, VoiceProviderId, VoiceProviderResolution } from "@/application/voice/voice-provider-selection";
 import { analyseTranscript, type VoiceMedicineDirectory } from "@/domain/voice/voice-candidate-extractor";
-import type { VoiceAnalysis, VoiceCandidate, VoiceFactCandidate, VoiceLanguage, VoiceMedicationRef, VoiceRedirectCategory } from "@/domain/voice/voice-contracts";
+import type { VoiceAnalysis, VoiceCandidate, VoiceLanguage, VoiceMedicationRef, VoiceRedirectCategory } from "@/domain/voice/voice-contracts";
 import { gateRemoteTranscriptExtraction } from "@/domain/voice/voice-remote-extraction-gate";
 import { createHelpInformationAdapter, telHref, whatsAppHref } from "@/application/governed/help-information-adapter";
 import { mergeRemoteCandidates } from "./voice-remote-merge";
@@ -17,7 +17,9 @@ import { AmbulanceIcon, MessageIcon, PhoneIcon } from "../primitives/Icons";
 import { ModalDialog } from "../primitives/ModalDialog";
 import { ScreenHeader } from "../primitives/ScreenHeader";
 import type { VoiceMedicineOption } from "./MedicineClarificationDialog";
+import { VoiceActivityCard } from "./VoiceActivityCard";
 import { VoiceFactCard, type VoiceFactOutcome } from "./VoiceFactCard";
+import { VoiceFeelingCard, type VoiceTalkItThroughInput } from "./VoiceFeelingCard";
 import { RememberedTermsSection } from "./RememberedTermsSection";
 import { voiceScreenCopy } from "./voice-screen-copy";
 
@@ -62,6 +64,9 @@ import { voiceScreenCopy } from "./voice-screen-copy";
  *   shows ONLY the calm safety message with the helplines (SOS, mindline, 995) and the exit: no transcript, fact card, "not captured"
  *   list, redirect, manual-entry chooser, remembered terms or remote-extraction offer. The transcript is dropped at once and nothing is
  *   saved (`onSaveFacts` is never reachable). Focus moves to the message, which is also announced as an alert.
+ * - Owner decision 2026-10-14 (Tell JagaOn understands more): a FEELING_NOTE shows the Feeling card (her words; Save as a note; Skip;
+ *   Talk it through only when `onTalkItThrough` is given) and an ACTIVITY_NOTE the Activity card (summary, editable label and
+ *   minutes; Save; Skip). Both save through the same review contract and `onSaveFacts` as every other card.
  */
 export type VoiceRememberedTerm = Readonly<{ recordId: string; revisionId: string; language: VoiceLanguage; phrase: string; medication: VoiceMedicationRef | null }>;
 export type VoiceTerminologyPort = Readonly<{
@@ -123,6 +128,11 @@ export type TellJagaOnScreenProps = Readonly<{
    * failure keeps the local result. Absent: never offered.
    */
   remoteExtraction?: VoiceRemoteExtraction;
+  /**
+   * Owner decision 2026-10-14 (design §3.1 step 4): the feelings chat, opened from a Feeling card's "Talk it through" with her (edited)
+   * words and the recognised cue keys. Absent: the Feeling card offers only "Save as a note" and "Skip".
+   */
+  onTalkItThrough?: (feeling: VoiceTalkItThroughInput) => void;
   timers?: VoiceTimers;
   startTimeoutMs?: number;
   maxSessionSeconds?: number;
@@ -554,10 +564,14 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
             </div>
           ) : null}
           {phase.analysis.candidates.map((candidate, index) =>
-            candidate.kind === "UNSUPPORTED_SPAN" ? null : (
+            candidate.kind === "UNSUPPORTED_SPAN" ? null : candidate.kind === "FEELING_NOTE" ? (
+              <VoiceFeelingCard key={`${phase.sessionToken}-${phase.generation}-${index}`} candidate={candidate} index={index} copy={copy} onDecide={decideFact} onInteract={touch} onTalkItThrough={props.onTalkItThrough} />
+            ) : candidate.kind === "ACTIVITY_NOTE" ? (
+              <VoiceActivityCard key={`${phase.sessionToken}-${phase.generation}-${index}`} candidate={candidate} index={index} copy={copy} onDecide={decideFact} onInteract={touch} />
+            ) : (
               <VoiceFactCard
                 key={`${phase.sessionToken}-${phase.generation}-${index}`}
-                candidate={candidate as VoiceFactCandidate}
+                candidate={candidate}
                 index={index}
                 copy={copy}
                 language={language}

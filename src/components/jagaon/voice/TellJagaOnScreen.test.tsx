@@ -1030,3 +1030,39 @@ describe("Tell JagaOn screen", () => {
     });
   });
 });
+
+describe("Tell JagaOn screen: feelings and activities (owner decision 2026-10-14)", () => {
+  it("a feeling, an activity and a reading each get their own card; each saves its own intent through onSaveFacts", async () => {
+    const context = setup({ text: "Walked 30 minutes. My sugar was 6.8 mmol. Feeling tired and a bit worried." });
+    await speakAndStop(context);
+    const articles = await screen.findAllByRole("article");
+    expect(articles.map((article) => within(article).getByRole("heading").textContent)).toEqual([context.messages.voice.activity.heading, context.pending.card.glucose, context.messages.voice.feeling.heading]);
+    fireEvent.click(within(articles[2]!).getByRole("button", { name: context.messages.voice.feeling.saveAsNote }));
+    await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledWith({ kind: "FEELING_NOTE", text: "Feeling tired and a bit worried.", cueKeys: ["tired", "worried"] }));
+    fireEvent.click(within(articles[0]!).getByRole("button", { name: context.messages.voice.activity.save }));
+    await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledWith({ kind: "ACTIVITY", category: "WALKING", label: "Walked 30 minutes", durationMinutes: 30 }));
+    expect(context.onSaveFacts).toHaveBeenCalledTimes(2);
+  });
+
+  it("Talk it through is offered only when the app passes onTalkItThrough, and hands over her words and cues", async () => {
+    const onTalkItThrough = vi.fn();
+    const context = setup({ text: "I'm so tired today", onTalkItThrough });
+    await speakAndStop(context);
+    fireEvent.click(await screen.findByRole("button", { name: context.messages.voice.feeling.talkItThrough }));
+    expect(onTalkItThrough).toHaveBeenCalledWith({ text: "I'm so tired today", cueKeys: ["tired"] });
+    expect(context.onSaveFacts).not.toHaveBeenCalled();
+    cleanup();
+    const without = setup({ text: "I'm so tired today" });
+    await speakAndStop(without);
+    await screen.findByRole("button", { name: without.messages.voice.feeling.saveAsNote });
+    expect(screen.queryByRole("button", { name: without.messages.voice.feeling.talkItThrough })).toBeNull();
+  });
+
+  it("distress still shows only the safety message, with no Feeling card", async () => {
+    const context = setup({ text: "I feel so tired I want to die" });
+    await speakAndStop(context);
+    await screen.findByText(context.messages.voice.distress.message);
+    expect(screen.queryByRole("article")).toBeNull();
+    expect(screen.queryByRole("button", { name: context.messages.voice.feeling.saveAsNote })).toBeNull();
+  });
+});

@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { VOICE_MAX_CANDIDATES, VOICE_TRANSCRIPT_MAX_CODE_POINTS, VOICE_VOCABULARY_VERSION, candidateMatchesTranscript, voiceAnalysisSchema, type VoiceAnalysis } from "./voice-contracts";
+import { VOICE_MAX_CANDIDATES, VOICE_TRANSCRIPT_MAX_CODE_POINTS, VOICE_VOCABULARY_VERSION, candidateMatchesTranscript, voiceAnalysisSchema, type VoiceAnalysis, type VoiceFactCandidate } from "./voice-contracts";
 import { analyseTranscript, extractVoiceCandidates, normaliseVoicePhrase, type VoiceMedicineDirectory } from "./voice-candidate-extractor";
 
 const REF_A = { recordType: "MEDICATION", recordId: "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f", revisionId: "7a1c2d3e-4a5b-4c6d-9e7f-0a1b2c3d4e5f" } as const;
@@ -101,7 +101,7 @@ describe("limits", () => {
 });
 
 describe("distress gate first (owner decision 2026-10-14)", () => {
-  const DISTRESS = { kind: "DISTRESS", candidates: [], cuesVersion: "voice-distress-cues.1", extractorVersion: "voice-extractor.13s.5" } as const;
+  const DISTRESS = { kind: "DISTRESS", candidates: [], cuesVersion: "voice-distress-cues.1", extractorVersion: "voice-extractor.13s.6" } as const;
   const distress = (text: string, language: "en" | "zh" = "en") => {
     const result = analyseTranscript(text, language);
     expect(voiceAnalysisSchema.safeParse(result).success, text).toBe(true);
@@ -264,7 +264,7 @@ describe("CR-11 fix round 3: signs, ranges and excess precision", () => {
     expect(voiceAnalysisSchema.safeParse(result).success, text).toBe(true);
     if (result.kind !== "ANALYSED") return result.kind;
     return result.candidates
-      .map((c) => (c.kind === "GLUCOSE_READING" ? `G(${c.valueText}${c.ambiguity.length ? ` ${c.ambiguity.join("+")}` : ""})` : c.kind === "MEDICATION_OCCURRENCE" ? `D(${c.reportedAmount ? `${c.reportedAmount.valueText} ${c.reportedAmount.unitText}` : "-"}${c.ambiguity.length ? ` ${c.ambiguity.join("+")}` : ""})` : c.kind === "MEAL_NOTE" ? "M" : "U"))
+      .map((c) => (c.kind === "GLUCOSE_READING" ? `G(${c.valueText}${c.ambiguity.length ? ` ${c.ambiguity.join("+")}` : ""})` : c.kind === "MEDICATION_OCCURRENCE" ? `D(${c.reportedAmount ? `${c.reportedAmount.valueText} ${c.reportedAmount.unitText}` : "-"}${c.ambiguity.length ? ` ${c.ambiguity.join("+")}` : ""})` : c.kind === "MEAL_NOTE" ? "M" : c.kind === "FEELING_NOTE" ? "F" : c.kind === "ACTIVITY_NOTE" ? "A" : "U"))
       .join(" ");
   };
 
@@ -306,7 +306,8 @@ describe("CR-11 fix round 3: signs, ranges and excess precision", () => {
       ["I injected 8–10 units of my dark pen", "en", "D(10 units UNCERTAINTY)"],
       ["我吃了2–3片药", "zh", "D(3 片 UNCERTAINTY+MEDICINE_UNRESOLVED)"],
       ["sugar was 6.8 - before breakfast", "en", "G(6.8)"],
-      ["sugar was 6.8, - I felt fine", "en", "G(6.8 UNIT_UNSTATED+UNCERTAINTY) U"],
+      // 13s.6: "I felt fine" is now a feeling (F); the reading beside it is unchanged (the C1 backstop still applies).
+      ["sugar was 6.8, - I felt fine", "en", "G(6.8 UNIT_UNSTATED+UNCERTAINTY) F"],
       ["血糖6.8 - 早餐前", "zh", "G(6.8)"],
       ["sugar plus six mmol", "en", "U"],
       ["血糖正六毫摩尔", "zh", "U"],
@@ -788,7 +789,7 @@ describe("owner decision 2026-10-12: English second person is clause-local", () 
  */
 describe("owner decision 2026-10-12, fix round 1: a clause without its own subject keeps an earlier \"you\" of its sentence", () => {
   const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
-  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c): c is VoiceFactCandidate => c.kind === "GLUCOSE_READING" || c.kind === "MEAL_NOTE" || c.kind === "MEDICATION_OCCURRENCE");
 
   it.each([
     ["you had chicken rice and took the dark pen", "MEDICATION_OCCURRENCE"],
@@ -830,7 +831,7 @@ describe("owner decision 2026-10-12, fix round 1: a clause without its own subje
  */
 describe("owner decision 2026-10-12, fix round 2: only a subject-form first person outweighs an earlier \"you\"", () => {
   const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
-  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c): c is VoiceFactCandidate => c.kind === "GLUCOSE_READING" || c.kind === "MEAL_NOTE" || c.kind === "MEDICATION_OCCURRENCE");
 
   it.each([
     ["you had lunch then took my dark pen", "MEDICATION_OCCURRENCE"],
@@ -871,7 +872,7 @@ describe("owner decision 2026-10-12, fix round 2: only a subject-form first pers
  */
 describe("owner decision 2026-10-12, fix round 3: only a first person before the fact's verb or cue cancels, and leaves UNCERTAINTY", () => {
   const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
-  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c): c is VoiceFactCandidate => c.kind === "GLUCOSE_READING" || c.kind === "MEAL_NOTE" || c.kind === "MEDICATION_OCCURRENCE");
 
   it.each([
     ["you had lunch then took the dark pen I gave", "MEDICATION_OCCURRENCE"],
@@ -925,7 +926,7 @@ describe("owner decision 2026-10-12, fix round 3: only a first person before the
  */
 describe("owner decision 2026-10-12, fix round 4: a subjectless fact right after a sentence with \"you\" is edit-only", () => {
   const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
-  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c): c is VoiceFactCandidate => c.kind === "GLUCOSE_READING" || c.kind === "MEAL_NOTE" || c.kind === "MEDICATION_OCCURRENCE");
 
   it.each([
     ["You took metformin. Took the dark pen.", "MEDICATION_OCCURRENCE"],
@@ -959,7 +960,7 @@ describe("owner decision 2026-10-12, fix round 4: a subjectless fact right after
  */
 describe("owner decision 2026-10-12, fix round 5: the nearest earlier sentence with a subject decides", () => {
   const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
-  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c): c is VoiceFactCandidate => c.kind === "GLUCOSE_READING" || c.kind === "MEAL_NOTE" || c.kind === "MEDICATION_OCCURRENCE");
   const editOnly = { state: "AMBIGUOUS", ambiguity: expect.arrayContaining(["UNCERTAINTY"]) };
 
   it("walks back over subjectless sentences to the \"you\"", () => {

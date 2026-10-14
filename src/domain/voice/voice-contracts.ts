@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { MMOL_CONFIRMATION_TRIGGER, isMmolEntryValue, mmolEntryNeedsConfirmation } from "./glucose-entry-format";
+import { VOICE_ACTIVITY_CATEGORIES, VOICE_ACTIVITY_MAX_MINUTES } from "./voice-activity-cues";
 import { VOICE_DISTRESS_CUES_VERSION, VOICE_DISTRESS_CUE_KEYS } from "./voice-distress-gate";
 import { VOICE_VOCABULARY_VERSION } from "./voice-vocabulary";
 
 /**
- * Packet 13 (P13S, owner scope expansion 2026-10-09): the closed voice candidate and analysis contracts, `voice-contract.13s.5`
- * (13s.3, 13s.4 and 13s.5 changes are listed below the version constants).
+ * Packet 13 (P13S, owner scope expansion 2026-10-09): the closed voice candidate and analysis contracts, `voice-contract.13s.6`
+ * (13s.3, 13s.4, 13s.5 and 13s.6 changes are listed below the version constants).
  * FROZEN INTERFACE: stream 1 maps its validated remote transcript extraction into THIS union (`source: "REMOTE_EXTRACTION"`); the
  * deterministic extractor produces `source: "DETERMINISTIC"`. Change only by a coordinated version bump.
  *
@@ -29,10 +30,14 @@ import { VOICE_VOCABULARY_VERSION } from "./voice-vocabulary";
  * - MEDICATION_OCCURRENCE: `status` PLANNED ("I need to inject": never taken) | TAKEN | SKIPPED | UNKNOWN ("forgot", "remembered later",
  *   "not sure"), `medicineRef`: UNRESOLVED with the spoken phrase, or MAPPED (canonical record ref, via TERMINOLOGY | EXACT_NAME),
  *   and `reportedAmount` (13s.3): the amount the person reported ("I injected 10 units"), exactly as spoken, or null.
+ * - FEELING_NOTE (13s.6): how she said she feels, `cueKeys` (the recognised cue keys, `voice-feeling-cues.1`) and `text` (her own
+ *   words, trimmed). DETERMINISTIC only; no state, no ambiguity (it is saved, edited or skipped as her note, never as a health fact).
+ * - ACTIVITY_NOTE (13s.6): an activity she reported, `category` (the activity-event categories), `label` (her own words) and
+ *   `durationMinutes` (only when said; 1–1440) or null. DETERMINISTIC only; no state, no ambiguity.
  * - UNSUPPORTED_SPAN: a part of the utterance that is not understood (shown as such, never dropped, never interpreted).
  */
-export const VOICE_CONTRACT_VERSION = "voice-contract.13s.5";
-export const VOICE_EXTRACTOR_VERSION = "voice-extractor.13s.5";
+export const VOICE_CONTRACT_VERSION = "voice-contract.13s.6";
+export const VOICE_EXTRACTOR_VERSION = "voice-extractor.13s.6";
 /*
  * voice-contract.13s.3 (owner decisions 2026-10-09 ~14:55, #2–#4; safety re-review fixes):
  * - MEDICATION_OCCURRENCE gains `reportedAmount: { valueText, unitText } | null`: an amount the person REPORTED for an occurrence
@@ -52,6 +57,10 @@ export const VOICE_EXTRACTOR_VERSION = "voice-extractor.13s.5";
  * - The analysis gains a DISTRESS result: the deterministic distress gate (`voice-distress-gate`, `voice-distress-cues.1`) runs before
  *   everything else; on a match the result has ZERO candidates, no redirect and no transcript, only the matched `cueKey` and the cue
  *   list version. The app then shows only the safety message with helplines; nothing is saved and nothing goes to remote extraction.
+ * voice-contract.13s.6 (owner decision 2026-10-14, Tell JagaOn understands more, design §2–§4):
+ * - Two new kinds, FEELING_NOTE and ACTIVITY_NOTE, produced ONLY by the deterministic extractor (`voice-feeling-cues.1`,
+ *   `voice-activity-cues.1`). A REMOTE_EXTRACTION candidate of either kind is invalid (`DETERMINISTIC_ONLY_KIND`), so remote extraction
+ *   can never add or alter one. Neither carries a state or ambiguity reasons. The distress gate still runs before both.
  */
 export { VOICE_VOCABULARY_VERSION };
 /** 13s.4 (CR-11): the shared new-entry value format, re-exported so the pure extractor depends only on its own contract module. */
@@ -172,17 +181,49 @@ const medicationSchema = z
   .strict();
 const unsupportedSchema = z.object({ kind: z.literal("UNSUPPORTED_SPAN"), ...base }).strict();
 
+/** 13s.6: her own words for a feeling note or an activity label: trimmed, not empty, at most `max` code points. */
+const ownWordsSchema = (max: number) => z.string().min(1).refine((text) => text === text.trim() && text.length > 0 && codePointLength(text) <= max, { message: "OWN_WORDS_INVALID" });
+/** 13s.6: the most cue keys one feeling note carries (the personal-note record allows as many). */
+export const VOICE_FEELING_MAX_CUES = 12;
+export const VOICE_FEELING_TEXT_MAX_CODE_POINTS = 1_000;
+/** A stored feeling cue key: lowercase letters, single hyphens or underscores between ("tired", "worn-out", "not-good"); ≤ 32. */
+export const voiceFeelingCueKeySchema = z.string().min(1).max(32).regex(/^[a-z]+(?:[-_][a-z]+)*$/);
+const feelingSchema = z
+  .object({
+    kind: z.literal("FEELING_NOTE"),
+    ...base,
+    cueKeys: z.array(voiceFeelingCueKeySchema).min(1).max(VOICE_FEELING_MAX_CUES),
+    text: ownWordsSchema(VOICE_FEELING_TEXT_MAX_CODE_POINTS),
+  })
+  .strict();
+export const voiceActivityDurationSchema = z.number().int().min(1).max(VOICE_ACTIVITY_MAX_MINUTES);
+const activitySchema = z
+  .object({
+    kind: z.literal("ACTIVITY_NOTE"),
+    ...base,
+    category: z.enum(VOICE_ACTIVITY_CATEGORIES),
+    label: ownWordsSchema(VOICE_SOURCE_PHRASE_MAX_CODE_POINTS),
+    durationMinutes: voiceActivityDurationSchema.nullable(),
+  })
+  .strict();
+
 const ALLOWED_REASONS: Readonly<Record<"GLUCOSE_READING" | "MEAL_NOTE" | "MEDICATION_OCCURRENCE", readonly VoiceAmbiguityReason[]>> = Object.freeze({
   GLUCOSE_READING: ["UNIT_UNSTATED", "NEGATION", "UNCERTAINTY", "CORRECTION", "OTHER_PERSON", "MULTIPLE_NUMBERS"],
   MEAL_NOTE: ["NEGATION", "UNCERTAINTY", "CORRECTION", "OTHER_PERSON"],
   MEDICATION_OCCURRENCE: ["NEGATION", "UNCERTAINTY", "CORRECTION", "OTHER_PERSON", "MEDICINE_UNRESOLVED", "STATUS_UNCLEAR"],
 });
 
-export const voiceCandidateSchema = z.discriminatedUnion("kind", [glucoseSchema, mealSchema, medicationSchema, unsupportedSchema]).superRefine((candidate, context) => {
+export const voiceCandidateSchema = z.discriminatedUnion("kind", [glucoseSchema, mealSchema, medicationSchema, feelingSchema, activitySchema, unsupportedSchema]).superRefine((candidate, context) => {
   const issue = (message: string) => context.addIssue({ code: z.ZodIssueCode.custom, message });
   if (codePointLength(candidate.sourcePhrase) !== candidate.span.end - candidate.span.start) issue("PHRASE_SPAN_MISMATCH");
   if (candidate.source === "DETERMINISTIC" && candidate.producerVersion !== VOICE_VOCABULARY_VERSION) issue("PRODUCER_VERSION_MISMATCH");
   if (candidate.kind === "UNSUPPORTED_SPAN") return;
+  // 13s.6: a feeling or an activity is recognised only by the fixed rules on the device; remote extraction never adds or alters one.
+  if (candidate.kind === "FEELING_NOTE" || candidate.kind === "ACTIVITY_NOTE") {
+    if (candidate.source !== "DETERMINISTIC") issue("DETERMINISTIC_ONLY_KIND");
+    if (candidate.kind === "FEELING_NOTE" && new Set(candidate.cueKeys).size !== candidate.cueKeys.length) issue("CUE_KEYS_NOT_UNIQUE");
+    return;
+  }
   const ordered = VOICE_AMBIGUITY_REASONS.filter((reason) => candidate.ambiguity.includes(reason));
   if (ordered.length !== candidate.ambiguity.length || ordered.some((reason, index) => candidate.ambiguity[index] !== reason)) issue("AMBIGUITY_NOT_CANONICAL");
   if (candidate.ambiguity.some((reason) => !ALLOWED_REASONS[candidate.kind].includes(reason))) issue("AMBIGUITY_NOT_ALLOWED");
@@ -204,6 +245,9 @@ export type VoiceGlucoseCandidate = Extract<VoiceCandidate, { kind: "GLUCOSE_REA
 export type VoiceMealCandidate = Extract<VoiceCandidate, { kind: "MEAL_NOTE" }>;
 export type VoiceMedicationCandidate = Extract<VoiceCandidate, { kind: "MEDICATION_OCCURRENCE" }>;
 export type VoiceUnsupportedSpan = Extract<VoiceCandidate, { kind: "UNSUPPORTED_SPAN" }>;
+/** 13s.6: a feeling she stated, and an activity she reported (deterministic only; no state or ambiguity). */
+export type VoiceFeelingCandidate = Extract<VoiceCandidate, { kind: "FEELING_NOTE" }>;
+export type VoiceActivityCandidate = Extract<VoiceCandidate, { kind: "ACTIVITY_NOTE" }>;
 export type VoiceFactCandidate = VoiceGlucoseCandidate | VoiceMealCandidate | VoiceMedicationCandidate;
 
 /** True when the candidate's span and phrase are exactly the transcript's code points (required for REMOTE_EXTRACTION too). */

@@ -90,3 +90,47 @@ describe("voice intent → existing journal command (Q13-6)", () => {
     expect(notSaved).not.toHaveBeenCalled();
   });
 });
+
+describe("owner decision 2026-10-14: a feeling saved as a note, an activity to the activity log", () => {
+  it("FEELING_NOTE → createPersonalNote with her words, the cues, the reviewed kind sentence and no AI", async () => {
+    const p = ports();
+    const createPersonalNote = vi.fn(async (input: unknown) => (void input, { kind: "COMMITTED", recordId: "r", revisionId: "v" }) as never);
+    const save = createVoiceJournalSave({ ...p, notes: { createPersonalNote } });
+    expect(await save({ kind: "FEELING_NOTE", text: "Feeling tired and a bit worried today.", cueKeys: ["tired", "worried"] })).toEqual({ kind: "SAVED" });
+    expect(createPersonalNote).toHaveBeenCalledWith({
+      payload: {
+        text: "Feeling tired and a bit worried today.",
+        language: "en-SG",
+        feelingCues: ["tired", "worried"],
+        turns: [
+          { role: "PATIENT", text: "Feeling tired and a bit worried today.", source: "PATIENT" },
+          { role: "JAGAON_KIND_SENTENCE", text: "It sounds like something has been on your mind. Thank you for sharing it.", source: "REVIEWED_BANK" },
+        ],
+        themes: [],
+        aiUsed: false,
+        promptVersion: null,
+        careQuestionRef: null,
+      },
+    });
+    for (const command of [p.commands.recordGlucose, p.commands.recordMeal, p.recordMedicationEvent]) expect(command).not.toHaveBeenCalled();
+    createPersonalNote.mockResolvedValueOnce({ kind: "FAILED", code: "COMMIT_FAILED" } as never);
+    expect(await save({ kind: "FEELING_NOTE", text: "Tired", cueKeys: ["tired"] })).toEqual({ kind: "NOT_SAVED" });
+    createPersonalNote.mockRejectedValueOnce(new Error("storage"));
+    expect(await save({ kind: "FEELING_NOTE", text: "Tired", cueKeys: ["tired"] })).toEqual({ kind: "NOT_SAVED" });
+    // Without the notes port nothing is saved.
+    expect(await createVoiceJournalSave(p)({ kind: "FEELING_NOTE", text: "Tired", cueKeys: ["tired"] })).toEqual({ kind: "NOT_SAVED" });
+  });
+
+  it("ACTIVITY → recordActivity with the category, her label, the duration only when said, and an unknown time", async () => {
+    const p = ports();
+    const recordActivity = vi.fn(async (input: unknown) => (void input, committed));
+    const save = createVoiceJournalSave({ ...p, recordActivity });
+    expect(await save({ kind: "ACTIVITY", category: "WALKING", label: "Walked 30 minutes after dinner", durationMinutes: 30 })).toEqual({ kind: "SAVED" });
+    expect(await save({ kind: "ACTIVITY", category: "HOUSEHOLD_ACTIVITY", label: "Cleaned the house", durationMinutes: null })).toEqual({ kind: "SAVED" });
+    expect(recordActivity.mock.calls.map(([input]) => input)).toEqual([
+      { payload: { activityCategory: "WALKING", patientLabel: "Walked 30 minutes after dinner", reportedDurationMinutes: 30 }, temporal: { kind: "POINT", occurrence: { kind: "UNKNOWN" } }, recordedAt: NOW },
+      { payload: { activityCategory: "HOUSEHOLD_ACTIVITY", patientLabel: "Cleaned the house" }, temporal: { kind: "POINT", occurrence: { kind: "UNKNOWN" } }, recordedAt: NOW },
+    ]);
+    expect(await createVoiceJournalSave(p)({ kind: "ACTIVITY", category: "WALKING", label: "Walked", durationMinutes: null })).toEqual({ kind: "NOT_SAVED" });
+  });
+});

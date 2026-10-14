@@ -10,6 +10,8 @@ import {
   glucoseValueInAppDefaultWindow,
   isMmolEntryValue,
   voiceRedirectMessageKey,
+  VOICE_FEELING_MAX_CUES,
+  VOICE_FEELING_TEXT_MAX_CODE_POINTS,
   type VoiceRedirectCategory,
   type VoiceReportedAmount,
   type VoiceAmbiguityReason,
@@ -22,7 +24,9 @@ import {
   type VoiceOccurrenceStatus,
 } from "./voice-contracts";
 import { classifyVoiceAdviceRedirect, voiceWordMatcher } from "./voice-advice-redirect";
+import { matchVoiceActivity } from "./voice-activity-cues";
 import { VOICE_DISTRESS_CUES_VERSION, detectVoiceDistress } from "./voice-distress-gate";
+import { matchVoiceFeeling } from "./voice-feeling-cues";
 import {
   EN_MEDICINE_PHRASE_STOPWORDS,
   EN_PRONOUN_ONE_PREFIXES,
@@ -62,6 +66,12 @@ import {
  * with its 1–2 spoken describing words) gives one MEDICATION_OCCURRENCE with the occurrence status said (PLANNED, TAKEN, SKIPPED;
  * UNKNOWN when unclear, forgotten or unsure). A description is never matched loosely: only an exact remembered term or an exact
  * canonical name maps it; otherwise it stays UNRESOLVED for the clarification question.
+ * Feelings and activities (13s.6, owner decision 2026-10-14; English only): a clause no other fact took, that no glucose reading
+ * touches and that is not a question or a redirected clause may state an activity (`voice-activity-cues.1`: ACTIVITY_NOTE) and/or a
+ * feeling (`voice-feeling-cues.1`: one FEELING_NOTE per transcript with every cue said). Priority: the distress gate first (unchanged);
+ * a dose/treatment/health QUESTION keeps the redirect ("Should I be worried about my sugar?", "Should I exercise after meals?"); a
+ * STATEMENT is never redirected for "worried" or "exercise" (the redirect needs a question form), so it becomes a feeling or activity
+ * card. "After my walk my sugar was 6.1" stays one glucose reading (a time reference, and the reading's clause).
  * Anything else with words or numbers is an UNSUPPORTED_SPAN (shown as not understood; never dropped, never interpreted).
  *
  * 13s.3 (safety re-review Cr1–Cr4, I1–I3, M2, M4; owner decisions #2–#4):
@@ -1072,8 +1082,57 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
     glucoseDrafts.push({ start, end, valueText: number.valueText, spoken: number.unitEnd !== null, reasons });
   }
 
+  // 13s.6 (owner decision 2026-10-14, design §2–§4): activities and feelings, English only, from the clauses no other fact took and no
+  // glucose reading touches (their words describe that fact: "after my walk my sugar was 6.1", "lunch was good"), never from a question
+  // or a redirected clause. A clause may hold an activity and, after "and/but/so", a feeling ("Walked 30 minutes and feeling good").
+  // The transcript yields at most ONE feeling: every feeling clause's cues, merged in order, over one span from the first to the last.
+  // These clauses are understood (not UNSUPPORTED), but for glucose readings they still count as other words in the transcript: the
+  // round-4 C1 backstop applies to them unchanged (every reading gets UNCERTAINTY and never the app-default unit), so this feature never
+  // makes a reading easier to save than before.
+  const noteRanges: Range[] = [];
+  if (language === "en") {
+    const feelingParts: Array<{ start: number; end: number; cueKeys: readonly string[] }> = [];
+    let previousFeeling: Range | null = null;
+    for (const range of clauseRanges) {
+      // A cue alone continues a feeling stated in the clause just before it, in the same sentence ("I'm not tired, but worried").
+      const continuation = previousFeeling !== null && sentenceIndex(previousFeeling.start) === sentenceIndex(range.start) && /^[\s,，、]*(?:(?:and|but|then)\s*)?$/i.test(text.slice(previousFeeling.end, range.start));
+      previousFeeling = null;
+      if (factRanges.includes(range) || glucoseDrafts.some((draft) => draft.start < range.end && draft.end > range.start)) continue;
+      const clause = text.slice(range.start, range.end);
+      if (QUESTION.en.test(clause) || QUESTION.en.test(text.slice(range.end, range.end + 2))) continue;
+      const activity = matchVoiceActivity(clause);
+      if (activity) {
+        const origin = base(range.start, range.end);
+        candidates.push({ start: range.start, candidate: Object.freeze({ kind: "ACTIVITY_NOTE", ...origin, category: activity.category, label: origin.sourcePhrase.trim(), durationMinutes: activity.durationMinutes }) });
+        noteRanges.push(range);
+      }
+      const starts = [0, ...[...clause.matchAll(/(?<![A-Za-z])(?:and|but|so|because|though|although)(?![A-Za-z])/gi)].map((match) => match.index)];
+      for (const offset of starts) {
+        const feeling = matchVoiceFeeling(clause.slice(offset), continuation && offset === 0);
+        if (!feeling) continue;
+        feelingParts.push({ start: range.start + offset + feeling.start, end: range.end, cueKeys: feeling.cueKeys });
+        if (!noteRanges.includes(range)) noteRanges.push(range);
+        previousFeeling = range;
+        break;
+      }
+    }
+    if (feelingParts.length > 0) {
+      const start = Math.min(...feelingParts.map((part) => part.start));
+      const end = Math.max(...feelingParts.map((part) => part.end));
+      const cueKeys = [...new Set(feelingParts.flatMap((part) => part.cueKeys))].slice(0, VOICE_FEELING_MAX_CUES);
+      // Her own words: the feeling's span, with the sentence's closing "." or "!" kept; at most 1000 code points.
+      const closing = /^[.!]/.test(text.slice(end, end + 1)) ? 1 : 0;
+      const words = [...text.slice(start, end + closing).trim()].slice(0, VOICE_FEELING_TEXT_MAX_CODE_POINTS).join("").trim();
+      candidates.push({ start, candidate: Object.freeze({ kind: "FEELING_NOTE", ...base(start, end), cueKeys, text: words }) });
+    }
+  }
+
   // Everything else with words is not understood (never dropped).
-  const covered = [...candidates.map(({ candidate }) => candidate.span), ...glucoseDrafts.map((draft) => base(draft.start, draft.end).span)];
+  const covered = [
+    ...candidates.filter(({ candidate }) => candidate.kind !== "FEELING_NOTE" && candidate.kind !== "ACTIVITY_NOTE").map(({ candidate }) => candidate.span),
+    ...glucoseDrafts.map((draft) => base(draft.start, draft.end).span),
+    ...noteRanges.map((range) => base(range.start, range.end).span),
+  ];
   const unsupported: Array<{ start: number; candidate: VoiceCandidate }> = [];
   for (const range of clauseRanges) {
     const clause = text.slice(range.start, range.end);
@@ -1089,11 +1148,13 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
   // gets UNCERTAINTY (not resolvable by an answer; the person must edit) and never the app-default unit.
   for (const draft of glucoseDrafts) {
     const { reasons } = draft;
-    if (unsupported.length > 0) reasons.add("UNCERTAINTY");
+    // 13s.6: a feeling or activity clause counts here exactly as before, when it was not understood.
+    const otherWords = unsupported.length > 0 || noteRanges.length > 0;
+    if (otherWords) reasons.add("UNCERTAINTY");
     // Owner default-unit boundary (#2): the app's entry unit only for an otherwise unambiguous reading inside the app-default window
     // (review I2: "sugar 72" stays UNIT_UNSTATED; 13s.4: the person then confirms the unit explicitly); it never clears another reason.
     // Round 5 (revised B): a hedged reading never gets the app-default unit; the person confirms the unit ("Yes, mmol/L").
-    const appDefault = !draft.spoken && !glucoseHedgeMarked(text.slice(draft.start, draft.end)) && reasons.size === 1 && reasons.has("UNIT_UNSTATED") && unsupported.length === 0 && options.glucoseEntryUnit === "MMOL_PER_L" && glucoseValueInAppDefaultWindow(draft.valueText);
+    const appDefault = !draft.spoken && !glucoseHedgeMarked(text.slice(draft.start, draft.end)) && reasons.size === 1 && reasons.has("UNIT_UNSTATED") && !otherWords && options.glucoseEntryUnit === "MMOL_PER_L" && glucoseValueInAppDefaultWindow(draft.valueText);
     if (appDefault) reasons.delete("UNIT_UNSTATED");
     const ambiguity = ordered(reasons);
     const unit = draft.spoken || appDefault ? "MMOL_PER_L" : "UNSTATED";

@@ -1100,7 +1100,17 @@ export function JagaOnApp({
         if (!runtime) return <p role="status">{messages.shared.loading}</p>;
         const voice = runtime.voice;
         // Packet 13 (Q13-6, HELD by the integration gate until the re-review approves): one confirmed fact → the existing command.
-        const saveFact = voice ? createVoiceJournalSave({ commands: runtime.commands, recordMedicationEvent: voice.recordMedicationEvent, now: () => new Date().toISOString() as never }) : null;
+        // Owner decision 2026-10-14 (Tell JagaOn understands more): a feeling saved as a note goes to the personal-note service, an
+        // activity to the existing activity command.
+        const saveFact = voice
+          ? createVoiceJournalSave({
+              commands: runtime.commands,
+              recordMedicationEvent: voice.recordMedicationEvent,
+              recordActivity: runtime.commands.recordActivity,
+              notes: runtime.notes?.commands,
+              now: () => new Date().toISOString() as never,
+            })
+          : null;
         return (
           <TellJagaOnScreen
             messages={messages}

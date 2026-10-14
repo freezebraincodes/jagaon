@@ -1,9 +1,13 @@
 import { z } from "zod";
 import {
+  VOICE_FEELING_TEXT_MAX_CODE_POINTS,
   VOICE_PERSON_RESOLVABLE_REASONS,
+  codePointLength,
   glucoseHedgeMarked,
   glucoseNeedsConfirmation,
+  voiceActivityDurationSchema,
   voiceAnalysisSchema,
+  voiceFeelingCueKeySchema,
   voiceMedicationRefSchema,
   voiceReportedAmountSchema,
   type VoiceAnalysis,
@@ -11,10 +15,11 @@ import {
   type VoiceMedicationRef,
 } from "@/domain/voice/voice-contracts";
 import { formatMmolEntry, isFormattedMmolEntry, isMmolEntryValue } from "@/domain/voice/glucose-entry-format";
+import { VOICE_ACTIVITY_CATEGORIES } from "@/domain/voice/voice-activity-cues";
 import type { VoiceSessionState } from "./voice-session-controller";
 
 /**
- * Packet 13 (P13S): from reviewed candidates plus the person's explicit per-fact decisions to closed save intents, `voice-review.13s.5`.
+ * Packet 13 (P13S): from reviewed candidates plus the person's explicit per-fact decisions to closed save intents, `voice-review.13s.6`.
  * Each fact is decided separately; nothing is an intent without an explicit SAVE decision for that fact.
  *
  * Rules (review C3 and the owner requirements):
@@ -36,13 +41,18 @@ import type { VoiceSessionState } from "./voice-session-controller";
  *   to exactly one decimal ("60" → "60.0", "0" → "0.0"). The unit is still never assumed outside the app-default window: an UNSTATED
  *   unit needs the explicit answer ("Yes, mmol/L").
  * - 13s.5 (owner decision 2026-10-14, distress safety): a DISTRESS analysis yields nothing (DISTRESS), whatever the decisions say.
+ * - 13s.6 (owner decision 2026-10-14, Tell JagaOn understands more): a FEELING_NOTE becomes a FEELING_NOTE intent (her words, edited or
+ *   as recognised, trimmed, 1–1000 code points, with the recognised cue keys) that the app saves as a personal note; an ACTIVITY_NOTE
+ *   becomes an ACTIVITY intent (the recognised category; her label, edited or as recognised, 1–160 code points; the duration in whole
+ *   minutes 1–1440, edited or as said, or null) that the app saves with the existing activity command. Neither has a reason to
+ *   resolve; an answer is ignored, and an edit of another kind is refused (EDIT_KIND_MISMATCH).
  * - A REDIRECT or over-long analysis, a session that did not complete or a review of an older session yields nothing; a redirect
  *   NOTICE beside separated facts does not block those facts. Malformed decisions refuse the whole review (fail closed).
  * Remembering a term is a separate decision (terminology service); it never creates or depends on an intent.
  * It imports no journal or storage code: the app maps intents to the existing commands (recordGlucose, recordMeal,
  * recordMedicationEvent). recordGlucose has NO format or confirmation check of its own, which is why this contract applies them.
  */
-export const VOICE_REVIEW_CONTRACT_VERSION = "voice-review.13s.5";
+export const VOICE_REVIEW_CONTRACT_VERSION = "voice-review.13s.6";
 
 /** An intent's value: the stored new-entry form, exactly one decimal (13s.4). An edit's value: the shared entry format (≤ 1 decimal). */
 const INTENT_VALUE = z.string().refine(isFormattedMmolEntry, { message: "VALUE_FORMAT" });
@@ -50,11 +60,16 @@ const EDIT_VALUE = z.string().refine(isMmolEntryValue, { message: "VALUE_FORMAT"
 const EVENT_STATUSES = ["TAKEN", "SKIPPED", "UNKNOWN"] as const;
 const SLOTS = ["BREAKFAST", "LUNCH", "DINNER", "SUPPER"] as const;
 const boundedText = (max: number) => z.string().min(1).max(max).refine((text) => text.trim().length > 0);
+/** 13s.6: her own words (a feeling note, an activity label): trimmed, not empty, at most `max` code points. */
+const ownWords = (max: number) => z.string().min(1).refine((text) => text === text.trim() && text.length > 0 && codePointLength(text) <= max, { message: "OWN_WORDS_INVALID" });
+const ACTIVITY_LABEL_MAX = 160;
 
 export const voiceSaveIntentSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("GLUCOSE"), valueText: INTENT_VALUE, unit: z.literal("MMOL_PER_L"), unitSource: z.enum(["SPOKEN", "APP_DEFAULT", "PERSON"]) }).strict(),
   z.object({ kind: z.literal("MEAL"), slot: z.enum(SLOTS).nullable(), itemText: boundedText(120).nullable() }).strict(),
   z.object({ kind: z.literal("MEDICATION_EVENT"), medication: voiceMedicationRefSchema, status: z.enum(EVENT_STATUSES), reportedAmount: voiceReportedAmountSchema.nullable() }).strict(),
+  z.object({ kind: z.literal("FEELING_NOTE"), text: ownWords(VOICE_FEELING_TEXT_MAX_CODE_POINTS), cueKeys: z.array(voiceFeelingCueKeySchema).min(1).max(12) }).strict(),
+  z.object({ kind: z.literal("ACTIVITY"), category: z.enum(VOICE_ACTIVITY_CATEGORIES), label: ownWords(ACTIVITY_LABEL_MAX), durationMinutes: voiceActivityDurationSchema.nullable() }).strict(),
 ]);
 export type VoiceSaveIntent = z.infer<typeof voiceSaveIntentSchema>;
 
@@ -62,6 +77,10 @@ const editSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("GLUCOSE_READING"), valueText: EDIT_VALUE, unit: z.literal("MMOL_PER_L") }).strict(),
   z.object({ kind: z.literal("MEAL_NOTE"), slot: z.enum(SLOTS).nullable(), itemText: boundedText(120).nullable() }).strict(),
   z.object({ kind: z.literal("MEDICATION_OCCURRENCE"), medication: voiceMedicationRefSchema, status: z.enum(EVENT_STATUSES) }).strict(),
+  /** 13s.6: her edited words for the note (trimmed by the contract). */
+  z.object({ kind: z.literal("FEELING_NOTE"), text: z.string() }).strict(),
+  /** 13s.6: her edited label and duration (null: no duration). */
+  z.object({ kind: z.literal("ACTIVITY_NOTE"), label: z.string(), durationMinutes: voiceActivityDurationSchema.nullable() }).strict(),
 ]);
 const decisionSchema = z.discriminatedUnion("action", [
   z.object({ candidateIndex: z.number().int().min(0), action: z.literal("SKIP") }).strict(),
@@ -100,6 +119,7 @@ export type VoiceFactRejection =
   | "VALUE_FORMAT"
   | "MEDICINE_NOT_IN_PROFILE"
   | "EDIT_KIND_MISMATCH"
+  | "TEXT_INVALID"
   | "NOT_A_FACT";
 export type VoiceReviewNoIntentReason = "INVALID_REVIEW" | "DISTRESS" | "REDIRECTED" | "TRANSCRIPT_TOO_LONG" | "SESSION_NOT_COMPLETED" | "STALE_REVIEW" | "INVALID_DECISIONS" | "NO_CONFIRMATION";
 export type VoiceReviewResult =
@@ -123,6 +143,19 @@ function glucose(valueText: string, unitSource: "SPOKEN" | "APP_DEFAULT" | "PERS
 /** The intent for one SAVE decision, or the closed reason it cannot be saved. Exported for the per-card review screen. */
 export function intentForDecision(candidate: VoiceCandidate, decision: Extract<VoiceFactDecision, { action: "SAVE" }>, knownMedications: readonly VoiceMedicationRef[]): { intent: VoiceSaveIntent } | { reason: VoiceFactRejection } {
   if (candidate.kind === "UNSUPPORTED_SPAN") return { reason: "NOT_A_FACT" };
+  // 13s.6: a feeling or an activity is saved as she recognised or edited it (her words are the record); nothing to resolve.
+  if (candidate.kind === "FEELING_NOTE") {
+    if (decision.edit && decision.edit.kind !== "FEELING_NOTE") return { reason: "EDIT_KIND_MISMATCH" };
+    const text = (decision.edit?.text ?? candidate.text).trim();
+    if (text.length === 0 || codePointLength(text) > VOICE_FEELING_TEXT_MAX_CODE_POINTS) return { reason: "TEXT_INVALID" };
+    return { intent: { kind: "FEELING_NOTE", text, cueKeys: [...candidate.cueKeys] } };
+  }
+  if (candidate.kind === "ACTIVITY_NOTE") {
+    if (decision.edit && decision.edit.kind !== "ACTIVITY_NOTE") return { reason: "EDIT_KIND_MISMATCH" };
+    const label = (decision.edit?.label ?? candidate.label).trim();
+    if (label.length === 0 || codePointLength(label) > ACTIVITY_LABEL_MAX) return { reason: "TEXT_INVALID" };
+    return { intent: { kind: "ACTIVITY", category: candidate.category, label, durationMinutes: decision.edit ? decision.edit.durationMinutes : candidate.durationMinutes } };
+  }
   if (candidate.ambiguity.includes("OTHER_PERSON")) return { reason: "OTHER_PERSON" };
   const known = (ref: VoiceMedicationRef) => knownMedications.some((entry) => sameRef(entry, ref));
   const edit = decision.edit;
@@ -130,6 +163,7 @@ export function intentForDecision(candidate: VoiceCandidate, decision: Extract<V
     if (edit.kind !== candidate.kind) return { reason: "EDIT_KIND_MISMATCH" };
     if (edit.kind === "GLUCOSE_READING") return glucose(edit.valueText, "PERSON", decision.confirmed === true);
     if (edit.kind === "MEAL_NOTE") return { intent: { kind: "MEAL", slot: edit.slot, itemText: edit.itemText } };
+    if (edit.kind !== "MEDICATION_OCCURRENCE") return { reason: "EDIT_KIND_MISMATCH" };
     return known(edit.medication) ? { intent: { kind: "MEDICATION_EVENT", medication: edit.medication, status: edit.status, reportedAmount: null } } : { reason: "MEDICINE_NOT_IN_PROFILE" };
   }
   if (candidate.kind === "GLUCOSE_READING" && formatMmolEntry(candidate.valueText) === null) return { reason: "VALUE_FORMAT" };
