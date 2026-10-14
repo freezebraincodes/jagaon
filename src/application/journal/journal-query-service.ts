@@ -16,6 +16,7 @@ const PACKET6_RECORD_TYPES: ReadonlySet<JournalEntryKind> = new Set([
   "GLUCOSE_READING",
   "MEDICATION_EVENT",
   "INTAKE_EVENT",
+  "ACTIVITY_EVENT",
 ]);
 
 const MAX_TODAY_ENTRIES = 20;
@@ -168,7 +169,7 @@ export function createJournalQueryService(
 function buildDisplayFields(revision: {
   recordType: string;
   payload: unknown;
-}): Pick<TodayJournalEntry, "displayValue" | "displayUnit" | "displayContext"> {
+}): Pick<TodayJournalEntry, "displayValue" | "displayUnit" | "displayContext" | "displayMinutes"> {
   if (revision.recordType === "GLUCOSE_READING") {
     const payload = revision.payload as GlucoseReadingPayload;
     const context = payload.context;
@@ -210,6 +211,20 @@ function buildDisplayFields(revision: {
     return {
       displayContext: payload.intakeSlot?.code ?? payload.intakeKind,
       displayValue: payload.items?.[0]?.label,
+    };
+  }
+
+  if (revision.recordType === "ACTIVITY_EVENT") {
+    const payload = revision.payload as {
+      activityCategory?: string;
+      patientLabel?: string;
+      reportedDurationMinutes?: number;
+    };
+    // Her own label and, only when she reported it, the duration.
+    return {
+      displayContext: payload.activityCategory,
+      displayValue: payload.patientLabel,
+      ...(payload.reportedDurationMinutes === undefined ? {} : { displayMinutes: payload.reportedDurationMinutes }),
     };
   }
 
@@ -266,6 +281,11 @@ function buildSummary(revision: {
     const slot = p.intakeSlot as { code?: string } | undefined;
     const slotCode = slot?.code ?? "";
     return `${slotCode} · ${firstItem}`;
+  }
+  if (revision.recordType === "ACTIVITY_EVENT") {
+    const label = (p.patientLabel as string | undefined) ?? "Activity";
+    const minutes = p.reportedDurationMinutes as number | undefined;
+    return minutes === undefined ? label : `${label} · ${minutes} min`;
   }
   return "";
 }

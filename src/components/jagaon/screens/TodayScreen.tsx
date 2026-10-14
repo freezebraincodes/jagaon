@@ -178,6 +178,21 @@ export function TodayScreen({
     : null;
   const latestMeal =
     todayEntries.find((entry) => entry.recordType === "INTAKE_EVENT") ?? null;
+  // The newest activity on any day, with when it happened (or when it was entered, if she gave no time).
+  const latestActivity =
+    journal.entries.find((entry) => entry.recordType === "ACTIVITY_EVENT") ?? null;
+  const latestActivityInstant = latestActivity ? knownOccurrence(latestActivity) : null;
+  const latestActivityWhen = latestActivity
+    ? latestActivityInstant
+      ? isSameSingaporeDay(latestActivityInstant, now)
+        ? formatSingaporeTime(locale, latestActivityInstant)
+        : formatSingaporeDateTime(locale, latestActivityInstant)
+      : msg.enteredAt(
+          isSameSingaporeDay(latestActivity.recordedAt, now)
+            ? formatSingaporeTime(locale, latestActivity.recordedAt)
+            : formatSingaporeDateTime(locale, latestActivity.recordedAt),
+        )
+    : null;
 
   return (
     <div className="today-screen">
@@ -421,19 +436,26 @@ export function TodayScreen({
               : msg.notRecorded}
           </span>
         </button>
-        {/* Synthetic, user-entered activity from the fixture; there is no
-            activity logging in Packet 6, so the tile is not interactive. */}
-        <div className="summary-tile" role="group" aria-labelledby="activity-heading">
+        {/* The latest activity she recorded (Tell JagaOn is where activities are recorded, so the tile opens it). */}
+        <button
+          type="button"
+          className="summary-tile"
+          aria-label={msg.activityTitle}
+          onClick={() => navigate("TELL_JAGAON")}
+          disabled={actionsDisabled}
+        >
           <WalkIcon size={28} className="icon summary-tile-icon" />
-          <h2 id="activity-heading" className="summary-tile-title">
-            {fixture.activity.title}
-          </h2>
-          <p className="summary-tile-body">
-            {[fixture.activity.place, messages.shared.minutes(fixture.activity.minutes), msg.enteredByYou].join(
-              " · ",
-            )}
-          </p>
-        </div>
+          <span className="summary-tile-title">{msg.activityTitle}</span>
+          <span className="summary-tile-body">
+            {latestActivity
+              ? [
+                  latestActivity.displayValue ?? latestActivity.summary,
+                  ...(latestActivity.displayMinutes === undefined ? [] : [messages.shared.minutes(latestActivity.displayMinutes)]),
+                  latestActivityWhen,
+                ].join(" · ")
+              : msg.notRecorded}
+          </span>
+        </button>
       </section>
 
       <section className="today-card" aria-labelledby="care-planning-heading">

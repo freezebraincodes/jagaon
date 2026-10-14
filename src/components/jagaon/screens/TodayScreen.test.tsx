@@ -346,14 +346,47 @@ describe("TodayScreen", () => {
     expect(container).toHaveTextContent(messages.today.bookletProgress(2, 3));
   });
 
-  it("shows the synthetic user-entered walk as a read-only tile", () => {
-    const { messages, fixture, getByRole } = setup({ locale: "en-SG" });
-    const tile = getByRole("group", { name: fixture.activity.title });
-    expect(tile).toHaveTextContent(fixture.activity.place);
-    expect(tile).toHaveTextContent(messages.shared.minutes(fixture.activity.minutes));
-    expect(tile).toHaveTextContent(messages.today.enteredByYou);
-    expect(within(tile).queryByRole("button")).not.toBeInTheDocument();
+  it("shows Not recorded on the Activity tile when no activity is recorded, and the tile opens Tell JagaOn", () => {
+    const { messages, getByRole, navigate } = setup({ locale: "en-SG" });
+    const tile = getByRole("button", { name: messages.today.activityTitle });
+    expect(tile).toHaveTextContent(messages.today.notRecorded);
+    fireEvent.click(tile);
+    expect(navigate).toHaveBeenCalledWith("TELL_JAGAON");
   });
+
+  it("shows the latest recorded activity on the Activity tile, from any day", () => {
+    const messages = getMessages("en-SG");
+    const activity = (id: string, label: string, at: string, minutes?: number): TodayJournalEntry => ({
+      recordId: `00000000-0000-4000-8000-0000000004${id}` as never,
+      revisionId: `00000000-0000-4000-8000-0000000005${id}` as never,
+      recordType: "ACTIVITY_EVENT",
+      revisionNumber: 1,
+      recordedAt: at as never,
+      occurrenceSortInstant: at as never,
+      summary: label,
+      displayValue: label,
+      displayContext: "WALKING",
+      ...(minutes === undefined ? {} : { displayMinutes: minutes }),
+    });
+    const newest = activity("01", "Walked after dinner", "2026-10-01T12:30:00Z", 30);
+    const older = activity("02", "Morning walk", "2026-09-30T00:20:00Z", 28);
+    const { getByRole } = render(
+      <TodayScreen
+        messages={messages}
+        locale="en-SG"
+        fixture={createDemoScenarioFixture()}
+        journal={{ unavailable: false, entries: [journal.entries[0]!, newest, older] }}
+        navigate={vi.fn()}
+        now={NOW}
+      />,
+    );
+    const tile = getByRole("button", { name: messages.today.activityTitle });
+    expect(tile).toHaveTextContent("Walked after dinner");
+    expect(tile).toHaveTextContent(messages.shared.minutes(30));
+    expect(tile).toHaveTextContent(formatSingaporeDateTime("en-SG", "2026-10-01T12:30:00Z" as never));
+    expect(tile).not.toHaveTextContent("Morning walk");
+  });
+
   it("shows frame 31 — no medicines recorded, never missed — after an explicit skip", () => {
     const messages = getMessages("en-SG");
     const navigate = vi.fn();

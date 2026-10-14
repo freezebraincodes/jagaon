@@ -167,6 +167,35 @@ describe("journal-query-service", () => {
     expect(result.entries[2]!.recordType).toBe("MEDICATION_EVENT");
   });
 
+  it("includes recorded activities with her label and reported minutes", async () => {
+    const db = await openDatabase();
+    const command = createJournalCommandService(db, makeDependencies());
+    const query = createJournalQueryService(db);
+
+    await command.recordActivity({
+      payload: { activityCategory: "WALKING", patientLabel: "Walked after dinner", reportedDurationMinutes: 30 },
+      temporal: VALID_MEAL_TEMPORAL,
+      recordedAt: "2026-10-02T09:00:00Z" as Instant,
+    });
+    await command.recordActivity({
+      payload: { activityCategory: "WALKING", patientLabel: "Short walk" },
+      temporal: VALID_MEAL_TEMPORAL,
+      recordedAt: "2026-10-02T09:05:00Z" as Instant,
+    });
+
+    const result = await query.loadToday();
+    const activities = result.entries.filter((entry) => entry.recordType === "ACTIVITY_EVENT");
+    expect(activities).toHaveLength(2);
+    expect(activities.find((entry) => entry.displayValue === "Walked after dinner")).toMatchObject({
+      displayContext: "WALKING",
+      displayMinutes: 30,
+      summary: "Walked after dinner · 30 min",
+    });
+    const short = activities.find((entry) => entry.displayValue === "Short walk");
+    expect(short).toBeDefined();
+    expect(short).not.toHaveProperty("displayMinutes");
+  });
+
   it("projects the source references needed to render recorded insulin and meal facts", async () => {
     const db = await openDatabase();
     const command = createJournalCommandService(db, makeDependencies());
