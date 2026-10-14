@@ -331,7 +331,12 @@ describe("Packet 11A scope", () => {
     // Packet 11C Addendum C, C5 (deliberate): plus one test-only file (the route's re-parse usage path, isolated for its module mock).
     // Packet 11C Addendum C, C6 (deliberate): the route's server-only deployment configuration and spend ledger modules, their tests and
     // one test-only support module (test configuration values; in no production graph, pinned below).
+    // Tell JagaOn understands more (owner-approved design 2026-10-14, deliberate): the feelings-chat route (POST /api/ai/feelings),
+    // its handler and its fake-transport test; off unless both switches and its own spend limit are set.
     expect(walk("src/app/api").filter((file) => /(^|\/)ai(\/|-)/i.test(file))).toEqual([
+      "src/app/api/ai/feelings/feelings-chat-handler.ts",
+      "src/app/api/ai/feelings/route.test.ts",
+      "src/app/api/ai/feelings/route.ts",
       "src/app/api/ai/shell/ai-shell-deployment-config.ts",
       "src/app/api/ai/shell/ai-shell-handler.ts",
       "src/app/api/ai/shell/ai-shell-route-test-support.ts",
@@ -376,7 +381,8 @@ describe("Packet 11A scope", () => {
     expect(strip(readFileSync(join(ROOT, AI_CREDIT_LIMIT_DIALOG), "utf8"))).not.toMatch(/\bfetch\b|XMLHttpRequest|sendBeacon|localStorage|sessionStorage|indexedDB/);
     // Packet 11B: the provider adapters are reachable only from the server AI route. Packet 11C B2a (deliberate retarget): that route is
     // now the value-blind POST /api/ai/shell; the retired POST /api/ai/task reaches no provider adapter, AI service or credential reader.
-    expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/ai/") && !importGraph(["src/app/api/ai/shell/route.ts", "src/app/api/ai/transcript/route.ts"]).includes(file))).toEqual([]);
+    // Tell JagaOn understands more (deliberate): the feelings-chat route reaches its own server-only request builder and transport.
+    expect(RUNTIME_GRAPH.filter((file) => file.startsWith("src/ai/") && !importGraph(["src/app/api/ai/feelings/route.ts", "src/app/api/ai/shell/route.ts", "src/app/api/ai/transcript/route.ts"]).includes(file))).toEqual([]);
     expect(importGraph(["src/app/api/ai/task/route.ts"]).filter((file) => /^src\/(ai|application\/ai|domain\/ai)\//.test(file))).toEqual([]);
     // The shared-helper extraction keeps the legacy fact-sending service out of the hybrid service's graph and the shell route's graph.
     // Packet 11C Addendum C, C1: the test-only request-class support (test-only QUALIFIED records) and the evaluation-only definitions
@@ -423,6 +429,9 @@ const SOURCES = walk("src")
 /** A network call site: a `fetch` call or the global `fetch` bound as a default fetcher, or another browser network primitive. */
 const NETWORK_CALL_SITE = /(?<![.\w$])fetch\b(?!\s*:)|(?:globalThis|window|self)\s*\.\s*fetch\b|\[\s*["'`]fetch["'`]\s*\]|XMLHttpRequest|WebSocket|EventSource|sendBeacon/;
 const EXISTING_NETWORK_MODULES = [
+  // Tell JagaOn understands more (owner-approved design 2026-10-14, deliberate): the feelings-chat transport's one bounded POST to the
+  // documented DeepSeek endpoint (server-only; reached only from POST /api/ai/feelings, after both switches and its own spend limit).
+  "src/ai/feelings-chat/feelings-chat-provider.ts",
   "src/ai/kie/kie-model-catalogue.ts",
   "src/ai/kie/kie-responses-provider.ts",
   // Packet 13 (P13X, owner scope expansion 2026-10-09): the transcript-extraction transport's one bounded POST to the documented DeepSeek endpoint (server-only).
@@ -432,6 +441,9 @@ const EXISTING_NETWORK_MODULES = [
   // It is the one deliberate addition; it sends only after the request passed the client-side checks and an accepted disclosure, and
   // the shipped manifest keeps every task NOT_ACTIVATED, so the shipped app never reaches it (B3: nor is the disclosure ever shown).
   "src/application/ai/browser-shell-client.ts",
+  // Tell JagaOn understands more (deliberate): the feelings-chat browser client's single same-origin POST to /api/ai/feelings, sent
+  // only after the chat dialog's AI notice was accepted. Not in the browser graph until the Tell JagaOn wiring loads it.
+  "src/application/feelings-chat/feelings-chat-client.ts",
   "src/application/nearby-food/browser-nearby-food.ts",
   // Packet 13 (P13X): the transcript-extraction browser client's single same-origin POST to /api/ai/transcript.
   "src/application/transcript-extraction/transcript-extraction-client.ts",
@@ -478,7 +490,9 @@ describe("Packet 11C Checkpoint 2 guards", () => {
     // the TRTC signing secret (read last, after every refusal; never returned).
     // Web Speech (owner-approved scope 2026-10-11, deliberate additions): the passcode-only voice access route, and the ONE browser-side
     // read of the public, non-secret build-time developer-settings flag (exactly `process.env.NEXT_PUBLIC_JAGAON_DEV_SETTINGS`).
-    expect(SOURCES.filter((file) => ENVIRONMENT_READ.test(strip(readFileSync(join(ROOT, file), "utf8"))))).toEqual(["src/app/api/ai/shell/route.ts", "src/app/api/ai/transcript/route.ts", "src/app/api/onemap/search/route.ts", "src/app/api/voice/access/route.ts", "src/app/api/voice/usersig/route.ts", DEV_SETTINGS_FLAG, BUILD_EXCLUSIONS].sort());
+    // Tell JagaOn understands more (deliberate): plus the feelings-chat route, which reads its switches, its own spend limit and (last,
+    // through readDeepSeekToken) the credential.
+    expect(SOURCES.filter((file) => ENVIRONMENT_READ.test(strip(readFileSync(join(ROOT, file), "utf8"))))).toEqual(["src/app/api/ai/feelings/route.ts", "src/app/api/ai/shell/route.ts", "src/app/api/ai/transcript/route.ts", "src/app/api/onemap/search/route.ts", "src/app/api/voice/access/route.ts", "src/app/api/voice/usersig/route.ts", DEV_SETTINGS_FLAG, BUILD_EXCLUSIONS].sort());
     for (const [file, read] of Object.entries(BROWSER_ENV_READS)) expect(strip(readFileSync(join(ROOT, file), "utf8")).match(/process\.env\.[A-Z_]+/g), file).toEqual([read]);
     expect(SOURCES.filter((file) => PROVIDER_KEY_NAME.test(readFileSync(join(ROOT, file), "utf8")))).toEqual([
       "src/ai/deepseek/deepseek-catalogue.ts",

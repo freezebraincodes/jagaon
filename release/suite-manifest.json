@@ -95,6 +95,7 @@
             "src/application/deletion/ai-audit-deletion.test.ts",
             "src/application/deletion/deletion-plan-integrity.test.ts",
             "src/application/deletion/deletion-planner.test.ts",
+            "src/application/feelings-chat/feelings-chat-client.test.ts",
             "src/application/governed/demo-scenario-fixture.test.ts",
             "src/application/governed/help-information-adapter.test.ts",
             "src/application/governed/medication-information-adapter.test.ts",
@@ -423,6 +424,7 @@
         {
           "runner": "vitest",
           "files": [
+            "src/app/api/ai/feelings/route.test.ts",
             "src/app/api/ai/shell/ai-spend-ledger.test.ts",
             "src/app/api/ai/shell/route-access-spend.test.ts",
             "src/app/api/ai/shell/route-reparse-usage.test.ts",
