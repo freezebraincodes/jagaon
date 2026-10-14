@@ -603,13 +603,22 @@ function bracketedRanges(text: string): Range[] {
   return ranges;
 }
 
+/**
+ * Owner report 2026-10-15: the dot inside "a.m." / "p.m." ("at 1:00 p.m.") is part of the time, not the end of a sentence; splitting
+ * there left a stray "m" that was not understood, which made every reading in the transcript edit-only. The closing dot still ends the
+ * sentence. Speech recognition writes times this way.
+ */
+function isMeridiemInnerDot(text: string, index: number): boolean {
+  return /^[ap]$/i.test(text[index - 1] ?? "") && /^m$/i.test(text[index + 1] ?? "") && (index < 2 || /[\s\d]/.test(text[index - 2]!)) && !/[A-Za-z]/.test(text[index + 2] ?? "");
+}
+
 /** Sentence boundaries: ! ? ; their full-width forms, line breaks, and a period not followed (after spaces) by a digit. */
 function sentenceBoundaries(text: string): number[] {
   const boundaries: number[] = [];
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index]!;
     if ("!?;。！？；\n".includes(char)) boundaries.push(index);
-    else if ((char === "." || char === "．") && !isDigitChar(text.slice(index + 1).trimStart()[0]) && !(/[零〇一二两三四五六七八九十]/.test(text[index - 1] ?? "") && /[零〇一二两三四五六七八九十]/.test(text[index + 1] ?? ""))) boundaries.push(index);
+    else if ((char === "." || char === "．") && !isDigitChar(text.slice(index + 1).trimStart()[0]) && !(/[零〇一二两三四五六七八九十]/.test(text[index - 1] ?? "") && /[零〇一二两三四五六七八九十]/.test(text[index + 1] ?? "")) && !isMeridiemInnerDot(text, index)) boundaries.push(index);
   }
   return boundaries;
 }
@@ -817,7 +826,8 @@ function onlyAllowedWords(segment: string, language: VoiceLanguage, vocabulary: 
     rest = rest.replace(/[零〇一二两三四五六七八九十百点0-9０-９.．,，、\s'’:：]/g, "");
     return !/[\p{Script=Han}A-Za-z]/u.test(rest);
   }
-  let rest = segment.toLowerCase().replace(/[’]/g, "'");
+  // Owner report 2026-10-15: "a.m." / "p.m." are the clock markers "am" / "pm" ("at 7 a.m.").
+  let rest = segment.toLowerCase().replace(/[’]/g, "'").replace(/(?<![a-z])([ap])\.\s?m(?:\.|(?![a-z]))/g, "$1m");
   const phrases = [...qualifierPhrases(vocabulary), ...allowed].filter((phrase) => phrase.includes(" ")).sort((left, right) => right.length - left.length);
   for (const phrase of phrases) rest = rest.replace(new RegExp(`(?<![a-z])${escape(phrase).replace(/ /g, "\\s+")}(?![a-z])`, "g"), " ");
   const single = new Set([...allowed, ...qualifierPhrases(vocabulary), ...vocabulary.integerWords, ...vocabulary.tensWords, ...vocabulary.digitWords, vocabulary.decimalMarker].filter((word) => !word.includes(" ")));
