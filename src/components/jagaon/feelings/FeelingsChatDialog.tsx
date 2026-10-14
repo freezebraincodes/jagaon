@@ -10,6 +10,7 @@ import type { NoteThemeKey } from "@/domain/notes/note-themes";
 import type { AppMessages } from "@/i18n/types";
 import { ModalDialog } from "../primitives/ModalDialog";
 import { TextareaField } from "../primitives/Field";
+import { FeelingsChatVoiceAnswer, type FeelingsChatVoice } from "./FeelingsChatVoiceAnswer";
 
 export type FeelingsChatTurnRole = "PATIENT" | "JAGAON_QUESTION" | "JAGAON_KIND_SENTENCE";
 export type FeelingsChatTurnSource = "PATIENT" | "AI_VALIDATED" | "REVIEWED_BANK";
@@ -47,6 +48,11 @@ export type FeelingsChatDialogProps = {
   onAddDoctorQuestion: (text: string) => Promise<boolean>;
   /** Closes without saving (Escape, "Don't save", "Done"). */
   onClose: () => void;
+  /**
+   * Owner decision 2026-10-14: "Speak my answer" (the same voice provider, notice and session as Tell JagaOn). Her spoken words go
+   * through the distress gate, then into the answer box; she still checks them and taps Send. Absent: typing only.
+   */
+  voice?: FeelingsChatVoice;
 };
 
 type Phase = "NOTICE" | "CHAT" | "WRAP_UP" | "SAVED" | "ENDED";
@@ -72,7 +78,7 @@ type DoctorState = "OPEN" | "ADDING" | "ADDED" | "DECLINED" | "FAILED";
  * Focus moves to the answer box with each question, to the summary at the wrap-up and to "Done" after saving; questions, the loading
  * state and the results are announced in a polite live region. Escape closes without saving.
  */
-export function FeelingsChatDialog({ messages, initialText, cueKeys, chat, detectDistress, onDistress, onSave, onAddDoctorQuestion, onClose }: FeelingsChatDialogProps) {
+export function FeelingsChatDialog({ messages, initialText, cueKeys, chat, detectDistress, onDistress, onSave, onAddDoctorQuestion, onClose, voice }: FeelingsChatDialogProps) {
   const t = messages.feelingsChat;
   const kind = kindSentenceFor(cueKeys);
   const feelingCues = [...new Set(cueKeys.map((cue) => cue.trim().toLowerCase()).filter((cue) => cue.length > 0))];
@@ -95,6 +101,8 @@ export function FeelingsChatDialog({ messages, initialText, cueKeys, chat, detec
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  // True while "Speak my answer" is open (notice, recording); Send, Skip and End chat wait for it.
+  const [voiceBusy, setVoiceBusy] = useState(false);
 
   const mounted = useRef(true);
   const inFlight = useRef<AbortController | null>(null);
@@ -112,8 +120,8 @@ export function FeelingsChatDialog({ messages, initialText, cueKeys, chat, detec
 
   // Focus stays in the answer box for the whole chat (also while JagaOn is thinking, when the buttons are disabled).
   useEffect(() => {
-    if (phase === "CHAT") answerRef.current?.focus();
-  }, [phase, question, loading]);
+    if (phase === "CHAT" && !voiceBusy) answerRef.current?.focus();
+  }, [phase, question, loading, voiceBusy]);
   useEffect(() => {
     if (phase === "WRAP_UP") summaryRef.current?.focus();
     if (phase === "SAVED") doneRef.current?.focus();
@@ -188,9 +196,16 @@ export function FeelingsChatDialog({ messages, initialText, cueKeys, chat, detec
     void requestTurn(1, chatHistory, opening);
   }
 
+  /** Her spoken answer: the distress gate first; then it joins what she already typed, for her to check and send. */
+  function spokenAnswer(text: string) {
+    if (detectDistress(text)) return stopForDistress();
+    setAnswer((current) => (current.trim().length > 0 ? `${current.trimEnd()} ${text}` : text).slice(0, FEELINGS_CHAT_MESSAGE_MAX_CHARS));
+    answerRef.current?.focus();
+  }
+
   /** Her answer (if any) joins the chat after the distress gate; then the next turn (or the wrap-up when `finish`). */
   function advance(kindOfStep: "SEND" | "SKIP" | "END") {
-    if (loading || question === null) return;
+    if (loading || question === null || voiceBusy) return;
     const text = kindOfStep === "SKIP" ? "" : answer.trim();
     if (kindOfStep === "SEND" && text.length === 0) return;
     if (text.length > 0 && detectDistress(text)) return stopForDistress();
@@ -323,13 +338,13 @@ export function FeelingsChatDialog({ messages, initialText, cueKeys, chat, detec
         onClose={onClose}
         actions={
           <>
-            <button type="button" className="btn btn-primary btn-wide" disabled={loading || question === null || answer.trim().length === 0} onClick={() => advance("SEND")}>
+            <button type="button" className="btn btn-primary btn-wide" disabled={loading || question === null || voiceBusy || answer.trim().length === 0} onClick={() => advance("SEND")}>
               {t.send}
             </button>
-            <button type="button" className="btn btn-outline btn-wide" disabled={loading || question === null} onClick={() => advance("SKIP")}>
+            <button type="button" className="btn btn-outline btn-wide" disabled={loading || question === null || voiceBusy} onClick={() => advance("SKIP")}>
               {t.skip}
             </button>
-            <button type="button" className="btn btn-ghost btn-wide" disabled={loading || question === null} onClick={() => advance("END")}>
+            <button type="button" className="btn btn-ghost btn-wide" disabled={loading || question === null || voiceBusy} onClick={() => advance("END")}>
               {t.endChat}
             </button>
           </>
@@ -345,10 +360,11 @@ export function FeelingsChatDialog({ messages, initialText, cueKeys, chat, detec
           maxLength={FEELINGS_CHAT_MESSAGE_MAX_CHARS}
           rows={3}
           // Read-only (not disabled) while JagaOn is thinking, so focus can stay in the answer box inside the dialog.
-          readOnly={loading || question === null}
+          readOnly={loading || question === null || voiceBusy}
           aria-busy={loading || undefined}
           onChange={(event) => setAnswer(event.target.value)}
         />
+        {voice ? <FeelingsChatVoiceAnswer voice={voice} labels={t} disabled={loading || question === null} onTranscript={spokenAnswer} onBusyChange={setVoiceBusy} /> : null}
         {live}
       </ModalDialog>
     );

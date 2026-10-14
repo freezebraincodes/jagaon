@@ -6269,6 +6269,60 @@ button.summary-tile:hover:not(:disabled) {
   flex: 1 1 9rem;
 }
 
+/* Owner decision 2026-10-14: "Speak my answer" in the chat (the voice notice and the recording stay inside the dialog). */
+.feelings-chat-voice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  min-width: 0;
+}
+
+.feelings-chat-speak {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.feelings-chat-mic {
+  display: inline-flex;
+}
+
+.feelings-chat-voice-consent,
+.feelings-chat-voice-session {
+  padding: 0.875rem 1rem;
+  border: 2px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card-2);
+  overflow-wrap: anywhere;
+}
+
+.feelings-chat-voice-title {
+  margin: 0;
+  font-size: 1.0625rem;
+  line-height: 1.3;
+}
+
+.feelings-chat-voice-consent p,
+.feelings-chat-voice-message,
+.feelings-chat-voice-status {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.feelings-chat-voice-live {
+  margin: 0;
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.feelings-chat-voice .button-row > .btn {
+  flex: 1 1 9rem;
+}
+
 /* HSA-bounded mode (owner decision 2026-10-14): preview banner, preview tag, More badge. */
 .preview-mode-banner {
   position: sticky;

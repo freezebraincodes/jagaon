@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { VOICE_MAX_CANDIDATES, VOICE_TRANSCRIPT_MAX_CODE_POINTS, VOICE_VOCABULARY_VERSION, candidateMatchesTranscript, voiceAnalysisSchema, type VoiceAnalysis, type VoiceFactCandidate } from "./voice-contracts";
+
+type VoiceAnalysisCandidate = Extract<VoiceAnalysis, { kind: "ANALYSED" }>["candidates"][number];
 import { analyseTranscript, extractVoiceCandidates, normaliseVoicePhrase, type VoiceMedicineDirectory } from "./voice-candidate-extractor";
 
 const REF_A = { recordType: "MEDICATION", recordId: "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f", revisionId: "7a1c2d3e-4a5b-4c6d-9e7f-0a1b2c3d4e5f" } as const;
@@ -28,9 +30,10 @@ describe("multi-fact extraction", () => {
   it("splits unpunctuated speech after a number when a new first-person statement starts (owner report 2026-10-14)", () => {
     const spoken = analysed("my sugar level is 8.2 I had chicken rice for lunch", "en");
     const punctuated = analysed("my sugar level is 8.2. I had chicken rice for lunch", "en");
-    expect(spoken.candidates.map((candidate) => [candidate.kind, candidate.state, candidate.ambiguity])).toEqual(punctuated.candidates.map((candidate) => [candidate.kind, candidate.state, candidate.ambiguity]));
+    const shape = (candidate: VoiceAnalysisCandidate) => [candidate.kind, "state" in candidate ? candidate.state : null, "ambiguity" in candidate ? candidate.ambiguity : null];
+    expect(spoken.candidates.map(shape)).toEqual(punctuated.candidates.map(shape));
     expect(spoken.candidates[1]).toMatchObject({ kind: "MEAL_NOTE", slot: "LUNCH", itemText: "chicken rice", sourcePhrase: "I had chicken rice for lunch" });
-    expect(analysed("sugar 6.8 mmol I ate nasi lemak for breakfast", "en").candidates.map((candidate) => [candidate.kind, candidate.state])).toEqual([
+    expect(analysed("sugar 6.8 mmol I ate nasi lemak for breakfast", "en").candidates.map((candidate) => shape(candidate).slice(0, 2))).toEqual([
       ["GLUCOSE_READING", "UNDERSTOOD"],
       ["MEAL_NOTE", "UNDERSTOOD"],
     ]);
