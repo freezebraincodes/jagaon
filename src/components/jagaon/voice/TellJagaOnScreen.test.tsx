@@ -9,7 +9,7 @@ import { normaliseVoicePhrase } from "@/domain/voice/voice-candidate-extractor";
 import { getMessages } from "@/i18n/get-messages";
 import type { SupportedLocale } from "@/i18n/types";
 import { TellJagaOnScreen, type TellJagaOnScreenProps, type VoiceTerminologyPort } from "./TellJagaOnScreen";
-import { VOICE_SCREEN_PENDING_COPY } from "./voice-screen-copy";
+import { VOICE_SCREEN_PENDING_COPY, VOICE_WEB_SPEECH_COPY } from "./voice-screen-copy";
 
 const DARK: VoiceMedicationRef = { recordType: "MEDICATION", recordId: "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f", revisionId: "7a1c2d3e-4a5b-4c6d-9e7f-0a1b2c3d4e5f" };
 const GREY: VoiceMedicationRef = { recordType: "MEDICATION", recordId: "1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", revisionId: "2b2c3d4e-5f60-4a1b-9c2d-3e4f5a6b7c8d" };
@@ -256,6 +256,39 @@ describe("Tell JagaOn screen", () => {
       expect(await screen.findByText(context.pending.typing.transcriptLabel)).toBeInTheDocument();
       expect(screen.queryByText(context.messages.voice.redirect.transcribedNote)).toBeNull();
     });
+  });
+
+  it("owner decision 2026-10-15: Tencent speech's daily limit used up opens a dialog that can switch to the browser's speech recognition", async () => {
+    const copy = VOICE_SCREEN_PENDING_COPY["en-SG"].dailyLimit;
+    let useWebSpeech = false;
+    const resolveProvider = vi.fn(async () => (useWebSpeech ? { kind: "AVAILABLE" as const, provider: "WEB_SPEECH" as const } : { kind: "AVAILABLE" as const, provider: "TRTC" as const }));
+    const voiceLimitFallback = { available: vi.fn(async () => true), use: vi.fn(() => void (useWebSpeech = true)) };
+    const context = setup({ script: { start: { kind: "FAILED", reason: "CREDENTIAL_REFUSED", credentialRefusal: "MINUTES_EXHAUSTED" } }, resolveProvider, voiceLimitFallback });
+    fireEvent.change(await screen.findByLabelText(context.messages.aiAccess.passcodeLabel), { target: { value: PASSCODE } });
+    fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.accept }));
+    const dialog = await screen.findByRole("dialog", { name: copy.title });
+    expect(dialog).toHaveTextContent(copy.body);
+    expect(within(dialog).getAllByRole("button").map((button) => button.textContent)).toEqual([copy.useBrowser, copy.ok]);
+    fireEvent.click(within(dialog).getByRole("button", { name: copy.useBrowser }));
+    expect(voiceLimitFallback.use).toHaveBeenCalledTimes(1);
+    // The screen starts again with the browser's own notice (never Tencent's).
+    expect(await screen.findByRole("dialog", { name: VOICE_WEB_SPEECH_COPY["en-SG"].consentTitle })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: copy.title })).toBeNull();
+  });
+
+  it("owner decision 2026-10-15: without the browser's speech here, the daily-limit dialog offers only OK and the screen keeps manual entry", async () => {
+    const copy = VOICE_SCREEN_PENDING_COPY["en-SG"].dailyLimit;
+    const voiceLimitFallback = { available: vi.fn(async () => false), use: vi.fn() };
+    const context = setup({ script: { start: { kind: "FAILED", reason: "CREDENTIAL_REFUSED", credentialRefusal: "MINUTES_EXHAUSTED" } }, voiceLimitFallback });
+    fireEvent.change(screen.getByLabelText(context.messages.aiAccess.passcodeLabel), { target: { value: PASSCODE } });
+    fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.accept }));
+    const dialog = await screen.findByRole("dialog", { name: copy.title });
+    expect(within(dialog).getAllByRole("button").map((button) => button.textContent)).toEqual([copy.ok]);
+    fireEvent.click(within(dialog).getByRole("button", { name: copy.ok }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText(copy.body)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: context.messages.today.recordReading })).toBeInTheDocument();
+    expect(voiceLimitFallback.use).not.toHaveBeenCalled();
   });
 
   it("unsupported speech is shown as not understood, never dropped, with manual entry", async () => {

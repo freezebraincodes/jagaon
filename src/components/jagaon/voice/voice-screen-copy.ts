@@ -45,6 +45,11 @@ export type VoiceScreenCopy = Readonly<{
    * voice notice is needed (no audio leaves the device).
    */
   typing: Readonly<{ start: string; label: string; hint: string; submit: string; transcriptLabel: string }>;
+  /**
+   * Owner decision 2026-10-15: Tencent speech's daily demo minutes are used up (the server refused MINUTES_EXHAUSTED). `useBrowser` is
+   * offered only when the browser's speech recognition is enabled and supported here.
+   */
+  dailyLimit: Readonly<{ title: string; body: string; useBrowser: string; ok: string; chatBody: string }>;
   /** Terminology review Critical #1: the minimal "Words JagaOn remembers" section (list, change, forget). Human acceptance pending. */
   terms: Readonly<{
     heading: string;
@@ -202,6 +207,14 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       submit: "Continue",
       transcriptLabel: "What you typed (not saved)",
     },
+    // Owner decision 2026-10-15.
+    dailyLimit: {
+      title: "Today's voice limit is used up",
+      body: "Tencent speech has reached this demo's limit for today. You can use your browser's speech recognition instead, type your entry, or try again tomorrow.",
+      useBrowser: "Use browser speech recognition",
+      ok: "OK",
+      chatBody: "Tencent speech has reached this demo's limit for today. You can use your browser's speech recognition instead, or type your answer.",
+    },
     remote: {
       offer: "Ask AI to help read what you said",
       title: "Send what you said to AI?",
@@ -311,6 +324,13 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       submit: "继续",
       transcriptLabel: "您输入的内容（未保存）",
     },
+    dailyLimit: {
+      title: "今天的语音使用量已用完",
+      body: "腾讯语音已达到本演示今天的上限。您可以改用浏览器的语音识别、输入记录，或明天再试。",
+      useBrowser: "使用浏览器语音识别",
+      ok: "好",
+      chatBody: "腾讯语音已达到本演示今天的上限。您可以改用浏览器的语音识别，或输入回答。",
+    },
     remote: {
       offer: "请 AI 帮忙理解您说的话",
       title: "要把您说的话发送给 AI 吗？",
@@ -406,6 +426,7 @@ export function voiceScreenCopy(messages: AppMessages, locale: SupportedLocale):
     remote: pending.remote,
     limit: pending.limit,
     typing: pending.typing,
+    dailyLimit: pending.dailyLimit,
     // English only (see VOICE_WEB_SPEECH_COPY): the ZH screen never reaches a Web Speech session.
     webSpeech: VOICE_WEB_SPEECH_COPY["en-SG"],
     terms: pending.terms,

@@ -31,7 +31,7 @@ import { NearbyFoodScreen } from "./screens/NearbyFoodScreen";
 import { FoodGeneralInfoScreen } from "./screens/FoodGeneralInfoScreen";
 import { MoreScreen } from "./screens/MoreScreen";
 import { HelpScreen } from "./screens/HelpScreen";
-import { TellJagaOnScreen } from "./voice/TellJagaOnScreen";
+import { TellJagaOnScreen, type VoiceLimitFallback } from "./voice/TellJagaOnScreen";
 import { browserWebSpeechSupported, checkVoiceAccess, checkVoiceProviderAnswer, VOICE_PROVIDER_LOADERS, type VoiceTranscriberLoader } from "./voice/voice-provider-wiring";
 import { VoiceProviderSettingsSection } from "./voice/VoiceProviderSettingsSection";
 import { DEV_SETTINGS_ENABLED } from "./dev-settings-flag";
@@ -333,7 +333,35 @@ export function JagaOnApp({
   );
   const legacyVoice = voiceTranscriberLoader !== undefined || voiceAvailabilityProbe !== undefined;
   const voiceLanguage = locale === "zh-SG" ? "zh" : "en";
+  // Owner decision 2026-10-15: after Tencent speech's daily demo minutes ran out and she chose "Use browser speech recognition", the
+  // browser's speech is preferred for the rest of that UTC day (the server's minute count resets at UTC midnight). Memory only.
+  const webSpeechFallbackDay = useRef<string | null>(null);
+  const utcDayNow = () => new Date().toISOString().slice(0, 10);
+  const webSpeechResolution = useCallback(async (): Promise<VoiceProviderResolution | null> => {
+    const { providers: enabled, passcodeRequired } = voiceAccessOf(await voiceProvidersProbe());
+    let supported = false;
+    try {
+      supported = webSpeechSupported() === true;
+    } catch {
+      supported = false;
+    }
+    const resolution = resolveVoiceProviderChoice({ enabled, webSpeechSupported: supported, language: voiceLanguage }, { devSettingsEnabled: true, stored: "WEB_SPEECH" });
+    return resolution.kind === "AVAILABLE" && resolution.provider === "WEB_SPEECH" && voiceProviderLoaders.WEB_SPEECH ? { ...resolution, passcodeRequired } : null;
+  }, [voiceProvidersProbe, webSpeechSupported, voiceLanguage, voiceProviderLoaders]);
+  const voiceLimitFallback = useMemo<VoiceLimitFallback>(
+    () => ({
+      available: async () => (await webSpeechResolution().catch(() => null)) !== null,
+      use: () => {
+        webSpeechFallbackDay.current = utcDayNow();
+      },
+    }),
+    [webSpeechResolution],
+  );
   const resolveVoiceProvider = useCallback(async (): Promise<VoiceProviderResolution> => {
+    if (webSpeechFallbackDay.current === utcDayNow()) {
+      const fallback = await webSpeechResolution().catch(() => null);
+      if (fallback) return fallback;
+    }
     const { providers: enabled, passcodeRequired } = voiceAccessOf(await voiceProvidersProbe());
     let supported = false;
     try {
@@ -346,7 +374,7 @@ export function JagaOnApp({
     if (resolution.kind === "AVAILABLE" && !voiceProviderLoaders[resolution.provider]) return { kind: "UNAVAILABLE" };
     // Owner decision 2026-10-12 (optional passcodes): the screen skips its passcode step only when the probe said none is required.
     return resolution.kind === "AVAILABLE" ? { ...resolution, passcodeRequired } : resolution;
-  }, [voiceProvidersProbe, webSpeechSupported, voiceLanguage, devSettingsEnabled, voiceProviderLoaders]);
+  }, [voiceProvidersProbe, webSpeechSupported, voiceLanguage, devSettingsEnabled, voiceProviderLoaders, webSpeechResolution]);
   const loadProviderTranscriber = useCallback(
     (accessPasscode: () => string | null, provider: VoiceProviderId, access: VoiceAccessMode): Promise<VoiceTranscriberPort> => {
       const load = voiceProviderLoaders[provider];
@@ -1176,6 +1204,7 @@ export function JagaOnApp({
             // Web Speech: the production provider choice, or the injected single-provider path (tests, harness).
             checkAvailability={legacyVoice ? legacyAvailability : undefined}
             resolveProvider={legacyVoice ? undefined : resolveVoiceProvider}
+            voiceLimitFallback={legacyVoice ? undefined : voiceLimitFallback}
             loadTranscriber={legacyVoice ? loadLegacyTranscriber : loadProviderTranscriber}
             onSessionActivity={setVoiceSessionActive}
             terminology={voice?.terminology ?? UNAVAILABLE_TERMINOLOGY}

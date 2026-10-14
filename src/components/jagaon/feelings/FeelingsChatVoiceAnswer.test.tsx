@@ -25,9 +25,10 @@ const ask = (question: string) => ({ candidate: { kind: "QUESTION", question, su
 
 type Setup = Readonly<{
   script?: FakeVoiceTranscriberScript;
-  resolution?: VoiceProviderResolution;
+  resolution?: VoiceProviderResolution | (() => VoiceProviderResolution);
   steps?: FakeFeelingsChatStep[];
   noVoice?: boolean;
+  limitFallback?: FeelingsChatVoice["limitFallback"];
 }>;
 
 function setup(options: Setup = {}) {
@@ -42,9 +43,10 @@ function setup(options: Setup = {}) {
   const voice: FeelingsChatVoice = {
     copy,
     language: "en",
-    resolveProvider: async () => options.resolution ?? { kind: "AVAILABLE", provider: "WEB_SPEECH", passcodeRequired: false },
+    resolveProvider: async () => (typeof options.resolution === "function" ? options.resolution() : options.resolution) ?? { kind: "AVAILABLE", provider: "WEB_SPEECH", passcodeRequired: false },
     loadTranscriber,
     onSessionActivity,
+    ...(options.limitFallback ? { limitFallback: options.limitFallback } : {}),
   };
   const onDistress = vi.fn();
   const onSave = vi.fn(async () => true);
@@ -203,5 +205,36 @@ describe("Feelings chat: Speak my answer", () => {
     fireEvent.click(accept);
     await waitFor(() => expect(loadTranscriber).toHaveBeenCalledWith(expect.any(Function), "TRTC", { passcodeRequired: true }));
     expect((loadTranscriber.mock.calls[0] as unknown as [() => string | null])[0]()).toBe("TEST-ONLY-passcode");
+  });
+
+  it("owner decision 2026-10-15: Tencent speech's daily limit used up: says so and offers the browser's speech recognition, which then starts", async () => {
+    let browser = false;
+    const limitFallback = { available: vi.fn(async () => true), use: vi.fn(() => void (browser = true)) };
+    const { loadTranscriber } = setup({
+      resolution: () => (browser ? { kind: "AVAILABLE", provider: "WEB_SPEECH", passcodeRequired: false } : { kind: "AVAILABLE", provider: "TRTC", passcodeRequired: false }),
+      script: { start: { kind: "FAILED", reason: "CREDENTIAL_REFUSED", credentialRefusal: "MINUTES_EXHAUSTED" } },
+      limitFallback,
+    });
+    await openChat();
+    fireEvent.click(button(t.speakAnswer));
+    fireEvent.click(await screen.findByRole("button", { name: copy.disclosure.accept }));
+    expect(await screen.findByText(copy.dailyLimit.chatBody)).toBeInTheDocument();
+    fireEvent.click(button(copy.dailyLimit.useBrowser));
+    expect(limitFallback.use).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("heading", { name: copy.webSpeech.consentTitle })).toBeInTheDocument();
+    expect(loadTranscriber).toHaveBeenCalledTimes(1);
+  });
+
+  it("owner decision 2026-10-15: without the browser's speech, the daily-limit message offers typing only", async () => {
+    setup({
+      resolution: { kind: "AVAILABLE", provider: "TRTC", passcodeRequired: false },
+      script: { start: { kind: "FAILED", reason: "CREDENTIAL_REFUSED", credentialRefusal: "MINUTES_EXHAUSTED" } },
+      limitFallback: { available: async () => false, use: vi.fn() },
+    });
+    await openChat();
+    fireEvent.click(button(t.speakAnswer));
+    fireEvent.click(await screen.findByRole("button", { name: copy.disclosure.accept }));
+    expect(await screen.findByText(copy.dailyLimit.chatBody)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: copy.dailyLimit.useBrowser })).toBeNull();
   });
 });
