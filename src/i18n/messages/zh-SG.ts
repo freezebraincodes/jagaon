@@ -85,6 +85,26 @@ export const zhSGMessages: AppMessages = {
     note: (habit) => `这只显示时间先后，不能证明是“${habit}”造成的。很多因素都会影响血糖。`,
     notEnough: "记录还不够，暂时无法显示预览趋势。",
   },
+  // HSA-bounded mode off, care nudges (owner decision 2026-10-14): draft, human acceptance pending (English-only demo scope).
+  hsaCareNudges: {
+    heading: (dueCount) => (dueCount === 0 ? "护理计划 · 没有到期项目" : `护理计划 · ${dueCount} 项到期`),
+    bellLabel: (dueCount) => (dueCount === 0 ? "没有到期的护理检查" : `${dueCount} 项护理检查到期`),
+    listLabel: "按标准间隔的护理检查",
+    itemLabel: { EYE_SCREENING: "眼睛检查", FOOT_CHECK: "足部检查", BLOOD_TEST: "HbA1c（血液检验）" },
+    dueChip: "到期",
+    dueSoon: (when) => `即将到期 · ${when}后`,
+    dueIn: (when) => `${when}后到期`,
+    months: (count) => `${count} 个月`,
+    weeks: (count) => `${count} 周`,
+    days: (count) => (count === 0 ? "不到一天" : `${count} 天`),
+    lastRecorded: (monthYear, ago) => `上次记录 ${monthYear} · ${ago}`,
+    monthsAgo: (count) => (count === 0 ? "本月" : `${count} 个月前`),
+    noRecord: "还没有记录",
+    cadence: { YEARLY: "通常每年一次", EVERY_3_TO_6_MONTHS: "通常每 3–6 个月一次" },
+    source: "新加坡指引（卫生部/保健促进局）。请向您的护理团队确认。",
+    setDate: "设定日期",
+    note: "预览：根据您记录的检查和标准间隔计算。需要做什么由您的护理团队决定。",
+  },
   // Owner decision 2026-10-12: My notes (human acceptance pending).
   myNotes: {
     title: "我的笔记",

@@ -17,6 +17,7 @@ import {
   type PreventiveCareItemView,
   type PreventiveCareView,
   type PreventiveHistoryEntry,
+  type ReportedPreventiveCompletion,
   type VisitPreparationView,
 } from "./care-organisation-contracts";
 
@@ -33,6 +34,7 @@ export type {
   PreventiveHistoryEntry,
   PreventiveCareItemView,
   PreventiveCareView,
+  ReportedPreventiveCompletion,
   AppointmentView,
   CareQuestionView,
   FactGroupKey,
@@ -91,18 +93,22 @@ export function createCareOrganisationQuery(database: JagaOnDatabase, dependenci
     try {
       const recordsByItem = new Map<string, PreventiveCareRecordRevision[]>();
       const recordChains = new Map<string, PreventiveCareRecordRevision[]>();
+      const completedRecords: PreventiveCareRecordRevision[] = [];
       for (const head of await activeHeads("PREVENTIVE_CARE_RECORD")) {
         const revisions = await chain<PreventiveCareRecordRevision>(head.recordId, careOrganisationRevisionRowCodec);
         const current = revisions.find((revision) => revision.revisionId === head.headRevisionId)!;
+        if (current.payload.completionReport.kind === "PATIENT_REPORTED_COMPLETED") completedRecords.push(current);
         if (current.payload.careReference.kind !== "PLANNED_ITEM") continue;
         const itemId = current.payload.careReference.item.recordId;
         recordsByItem.set(itemId, [...(recordsByItem.get(itemId) ?? []), current]);
         recordChains.set(head.recordId, revisions);
       }
       const items: PreventiveCareItemView[] = [];
+      const itemIdentities = new Map<string, PreventiveCareItemRevision["payload"]["identity"]>();
       for (const head of await activeHeads("PREVENTIVE_CARE_ITEM")) {
         const revisions = await chain<PreventiveCareItemRevision>(head.recordId, carePlanRevisionRowCodec);
         const current = revisions.find((revision) => revision.revisionId === head.headRevisionId)!;
+        itemIdentities.set(head.recordId, current.payload.identity);
         if (current.payload.trackingState === "ENDED") continue;
         // A report counts for the plan it was made against: later corrections keep
         // that plan, but a superseding new plan starts without any report.
@@ -148,7 +154,18 @@ export function createCareOrganisationQuery(database: JagaOnDatabase, dependenci
       // Entry order: first recorded first; ties broken by identity for determinism.
       const firstRecorded = new Map(items.map((item) => [item.recordId, item.history.find((entry) => entry.kind === "ITEM")?.revisionCreatedAt ?? ""]));
       items.sort((a, b) => firstRecorded.get(a.recordId)!.localeCompare(firstRecorded.get(b.recordId)!) || a.recordId.localeCompare(b.recordId));
-      return { status: "READY", items };
+      // Every reported completion by catalogue key, whatever plan it was made against (or none); an unknown date is left out.
+      const reportedCompletions: ReportedPreventiveCompletion[] = [];
+      for (const record of completedRecords) {
+        const reference = record.payload.careReference;
+        const identity = reference.kind === "UNPLANNED" ? reference.identity : itemIdentities.get(reference.item.recordId);
+        const at = instantOf(record.temporal.occurrence);
+        if (!identity || identity.kind !== "REVIEWED_CATALOGUE_MATCH" || at === null) continue;
+        const localDate = record.temporal.occurrence.kind === "DATE_ONLY" ? record.temporal.occurrence.localDate : localDateOf(at);
+        reportedCompletions.push({ catalogueEntryKey: identity.catalogueEntryKey, localDate });
+      }
+      reportedCompletions.sort((a, b) => a.catalogueEntryKey.localeCompare(b.catalogueEntryKey) || a.localDate.localeCompare(b.localDate));
+      return { status: "READY", items, reportedCompletions };
     } catch {
       return { status: "UNAVAILABLE" };
     }

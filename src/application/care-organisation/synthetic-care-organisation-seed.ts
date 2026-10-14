@@ -28,6 +28,13 @@ export const SYNTHETIC_CARE_ORGANISATION_DATES = Object.freeze({
   bloodTest: "2026-10-14",
   footCheckRecorded: "2026-09-14",
   appointmentInstant: "2026-10-14T01:40:00.000Z",
+  /**
+   * Earlier checks the patient reported without a plan (HSA-bounded-mode-off preview, owner decision 2026-10-14): they leave every
+   * item and the visit unchanged and let the preview show one clear due check (eye screening, 13 months ago in mid-October 2026) and
+   * one coming up (blood test, due about mid-November 2026).
+   */
+  eyeScreeningRecorded: "2025-09-09",
+  bloodTestRecorded: "2026-05-12",
 });
 
 export const SYNTHETIC_CARE_QUESTION_TEXT = "Should I change anything before my next appointment?";
@@ -113,6 +120,18 @@ export async function seedSyntheticCareOrganisation(input: {
       occurrence: day(SYNTHETIC_CARE_ORGANISATION_DATES.footCheckRecorded),
     }),
   );
+  // Earlier checks the patient reported without a plan. They are not part of any item, so My health checks is unchanged.
+  for (const [key, label, localDate] of [
+    ["EYE_SCREENING", "Eye screening", SYNTHETIC_CARE_ORGANISATION_DATES.eyeScreeningRecorded],
+    ["BLOOD_TEST", "Blood test", SYNTHETIC_CARE_ORGANISATION_DATES.bloodTestRecorded],
+  ] as const) {
+    committed(
+      await co.recordPreventiveOutcome({
+        payload: { careReference: { kind: "UNPLANNED", identity: catalogue(key, label) }, completionReport: { kind: "PATIENT_REPORTED_COMPLETED" } },
+        occurrence: day(localDate),
+      }),
+    );
+  }
   const appointment = committed(
     await co.scheduleAppointment({
       payload: {

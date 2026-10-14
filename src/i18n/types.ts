@@ -1171,6 +1171,26 @@ export type AppMessages = {
     note: (habit: string) => string;
     notEnough: string;
   };
+  /** HSA-bounded mode off only (preview): care checks due by standard intervals on Today's care planning card. */
+  hsaCareNudges: {
+    heading: (dueCount: number) => string;
+    bellLabel: (dueCount: number) => string;
+    listLabel: string;
+    itemLabel: { EYE_SCREENING: string; FOOT_CHECK: string; BLOOD_TEST: string };
+    dueChip: string;
+    dueSoon: (when: string) => string;
+    dueIn: (when: string) => string;
+    months: (count: number) => string;
+    weeks: (count: number) => string;
+    days: (count: number) => string;
+    lastRecorded: (monthYear: string, ago: string) => string;
+    monthsAgo: (count: number) => string;
+    noRecord: string;
+    cadence: { YEARLY: string; EVERY_3_TO_6_MONTHS: string };
+    source: string;
+    setDate: string;
+    note: string;
+  };
   /** Owner decision 2026-10-12: My notes, reached from More (first version: the destination only). */
   myNotes: {
     title: string;

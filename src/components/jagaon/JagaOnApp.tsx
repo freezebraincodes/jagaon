@@ -20,6 +20,7 @@ import {
 import type { DemoOnboardingStoragePort } from "@/application/onboarding/demo-onboarding-repository";
 import { AppShell } from "./AppShell";
 import { TodayScreen } from "./screens/TodayScreen";
+import { useCareNudgeSummary } from "./hsa/care-nudges";
 import { GlucoseEntryScreen } from "./screens/GlucoseEntryScreen";
 import { ReadingTimeScreen } from "./screens/ReadingTimeScreen";
 import { InsulinEntryScreen } from "./screens/InsulinEntryScreen";
@@ -659,6 +660,8 @@ export function JagaOnApp({
 
   const current = stack[stack.length - 1]!;
   const isTopLevel = TOP_LEVEL_SCREENS.includes(current.screen);
+  // HSA-bounded mode off only: care checks due (Today's care card and the More badge), reloaded as the visible screen changes.
+  const careNudges = useCareNudgeSummary(runtime?.careOrganisation.query, current.screen);
 
   const navigate = useCallback((screen: ScreenId, params?: Record<string, string>) => {
     setStack((prev) => [...prev, { screen, params }]);
@@ -908,6 +911,7 @@ export function JagaOnApp({
             recordDeletion={runtime?.recordDeletion}
             onRecordDeleted={() => void refreshToday()}
             onOpenHistory={() => switchTab("HISTORY")}
+            careNudges={careNudges}
           />
         );
       case "LOG_GLUCOSE":

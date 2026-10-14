@@ -234,7 +234,8 @@
             "tests/release/evidence.test.ts",
             "tests/release/release-core.test.ts",
             "tests/release/run-suite.test.ts",
-            "tests/release/traceability.test.ts"
+            "tests/release/traceability.test.ts",
+            "src/application/preview/care-nudges.test.ts"
           ]
         }
       ]
@@ -363,7 +364,8 @@
             "src/storage/stored-event-work-item.test.ts",
             "src/storage/stored-record-revision.test.ts",
             "src/storage/table-catalogue.test.ts",
-            "tests/home.test.tsx"
+            "tests/home.test.tsx",
+            "src/components/jagaon/hsa/care-nudges.test.tsx"
           ]
         }
       ]
