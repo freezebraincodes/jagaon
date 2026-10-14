@@ -32,7 +32,8 @@ const DEFAULT_MODE: HsaBoundedMode = Object.freeze({
 
 const HsaBoundedModeContext = createContext<HsaBoundedMode>(DEFAULT_MODE);
 
-const CHANGE_EVENT = "jagaon:hsa-bounded-mode";
+/** A same-page change notice (not a storage key). */
+const CHANGE_EVENT = "jagaon-hsa-bounded-mode-change";
 /** A page-local copy, used when storage is unavailable so the choice still lasts for this page. */
 let pageValue: boolean | null = null;
 

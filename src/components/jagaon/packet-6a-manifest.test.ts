@@ -41,7 +41,14 @@ describe("Packet 6A storage and screen manifest", () => {
     // a session (privacy cleanup); it never reads or writes JagaOn data.
     // HSA preview "Get general information with AI" (owner-approved 2026-10-14, deliberate): the medicine-information client keeps its
     // validated answers and the "notice seen" list per normalised medicine name (guarded; no other JagaOn data).
-    expect(users).toEqual(["src/application/medicine-info/medicine-info-client.ts", "src/application/onboarding/demo-onboarding-repository.ts", "src/voice/trtc/trtc-transcriber-adapter.ts"]);
+    // HSA-bounded mode (owner decision 2026-10-14, deliberate): the switch keeps only its own on/off choice ("jagaon.hsaBoundedMode",
+    // guarded; no health data).
+    expect(users).toEqual([
+      "src/application/medicine-info/medicine-info-client.ts",
+      "src/application/onboarding/demo-onboarding-repository.ts",
+      "src/components/jagaon/hsa/hsa-bounded-mode.tsx",
+      "src/voice/trtc/trtc-transcriber-adapter.ts",
+    ]);
   });
 
   it("writes no authoritative revision or domain event from onboarding modules", () => {
