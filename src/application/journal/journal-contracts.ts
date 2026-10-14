@@ -137,7 +137,8 @@ export type { JagaOnDatabase };
 export type JournalEntryKind =
   | "GLUCOSE_READING"
   | "MEDICATION_EVENT"
-  | "INTAKE_EVENT";
+  | "INTAKE_EVENT"
+  | "ACTIVITY_EVENT";
 
 export type TodayJournalEntry = {
   recordId: RecordId;
@@ -150,6 +151,8 @@ export type TodayJournalEntry = {
   displayValue?: string;
   displayUnit?: string;
   displayContext?: string;
+  /** ACTIVITY_EVENT only: the minutes she reported, when she said them. */
+  displayMinutes?: number;
 };
 
 export type TodayJournalViewModel = {
