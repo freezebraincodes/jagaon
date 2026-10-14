@@ -14,7 +14,7 @@ import { formatMmolEntry, isFormattedMmolEntry, isMmolEntryValue } from "@/domai
 import type { VoiceSessionState } from "./voice-session-controller";
 
 /**
- * Packet 13 (P13S): from reviewed candidates plus the person's explicit per-fact decisions to closed save intents, `voice-review.13s.4`.
+ * Packet 13 (P13S): from reviewed candidates plus the person's explicit per-fact decisions to closed save intents, `voice-review.13s.5`.
  * Each fact is decided separately; nothing is an intent without an explicit SAVE decision for that fact.
  *
  * Rules (review C3 and the owner requirements):
@@ -35,13 +35,14 @@ import type { VoiceSessionState } from "./voice-session-controller";
  *   must be in the shared new-entry format (1–4 integer digits, at most one decimal; never rounded) and the intent carries it formatted
  *   to exactly one decimal ("60" → "60.0", "0" → "0.0"). The unit is still never assumed outside the app-default window: an UNSTATED
  *   unit needs the explicit answer ("Yes, mmol/L").
+ * - 13s.5 (owner decision 2026-10-14, distress safety): a DISTRESS analysis yields nothing (DISTRESS), whatever the decisions say.
  * - A REDIRECT or over-long analysis, a session that did not complete or a review of an older session yields nothing; a redirect
  *   NOTICE beside separated facts does not block those facts. Malformed decisions refuse the whole review (fail closed).
  * Remembering a term is a separate decision (terminology service); it never creates or depends on an intent.
  * It imports no journal or storage code: the app maps intents to the existing commands (recordGlucose, recordMeal,
  * recordMedicationEvent). recordGlucose has NO format or confirmation check of its own, which is why this contract applies them.
  */
-export const VOICE_REVIEW_CONTRACT_VERSION = "voice-review.13s.4";
+export const VOICE_REVIEW_CONTRACT_VERSION = "voice-review.13s.5";
 
 /** An intent's value: the stored new-entry form, exactly one decimal (13s.4). An edit's value: the shared entry format (≤ 1 decimal). */
 const INTENT_VALUE = z.string().refine(isFormattedMmolEntry, { message: "VALUE_FORMAT" });
@@ -100,7 +101,7 @@ export type VoiceFactRejection =
   | "MEDICINE_NOT_IN_PROFILE"
   | "EDIT_KIND_MISMATCH"
   | "NOT_A_FACT";
-export type VoiceReviewNoIntentReason = "INVALID_REVIEW" | "REDIRECTED" | "TRANSCRIPT_TOO_LONG" | "SESSION_NOT_COMPLETED" | "STALE_REVIEW" | "INVALID_DECISIONS" | "NO_CONFIRMATION";
+export type VoiceReviewNoIntentReason = "INVALID_REVIEW" | "DISTRESS" | "REDIRECTED" | "TRANSCRIPT_TOO_LONG" | "SESSION_NOT_COMPLETED" | "STALE_REVIEW" | "INVALID_DECISIONS" | "NO_CONFIRMATION";
 export type VoiceReviewResult =
   | Readonly<{ kind: "INTENTS"; intents: ReadonlyArray<Readonly<{ candidateIndex: number; intent: VoiceSaveIntent }>>; rejected: ReadonlyArray<Readonly<{ candidateIndex: number; reason: VoiceFactRejection }>> }>
   | Readonly<{ kind: "NO_INTENT"; reason: VoiceReviewNoIntentReason; rejected?: ReadonlyArray<Readonly<{ candidateIndex: number; reason: VoiceFactRejection }>> }>;
@@ -153,6 +154,7 @@ export function intentForDecision(candidate: VoiceCandidate, decision: Extract<V
 export function reviewVoiceCandidates(input: VoiceReviewInput): VoiceReviewResult {
   const analysis = voiceAnalysisSchema.safeParse(input?.analysis);
   if (!analysis.success) return none("INVALID_REVIEW");
+  if (analysis.data.kind === "DISTRESS") return none("DISTRESS");
   if (analysis.data.kind === "REDIRECT") return none("REDIRECTED");
   if (analysis.data.kind === "TRANSCRIPT_TOO_LONG") return none("TRANSCRIPT_TOO_LONG");
   if (input.currentSession?.state !== "COMPLETED") return none("SESSION_NOT_COMPLETED");

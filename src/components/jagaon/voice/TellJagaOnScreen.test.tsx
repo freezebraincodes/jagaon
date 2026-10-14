@@ -236,6 +236,71 @@ describe("Tell JagaOn screen", () => {
     });
   }
 
+  // Owner decision 2026-10-14 (distress safety): only the calm safety message with helplines; nothing else, nothing saved or sent.
+  describe("distress words (owner decision 2026-10-14)", () => {
+    const LINKS = [
+      ["SOS (Samaritans of Singapore): call 1767", "tel:1767"],
+      ["or WhatsApp 9151 1767", "https://wa.me/6591511767"],
+      ["mindline: call 1771", "tel:1771"],
+      ["or WhatsApp 6669 1771", "https://wa.me/6566691771"],
+      ["If you're in immediate danger, call 995", "tel:995"],
+    ] as const;
+
+    for (const text of ["I don't want to live anymore", "Please help me, I can't go on", "I want to kill myself, how much insulin should I take", "My sugar was 6.8 mmol, I had chicken rice for lunch and I want to end it all"]) {
+      it(`"${text}" shows only the safety message with the five helpline links; no card, transcript, redirect, not-captured list or save`, async () => {
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        const remoteExtraction = vi.fn();
+        const context = setup({ text, remoteExtraction });
+        await speakAndStop(context);
+        const distress = context.messages.voice.distress;
+        const heading = await screen.findByRole("heading", { name: distress.message });
+        expect(distress.message).toBe("It sounds like you're going through something really hard. You don't have to face it alone. Please reach out now:");
+        expect(heading.closest('[role="alert"]')).not.toBeNull();
+        await waitFor(() => expect(heading).toHaveFocus());
+        const section = heading.closest("section") as HTMLElement;
+        const links = within(section).getAllByRole("link");
+        expect(links.map((link) => link.getAttribute("href"))).toEqual(LINKS.map(([, href]) => href));
+        for (const [name, href] of LINKS) expect(within(section).getByRole("link", { name: new RegExp(`^${name.replace(/[()]/g, "\\$&")}`) })).toHaveAttribute("href", href);
+        for (const href of ["https://wa.me/6591511767", "https://wa.me/6566691771"]) expect(links.find((link) => link.getAttribute("href") === href)).toHaveAttribute("target", "_blank");
+        expect(within(section).getByText("24 hours")).toBeInTheDocument();
+        expect(within(section).getByText("round the clock")).toBeInTheDocument();
+        expect(within(section).getByText("You can also talk to someone you trust.")).toBeInTheDocument();
+        // Nothing else: no transcript, card, not-captured list, redirect, manual chooser, remote offer or remembered words.
+        expect(screen.queryByText(context.messages.voice.review.transcriptLabel)).toBeNull();
+        expect(screen.queryByText(text)).toBeNull();
+        expect(screen.queryAllByRole("article")).toHaveLength(0);
+        expect(screen.queryByText(context.pending.review.notUnderstoodHeading)).toBeNull();
+        expect(screen.queryByText(context.pending.review.notUnderstoodBody)).toBeNull();
+        expect(screen.queryByText(context.messages.voice.redirect.body)).toBeNull();
+        expect(screen.queryByText(context.pending.redirect.healthBody)).toBeNull();
+        expect(screen.queryByText(context.messages.voice.redirect.transcribedNote)).toBeNull();
+        expect(screen.queryByText(context.messages.voice.review.nothingFound)).toBeNull();
+        expect(screen.queryByText(context.pending.review.manualHeading)).toBeNull();
+        expect(screen.queryByRole("button", { name: context.pending.remote.offer })).toBeNull();
+        expect(screen.queryByRole("button", { name: context.pending.card.save })).toBeNull();
+        expect(screen.queryByRole("button", { name: context.messages.voice.review.discard })).toBeNull();
+        expect(screen.getAllByRole("button")).toHaveLength(1);
+        fireEvent.click(screen.getByRole("button", { name: context.pending.review.backToToday }));
+        expect(context.onClose).toHaveBeenCalledTimes(1);
+        expect(context.onSaveFacts).not.toHaveBeenCalled();
+        expect(context.onManualEntry).not.toHaveBeenCalled();
+        expect(remoteExtraction).not.toHaveBeenCalled();
+        expect(fetchSpy).not.toHaveBeenCalled();
+        fetchSpy.mockRestore();
+      });
+    }
+
+    it("zh-SG: English distress words in a Chinese session also show the safety message (draft Chinese copy)", async () => {
+      const context = setup({ locale: "zh-SG", text: "血糖六点八，I want to die" });
+      await speakAndStop(context);
+      const heading = await screen.findByRole("heading", { name: context.messages.voice.distress.message });
+      const links = within(heading.closest("section") as HTMLElement).getAllByRole("link");
+      expect(links.map((link) => link.getAttribute("href"))).toEqual(LINKS.map(([, href]) => href));
+      expect(screen.queryAllByRole("article")).toHaveLength(0);
+      expect(context.onSaveFacts).not.toHaveBeenCalled();
+    });
+  });
+
   it("mixed content: the redirect stays visible beside a separately reviewable reading", async () => {
     const context = setup({ text: "sugar 15 mmol, how many units now" });
     await speakAndStop(context);

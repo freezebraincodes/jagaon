@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { MMOL_CONFIRMATION_TRIGGER, isMmolEntryValue, mmolEntryNeedsConfirmation } from "./glucose-entry-format";
+import { VOICE_DISTRESS_CUES_VERSION, VOICE_DISTRESS_CUE_KEYS } from "./voice-distress-gate";
 import { VOICE_VOCABULARY_VERSION } from "./voice-vocabulary";
 
 /**
- * Packet 13 (P13S, owner scope expansion 2026-10-09): the closed voice candidate and analysis contracts, `voice-contract.13s.4`
- * (13s.3 and 13s.4 changes are listed below the version constants).
+ * Packet 13 (P13S, owner scope expansion 2026-10-09): the closed voice candidate and analysis contracts, `voice-contract.13s.5`
+ * (13s.3, 13s.4 and 13s.5 changes are listed below the version constants).
  * FROZEN INTERFACE: stream 1 maps its validated remote transcript extraction into THIS union (`source: "REMOTE_EXTRACTION"`); the
  * deterministic extractor produces `source: "DETERMINISTIC"`. Change only by a coordinated version bump.
  *
@@ -30,8 +31,8 @@ import { VOICE_VOCABULARY_VERSION } from "./voice-vocabulary";
  *   and `reportedAmount` (13s.3): the amount the person reported ("I injected 10 units"), exactly as spoken, or null.
  * - UNSUPPORTED_SPAN: a part of the utterance that is not understood (shown as such, never dropped, never interpreted).
  */
-export const VOICE_CONTRACT_VERSION = "voice-contract.13s.4";
-export const VOICE_EXTRACTOR_VERSION = "voice-extractor.13s.4";
+export const VOICE_CONTRACT_VERSION = "voice-contract.13s.5";
+export const VOICE_EXTRACTOR_VERSION = "voice-extractor.13s.5";
 /*
  * voice-contract.13s.3 (owner decisions 2026-10-09 ~14:55, #2–#4; safety re-review fixes):
  * - MEDICATION_OCCURRENCE gains `reportedAmount: { valueText, unitText } | null`: an amount the person REPORTED for an occurrence
@@ -47,6 +48,10 @@ export const VOICE_EXTRACTOR_VERSION = "voice-extractor.13s.4";
  * - 50 is no longer a save limit. The app-default window (0 < value ≤ 50) only bounds where the app may ASSUME mmol/L; outside it the
  *   unit must be said or explicitly confirmed ("Yes, mmol/L"). A value above 50, or zero, needs explicit confirmation before saving
  *   (`glucoseNeedsConfirmation`); the review contract enforces it.
+ * voice-contract.13s.5 (owner decision 2026-10-14, distress safety):
+ * - The analysis gains a DISTRESS result: the deterministic distress gate (`voice-distress-gate`, `voice-distress-cues.1`) runs before
+ *   everything else; on a match the result has ZERO candidates, no redirect and no transcript, only the matched `cueKey` and the cue
+ *   list version. The app then shows only the safety message with helplines; nothing is saved and nothing goes to remote extraction.
  */
 export { VOICE_VOCABULARY_VERSION };
 /** 13s.4 (CR-11): the shared new-entry value format, re-exported so the pure extractor depends only on its own contract module. */
@@ -251,7 +256,19 @@ const tooLongSchema = z
   })
   .strict();
 
-export const voiceAnalysisSchema = z.discriminatedUnion("kind", [analysedSchema, redirectSchema, tooLongSchema]).superRefine((result, context) => {
+/** 13s.5 (owner decision 2026-10-14): a distress cue was said. Nothing else is analysed, offered or saved. */
+const distressSchema = z
+  .object({
+    kind: z.literal("DISTRESS"),
+    language: voiceLanguageSchema,
+    candidates: z.array(voiceCandidateSchema).max(0),
+    cueKey: z.enum(VOICE_DISTRESS_CUE_KEYS),
+    cuesVersion: z.literal(VOICE_DISTRESS_CUES_VERSION),
+    extractorVersion: z.string().regex(PRODUCER_VERSION),
+  })
+  .strict();
+
+export const voiceAnalysisSchema = z.discriminatedUnion("kind", [analysedSchema, redirectSchema, tooLongSchema, distressSchema]).superRefine((result, context) => {
   if (result.kind === "REDIRECT" && !messageKeyMatches(result)) context.addIssue({ code: z.ZodIssueCode.custom, message: "REDIRECT_KEY_CATEGORY_MISMATCH" });
   if (result.kind === "ANALYSED" && result.redirect !== null && result.candidates.some((candidate) => candidate.kind === "MEDICATION_OCCURRENCE")) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "MEDICINE_BESIDE_REDIRECT" });

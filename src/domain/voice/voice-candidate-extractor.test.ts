@@ -100,6 +100,43 @@ describe("limits", () => {
   });
 });
 
+describe("distress gate first (owner decision 2026-10-14)", () => {
+  const DISTRESS = { kind: "DISTRESS", candidates: [], cuesVersion: "voice-distress-cues.1", extractorVersion: "voice-extractor.13s.5" } as const;
+  const distress = (text: string, language: "en" | "zh" = "en") => {
+    const result = analyseTranscript(text, language);
+    expect(voiceAnalysisSchema.safeParse(result).success, text).toBe(true);
+    return result;
+  };
+
+  it("returns DISTRESS with zero candidates and nothing from the transcript", () => {
+    expect(distress("I don't want to live anymore")).toEqual({ ...DISTRESS, language: "en", cueKey: "NOT_WANT_TO_LIVE" });
+    expect(JSON.stringify(distress("I don't want to live anymore"))).not.toContain("live");
+  });
+
+  it("beats the HEALTH redirect (\"help\"), the dose redirect and separable facts", () => {
+    expect(analyseTranscript("Please help me", "en")).toMatchObject({ kind: "REDIRECT", category: "HEALTH_QUESTION" });
+    expect(distress("Please help me, I can't go on")).toEqual({ ...DISTRESS, language: "en", cueKey: "CANNOT_GO_ON" });
+    expect(analyseTranscript("how much insulin should I take", "en")).toMatchObject({ kind: "REDIRECT", category: "DOSE_TREATMENT" });
+    expect(distress("I want to kill myself, how much insulin should I take")).toEqual({ ...DISTRESS, language: "en", cueKey: "KILL_MYSELF" });
+    expect(distress("My sugar was 6.8 mmol, I had chicken rice for lunch and I want to end it all")).toEqual({ ...DISTRESS, language: "en", cueKey: "END_IT_ALL" });
+  });
+
+  it("beats TRANSCRIPT_TOO_LONG", () => {
+    const long = `${"sugar 6.8 mmol ".repeat(100)}I am suicidal`;
+    expect([...long].length).toBeGreaterThan(VOICE_TRANSCRIPT_MAX_CODE_POINTS);
+    expect(distress(long)).toEqual({ ...DISTRESS, language: "en", cueKey: "SUICIDE" });
+  });
+
+  it("applies the English cues in a Chinese session too", () => {
+    expect(distress("血糖六点八，I want to die", "zh")).toEqual({ ...DISTRESS, language: "zh", cueKey: "WANT_TO_DIE" });
+  });
+
+  it("leaves ordinary utterances unchanged", () => {
+    expect(analysed("This traffic is killing me, my sugar was 6.8 mmol", "en").candidates.map((candidate) => candidate.kind)).toContain("GLUCOSE_READING");
+    expect(analyseTranscript("I'm dying to eat chicken rice", "en").kind).toBe("ANALYSED");
+  });
+});
+
 describe("owner default-unit boundary (unitSource)", () => {
   const withDefault = { glucoseEntryUnit: "MMOL_PER_L" as const };
   it("proposes the app's entry unit only for an unambiguous, positively stated reading of the current person", () => {

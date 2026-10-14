@@ -9,8 +9,11 @@ import type { VoiceAccessMode, VoiceProviderId, VoiceProviderResolution } from "
 import { analyseTranscript, type VoiceMedicineDirectory } from "@/domain/voice/voice-candidate-extractor";
 import type { VoiceAnalysis, VoiceCandidate, VoiceFactCandidate, VoiceLanguage, VoiceMedicationRef, VoiceRedirectCategory } from "@/domain/voice/voice-contracts";
 import { gateRemoteTranscriptExtraction } from "@/domain/voice/voice-remote-extraction-gate";
+import { createHelpInformationAdapter, telHref, whatsAppHref } from "@/application/governed/help-information-adapter";
 import { mergeRemoteCandidates } from "./voice-remote-merge";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
+import { ContactLink } from "../primitives/ContactLink";
+import { AmbulanceIcon, MessageIcon, PhoneIcon } from "../primitives/Icons";
 import { ModalDialog } from "../primitives/ModalDialog";
 import { ScreenHeader } from "../primitives/ScreenHeader";
 import type { VoiceMedicineOption } from "./MedicineClarificationDialog";
@@ -55,6 +58,10 @@ import { voiceScreenCopy } from "./voice-screen-copy";
  *   demo passcode (`passcodeRequired`; absent means required, fail safe). Not required: the disclosure shows no passcode field, its
  *   primary action is enabled at once (consent → microphone), nothing is held in memory and the loader is told `{ passcodeRequired:
  *   false }`, so the clients send no passcode header. Required: unchanged. The server checks either way.
+ * - Owner decision 2026-10-14 (distress safety): when the analysis is DISTRESS (the deterministic distress gate runs first), the screen
+ *   shows ONLY the calm safety message with the helplines (SOS, mindline, 995) and the exit: no transcript, fact card, "not captured"
+ *   list, redirect, manual-entry chooser, remembered terms or remote-extraction offer. The transcript is dropped at once and nothing is
+ *   saved (`onSaveFacts` is never reachable). Focus moves to the message, which is also announced as an alert.
  */
 export type VoiceRememberedTerm = Readonly<{ recordId: string; revisionId: string; language: VoiceLanguage; phrase: string; medication: VoiceMedicationRef | null }>;
 export type VoiceTerminologyPort = Readonly<{
@@ -128,6 +135,8 @@ type Phase =
   | { kind: "SESSION" }
   | { kind: "REVIEW"; transcript: string; analysis: Extract<VoiceAnalysis, { kind: "ANALYSED" }>; sessionToken: number; medicines: readonly VoiceMedicineOption[]; directory: VoiceMedicineDirectory; generation: number }
   | { kind: "REDIRECT"; transcript: string; category: VoiceRedirectCategory }
+  // Owner decision 2026-10-14: no transcript is kept in this phase.
+  | { kind: "DISTRESS" }
   | { kind: "ENDED"; reason: Ended };
 
 const DEFAULT_TIMERS: VoiceTimers = Object.freeze({
@@ -261,6 +270,11 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         const [directory, medicines] = await Promise.all([terminology.directory(language), terminology.activeMedicines()]);
         const analysis = analyseTranscript(transcript, language, { medicines: directory, glucoseEntryUnit });
         if (!mounted.current) return;
+        if (analysis.kind === "DISTRESS") {
+          session.discardTranscript();
+          setEndNotice(null);
+          return setPhase({ kind: "DISTRESS" });
+        }
         if (analysis.kind === "REDIRECT") return setPhase({ kind: "REDIRECT", transcript, category: analysis.category });
         if (analysis.kind !== "ANALYSED" || analysis.candidates.length === 0) return setPhase({ kind: "ENDED", reason: "NOT_UNDERSTOOD" });
         setRemote("IDLE");
@@ -353,6 +367,7 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
     return result.kind === "SAVED" ? "SAVED" : "NOT_SAVED";
   }
 
+  // Owner decision 2026-10-14: only a REVIEW can offer remote extraction, and the gate withholds any distress transcript as well.
   const remoteOffered = phase.kind === "REVIEW" && props.remoteExtraction !== undefined && !anySaved && phase.analysis.redirect === null && gateRemoteTranscriptExtraction(phase.transcript, language).kind === "PERMIT";
 
   async function askRemote() {
@@ -422,7 +437,9 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         ? copy.review.heading
         : phase.kind === "REDIRECT"
           ? redirectBody(phase.category)
-          : phase.kind === "ENDED"
+          : phase.kind === "DISTRESS"
+            ? "" // The safety message is its own alert (below); nothing else is announced.
+            : phase.kind === "ENDED"
             ? {
                 DECLINED: copy.state.declined,
                 CANCELLED: copy.state.cancelled,
@@ -457,6 +474,13 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
       </div>
     </section>
   );
+  // Owner decision 2026-10-14: the helplines come from the Help screen's reviewed contact information.
+  const help = useMemo(() => createHelpInformationAdapter().getHelpInformation(), []);
+  const distressHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (phase.kind === "DISTRESS") distressHeading.current?.focus();
+  }, [phase.kind]);
+
   // A separate exit, not a manual-entry action.
   const backToToday = (
     <button type="button" className="btn btn-ghost btn-wide" onClick={onClose}>
@@ -583,6 +607,25 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
             </button>
             {backToToday}
           </div>
+        </section>
+      ) : null}
+
+      {phase.kind === "DISTRESS" ? (
+        <section className="voice-distress" aria-labelledby={`${passcodeId}-distress`}>
+          <div className="voice-distress-message" role="alert">
+            <h2 id={`${passcodeId}-distress`} ref={distressHeading} tabIndex={-1} className="voice-distress-heading">
+              {copy.distress.message}
+            </h2>
+          </div>
+          <div className="voice-distress-contacts">
+            <ContactLink href={telHref(help.sosNumber)} icon={<PhoneIcon size={28} />} action={copy.distress.sosCall} detail={copy.distress.sosHours} number={help.sosNumber} />
+            <ContactLink href={whatsAppHref(help.sosWhatsAppNumber)} icon={<MessageIcon size={28} />} action={copy.distress.sosWhatsApp} number={help.sosWhatsAppNumber} stacked external />
+            <ContactLink href={telHref(help.mindlineNumber)} icon={<PhoneIcon size={28} />} action={copy.distress.mindlineCall} detail={copy.distress.mindlineHours} number={help.mindlineNumber} />
+            <ContactLink href={whatsAppHref(help.mindlineWhatsAppNumber)} icon={<MessageIcon size={28} />} action={copy.distress.mindlineWhatsApp} number={help.mindlineWhatsAppNumber} stacked external />
+            <ContactLink href={telHref(help.emergencyNumber)} icon={<AmbulanceIcon size={28} />} action={copy.distress.danger} number={help.emergencyNumber} emphasis />
+          </div>
+          <p className="voice-distress-closing">{copy.distress.trustedPerson}</p>
+          <div className="voice-actions">{backToToday}</div>
         </section>
       ) : null}
 

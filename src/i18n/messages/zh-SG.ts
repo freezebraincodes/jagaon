@@ -97,6 +97,18 @@ export const zhSGMessages: AppMessages = {
       body: "JagaOn 无法回答有关剂量或更改治疗的问题。请咨询您的医生或药剂师。",
       transcribedNote: "您的语音由腾讯云转写。这个问题没有发送到其他地方，也没有保存任何内容。",
     },
+    // Owner decision 2026-10-14 (distress safety): draft, human acceptance pending.
+    distress: {
+      message: "听起来您正在经历非常艰难的事情。您不必独自面对。请现在就联系：",
+      sosCall: "SOS（新加坡援人协会）：拨打 1767",
+      sosWhatsApp: "或 WhatsApp 9151 1767",
+      sosHours: "24 小时",
+      mindlineCall: "mindline：拨打 1771",
+      mindlineWhatsApp: "或 WhatsApp 6669 1771",
+      mindlineHours: "全天候",
+      danger: "如果您有即时危险，请拨打 995",
+      trustedPerson: "您也可以和您信任的人谈一谈。",
+    },
   },
   shared: {
     appName: "JagaOn",
@@ -484,6 +496,19 @@ export const zhSGMessages: AppMessages = {
     // Packet 6 v1 convergence (needs bilingual review)
     generalContacts: "一般联络（新加坡）",
     publicInfoUnavailable: "本演示目前还没有经审核的公共健康资料。",
+    // Owner decision 2026-10-14 (distress safety): draft, human acceptance pending.
+    emotionalSupportHeading: "情绪支援（新加坡）",
+    sosCall: "SOS：拨打 1767",
+    sosWhatsApp: "SOS：WhatsApp CareText 9151 1767",
+    sosProvider: "新加坡援人协会（Samaritans of Singapore）",
+    sosHours: "24 小时",
+    mindlineCall: "mindline：拨打 1771",
+    mindlineWhatsApp: "mindline：WhatsApp 6669 1771",
+    mindlineProvider: "mindline",
+    mindlineHours: "全天候",
+    emotionalSupportVerify: "查看最新资料：",
+    sosWebsite: "SOS 网站",
+    mindlineWebsite: "mindline 网站",
   },
   // Packet 6A synthetic onboarding (needs bilingual review)
   onboarding: {

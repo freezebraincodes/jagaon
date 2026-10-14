@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { useMemo } from "react";
 import type { AppMessages } from "@/i18n/types";
-import { createHelpInformationAdapter } from "@/application/governed/help-information-adapter";
+import { createHelpInformationAdapter, telHref, whatsAppHref } from "@/application/governed/help-information-adapter";
 import {
   AmbulanceIcon,
   BookIcon,
@@ -10,50 +10,13 @@ import {
   MessageIcon,
   PhoneIcon,
 } from "../primitives/Icons";
+import { ContactLink } from "../primitives/ContactLink";
 import { Notice, ScreenHeader } from "../primitives/ScreenHeader";
 
 type HelpScreenProps = {
   messages: AppMessages;
   goBack: () => void;
 };
-
-function ContactLink({
-  href,
-  icon,
-  action,
-  detail,
-  number,
-  emphasis = false,
-  stacked = false,
-}: {
-  href: string;
-  icon: ReactNode;
-  /** Approved action text; it already contains the number. */
-  action: string;
-  /** Category or provider shown under the action. */
-  detail: string;
-  number: string;
-  emphasis?: boolean;
-  /** Long action text: show the number on its own line. */
-  stacked?: boolean;
-}) {
-  const variants = [emphasis ? "contact-card--emphasis" : "", stacked ? "contact-card--stacked" : ""];
-  return (
-    <a href={href} className={["contact-card", ...variants].filter(Boolean).join(" ")}>
-      <span className="contact-icon" aria-hidden="true">
-        {icon}
-      </span>
-      <span className="contact-text">
-        <span className="contact-action">{action}</span>
-        <span className="contact-detail">{detail}</span>
-      </span>
-      {/* The number is already part of the approved action text. */}
-      <span className="contact-number" aria-hidden="true">
-        {number}
-      </span>
-    </a>
-  );
-}
 
 export function HelpScreen({ messages }: HelpScreenProps) {
   const msg = messages.help;
@@ -87,12 +50,36 @@ export function HelpScreen({ messages }: HelpScreenProps) {
           stacked
         />
         <ContactLink
-          href={`tel:${info.nurseAdviceNumber.replace(/\s/g, "")}`}
+          href={telHref(info.nurseAdviceNumber)}
           icon={<PhoneIcon size={28} />}
           action={msg.nurseFirst}
           detail={msg.nonEmergencyHeading}
           number={info.nurseAdviceNumber}
         />
+      </section>
+
+      {/* Owner decision 2026-10-14 (distress safety): emotional support lines, after the general contacts. */}
+      <section className="help-section" aria-labelledby="help-emotional-heading">
+        <h2 id="help-emotional-heading" className="eyebrow">
+          {msg.emotionalSupportHeading}
+        </h2>
+        <ContactLink href={telHref(info.sosNumber)} icon={<PhoneIcon size={28} />} action={msg.sosCall} detail={`${msg.sosProvider} · ${msg.sosHours}`} number={info.sosNumber} />
+        <ContactLink href={whatsAppHref(info.sosWhatsAppNumber)} icon={<MessageIcon size={28} />} action={msg.sosWhatsApp} detail={`${msg.sosProvider} · ${msg.sosHours}`} number={info.sosWhatsAppNumber} stacked external />
+        <ContactLink href={telHref(info.mindlineNumber)} icon={<PhoneIcon size={28} />} action={msg.mindlineCall} detail={`${msg.mindlineProvider} · ${msg.mindlineHours}`} number={info.mindlineNumber} />
+        <ContactLink href={whatsAppHref(info.mindlineWhatsAppNumber)} icon={<MessageIcon size={28} />} action={msg.mindlineWhatsApp} detail={`${msg.mindlineProvider} · ${msg.mindlineHours}`} number={info.mindlineWhatsAppNumber} stacked external />
+        <p className="source-attr help-source">
+          <span>{msg.emotionalSupportVerify}</span>
+          <a href={info.sosWebsite} target="_blank" rel="noreferrer noopener">
+            {msg.sosWebsite}
+            <ExternalIcon size={14} />
+          </a>
+          <span aria-hidden="true">·</span>
+          <a href={info.mindlineWebsite} target="_blank" rel="noreferrer noopener">
+            {msg.mindlineWebsite}
+            <ExternalIcon size={14} />
+          </a>
+          <span> · {messages.shared.reviewedOn(info.emotionalSupportCheckedOn)}</span>
+        </p>
       </section>
 
       <section className="help-section" aria-labelledby="help-general-heading">

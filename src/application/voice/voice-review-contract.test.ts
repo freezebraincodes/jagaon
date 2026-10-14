@@ -92,6 +92,11 @@ describe("voice review → save intents (multi-fact, review C3)", () => {
       expect(review(text, [save(0, { answers: { status: "TAKEN" } })], language), text).toEqual(rejectedOnly("NEEDS_EDIT"));
     }
     for (const [text, language] of [["How many units should I inject?", "en"], ["我应该打几个单位？", "zh"]] as const) expect(review(text, [], language), text).toEqual({ kind: "NO_INTENT", reason: "REDIRECTED" });
+    // Owner decision 2026-10-14: a distress analysis never yields an intent, even with a save decision.
+    for (const [text, language] of [["My sugar was 6.8 mmol and I want to die", "en"], ["血糖六点八，I can't go on", "zh"]] as const) {
+      expect(review(text, [save(0)], language), text).toEqual({ kind: "NO_INTENT", reason: "DISTRESS" });
+      expect(review(text, [], language), text).toEqual({ kind: "NO_INTENT", reason: "DISTRESS" });
+    }
     // An edit carries no amount: the person's edit is the medicine and status only.
     expect(review("I injected 10 units of my dark pen", [save(0, { edit: { kind: "MEDICATION_OCCURRENCE", medication: DARK, status: "TAKEN" } })])).toEqual({
       kind: "INTENTS",

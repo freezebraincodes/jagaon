@@ -5849,10 +5849,36 @@ button.summary-tile:hover:not(:disabled) {
 .voice-listening,
 .voice-review,
 .voice-redirect-only,
-.voice-ended {
+.voice-ended,
+.voice-distress {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+/* Owner decision 2026-10-14 (distress safety): a calm message with the Help screen's contact cards; no status colours. */
+.voice-distress-heading {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.voice-distress-heading:focus {
+  outline: none;
+}
+
+.voice-distress-contacts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.voice-distress-closing {
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  color: var(--ink);
 }
 
 .voice-section-label + .voice-transcript,
