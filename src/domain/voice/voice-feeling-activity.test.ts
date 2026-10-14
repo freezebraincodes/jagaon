@@ -58,6 +58,12 @@ describe("feeling recognition (voice-feeling-cues.1)", () => {
     ["I'm a bit anxious and stressed out", "F(anxious+stressed)"],
     ["Feeling tired. I'm also lonely.", "F(tired+lonely)"],
     ["I'm not feeling good today", "F(not-good)"],
+    // voice-feeling-cues.2 (owner request 2026-10-15): good moments and a few more feelings.
+    ["I feel pretty happy that my sugar level has been within the control", "F(happy)"],
+    ["I feel proud that I walked every morning this week", "F(proud)"],
+    ["I'm excited about my holiday", "F(excited)"],
+    ["I feel grateful for my family", "F(grateful)"],
+    ["I'm scared", "F(scared)"],
     ["I'm not tired but worried", "F(not-tired+worried)"],
     ["I'm worried about my sugar", "F(worried)"],
     ["I feel hopeless", "F(hopeless)"],
