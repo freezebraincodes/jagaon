@@ -24,6 +24,21 @@ type KeyValueStorage = Pick<Storage, "getItem" | "setItem">;
 
 export const MEDICINE_INFO_CACHE_KEY = "jagaon.medicineInfo.cache.v1";
 export const MEDICINE_INFO_NOTICE_KEY = "jagaon.medicineInfo.noticeSeen.v1";
+
+/**
+ * Owner decision 2026-10-14: "Delete all data on this device" also clears the cached AI medicine information and the notice list.
+ * Returns true when both keys are gone (or storage is absent).
+ */
+export function clearMedicineInfoLocalState(storage: Pick<Storage, "removeItem"> | undefined = globalThis.localStorage): boolean {
+  if (!storage) return true;
+  try {
+    storage.removeItem(MEDICINE_INFO_CACHE_KEY);
+    storage.removeItem(MEDICINE_INFO_NOTICE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
 export const MEDICINE_INFO_CACHE_MAX_ENTRIES = 50;
 export const MEDICINE_INFO_CLIENT_TIMEOUT_MS = 20_000;
 const MAX_RESPONSE_CHARS = 8_192;

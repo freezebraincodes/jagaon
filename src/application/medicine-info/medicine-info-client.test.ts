@@ -154,3 +154,14 @@ describe("medicine-info client", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("clearMedicineInfoLocalState (owner decision 2026-10-14: Delete all data clears it)", () => {
+  it("removes the cache and the notice list, and reports failure without throwing", async () => {
+    const { clearMedicineInfoLocalState, MEDICINE_INFO_CACHE_KEY, MEDICINE_INFO_NOTICE_KEY } = await import("./medicine-info-client");
+    const removed: string[] = [];
+    expect(clearMedicineInfoLocalState({ removeItem: (key: string) => void removed.push(key) })).toBe(true);
+    expect(removed).toEqual([MEDICINE_INFO_CACHE_KEY, MEDICINE_INFO_NOTICE_KEY]);
+    expect(clearMedicineInfoLocalState({ removeItem: () => { throw new Error("blocked"); } })).toBe(false);
+    expect(clearMedicineInfoLocalState(undefined)).toBe(true);
+  });
+});

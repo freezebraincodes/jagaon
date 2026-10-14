@@ -1,5 +1,6 @@
 "use client";
 
+import { clearMedicineInfoLocalState } from "@/application/medicine-info/medicine-info-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SupportedLocale } from "@/domain/patient-settings/locale";
 import type { Instant } from "@/domain/shared/time";
@@ -769,7 +770,8 @@ export function JagaOnApp({
   const clearLocalStateOwners = useCallback(() => {
     // An owner that is not loaded yet is still attempted, never assumed clear.
     const onboardingOwner = repository ?? repositoryRef.current ?? onboardingRepositoryFactory();
-    const results = [onboardingOwner.clear().ok, appointmentNotes.clear().ok];
+    // Owner decision 2026-10-14: the cached AI medicine information is cleared too.
+    const results = [onboardingOwner.clear().ok, appointmentNotes.clear().ok, clearMedicineInfoLocalState()];
     return results.every(Boolean);
   }, [appointmentNotes, repository, onboardingRepositoryFactory]);
   clearLocalStateOwnersRef.current = clearLocalStateOwners;
