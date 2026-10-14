@@ -96,6 +96,18 @@ export const enSGMessages: AppMessages = {
       body: "JagaOn cannot answer questions about doses or changing treatment. Please ask your doctor or pharmacist.",
       transcribedNote: "Your voice was transcribed by Tencent Cloud. This question was not sent anywhere else, and nothing was saved.",
     },
+    // Owner decision 2026-10-14 (distress safety; owner-approved wording).
+    distress: {
+      message: "It sounds like you're going through something really hard. You don't have to face it alone. Please reach out now:",
+      sosCall: "SOS (Samaritans of Singapore): call 1767",
+      sosWhatsApp: "or WhatsApp 9151 1767",
+      sosHours: "24 hours",
+      mindlineCall: "mindline: call 1771",
+      mindlineWhatsApp: "or WhatsApp 6669 1771",
+      mindlineHours: "round the clock",
+      danger: "If you're in immediate danger, call 995",
+      trustedPerson: "You can also talk to someone you trust.",
+    },
   },
   shared: {
     appName: "JagaOn",
@@ -502,6 +514,19 @@ export const enSGMessages: AppMessages = {
     // Packet 6 v1 convergence (needs bilingual review)
     generalContacts: "General contacts (Singapore)",
     publicInfoUnavailable: "Reviewed public health information is not available in this demo yet.",
+    // Owner decision 2026-10-14 (distress safety). Sources: https://www.sos.org.sg/ and https://www.mindline.sg/
+    emotionalSupportHeading: "Emotional support (Singapore)",
+    sosCall: "SOS: call 1767",
+    sosWhatsApp: "SOS: WhatsApp CareText 9151 1767",
+    sosProvider: "Samaritans of Singapore",
+    sosHours: "24 hours",
+    mindlineCall: "mindline: call 1771",
+    mindlineWhatsApp: "mindline: WhatsApp 6669 1771",
+    mindlineProvider: "mindline",
+    mindlineHours: "Round the clock",
+    emotionalSupportVerify: "Check current information:",
+    sosWebsite: "SOS website",
+    mindlineWebsite: "mindline website",
   },
   // Packet 6A synthetic onboarding (needs bilingual review)
   onboarding: {

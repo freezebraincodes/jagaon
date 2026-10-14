@@ -24,6 +24,8 @@ export type VoiceScreenCopy = Readonly<{
       manualMedicine: string;
     }>;
   redirect: AppMessages["voice"]["redirect"] & Readonly<{ healthBody: string }>;
+  /** Owner decision 2026-10-14 (distress safety): catalogue rows `voice.distress.*` (EN owner-approved; ZH drafts). */
+  distress: AppMessages["voice"]["distress"];
   /** voice-copy.13s.2 `voice.remoteExtraction.*` (the disclosure wording is the coordinator's; human acceptance pending). */
   remote: Readonly<{ offer: string; title: string; disclosure: string; accept: string; decline: string; checking: string; keptLocal: string }>;
   /** Web Speech (VOICE_WEB_SPEECH_COPY; owner-approved wording 2026-10-11). */
@@ -142,7 +144,7 @@ export const VOICE_WEB_SPEECH_COPY: Readonly<{ "en-SG": WebSpeechCopy }> = Objec
   }),
 });
 
-type PendingCopy = Omit<VoiceScreenCopy, "title" | "passcodeLabel" | "close" | "disclosure" | "state" | "review" | "redirect" | "remote" | "terms" | "webSpeech" | "limit"> &
+type PendingCopy = Omit<VoiceScreenCopy, "title" | "passcodeLabel" | "close" | "disclosure" | "state" | "review" | "redirect" | "distress" | "remote" | "terms" | "webSpeech" | "limit"> &
   Readonly<{
     state: Readonly<{ starting: string; accessDenied: string; checking: string; declined: string; doneSaved: string }>;
     review: Readonly<{ notUnderstoodHeading: string; notUnderstoodBody: string; backToToday: string; manualHeading: string }>;
@@ -365,6 +367,7 @@ export function voiceScreenCopy(messages: AppMessages, locale: SupportedLocale):
     // Finding N-1: the chooser's labels are the destinations' own titles, so a label always matches the screen it opens.
     review: { ...messages.voice.review, ...pending.review, manualReading: messages.today.recordReading, manualMeal: messages.meal.screenTitle, manualMedicine: messages.schedule.title },
     redirect: { ...messages.voice.redirect, ...pending.redirect },
+    distress: messages.voice.distress,
     remote: pending.remote,
     limit: pending.limit,
     // English only (see VOICE_WEB_SPEECH_COPY): the ZH screen never reaches a Web Speech session.

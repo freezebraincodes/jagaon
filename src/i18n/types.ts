@@ -418,6 +418,19 @@ export type HelpMessages = {
   // Packet 6 v1 convergence (needs bilingual review)
   generalContacts: string;
   publicInfoUnavailable: string;
+  /** Owner decision 2026-10-14 (distress safety): emotional support contacts. English owner-approved; Chinese drafts. */
+  emotionalSupportHeading: string;
+  sosCall: string;
+  sosWhatsApp: string;
+  sosProvider: string;
+  sosHours: string;
+  mindlineCall: string;
+  mindlineWhatsApp: string;
+  mindlineProvider: string;
+  mindlineHours: string;
+  emotionalSupportVerify: string;
+  sosWebsite: string;
+  mindlineWebsite: string;
 };
 
 /** Packet 6A synthetic onboarding (frames 14–31; needs bilingual review). */
@@ -1019,6 +1032,21 @@ export type VoiceMessages = {
     discard: string;
   };
   redirect: { body: string; transcribedNote: string };
+  /**
+   * Owner decision 2026-10-14 (distress safety): the only content shown when a distress cue was said. English owner-approved; Chinese
+   * drafts (human acceptance pending). Each contact row is a separate link; the numbers are part of the text.
+   */
+  distress: {
+    message: string;
+    sosCall: string;
+    sosWhatsApp: string;
+    sosHours: string;
+    mindlineCall: string;
+    mindlineWhatsApp: string;
+    mindlineHours: string;
+    danger: string;
+    trustedPerson: string;
+  };
 };
 
 export type AppMessages = {

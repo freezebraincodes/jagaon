@@ -28,9 +28,9 @@ const unresolved = Object.freeze({ kind: "MEDICATION_OCCURRENCE", ...origin, sta
 const mapped = Object.freeze({ ...unresolved, medicineRef: { kind: "MAPPED", phrase: "dark pen", medication: MED, via: "TERMINOLOGY" }, state: "UNDERSTOOD", ambiguity: [] });
 const unsupported = Object.freeze({ kind: "UNSUPPORTED_SPAN", ...origin, span: { start: 0, end: 11 }, sourcePhrase: "I was dizzy" });
 
-describe("voice candidate union (voice-contract.13s.4)", () => {
-  it("is version 13s.4 (CR-11)", () => {
-    expect([VOICE_CONTRACT_VERSION, VOICE_EXTRACTOR_VERSION, VOICE_VOCABULARY_VERSION]).toEqual(["voice-contract.13s.4", "voice-extractor.13s.4", "voice-vocabulary.13s.4"]);
+describe("voice candidate union (voice-contract.13s.5)", () => {
+  it("is version 13s.5 (distress safety, owner decision 2026-10-14; the vocabulary stays 13s.4)", () => {
+    expect([VOICE_CONTRACT_VERSION, VOICE_EXTRACTOR_VERSION, VOICE_VOCABULARY_VERSION]).toEqual(["voice-contract.13s.5", "voice-extractor.13s.5", "voice-vocabulary.13s.4"]);
   });
 
   it("accepts each kind", () => {
@@ -160,5 +160,18 @@ describe("voice candidate union (voice-contract.13s.4)", () => {
     expect(voiceAnalysisSchema.safeParse({ ...analysed, candidates: [...analysed.candidates, glucose] }).success).toBe(false);
     expect(voiceAnalysisSchema.safeParse({ ...analysed, transcript: "kept" }).success).toBe(false);
     expect(voiceAnalysisSchema.safeParse({ ...analysed, language: "ms" }).success).toBe(false);
+  });
+
+  it("13s.5: a DISTRESS result carries only its cue key and the cue list version: no candidate, redirect or transcript", () => {
+    const distress = { kind: "DISTRESS", language: "en", candidates: [], cueKey: "NOT_WANT_TO_LIVE", cuesVersion: "voice-distress-cues.1", extractorVersion: VOICE_EXTRACTOR_VERSION };
+    expect(voiceAnalysisSchema.safeParse(distress).success).toBe(true);
+    expect(voiceAnalysisSchema.safeParse({ ...distress, language: "zh" }).success).toBe(true);
+    expect(voiceAnalysisSchema.safeParse({ ...distress, candidates: [glucose] }).success).toBe(false);
+    expect(voiceAnalysisSchema.safeParse({ ...distress, cueKey: "SAD" }).success).toBe(false);
+    expect(voiceAnalysisSchema.safeParse({ ...distress, cuesVersion: "voice-distress-cues.0" }).success).toBe(false);
+    expect(voiceAnalysisSchema.safeParse({ ...distress, transcript: "kept" }).success).toBe(false);
+    expect(voiceAnalysisSchema.safeParse({ ...distress, redirect: null }).success).toBe(false);
+    const { cueKey: _cueKey, ...withoutCue } = distress;
+    expect(voiceAnalysisSchema.safeParse(withoutCue).success).toBe(false);
   });
 });

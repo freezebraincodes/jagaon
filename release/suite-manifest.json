@@ -201,6 +201,7 @@
             "src/domain/transcript-extraction/transcript-extraction-validator.test.ts",
             "src/domain/voice/glucose-entry-format.test.ts",
             "src/domain/voice/voice-advice-redirect.test.ts",
+            "src/domain/voice/voice-distress-gate.test.ts",
             "src/domain/voice/voice-candidate-extractor.test.ts",
             "src/domain/voice/voice-bracket-exclusion.test.ts",
             "src/domain/voice/voice-extractor-cases.test.ts",

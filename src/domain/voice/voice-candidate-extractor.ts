@@ -22,6 +22,7 @@ import {
   type VoiceOccurrenceStatus,
 } from "./voice-contracts";
 import { classifyVoiceAdviceRedirect, voiceWordMatcher } from "./voice-advice-redirect";
+import { VOICE_DISTRESS_CUES_VERSION, detectVoiceDistress } from "./voice-distress-gate";
 import {
   EN_MEDICINE_PHRASE_STOPWORDS,
   EN_PRONOUN_ONE_PREFIXES,
@@ -40,7 +41,9 @@ import {
  * (`VoiceMedicineDirectory`); nothing is learned here.
  *
  * `analyseTranscript(transcript, language, options)`:
- * 1. the neutral dose/treatment redirect FIRST; a REDIRECT yields zero candidates (the redirect is never hidden behind a fact);
+ * 0. the distress gate FIRST (owner decision 2026-10-14, `voice-distress-gate`): any distress cue, in any session language and at any
+ *    length, yields DISTRESS with zero candidates; nothing else (redirect, length check, extraction) runs;
+ * 1. the neutral dose/treatment redirect next; a REDIRECT yields zero candidates (the redirect is never hidden behind a fact);
  * 2. a transcript over VOICE_TRANSCRIPT_MAX_CODE_POINTS code points is TRANSCRIPT_TOO_LONG (no candidates);
  * 3. otherwise at most VOICE_MAX_CANDIDATES candidates, ordered by position (`truncated` beyond).
  *
@@ -1106,10 +1109,13 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
   });
 }
 
-/** The analysis entry point: the redirect first, then the length limit, then the bounded extraction. */
+/** The analysis entry point: the distress gate first, then the redirect, then the length limit, then the bounded extraction. */
 export function analyseTranscript(transcript: string, language: VoiceLanguage, options: VoiceAnalysisOptions = {}): VoiceAnalysis {
   if (language !== "en" && language !== "zh") throw new TypeError("VOICE_LANGUAGE_INVALID");
   const text = typeof transcript === "string" ? transcript : "";
+  // Owner decision 2026-10-14: distress beats every other result (a dose or health question, an over-long transcript, any fact).
+  const distress = detectVoiceDistress(text);
+  if (distress.kind === "DISTRESS") return Object.freeze({ kind: "DISTRESS", language, candidates: [], cueKey: distress.cueKey, cuesVersion: VOICE_DISTRESS_CUES_VERSION, extractorVersion: VOICE_EXTRACTOR_VERSION });
   // P13X review CRITICAL 2: code-switched speech ("Sugar 15 要不要加 insulin") is redirected by EITHER language's classifier.
   const own = classifyVoiceAdviceRedirect(text, language);
   const redirect = own.kind === "REDIRECT" ? own : classifyVoiceAdviceRedirect(text, language === "en" ? "zh" : "en");
