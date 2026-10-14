@@ -1,5 +1,6 @@
 import { FEELINGS_CHAT_MAX_TURNS, FEELINGS_CHAT_SUMMARY_MAX_CHARS, type FeelingsChatRequest } from "./feelings-chat-contract";
 import type { ValidatedFeelingsChatReply } from "./feelings-chat-validator";
+import { voiceFeelingGroupOf, type VoiceFeelingGroup } from "../voice/voice-feeling-cues";
 
 /**
  * Tell JagaOn understands more (design §3.4; wording approved by the owner on 2026-10-14): the reviewed bank. The kind sentences are
@@ -28,58 +29,31 @@ export const FALLBACK_QUESTIONS: readonly string[] = Object.freeze([
   "Is there anything you'd like to remember to tell your doctor?",
 ]);
 
-/**
- * Feeling-cue keys (lowercase words from the deterministic feeling recogniser, e.g. "tired", "worried") mapped to a kind-sentence key.
- * An unknown cue maps to nothing; no recognised cue gives OTHER.
- */
-const CUE_TO_KEY: Readonly<Record<string, KindSentenceKey>> = Object.freeze({
-  tired: "TIRED",
-  exhausted: "TIRED",
-  sleepy: "TIRED",
-  drained: "TIRED",
-  "worn-out": "TIRED",
-  worn_out: "TIRED",
-  fatigued: "TIRED",
-  weary: "TIRED",
-  worried: "WORRIED",
-  worry: "WORRIED",
-  anxious: "WORRIED",
-  nervous: "WORRIED",
-  scared: "WORRIED",
-  afraid: "WORRIED",
-  concerned: "WORRIED",
-  uneasy: "WORRIED",
-  stressed: "STRESSED",
-  stress: "STRESSED",
-  overwhelmed: "STRESSED",
-  pressured: "STRESSED",
-  tense: "STRESSED",
-  frustrated: "STRESSED",
-  sad: "SAD_OR_LOW",
-  low: "SAD_OR_LOW",
-  down: "SAD_OR_LOW",
-  upset: "SAD_OR_LOW",
-  unhappy: "SAD_OR_LOW",
-  lonely: "SAD_OR_LOW",
-  blue: "SAD_OR_LOW",
-  miserable: "SAD_OR_LOW",
-  happy: "HAPPY_OR_GOOD",
-  good: "HAPPY_OR_GOOD",
-  great: "HAPPY_OR_GOOD",
-  better: "HAPPY_OR_GOOD",
-  glad: "HAPPY_OR_GOOD",
-  calm: "HAPPY_OR_GOOD",
-  relieved: "HAPPY_OR_GOOD",
-  cheerful: "HAPPY_OR_GOOD",
+/** The recogniser's feeling groups (voice-feeling-cues.1) mapped to the bank's kind-sentence keys. */
+const GROUP_TO_KEY: Readonly<Record<VoiceFeelingGroup, KindSentenceKey>> = Object.freeze({
+  TIRED: "TIRED",
+  WORRIED: "WORRIED",
+  STRESSED: "STRESSED",
+  SAD_LOW: "SAD_OR_LOW",
+  HAPPY_GOOD: "HAPPY_OR_GOOD",
 });
 
 /**
+ * The ONE kind-sentence choice of the app: the feelings chat and the voice "Save as a note" path (`noteKindSentenceFor`, which
+ * delegates here) both use it, so a note always carries the same reviewed sentence whichever way it was saved.
+ *
+ * Cue keys are the stored keys of the deterministic feeling recogniser (`voice-feeling-cues.1`: "tired", "worried", "worn-out"; trimmed
+ * and lower-cased here); their group comes from that cue list, the single source of the cue → feeling mapping. A negated key
+ * ("not-good") or an unknown key has no group.
+ *
  * Deterministic priority when several cues match: the heavier feelings first (sad or low, then stressed), then tired before worried
- * (the design's own example, "Feeling tired and a bit worried today", gets the tiring-day sentence), then happy or good; else OTHER.
- * The order of the cues themselves never matters.
+ * (the design's own example, "Feeling tired and a bit worried today", gets the tiring-day sentence, design §3.1 step 5), then happy or
+ * good; else OTHER. The order of the cues themselves never matters.
  */
 export function kindSentenceFor(cueKeys: readonly string[]): Readonly<{ key: KindSentenceKey; text: string }> {
-  const matched = new Set(cueKeys.map((cue) => CUE_TO_KEY[cue.trim().toLowerCase()]).filter((key): key is KindSentenceKey => key !== undefined));
+  const matched = new Set(
+    cueKeys.map((cue) => voiceFeelingGroupOf(cue.trim().toLowerCase())).filter((group): group is VoiceFeelingGroup => group !== null).map((group) => GROUP_TO_KEY[group]),
+  );
   const key = KIND_SENTENCE_KEYS.find((candidate) => matched.has(candidate)) ?? "OTHER";
   return Object.freeze({ key, text: KIND_SENTENCES[key] });
 }

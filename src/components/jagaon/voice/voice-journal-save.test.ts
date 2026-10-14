@@ -104,7 +104,7 @@ describe("owner decision 2026-10-14: a feeling saved as a note, an activity to t
         feelingCues: ["tired", "worried"],
         turns: [
           { role: "PATIENT", text: "Feeling tired and a bit worried today.", source: "PATIENT" },
-          { role: "JAGAON_KIND_SENTENCE", text: "It sounds like something has been on your mind. Thank you for sharing it.", source: "REVIEWED_BANK" },
+          { role: "JAGAON_KIND_SENTENCE", text: "That sounds like a tiring day. Thank you for telling me.", source: "REVIEWED_BANK" },
         ],
         themes: [],
         aiUsed: false,

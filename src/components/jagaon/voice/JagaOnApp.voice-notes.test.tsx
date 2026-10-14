@@ -74,7 +74,7 @@ describe("Tell JagaOn: feelings become notes, activities go to the activity log 
       expect(within(feeling!).queryByRole("button", { name: en.voice.feeling.talkItThrough })).toBeNull();
       fireEvent.click(within(feeling!).getByRole("button", { name: en.voice.feeling.saveAsNote }));
       await waitFor(() => expect(within(feeling!).getByText(en.voice.feeling.savedToNotes)).toBeInTheDocument(), { timeout: 30_000 });
-      expect(within(feeling!).getByText("It sounds like something has been on your mind. Thank you for sharing it.")).toBeInTheDocument();
+      expect(within(feeling!).getByText("That sounds like a tiring day. Thank you for telling me.")).toBeInTheDocument();
 
       const afterNote = await rowsAfter(before);
       expect(afterNote.map((row) => row.recordType)).toEqual(["PERSONAL_NOTE"]);
@@ -84,7 +84,7 @@ describe("Tell JagaOn: feelings become notes, activities go to the activity log 
         feelingCues: ["tired", "worried"],
         turns: [
           { role: "PATIENT", text: "Feeling tired and a bit worried today.", source: "PATIENT" },
-          { role: "JAGAON_KIND_SENTENCE", text: "It sounds like something has been on your mind. Thank you for sharing it.", source: "REVIEWED_BANK" },
+          { role: "JAGAON_KIND_SENTENCE", text: "That sounds like a tiring day. Thank you for telling me.", source: "REVIEWED_BANK" },
         ],
         themes: [],
         aiUsed: false,

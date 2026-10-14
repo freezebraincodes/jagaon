@@ -1,32 +1,30 @@
-import { voiceFeelingGroupOf, type VoiceFeelingGroup } from "../voice/voice-feeling-cues";
+import { FEELINGS_CHAT_BANK_VERSION, KIND_SENTENCES, kindSentenceFor } from "../feelings-chat/feelings-chat-bank";
+import type { VoiceFeelingGroup } from "../voice/voice-feeling-cues";
 
 /**
- * Owner decision 2026-10-14 (design §3.4, owner-approved wording): the reviewed kind sentences of the "Save as a note" path, chosen by
- * the feeling cues she said. Fixed English text from the reviewed bank, never written by AI; stored as the note's
+ * Owner decision 2026-10-14 (design §3.4, owner-approved wording): the reviewed kind sentence of the voice "Save as a note" path, chosen
+ * by the feeling cues she said. Fixed English text from the reviewed bank, never written by AI; stored as the note's
  * JAGAON_KIND_SENTENCE turn (source REVIEWED_BANK) and shown to her after saving.
  *
- * Choice: the first matching cue group in this priority: sad or low > stressed > worried > tired > happy or good > other. A negated or
- * unknown cue ("not-good") has no group, so a note with only such cues gets the neutral "other" sentence. Distress never reaches here
- * (the distress gate runs first and nothing is saved).
- *
- * Local to the voice "Save as a note" path; the feelings-chat bank (`kindSentenceFor`, a separate track) is to be reconciled with it.
+ * Reconciled with the feelings chat (2026-10-14): there is ONE table and ONE choice, the reviewed bank's `KIND_SENTENCES` and
+ * `kindSentenceFor` (feelings-chat-bank.1). This module only re-exposes them under the recogniser's group names, so the note saved from
+ * a Feeling card and the note saved from the chat carry the same sentence for the same cues. Priority (the bank's): sad or low >
+ * stressed > tired > worried > happy or good > other. A negated or unknown cue ("not-good") has no group, so a note with only such cues
+ * gets the neutral "other" sentence. Distress never reaches here (the distress gate runs first and nothing is saved).
  */
-export const NOTE_KIND_SENTENCES_VERSION = "note-kind-sentences.1";
+export const NOTE_KIND_SENTENCES_VERSION = FEELINGS_CHAT_BANK_VERSION;
 
+/** The bank's sentences keyed by the recogniser's group names (a view of `KIND_SENTENCES`, not a second table). */
 export const NOTE_KIND_SENTENCES: Readonly<Record<VoiceFeelingGroup | "OTHER", string>> = Object.freeze({
-  TIRED: "That sounds like a tiring day. Thank you for telling me.",
-  WORRIED: "It sounds like something has been on your mind. Thank you for sharing it.",
-  STRESSED: "That sounds like a lot to carry. Thank you for telling me.",
-  SAD_LOW: "I'm sorry today feels hard. Thank you for sharing how you feel.",
-  HAPPY_GOOD: "It's good to hear that. Thank you for sharing it.",
-  OTHER: "Thank you for telling me how you feel.",
+  TIRED: KIND_SENTENCES.TIRED,
+  WORRIED: KIND_SENTENCES.WORRIED,
+  STRESSED: KIND_SENTENCES.STRESSED,
+  SAD_LOW: KIND_SENTENCES.SAD_OR_LOW,
+  HAPPY_GOOD: KIND_SENTENCES.HAPPY_OR_GOOD,
+  OTHER: KIND_SENTENCES.OTHER,
 });
 
-const PRIORITY: readonly VoiceFeelingGroup[] = Object.freeze(["SAD_LOW", "STRESSED", "WORRIED", "TIRED", "HAPPY_GOOD"]);
-
-/** The reviewed kind sentence for these cue keys (see the priority above). */
+/** The reviewed kind sentence for these cue keys: delegates to the bank's `kindSentenceFor`. */
 export function noteKindSentenceFor(cueKeys: readonly string[]): string {
-  const groups = new Set(cueKeys.map(voiceFeelingGroupOf));
-  const group = PRIORITY.find((candidate) => groups.has(candidate));
-  return NOTE_KIND_SENTENCES[group ?? "OTHER"];
+  return kindSentenceFor(cueKeys).text;
 }

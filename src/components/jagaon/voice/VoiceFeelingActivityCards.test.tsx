@@ -37,7 +37,7 @@ describe("Feeling card", () => {
     const onDecide = decider();
     render(<VoiceFeelingCard candidate={feeling} index={2} copy={copy} onDecide={onDecide} />);
     fireEvent.click(screen.getByRole("button", { name: "Save as a note" }));
-    await waitFor(() => expect(screen.getByText("It sounds like something has been on your mind. Thank you for sharing it.")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("That sounds like a tiring day. Thank you for telling me.")).toBeInTheDocument());
     expect(onDecide).toHaveBeenCalledWith({ candidateIndex: 2, action: "SAVE" });
     expect(screen.getByText(copy.feeling.savedToNotes)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save as a note" })).toBeNull();

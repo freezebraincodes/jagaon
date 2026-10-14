@@ -33,6 +33,11 @@ describe("feelings-chat reviewed bank (feelings-chat-bank.1)", () => {
     [["happy", "sad"], "SAD_OR_LOW"],
     [["tired", "stressed"], "STRESSED"],
     [[" Tired "], "TIRED"],
+    // The cue → feeling mapping is the recogniser's cue list (voice-feeling-cues.1), the single source.
+    [["worn-out"], "TIRED"],
+    [["under-pressure"], "STRESSED"],
+    [["okay"], "HAPPY_OR_GOOD"],
+    [["not-good"], "OTHER"],
   ])("picks the kind sentence for %j deterministically", (cues, key) => {
     expect(kindSentenceFor(cues)).toEqual({ key, text: KIND_SENTENCES[key as keyof typeof KIND_SENTENCES] });
   });
