@@ -6415,6 +6415,30 @@ button.summary-tile:hover:not(:disabled) {
   gap: 0.5rem;
 }
 
+/* Owner decision 2026-10-15: "Show other ideas", right-aligned in the tile's header (a full-size tap target). */
+.meal-ideas-refresh {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap, 2.75rem);
+  height: var(--tap, 2.75rem);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--card-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.meal-ideas-refresh:hover {
+  border-color: var(--ink);
+}
+
+.meal-ideas-refresh:focus-visible {
+  outline: 3px solid var(--focus, var(--ink));
+  outline-offset: 2px;
+}
+
 .meal-ideas-intro {
   font-size: 1rem;
   color: var(--ink-2);

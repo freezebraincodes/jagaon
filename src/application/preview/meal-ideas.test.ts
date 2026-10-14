@@ -36,19 +36,18 @@ const FORBIDDEN = [
   "always",
 ];
 
-describe("meal ideas dataset (meal-ideas.1)", () => {
+describe("meal ideas dataset (meal-ideas.2)", () => {
   it("is versioned", () => {
-    expect(MEAL_IDEAS_VERSION).toBe("meal-ideas.1");
+    expect(MEAL_IDEAS_VERSION).toBe("meal-ideas.2");
   });
 
-  it("groups 24 to 30 swaps into breakfast, lunch and dinner, evenly", () => {
+  it("meal-ideas.2: 24 swaps per meal, evenly, so \"Show other ideas\" shows 8 different sets before any repeat", () => {
     expect(Object.keys(MEAL_IDEAS).sort()).toEqual(["BREAKFAST", "DINNER", "LUNCH"]);
     for (const swaps of Object.values(MEAL_IDEAS)) {
-      expect(swaps.length).toBeGreaterThanOrEqual(MEAL_IDEAS_SHOWN * 2);
-      expect(swaps.length).toBe(MEAL_IDEAS.BREAKFAST.length);
+      expect(swaps.length).toBe(24);
+      expect(swaps.length % MEAL_IDEAS_SHOWN).toBe(0);
     }
-    expect(ALL_SWAPS.length).toBeGreaterThanOrEqual(24);
-    expect(ALL_SWAPS.length).toBeLessThanOrEqual(30);
+    expect(ALL_SWAPS.length).toBe(72);
   });
 
   it("gives every swap a unique id and short, plain from/to wording", () => {
@@ -70,6 +69,16 @@ describe("meal ideas dataset (meal-ideas.1)", () => {
       const text = `${swap.from} ${swap.to} `.toLowerCase();
       expect(text, swap.id).not.toMatch(/\d/);
       for (const word of FORBIDDEN) expect(text, `${swap.id}: "${word}"`).not.toContain(word);
+    }
+  });
+
+  it("owner review 2026-10-15: fruit is always a small portion of a lower-sugar fruit, never a very sweet one or \"a whole fruit\"", () => {
+    const SWEET = ["durian", "mango", "lychee", "longan", "banana", "grape", "date", "jackfruit", "rambutan", "dried fruit", "whole fruit", "fruit juice"];
+    const FRUIT = /\b(?:fruit|apple|orange|pear|guava|berr(?:y|ies)|honeydew|papaya|melon)\b/i;
+    for (const swap of ALL_SWAPS) {
+      const to = swap.to.toLowerCase();
+      for (const word of SWEET) expect(to, `${swap.id}: "${word}"`).not.toContain(word);
+      if (FRUIT.test(to)) expect(to, swap.id).toMatch(/\b(?:small|few)\b/);
     }
   });
 
@@ -122,10 +131,31 @@ describe("daily selection", () => {
 
   it("covers the whole list over consecutive days", () => {
     const seen = new Set<string>();
-    for (let day = 10; day < 10 + list.length; day += 1) {
-      for (const swap of pickMealIdeas(list, sgt(`2026-10-${day}`, "12:00"))) seen.add(swap.id);
+    const first = sgt("2026-10-10", "12:00").getTime();
+    for (let day = 0; day < list.length; day += 1) {
+      for (const swap of pickMealIdeas(list, new Date(first + day * 86_400_000))) seen.add(swap.id);
     }
     expect(seen.size).toBe(list.length);
+  });
+
+  it("owner decision 2026-10-15: each \"Show other ideas\" tap moves on by one set, reaching every swap before any repeats", () => {
+    const now = sgt("2026-10-15", "08:00");
+    const seen: string[] = [];
+    for (let step = 0; step < list.length / MEAL_IDEAS_SHOWN; step += 1) seen.push(...pickMealIdeas(list, now, MEAL_IDEAS_SHOWN, step).map((swap) => swap.id));
+    expect(new Set(seen).size).toBe(list.length);
+    expect(pickMealIdeas(list, now, MEAL_IDEAS_SHOWN, list.length / MEAL_IDEAS_SHOWN)).toEqual(pickMealIdeas(list, now));
+    expect(pickMealIdeas(list, now, MEAL_IDEAS_SHOWN, -2)).toEqual(pickMealIdeas(list, now));
+  });
+
+  it("meal-ideas.2: every set of three leads with a Singapore dish and holds at most one generic swap", () => {
+    const GENERIC = new Set(["sweetened-cereal", "fruit-juice", "white-bread", "butter-croissant", "sweetened-yoghurt", "pancakes", "muffin", "fried-chicken", "soft-drink", "bubble-tea", "burger-fries", "creamy-pasta", "iced-lemon-tea", "fish-and-chips", "fried-chicken-wings", "pizza", "instant-noodles", "ice-cream", "potato-chips"]);
+    for (const swaps of Object.values(MEAL_IDEAS)) {
+      for (let start = 0; start < swaps.length; start += MEAL_IDEAS_SHOWN) {
+        const set = swaps.slice(start, start + MEAL_IDEAS_SHOWN).map((swap) => swap.id);
+        expect(GENERIC.has(set[0]!), set.join(", ")).toBe(false);
+        expect(set.filter((id) => GENERIC.has(id)).length, set.join(", ")).toBeLessThanOrEqual(1);
+      }
+    }
   });
 
   it("wraps around a short list and handles empty input", () => {

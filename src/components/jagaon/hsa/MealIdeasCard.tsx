@@ -26,10 +26,24 @@ export function MealIdeasCard(props: MealIdeasCardProps) {
 
 type MealIdeasData = Readonly<Record<MealIdeaSlot, readonly MealSwap[]>>;
 
+/** Two circular arrows ("show other ideas"). */
+function RefreshIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8" />
+      <path d="M4 3v5h5" />
+      <path d="M4 13a8 8 0 0 0 14.3 4.9L20 16" />
+      <path d="M20 21v-5h-5" />
+    </svg>
+  );
+}
+
 function MealIdeasPreview({ messages, now, navigate }: MealIdeasCardProps) {
   const msg = messages.hsaMealIdeas;
   // The list is only fetched once the preview is shown (never while HSA-bounded mode is ON).
   const [data, setData] = useState<MealIdeasData | null>(null);
+  // Owner decision 2026-10-15: "Show other ideas" moves on by one set of three per tap (in memory only).
+  const [step, setStep] = useState(0);
   useEffect(() => {
     let active = true;
     void import("@/application/preview/meal-ideas-data").then((module) => {
@@ -42,7 +56,7 @@ function MealIdeasPreview({ messages, now, navigate }: MealIdeasCardProps) {
   if (!data) return null;
 
   const slot = mealIdeaSlotAt(now);
-  const swaps = pickMealIdeas(data[slot], now);
+  const swaps = pickMealIdeas(data[slot], now, undefined, step);
   const heading = { BREAKFAST: msg.headingBreakfast, LUNCH: msg.headingLunch, DINNER: msg.headingDinner }[slot];
 
   return (
@@ -52,6 +66,9 @@ function MealIdeasPreview({ messages, now, navigate }: MealIdeasCardProps) {
         <h2 id="meal-ideas-heading" className="eyebrow">
           {heading}
         </h2>
+        <button type="button" className="meal-ideas-refresh" aria-label={msg.refresh} title={msg.refresh} onClick={() => setStep((value) => value + 1)}>
+          <RefreshIcon />
+        </button>
       </div>
       <p className="meal-ideas-intro">{msg.intro}</p>
       <ul className="meal-ideas-list" lang="en">

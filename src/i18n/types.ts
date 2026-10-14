@@ -1170,6 +1170,8 @@ export type AppMessages = {
     headingLunch: string;
     headingDinner: string;
     intro: string;
+    /** Owner decision 2026-10-15: the refresh button's name ("Show other ideas"). */
+    refresh: string;
     /** Read between the two halves of a swap by screen readers (the arrow is hidden). */
     swapJoin: string;
     findPlaces: string;
