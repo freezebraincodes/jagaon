@@ -31,7 +31,7 @@ import { InMemoryDailySpendLedger, type SpendLedger, type SpendReservationToken 
  *      task's own `JAGAON_AI_FEELINGS_DAILY_SPEND_LIMIT_USD` (same format as the other routes' limits: a positive USD decimal with at
  *      most 6 decimals; missing or malformed is NOT_CONFIGURED);
  *   6. the credential read, the rate limit, ONE bounded call (no retry, no repair), the settlement, then the validator
- *      (feelings-chat-validator.1) over the parsed output.
+ *      (feelings-chat-validator.2) over the parsed output; a wrap-up whose doctor question alone fails is answered OK without it.
  * There is no activation-manifest or qualification step: this task is not one of the 11C shell tasks, and its two switches (off by
  * default) plus its own spend limit are the owner's gate (design §3.8).
  *
@@ -203,7 +203,12 @@ export function createFeelingsChatHandler(options: FeelingsChatHandlerOptions): 
       if (result.retention !== "CONFIRMED_NOT_STORED") return failed("PROVIDER_FAILED", result.usage);
       const validation = validateFeelingsChatReply(result.candidate, chat);
       const body: FeelingsChatRouteResponse = validation.ok
-        ? { kind: "OK", reply: { ...validation.value, themes: [...validation.value.themes] } }
+        ? {
+            kind: "OK",
+            reply: { ...validation.value, themes: [...validation.value.themes] },
+            // Owner decision 2026-10-14: only the doctor question failed; the summary is kept and the closed reasons go with it.
+            ...(validation.doctorQuestionDropped ? { doctorQuestionDropped: [...validation.doctorQuestionDropped] } : {}),
+          }
         : { kind: "REJECTED", reasons: [...validation.reasons] };
       return { body, usage: result.usage };
     } catch {

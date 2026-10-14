@@ -12,7 +12,7 @@ import { FEELINGS_CHAT_ROUTE_PATH, feelingsChatRouteResponseSchema } from "./fee
  *
  * Per turn: (1) the strict request schema (nothing is sent when it fails); (2) one same-origin POST, no retry, with the demo passcode
  * header when the caller holds one; (3) the response schema; (4) an OK reply is validated AGAIN on the device with the same rules
- * (feelings-chat-validator.1). Every other outcome falls back to the reviewed bank (`feelingsChatBankReply`: the turn's bank question,
+ * (feelings-chat-validator.2; a wrap-up whose doctor question alone fails keeps its summary, without the doctor question). Every other outcome falls back to the reviewed bank (`feelingsChatBankReply`: the turn's bank question,
  * or at turn 3 a local wrap-up from her first message, no doctor question, no theme), with a closed reason. A request that fails the
  * schema is never sent.
  * The client never logs or stores chat text. It counts interventions (numbers only, in memory) for the demo's "how often the rules
@@ -81,7 +81,9 @@ export function createFeelingsChatClient(options: FeelingsChatClientOptions = {}
       // The device validates the server-accepted reply again before anything is shown.
       const validation = validateFeelingsChatReply(route.data.reply, request);
       if (!validation.ok) return fallback("REJECTED_ON_DEVICE");
-      return Object.freeze({ source: "AI_VALIDATED" as const, reply: validation.value });
+      // Owner decision 2026-10-14: a doctor question dropped by the server's rules, or by the device's (the same rules), keeps the summary.
+      const dropped = route.data.doctorQuestionDropped ?? validation.doctorQuestionDropped;
+      return Object.freeze({ source: "AI_VALIDATED" as const, reply: validation.value, ...(dropped ? { doctorQuestionDropped: Object.freeze([...dropped]) } : {}) });
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);

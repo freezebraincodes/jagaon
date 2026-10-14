@@ -1,5 +1,5 @@
 import type { FeelingsChatRequest } from "@/domain/feelings-chat/feelings-chat-contract";
-import type { ValidatedFeelingsChatReply } from "@/domain/feelings-chat/feelings-chat-validator";
+import type { FeelingsChatRejectionReason, ValidatedFeelingsChatReply } from "@/domain/feelings-chat/feelings-chat-validator";
 import type { FeelingsChatUnavailableReason } from "./feelings-chat-route-contract";
 
 /**
@@ -9,7 +9,11 @@ import type { FeelingsChatUnavailableReason } from "./feelings-chat-route-contra
 export type FeelingsChatFallbackReason = FeelingsChatUnavailableReason | "REQUEST_INVALID" | "RESPONSE_INVALID" | "REJECTED_BY_SERVER" | "REJECTED_ON_DEVICE";
 
 export type FeelingsChatTurnResult =
-  | Readonly<{ source: "AI_VALIDATED"; reply: ValidatedFeelingsChatReply }>
+  /**
+   * `doctorQuestionDropped` (owner decision 2026-10-14): present only when the rules dropped the AI's doctor question from this wrap-up
+   * and kept its summary; closed reasons only.
+   */
+  | Readonly<{ source: "AI_VALIDATED"; reply: ValidatedFeelingsChatReply; doctorQuestionDropped?: readonly FeelingsChatRejectionReason[] }>
   | Readonly<{ source: "REVIEWED_BANK"; reply: ValidatedFeelingsChatReply; reason: FeelingsChatFallbackReason }>;
 
 /** The port the chat dialog uses (the real client, or the fake port for tests and the offline demo). */
@@ -26,7 +30,9 @@ export type FeelingsChatInterventionCounts = Readonly<{
   rejectedOnDevice: number;
   /** The AI was off, unreachable, out of credit, rate limited, timed out, or answered in an unexpected shape. */
   unavailable: number;
-  /** rejectedByServer + rejectedOnDevice: how often the rules stepped in. */
+  /** Wrap-ups shown with their summary after the rules dropped the AI's doctor question (owner decision 2026-10-14). */
+  doctorQuestionsDropped: number;
+  /** rejectedByServer + rejectedOnDevice + doctorQuestionsDropped: how often the rules stepped in. */
   rulesSteppedIn: number;
 }>;
 
@@ -34,15 +40,17 @@ type Counts = { -readonly [K in keyof FeelingsChatInterventionCounts]: number };
 
 /** In-memory intervention counts: numbers only, never text; reset with the page. */
 export function createInterventionCounter() {
-  const counts: Counts = { requests: 0, aiAccepted: 0, rejectedByServer: 0, rejectedOnDevice: 0, unavailable: 0, rulesSteppedIn: 0 };
+  const counts: Counts = { requests: 0, aiAccepted: 0, rejectedByServer: 0, rejectedOnDevice: 0, unavailable: 0, doctorQuestionsDropped: 0, rulesSteppedIn: 0 };
   return Object.freeze({
     record(result: FeelingsChatTurnResult): FeelingsChatTurnResult {
       counts.requests += 1;
-      if (result.source === "AI_VALIDATED") counts.aiAccepted += 1;
-      else if (result.reason === "REJECTED_BY_SERVER") counts.rejectedByServer += 1;
+      if (result.source === "AI_VALIDATED") {
+        counts.aiAccepted += 1;
+        if (result.doctorQuestionDropped !== undefined) counts.doctorQuestionsDropped += 1;
+      } else if (result.reason === "REJECTED_BY_SERVER") counts.rejectedByServer += 1;
       else if (result.reason === "REJECTED_ON_DEVICE") counts.rejectedOnDevice += 1;
       else counts.unavailable += 1;
-      counts.rulesSteppedIn = counts.rejectedByServer + counts.rejectedOnDevice;
+      counts.rulesSteppedIn = counts.rejectedByServer + counts.rejectedOnDevice + counts.doctorQuestionsDropped;
       return result;
     },
     snapshot: (): FeelingsChatInterventionCounts => Object.freeze({ ...counts }),

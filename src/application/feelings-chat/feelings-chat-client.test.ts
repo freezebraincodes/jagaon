@@ -84,7 +84,35 @@ describe("feelings-chat client", () => {
     let index = 0;
     const { instance } = client(() => replies[index++]!());
     for (let call = 0; call < replies.length; call += 1) await instance.nextTurn(turn(1));
-    expect(instance.interventions()).toEqual({ requests: 5, aiAccepted: 1, rejectedByServer: 1, rejectedOnDevice: 1, unavailable: 2, rulesSteppedIn: 2 });
+    expect(instance.interventions()).toEqual({ requests: 5, aiAccepted: 1, rejectedByServer: 1, rejectedOnDevice: 1, unavailable: 2, doctorQuestionsDropped: 0, rulesSteppedIn: 2 });
+  });
+
+  describe("owner decision 2026-10-14: a doctor question that alone fails the rules is dropped and the summary kept", () => {
+    const wrapRequest = turn(3, [{ role: "patient", text: FIRST }, { role: "jagaon_question", text: "What has been keeping you up?" }, { role: "patient", text: "Only sleeping 4 hours." }]);
+    const summary = "Feeling tired; sleeping about 4 hours.";
+    const wrapUp = (doctorQuestion: string | null) => ({ kind: "WRAP_UP", question: null, summary, doctorQuestion, themes: ["SLEEP"], end: true });
+
+    it("the server dropped it: AI_VALIDATED with the summary and the server's reasons", async () => {
+      const { instance } = client(() => json({ kind: "OK", reply: wrapUp(null), doctorQuestionDropped: ["MEDICINE_ACTION"] }));
+      expect(await instance.nextTurn(wrapRequest)).toEqual({ source: "AI_VALIDATED", reply: wrapUp(null), doctorQuestionDropped: ["MEDICINE_ACTION"] });
+      expect(instance.interventions()).toMatchObject({ aiAccepted: 1, doctorQuestionsDropped: 1, rulesSteppedIn: 1 });
+    });
+
+    it("the device drops it with the same rules (e.g. \"Should I reduce my insulin before bed?\"): summary kept, doctor question null", async () => {
+      const { instance } = client(() => json({ kind: "OK", reply: wrapUp("Should I reduce my insulin before bed?") }));
+      expect(await instance.nextTurn(wrapRequest)).toEqual({ source: "AI_VALIDATED", reply: wrapUp(null), doctorQuestionDropped: ["MEDICINE_ACTION", "DOCTOR_QUESTION_NOT_OWN_WORDS"] });
+    });
+
+    it("the fake port applies the same rule", async () => {
+      const port = createFakeFeelingsChatPort([{ candidate: wrapUp("Should I reduce my insulin before bed?") }]);
+      expect(await port.nextTurn(wrapRequest)).toMatchObject({ source: "AI_VALIDATED", reply: { summary, doctorQuestion: null }, doctorQuestionDropped: ["MEDICINE_ACTION", "DOCTOR_QUESTION_NOT_OWN_WORDS"] });
+      expect(port.interventions()).toMatchObject({ doctorQuestionsDropped: 1, rulesSteppedIn: 1 });
+    });
+
+    it("a route OK carrying an unknown dropped reason is an unexpected shape", async () => {
+      const { instance } = client(() => json({ kind: "OK", reply: wrapUp(null), doctorQuestionDropped: ["SOMETHING_ELSE"] }));
+      expect(await instance.nextTurn(wrapRequest)).toMatchObject({ source: "REVIEWED_BANK", reason: "RESPONSE_INVALID" });
+    });
   });
 
   it("never logs", async () => {

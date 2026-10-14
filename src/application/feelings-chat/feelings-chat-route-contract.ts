@@ -8,7 +8,9 @@ import { NOTE_THEME_KEYS } from "@/domain/notes/note-themes";
  * provider, endpoint or network code; the route and the browser client share it.
  *
  * The request body is exactly one `feelingsChatRequestSchema` object. The response is one of:
- * - OK: the reply that passed the server's validator (feelings-chat-validator.1). The browser validates it AGAIN before showing it.
+ * - OK: the reply that passed the server's validator (feelings-chat-validator.2). The browser validates it AGAIN before showing it.
+ *   Owner decision 2026-10-14: when the validator dropped only the AI's doctor question from a wrap-up, `doctorQuestionDropped` carries
+ *   its closed reasons (the dropped text never leaves the server); absent otherwise.
  * - REJECTED: the validator rejected the model's reply; closed reason codes only, the reply never leaves the server.
  * - UNAVAILABLE: a closed reason; the browser then uses the reviewed bank. Reasons mirror the existing routes' vocabularies:
  *   DISABLED (either switch off), NOT_CONFIGURED (no spend limit, no provider credential or no model), ORIGIN_REJECTED and
@@ -54,7 +56,11 @@ export const feelingsChatValidatedReplySchema = z.strictObject({
 });
 
 export const feelingsChatRouteResponseSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("OK"), reply: feelingsChatValidatedReplySchema }),
+  z.strictObject({
+    kind: z.literal("OK"),
+    reply: feelingsChatValidatedReplySchema,
+    doctorQuestionDropped: z.array(z.enum(FEELINGS_CHAT_REJECTION_REASONS)).min(1).max(FEELINGS_CHAT_REJECTION_REASONS.length).optional(),
+  }),
   z.strictObject({ kind: z.literal("REJECTED"), reasons: z.array(z.enum(FEELINGS_CHAT_REJECTION_REASONS)).min(1).max(FEELINGS_CHAT_REJECTION_REASONS.length) }),
   z.strictObject({ kind: z.literal("UNAVAILABLE"), reason: z.enum(FEELINGS_CHAT_UNAVAILABLE_REASONS) }),
 ]);

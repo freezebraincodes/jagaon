@@ -22,8 +22,13 @@ import {
  *      not a stopword) from her own messages;
  *   9. themes only from the allow-list, without repeats.
  * The reasons are closed codes, never text. The lexicons are reviewed and versioned; a change is a new version.
+ *
+ * Owner decision 2026-10-14 (feelings-chat-validator.2): in a WRAP_UP, when ONLY the drafted doctor question fails (rule 8, or rules
+ * 3–6 found in the doctor question alone), the doctor question is dropped (null) and the summary is kept: the result is ok, with the
+ * doctor question's closed reasons in `doctorQuestionDropped`. When anything else fails (schema, themes, the summary), the whole reply
+ * is rejected as before. The server route and the browser client share this function, so both apply the rule the same way.
  */
-export const FEELINGS_CHAT_VALIDATOR_VERSION = "feelings-chat-validator.1";
+export const FEELINGS_CHAT_VALIDATOR_VERSION = "feelings-chat-validator.2";
 
 export const FEELINGS_CHAT_REJECTION_REASONS = Object.freeze([
   "SCHEMA",
@@ -50,7 +55,13 @@ export type ValidatedFeelingsChatReply = Readonly<{
   end: boolean;
 }>;
 
-export type FeelingsChatValidation = Readonly<{ ok: true; value: ValidatedFeelingsChatReply }> | Readonly<{ ok: false; reasons: readonly FeelingsChatRejectionReason[] }>;
+/**
+ * `doctorQuestionDropped` is present only when the AI's doctor question was dropped from an otherwise valid wrap-up (its closed
+ * reasons, never text).
+ */
+export type FeelingsChatValidation =
+  | Readonly<{ ok: true; value: ValidatedFeelingsChatReply; doctorQuestionDropped?: readonly FeelingsChatRejectionReason[] }>
+  | Readonly<{ ok: false; reasons: readonly FeelingsChatRejectionReason[] }>;
 
 // ---------------------------------------------------------------------------------------------------------------------------------
 // Reviewed lexicons (feelings-chat-validator.1). Every pattern runs on the normalised text: lower case, curly quotes made straight,
@@ -225,6 +236,8 @@ export function validateFeelingsChatReply(candidate: unknown, request: FeelingsC
   if (!parsed.success) return Object.freeze({ ok: false as const, reasons: Object.freeze(["SCHEMA" as const]) });
   const reply = parsed.data;
   const reasons = new Set<FeelingsChatRejectionReason>();
+  // The doctor question's own failures, kept apart: alone they drop the doctor question, never the wrap-up.
+  const doctorReasons = new Set<FeelingsChatRejectionReason>();
 
   const themesOk = reply.themes.every(isNoteThemeKey) && new Set(reply.themes).size === reply.themes.length;
   if (!themesOk) reasons.add("THEMES");
@@ -242,23 +255,24 @@ export function validateFeelingsChatReply(candidate: unknown, request: FeelingsC
       for (const reason of contentReasons(reply.summary)) reasons.add(reason);
     }
     if (reply.doctorQuestion !== null) {
-      if (!doctorQuestionFormatOk(reply.doctorQuestion)) reasons.add("DOCTOR_QUESTION_FORMAT");
+      if (!doctorQuestionFormatOk(reply.doctorQuestion)) doctorReasons.add("DOCTOR_QUESTION_FORMAT");
       const hers = request.messages.filter((message) => message.role === "patient").map((message) => message.text);
-      if (!reusesPatientWords(reply.doctorQuestion, hers)) reasons.add("DOCTOR_QUESTION_NOT_OWN_WORDS");
-      for (const reason of contentReasons(reply.doctorQuestion)) reasons.add(reason);
+      if (!reusesPatientWords(reply.doctorQuestion, hers)) doctorReasons.add("DOCTOR_QUESTION_NOT_OWN_WORDS");
+      for (const reason of contentReasons(reply.doctorQuestion)) doctorReasons.add(reason);
     }
   }
 
-  if (reasons.size > 0) return Object.freeze({ ok: false as const, reasons: Object.freeze(FEELINGS_CHAT_REJECTION_REASONS.filter((reason) => reasons.has(reason))) });
-  return Object.freeze({
-    ok: true as const,
-    value: Object.freeze({
-      kind: reply.kind,
-      question: reply.question?.trim() ?? null,
-      summary: reply.summary?.trim() ?? null,
-      doctorQuestion: reply.doctorQuestion?.trim() ?? null,
-      themes: Object.freeze(reply.themes.filter(isNoteThemeKey)),
-      end: reply.end,
-    }),
+  const ordered = (set: ReadonlySet<FeelingsChatRejectionReason>) => Object.freeze(FEELINGS_CHAT_REJECTION_REASONS.filter((reason) => set.has(reason)));
+  if (reasons.size > 0) return Object.freeze({ ok: false as const, reasons: ordered(new Set([...reasons, ...doctorReasons])) });
+  // Owner decision 2026-10-14: only the doctor question failed (a WRAP_UP whose summary passed): drop it, keep the summary.
+  const dropDoctorQuestion = doctorReasons.size > 0;
+  const value: ValidatedFeelingsChatReply = Object.freeze({
+    kind: reply.kind,
+    question: reply.question?.trim() ?? null,
+    summary: reply.summary?.trim() ?? null,
+    doctorQuestion: dropDoctorQuestion ? null : (reply.doctorQuestion?.trim() ?? null),
+    themes: Object.freeze(reply.themes.filter(isNoteThemeKey)),
+    end: reply.end,
   });
+  return dropDoctorQuestion ? Object.freeze({ ok: true as const, value, doctorQuestionDropped: ordered(doctorReasons) }) : Object.freeze({ ok: true as const, value });
 }

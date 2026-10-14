@@ -104,6 +104,22 @@ describe("/api/ai/feelings: happy path", () => {
     const { handle } = setup({ respond: () => new Response(JSON.stringify(envelope(wrapUp))) });
     expect((await read(await handle(post(chat({ turn: 3 }))))).body).toEqual({ kind: "OK", reply: wrapUp });
   });
+
+  it("owner decision 2026-10-14: a wrap-up whose doctor question alone fails → OK with the summary, no doctor question, closed reasons only", async () => {
+    const wrapUp = { kind: "WRAP_UP", question: null, summary: "Feeling tired and worried.", doctorQuestion: "Should I reduce my insulin before bed?", themes: ["MOOD"], end: true };
+    const { handle, ledger } = setup({ respond: () => new Response(JSON.stringify(envelope(wrapUp))) });
+    const { status, body } = await read(await handle(post(chat({ turn: 3 }))));
+    expect(status).toBe(200);
+    expect(body).toEqual({ kind: "OK", reply: { ...wrapUp, doctorQuestion: null }, doctorQuestionDropped: ["MEDICINE_ACTION", "DOCTOR_QUESTION_NOT_OWN_WORDS"] });
+    expect(JSON.stringify(body)).not.toMatch(/insulin|before bed/);
+    expect(ledger.events).toEqual(["reserve:true", "commit:REPORTED:true"]);
+  });
+
+  it("a wrap-up whose summary fails is still REJECTED as a whole", async () => {
+    const wrapUp = { kind: "WRAP_UP", question: null, summary: "Feeling tired; signs of depression.", doctorQuestion: "Should I reduce my insulin before bed?", themes: [], end: true };
+    const { handle } = setup({ respond: () => new Response(JSON.stringify(envelope(wrapUp))) });
+    expect((await read(await handle(post(chat({ turn: 3 }))))).body).toEqual({ kind: "REJECTED", reasons: ["MEDICINE_ACTION", "DIAGNOSIS", "DOCTOR_QUESTION_NOT_OWN_WORDS"] });
+  });
 });
 
 describe("/api/ai/feelings: switches, access and spend, all before the credential read", () => {

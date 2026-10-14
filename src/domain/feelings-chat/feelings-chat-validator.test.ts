@@ -27,7 +27,7 @@ const wrap = (summary: string, doctorQuestion: string | null = null, themes: str
 
 describe("feelings-chat validator (feelings-chat-validator.1)", () => {
   it("is versioned", () => {
-    expect(FEELINGS_CHAT_VALIDATOR_VERSION).toBe("feelings-chat-validator.1");
+    expect(FEELINGS_CHAT_VALIDATOR_VERSION).toBe("feelings-chat-validator.2");
   });
 
   it.each([
@@ -156,10 +156,34 @@ describe("feelings-chat validator (feelings-chat-validator.1)", () => {
       ["Should I reduce my insulin because I only sleep 4 hours?", "MEDICINE_ACTION"],
       ["Do I have insomnia from sleeping only 4 hours?", "DIAGNOSIS"],
       ["Is my sugar high because I sleep only 4 hours?", "GLUCOSE_CAUSALITY"],
-    ])("rejects %s (%s)", (doctorQuestion, reason) => {
+    ])("drops %s (%s) and keeps the summary (owner decision 2026-10-14)", (doctorQuestion, reason) => {
       const result = validateFeelingsChatReply(wrap(summary, doctorQuestion), turn3);
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.reasons).toContain(reason);
+      expect(result).toMatchObject({ ok: true, value: { kind: "WRAP_UP", summary, doctorQuestion: null, themes: ["SLEEP"], end: true } });
+      expect(result.ok && result.doctorQuestionDropped).toContain(reason);
+    });
+
+    it("drops an advice-seeking medicine question and keeps the summary, with the closed reasons only", () => {
+      const result = validateFeelingsChatReply(wrap(summary, "Should I reduce my insulin before bed?"), turn3);
+      expect(result).toEqual({
+        ok: true,
+        value: { kind: "WRAP_UP", question: null, summary, doctorQuestion: null, themes: ["SLEEP"], end: true },
+        doctorQuestionDropped: ["MEDICINE_ACTION", "DOCTOR_QUESTION_NOT_OWN_WORDS"],
+      });
+    });
+
+    it("still rejects the whole wrap-up when the summary (or anything but the doctor question) fails", () => {
+      const doctorQuestion = "Should I reduce my insulin before bed?";
+      expect(validateFeelingsChatReply(wrap("Feeling tired; she should rest more.", doctorQuestion), turn3)).toEqual({
+        ok: false,
+        reasons: ["ADVICE", "MEDICINE_ACTION", "DOCTOR_QUESTION_NOT_OWN_WORDS"],
+      });
+      expect(validateFeelingsChatReply(wrap(summary, doctorQuestion, ["INSOMNIA"]), turn3)).toMatchObject({ ok: false, reasons: expect.arrayContaining(["THEMES", "MEDICINE_ACTION"]) });
+      expect(validateFeelingsChatReply(wrap("x".repeat(161), "I sleep only 4 hours. Is that worth asking about?"), turn3)).toEqual({ ok: false, reasons: ["SUMMARY_FORMAT"] });
+    });
+
+    it("a valid doctor question is kept and nothing is marked dropped", () => {
+      const result = validateFeelingsChatReply(wrap(summary, "I sleep only 4 hours. Is that worth asking about?"), turn3);
+      expect(result).toEqual({ ok: true, value: { kind: "WRAP_UP", question: null, summary, doctorQuestion: "I sleep only 4 hours. Is that worth asking about?", themes: ["SLEEP"], end: true } });
     });
 
     it("reuse needs a content word of 4+ letters that is not a stopword (stems compared)", () => {

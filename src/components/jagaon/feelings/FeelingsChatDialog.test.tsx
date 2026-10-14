@@ -166,6 +166,25 @@ describe("FeelingsChatDialog", () => {
     expect(onAddDoctorQuestion).not.toHaveBeenCalled();
   });
 
+  it("owner decision 2026-10-14: the rules drop only the AI's doctor question; its summary is kept and she may write her own question", async () => {
+    const dropped = { candidate: { ...WRAP.candidate, doctorQuestion: "Should I reduce my insulin before bed?" } };
+    const { onSave, port } = setup([ask(Q1), ask(Q2), dropped]);
+    fireEvent.click(button(t.continue));
+    await screen.findByText(Q1);
+    await answer(A1);
+    await screen.findByText(Q2);
+    await answer(A2);
+    expect(await screen.findByRole("textbox", { name: t.summaryLabel })).toHaveValue(WRAP.candidate.summary);
+    expect(screen.queryByText(/insulin/)).toBeNull();
+    expect(screen.queryByRole("textbox", { name: t.doctorQuestionTitle })).toBeNull();
+    expect(screen.getByRole("textbox", { name: FALLBACK_QUESTIONS[2] })).toHaveValue("");
+    expect(screen.queryByText(t.fallbackNotice)).toBeNull();
+    fireEvent.click(button(t.saveNote));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0]![0]).toMatchObject({ text: WRAP.candidate.summary, themes: ["SLEEP", "FAMILY"], aiUsed: true, promptVersion: "feelings-chat-prompt.1" });
+    expect(port.interventions()).toMatchObject({ doctorQuestionsDropped: 1 });
+  });
+
   it("Save as a note without AI saves at once: her words and the kind sentence, aiUsed false; nothing is sent", async () => {
     const { port, onSave } = setup([ask(Q1)], { cueKeys: ["sad"] });
     fireEvent.click(button(t.saveWithoutAi));

@@ -25,7 +25,9 @@ export function createFakeFeelingsChatPort(script: readonly FakeFeelingsChatStep
       if (typeof step === "function") return counter.record(step(request));
       if ("unavailable" in step) return counter.record(fallback(step.unavailable));
       const validation = validateFeelingsChatReply(step.candidate, request);
-      return counter.record(validation.ok ? Object.freeze({ source: "AI_VALIDATED" as const, reply: validation.value }) : fallback("REJECTED_ON_DEVICE"));
+      if (!validation.ok) return counter.record(fallback("REJECTED_ON_DEVICE"));
+      const dropped = validation.doctorQuestionDropped;
+      return counter.record(Object.freeze({ source: "AI_VALIDATED" as const, reply: validation.value, ...(dropped ? { doctorQuestionDropped: dropped } : {}) }));
     },
   });
   return Object.freeze({ ...port, requests: () => [...requests], interventions: () => counter.snapshot() });

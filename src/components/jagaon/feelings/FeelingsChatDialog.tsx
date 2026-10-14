@@ -50,7 +50,8 @@ export type FeelingsChatDialogProps = {
 };
 
 type Phase = "NOTICE" | "CHAT" | "WRAP_UP" | "SAVED" | "ENDED";
-type WrapUp = Readonly<{ fromAi: boolean; themes: readonly NoteThemeKey[]; doctorDraftOffered: boolean }>;
+/** `doctorFromAi`: the doctor-question box holds the AI's validated draft (else it is empty, under the bank's turn-3 question). */
+type WrapUp = Readonly<{ fromAi: boolean; themes: readonly NoteThemeKey[]; doctorDraftOffered: boolean; doctorFromAi: boolean }>;
 type DoctorState = "OPEN" | "ADDING" | "ADDED" | "DECLINED" | "FAILED";
 
 /**
@@ -65,7 +66,8 @@ type DoctorState = "OPEN" | "ADDING" | "ADDED" | "DECLINED" | "FAILED";
  *     and the dialog closes without saving; the AI's own safety stop does the same;
  * (d) at most 3 turns (questions at turns 1 and 2, the wrap-up at turn 3, or earlier on "End chat" or when she says she is done);
  *     the wrap-up shows an editable summary and, when the AI drafted one (or with the bank's turn-3 question when the AI was
- *     unavailable), an editable doctor question with "Add to my questions" / "No, thanks"; then "Save note";
+ *     unavailable, or when the rules dropped the AI's doctor question and kept its summary), an editable doctor question with "Add to
+ *     my questions" / "No, thanks"; then "Save note";
  * (e) "Save as a note without AI" saves at once: her words and the kind sentence, `aiUsed: false`.
  * Focus moves to the answer box with each question, to the summary at the wrap-up and to "Done" after saving; questions, the loading
  * state and the results are announced in a polite live region. Escape closes without saving.
@@ -160,10 +162,14 @@ export function FeelingsChatDialog({ messages, initialText, cueKeys, chat, detec
     // The wrap-up (a QUESTION at the last turn cannot pass the validator; the bank wraps up locally then).
     const final = reply.kind === "WRAP_UP" ? reply : feelingsChatBankReply({ ...request, turn: FEELINGS_CHAT_MAX_TURNS });
     const wrapFromAi = fromAi && reply.kind === "WRAP_UP";
+    // Owner decision 2026-10-14: when the rules dropped the AI's doctor question, the summary is kept and she is offered the empty box
+    // under the bank's turn-3 question instead (as when the AI is unavailable); the dropped draft is never shown.
+    const doctorDropped = result.source === "AI_VALIDATED" && result.doctorQuestionDropped !== undefined;
+    const doctorFromAi = wrapFromAi && final.doctorQuestion !== null;
     setTurns(chatTurns);
-    setWrapUp({ fromAi: wrapFromAi, themes: wrapFromAi ? final.themes : [], doctorDraftOffered: wrapFromAi ? final.doctorQuestion !== null : true });
+    setWrapUp({ fromAi: wrapFromAi, themes: wrapFromAi ? final.themes : [], doctorDraftOffered: wrapFromAi ? doctorFromAi || doctorDropped : true, doctorFromAi });
     setSummary(final.summary ?? firstWords);
-    setDoctorDraft(wrapFromAi ? (final.doctorQuestion ?? "") : "");
+    setDoctorDraft(doctorFromAi ? (final.doctorQuestion ?? "") : "");
     setDoctorState("OPEN");
     setAnnouncement(t.wrapUpTitle);
     setPhase("WRAP_UP");
@@ -389,7 +395,7 @@ export function FeelingsChatDialog({ messages, initialText, cueKeys, chat, detec
       {doctorOffered ? (
         <div className="feelings-chat-doctor-question">
           <TextareaField
-            label={wrapUp?.fromAi ? t.doctorQuestionTitle : fallbackQuestion(FEELINGS_CHAT_MAX_TURNS)}
+            label={wrapUp?.doctorFromAi ? t.doctorQuestionTitle : fallbackQuestion(FEELINGS_CHAT_MAX_TURNS)}
             hint={t.doctorQuestionHint}
             value={doctorDraft}
             maxLength={1000}
