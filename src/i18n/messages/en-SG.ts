@@ -62,6 +62,29 @@ export const enSGMessages: AppMessages = {
     previewTag: "Preview",
     moreBadgeLabel: (count) => `${count} care ${count === 1 ? "check" : "checks"} due`,
   },
+  // HSA preview (owner decision 2026-10-14): "Get general information with AI". New wording, human acceptance pending.
+  hsaMedicineInfo: {
+    getButton: "Get general information with AI",
+    noticeTitle: "Get general information with AI",
+    noticeBody: (name) =>
+      `JagaOn will ask an AI service for general information about “${name}”. Only the medicine name is sent — never your directions, readings or name. The result is general information, not advice.`,
+    noticeContinue: "Continue",
+    noticeCancel: "Cancel",
+    loading: "Looking up general information…",
+    cardTag: "AI-generated general information",
+    cardTitle: (name) => `About this medicine: ${name}`,
+    usedForLabel: "What it is generally used for",
+    howTakenLabel: "How it is generally taken",
+    generatedOn: (date) => `AI-generated on ${date}`,
+    searchHealthHub: "Search HealthHub",
+    opensInNewTab: "(opens in a new tab)",
+    caution: "AI can make mistakes. Check with your pharmacist. Your recorded directions are never changed by this.",
+    refresh: "Refresh",
+    refreshFailed: "Couldn’t refresh just now. This is the information looked up earlier.",
+    noReliableInfo: "JagaOn couldn’t find reliable general information for this name. Please check with your pharmacist.",
+    unavailable: "General information can’t be looked up right now. Please try again later.",
+    creditLimitBody: "This demo has used up its AI credit for today. No general information was looked up.",
+  },
   // Owner decision 2026-10-12: My notes replaces the Reminders tile on More; details to follow.
   myNotes: {
     title: "My notes",

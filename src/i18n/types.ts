@@ -1147,6 +1147,32 @@ export type AppMessages = {
     previewTag: string;
     moreBadgeLabel: (count: number) => string;
   };
+  /**
+   * HSA preview (owner decision 2026-10-14): "Get general information with AI" for a medicine without reviewed information (only when
+   * HSA-bounded mode is off). en-SG: new wording, human acceptance pending; zh-SG: drafts, human acceptance pending.
+   */
+  hsaMedicineInfo: {
+    getButton: string;
+    noticeTitle: string;
+    noticeBody: (name: string) => string;
+    noticeContinue: string;
+    noticeCancel: string;
+    loading: string;
+    cardTag: string;
+    cardTitle: (name: string) => string;
+    usedForLabel: string;
+    howTakenLabel: string;
+    generatedOn: (date: string) => string;
+    searchHealthHub: string;
+    opensInNewTab: string;
+    caution: string;
+    refresh: string;
+    refreshFailed: string;
+    noReliableInfo: string;
+    unavailable: string;
+    /** The AI credit-limit dialog's body for this flow. */
+    creditLimitBody: string;
+  };
   /** Owner decision 2026-10-12: My notes, reached from More (first version: the destination only). */
   myNotes: {
     title: string;

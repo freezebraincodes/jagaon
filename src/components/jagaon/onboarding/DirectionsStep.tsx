@@ -14,6 +14,7 @@ import { labelAndValue, labelWithAside } from "../locale-format";
 import { Button } from "../primitives/Button";
 import { ChoiceGroup } from "../primitives/ChoiceGroup";
 import { BookIcon, ExternalIcon, InfoIcon, QuestionIcon, SaveIcon, ShieldIcon } from "../primitives/Icons";
+import { MedicineGeneralInfoPreview } from "../medicine-info/MedicineGeneralInfoPreview";
 import { sourceLabel } from "./medicine-labels";
 
 type FactKey = Exclude<keyof RecordedFacts, "source">;
@@ -189,7 +190,11 @@ export function DirectionsStep({ messages, locale, medicine, onSave }: Direction
             </p>
           </>
         ) : (
-          <p className="about-unavailable">{msg.reviewedUnavailableBody}</p>
+          <>
+            <p className="about-unavailable">{msg.reviewedUnavailableBody}</p>
+            {/* HSA preview (owner decision 2026-10-14): only when HSA-bounded mode is off; renders nothing otherwise. */}
+            <MedicineGeneralInfoPreview messages={messages} locale={locale} name={medicine.displayName} headingLevel={3} />
+          </>
         )}
         <p className="provenance-line about-boundary">
           <ShieldIcon size={16} />

@@ -454,6 +454,9 @@ const EXISTING_NETWORK_MODULES = [
   // Tell JagaOn understands more (deliberate): the feelings-chat browser client's single same-origin POST to /api/ai/feelings, sent
   // only after the chat dialog's AI notice was accepted. Not in the browser graph until the Tell JagaOn wiring loads it.
   "src/application/feelings-chat/feelings-chat-client.ts",
+  // HSA preview "Get general information with AI" (owner-approved 2026-10-14, deliberate): the medicine-information browser client's
+  // single same-origin POST to /api/ai/medicine-info, sent only while HSA-bounded mode is off and after the one-time notice was accepted.
+  "src/application/medicine-info/medicine-info-client.ts",
   "src/application/nearby-food/browser-nearby-food.ts",
   // Packet 13 (P13X): the transcript-extraction browser client's single same-origin POST to /api/ai/transcript.
   "src/application/transcript-extraction/transcript-extraction-client.ts",
