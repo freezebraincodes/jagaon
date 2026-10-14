@@ -420,6 +420,8 @@ export const enSGMessages: AppMessages = {
     provenanceDocument: "Transcribed from a prescription document",
     sampleQuestionLabel: "Sample question — yours, not JagaOn's advice",
     addQuestion: "Add a question for my doctor or pharmacist",
+    // Owner decision 2026-10-14.
+    questionAdded: "Added to your questions in Prepare for my appointment.",
     sourceHistory: "Source history",
   },
   food: {
