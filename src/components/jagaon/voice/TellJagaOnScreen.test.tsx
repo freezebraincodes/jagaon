@@ -241,7 +241,7 @@ describe("Tell JagaOn screen", () => {
       expect(context.onSaveFacts).not.toHaveBeenCalled();
     });
 
-    it("works without voice: when voice is unavailable, \"Speak or type to JagaOn\" opens the typing box", async () => {
+    it("works without voice: when voice is unavailable, \"Speak or Type to Tell JagaOn\" opens the typing box", async () => {
       const context = setup({ voiceAvailable: false });
       fireEvent.click(screen.getByRole("button", { name: context.pending.review.tellAgain }));
       typeAndContinue(context, "Walked 30 minutes after dinner");
@@ -255,7 +255,7 @@ describe("Tell JagaOn screen", () => {
       typeAndContinue(context, "My sugar was 6.2 this morning. I had chicken rice for lunch at 1:00 p.m.");
       expect(await screen.findByText(context.pending.card.noTimeGlucose)).toBeInTheDocument();
       expect(screen.getByText(context.pending.card.noTimeMeal)).toBeInTheDocument();
-      // The review offers exactly one "Speak or type to JagaOn" button.
+      // The review offers exactly one "Speak or Type to Tell JagaOn" button.
       expect(screen.getAllByRole("button", { name: context.pending.review.tellAgain })).toHaveLength(1);
       expect(screen.queryByRole("button", { name: /^Type to JagaOn$/ })).toBeNull();
       expect(screen.getByRole("heading", { name: "Add another entry" })).toBeInTheDocument();
