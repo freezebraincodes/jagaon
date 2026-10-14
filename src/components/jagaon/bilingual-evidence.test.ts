@@ -161,17 +161,28 @@ describe("catalogue wording boundaries", () => {
       /lower gi/i, /healthier/i, /recommended dose/i,
     ];
     const chineseProhibited = [/漏服/, /漏用/, /立即服用/, /过期未/, /风险/, /诊断/, /您应该/, /偏高了/, /偏低了/, /低GI/i, /较健康/];
+    // HSA-bounded mode (owner decision 2026-10-14): the `hsa*` blocks are PREVIEW copy, shown only while the mode is off, and may
+    // use wording beyond the wellness boundary (for example "healthier places"). They are checked by the hard-line test below instead.
+    const isPreviewKey = (key: string) => key.startsWith("hsa");
     for (const [key, text] of entries(getMessages("en-SG"))) {
-      if (DENIAL_SENTENCES.has(key) || SOURCE_NAME_KEYS.has(key)) continue;
+      if (DENIAL_SENTENCES.has(key) || SOURCE_NAME_KEYS.has(key) || isPreviewKey(key)) continue;
       for (const pattern of englishProhibited) expect(text, key).not.toMatch(pattern);
     }
     for (const [key, text] of entries(getMessages("zh-SG"))) {
-      if (DENIAL_SENTENCES.has(key) || SOURCE_NAME_KEYS.has(key)) continue;
+      if (DENIAL_SENTENCES.has(key) || SOURCE_NAME_KEYS.has(key) || isPreviewKey(key)) continue;
       for (const pattern of chineseProhibited) expect(text, key).not.toMatch(pattern);
     }
     // The exempted source name is pinned exactly so it cannot drift into a claim.
     expect(getMessages("en-SG").food.governedDatasetSource).toBe("HPB Healthier Dining Partners \u00b7 data.gov.sg");
     expect(getMessages("zh-SG").food.governedDatasetSource).toBe("保健促进局较健康餐饮伙伴 · data.gov.sg");
+  });
+
+  it("keeps PREVIEW copy within the hard lines that hold whatever the HSA-bounded mode (owner decision 2026-10-14)", () => {
+    // No dosing, take-now, double-up or medication-change wording, and no diagnosis, in any preview block.
+    const hardLines = [/take now/i, /take it now/i, /double (up|dose)/i, /recommended dose/i, /catch[- ]up/i, /you should/i, /diagnos/i];
+    const preview = entries(getMessages("en-SG")).filter(([key]) => key.startsWith("hsa"));
+    expect(preview.length).toBeGreaterThan(0);
+    for (const [key, text] of preview) for (const pattern of hardLines) expect(text, key).not.toMatch(pattern);
   });
 
   it("keeps each denial sentence a denial in both locales", () => {
