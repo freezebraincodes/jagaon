@@ -1093,7 +1093,9 @@ export function JagaOnApp({
           />
         );
       case "MY_NOTES":
-        return <MyNotesScreen messages={messages} />;
+        // Owner decision 2026-10-14 (My notes): the stored notes and the existing permanent deletion of one note.
+        if (!runtime) return <p role="status">{messages.shared.loading}</p>;
+        return <MyNotesScreen messages={messages} locale={locale} notes={runtime.notes ? { query: runtime.notes.query, deletion: runtime.recordDeletion } : undefined} />;
       case "TELL_JAGAON": {
         if (!runtime) return <p role="status">{messages.shared.loading}</p>;
         const voice = runtime.voice;

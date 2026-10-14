@@ -306,6 +306,7 @@
             "src/components/jagaon/screens/MedicationScheduleScreen.test.tsx",
             "src/components/jagaon/screens/MoreScreen.test.tsx",
             "src/components/jagaon/screens/MyMedicinesScreen.test.tsx",
+            "src/components/jagaon/screens/MyNotesScreen.test.tsx",
             "src/components/jagaon/screens/NearbyFoodScreen.test.tsx",
             "src/components/jagaon/screens/PreventiveCareScreen.test.tsx",
             "src/components/jagaon/screens/ReadingTimeScreen.test.tsx",

@@ -4897,6 +4897,59 @@ button.summary-tile:hover:not(:disabled) {
   min-width: 0;
 }
 
+/* Owner decision 2026-10-14 (My notes): stored notes reuse the care-item card, list and chip styles. */
+.my-notes-themes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.my-notes-theme-lines,
+.my-note-conversation ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.my-note-when {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.my-note-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.my-note-themes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.my-note-conversation summary {
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.my-note-conversation li {
+  overflow-wrap: anywhere;
+}
+
+.my-note-speaker {
+  font-weight: 700;
+}
+
 .care-loading {
   color: var(--ink-2);
 }
