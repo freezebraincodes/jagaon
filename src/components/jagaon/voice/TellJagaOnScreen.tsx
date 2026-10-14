@@ -667,15 +667,17 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         {copy.review.manualHeading}
       </h2>
       <div className="voice-actions">
-        {canTellAgain ? (
-          <button type="button" className="btn btn-outline btn-wide" onClick={restart}>
+        {/* Owner decision 2026-10-15: ONE button to speak or type. With voice, the notice offers "Turn on microphone" or "Type
+            instead"; without voice here, it opens the typing box. On the typing screen it is "Speak instead". */}
+        {phase.kind === "TYPING" ? (
+          canTellAgain ? (
+            <button type="button" className="btn btn-outline btn-wide" onClick={restart}>
+              {copy.typing.speakInstead}
+            </button>
+          ) : null
+        ) : (
+          <button type="button" className="btn btn-outline btn-wide" onClick={canTellAgain ? restart : () => startTyping()}>
             {copy.review.tellAgain}
-          </button>
-        ) : null}
-        {/* Owner decision 2026-10-15: typing works in every browser, with or without a microphone. */}
-        {phase.kind === "TYPING" ? null : (
-          <button type="button" className="btn btn-outline btn-wide" onClick={() => startTyping()}>
-            {copy.typing.start}
           </button>
         )}
         <button type="button" className="btn btn-secondary btn-wide" onClick={() => onManualEntry("GLUCOSE")}>
