@@ -203,7 +203,9 @@ export const enSGMessages: AppMessages = {
     },
     // Owner decision 2026-10-14 (distress safety; owner-approved wording).
     distress: {
-      message: "It sounds like you're going through something really hard. You don't have to face it alone. Please reach out now:",
+      message: "It sounds like you're going through something really hard. You don't have to face it alone.",
+      // Owner decision 2026-10-15: say that this needs more support than JagaOn can give, and lead to the people who can help now.
+      moreSupport: "This needs more support than JagaOn can give. These services have trained people ready to talk with you now:",
       sosCall: "SOS (Samaritans of Singapore): call 1767",
       sosWhatsApp: "or WhatsApp 9151 1767",
       sosHours: "24 hours",

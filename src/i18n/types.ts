@@ -1043,6 +1043,8 @@ export type VoiceMessages = {
    */
   distress: {
     message: string;
+    /** Owner decision 2026-10-15: why JagaOn points to people here (more support than JagaOn can give), before the contacts. */
+    moreSupport: string;
     sosCall: string;
     sosWhatsApp: string;
     sosHours: string;
