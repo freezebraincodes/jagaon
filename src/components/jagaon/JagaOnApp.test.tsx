@@ -1231,13 +1231,18 @@ describe("durable local-state cleanup across app instances (Corrective Pass C)",
     const onboarding = ownerStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(prepared) }, false);
     mount(dev, onboarding, ownerStorage({}, false));
     await deleteEverything();
-    const replacement = await dev.runtimeFactory.mock.results.at(-1)!.value;
     expect(dev.runtimeFactory.mock.calls.at(-1)![1]).toMatchObject({ seedSyntheticScenarioOnCreate: false });
     fireEvent.click(screen.getByRole("button", { name: en.onboarding.usePrepared }));
     await screen.findByRole("button", { name: en.today.recordReading });
-    await waitFor(() => expect(replacement.seedPreparedDemoWhenEmpty).toHaveBeenCalledTimes(1));
+    // Counted over every runtime the app opened (a slow machine may open the replacement later than the click).
+    const seedCalls = async () => {
+      let total = 0;
+      for (const result of dev.runtimeFactory.mock.results) total += ((await result.value) as { seedPreparedDemoWhenEmpty: { mock: { calls: unknown[] } } }).seedPreparedDemoWhenEmpty.mock.calls.length;
+      return total;
+    };
+    await waitFor(async () => expect(await seedCalls()).toBe(1));
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(replacement.seedPreparedDemoWhenEmpty).toHaveBeenCalledTimes(1);
+    expect(await seedCalls()).toBe(1);
   });
 
   it("E: an ordinary first launch creates no marker and a legitimate setup is never mistaken for stale state", async () => {

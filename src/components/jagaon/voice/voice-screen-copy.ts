@@ -44,7 +44,7 @@ export type VoiceScreenCopy = Readonly<{
    * Owner decision 2026-10-15: typing to Tell JagaOn. The typed words go through the same on-device checks and cards as speech; no
    * voice notice is needed (no audio leaves the device).
    */
-  typing: Readonly<{ start: string; label: string; hint: string; submit: string; transcriptLabel: string }>;
+  typing: Readonly<{ speakInstead: string; label: string; hint: string; submit: string; transcriptLabel: string }>;
   /**
    * Owner decision 2026-10-15: Tencent speech's daily demo minutes are used up (the server refused MINUTES_EXHAUSTED). `useBrowser` is
    * offered only when the browser's speech recognition is enabled and supported here.
@@ -77,6 +77,9 @@ export type VoiceScreenCopy = Readonly<{
     manualGlucose: string;
     manualMeal: string;
     manualMedicine: string;
+    /** Owner decision 2026-10-15: voice and typed entries are saved without a time; the card says so and names the way to add one. */
+    noTimeGlucose: string;
+    noTimeMeal: string;
     save: string;
     leaveOut: string;
     saved: string;
@@ -187,9 +190,11 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       // Finding N-1 (owner-approved 2026-10-10): a manual-entry chooser, and Back to Today as a separate exit. One chooser heading on
       // every screen that shows it (owner's decision, 2026-10-11).
       backToToday: "Back to Today",
-      manualHeading: "Type another entry",
+      // Owner decision 2026-10-15: it now holds speaking and typing too.
+      manualHeading: "Add another entry",
       // Owner decision 2026-10-14.
-      tellAgain: "Tell JagaOn again",
+      // Owner decision 2026-10-15: one button for speaking or typing (the voice notice offers "Type instead").
+      tellAgain: "Speak or type to JagaOn",
     },
     redirect: { healthBody: "JagaOn can record what you report, but cannot assess whether a reading is dangerous or recommend treatment. Please check with your care team." },
     // W-6a: owner-approved wording, 2026-10-11 (verbatim).
@@ -201,7 +206,7 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
     },
     // Owner decision 2026-10-15.
     typing: {
-      start: "Type to JagaOn",
+      speakInstead: "Speak instead",
       label: "What would you like to tell JagaOn?",
       hint: "For example: “My sugar was 6.8 before breakfast” or “I feel tired today”. Nothing is saved until you check it.",
       submit: "Continue",
@@ -249,6 +254,8 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       manualGlucose: "Type the reading yourself",
       manualMeal: "Type the meal yourself",
       manualMedicine: "Record it in Medication schedule",
+      noTimeGlucose: "Saved without a time. To add one, use “Type the reading yourself”.",
+      noTimeMeal: "Saved without a time. To add one, use “Type the meal yourself”.",
       save: "Save this",
       leaveOut: "Leave out",
       saved: "Saved.",
@@ -304,9 +311,9 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       notUnderstoodBody: "JagaOn 没有保存这些话，也没有解读它们的意思。",
       // Finding N-1 (owner-approved 2026-10-10): see the EN rows.
       backToToday: "返回“今天”",
-      manualHeading: "输入其他内容",
+      manualHeading: "添加其他记录",
       // Owner decision 2026-10-14; draft, human acceptance pending.
-      tellAgain: "再次告诉 JagaOn",
+      tellAgain: "说话或输入给 JagaOn",
     },
     redirect: { healthBody: "JagaOn 可以记录您报告的内容，但无法评估读数是否危险，也无法建议治疗。请向您的医护团队确认。" },
     // W-6a: ZH for the TRTC limit notice only (the screen copy requires both locales). Draft, pending owner review.
@@ -318,7 +325,7 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
     },
     // Drafts (English only for the hackathon).
     typing: {
-      start: "输入给 JagaOn",
+      speakInstead: "改用说话",
       label: "您想告诉 JagaOn 什么？",
       hint: "例如：“早餐前血糖 6.8” 或 “我今天觉得累”。检查之前不会保存任何内容。",
       submit: "继续",
@@ -365,6 +372,8 @@ export const VOICE_SCREEN_PENDING_COPY: Readonly<Record<SupportedLocale, Pending
       manualGlucose: "自己输入读数",
       manualMeal: "自己输入餐食",
       manualMedicine: "在“用药时间表”中记录",
+      noTimeGlucose: "保存时不含时间。如需添加时间，请使用“自己输入读数”。",
+      noTimeMeal: "保存时不含时间。如需添加时间，请使用“自己输入餐食”。",
       save: "保存这一项",
       leaveOut: "不保存",
       saved: "已保存。",

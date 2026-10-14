@@ -211,9 +211,9 @@ describe("Tell JagaOn screen", () => {
       const box = screen.getByRole("textbox", { name: new RegExp(`^${context.pending.typing.label}`) });
       expect(document.activeElement).toBe(box);
       expect(screen.getByRole("button", { name: context.pending.typing.submit })).toBeDisabled();
-      // The manual-entry chooser stays available (N-1), without a second "Type to JagaOn".
-      expect(screen.getByRole("button", { name: context.pending.review.tellAgain })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: context.pending.typing.start })).toBeNull();
+      // The manual-entry chooser stays available (N-1); while typing, its first button is "Speak instead" (owner decision 2026-10-15).
+      expect(screen.getByRole("button", { name: context.pending.typing.speakInstead })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: context.pending.review.tellAgain })).toBeNull();
       typeAndContinue(context, "my sugar level is 8.2 I had chicken rice for lunch");
       expect(await screen.findByText(context.pending.typing.transcriptLabel)).toBeInTheDocument();
       expect(screen.queryByText(context.messages.voice.review.transcriptLabel)).toBeNull();
@@ -241,12 +241,29 @@ describe("Tell JagaOn screen", () => {
       expect(context.onSaveFacts).not.toHaveBeenCalled();
     });
 
-    it("works without voice: when voice is unavailable the chooser offers \"Type to JagaOn\"", async () => {
+    it("works without voice: when voice is unavailable, \"Speak or type to JagaOn\" opens the typing box", async () => {
       const context = setup({ voiceAvailable: false });
-      fireEvent.click(screen.getByRole("button", { name: context.pending.typing.start }));
+      fireEvent.click(screen.getByRole("button", { name: context.pending.review.tellAgain }));
       typeAndContinue(context, "Walked 30 minutes after dinner");
       expect(await screen.findByText(context.messages.voice.activity.heading)).toBeInTheDocument();
       expect(context.loadTranscriber).not.toHaveBeenCalled();
+    });
+
+    it("owner decision 2026-10-15: the cards say they save without a time; Edit starts from what was understood; one Speak-or-type button", async () => {
+      const context = setup();
+      fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
+      typeAndContinue(context, "My sugar was 6.2 this morning. I had chicken rice for lunch at 1:00 p.m.");
+      expect(await screen.findByText(context.pending.card.noTimeGlucose)).toBeInTheDocument();
+      expect(screen.getByText(context.pending.card.noTimeMeal)).toBeInTheDocument();
+      // The review offers exactly one "Speak or type to JagaOn" button.
+      expect(screen.getAllByRole("button", { name: context.pending.review.tellAgain })).toHaveLength(1);
+      expect(screen.queryByRole("button", { name: /^Type to JagaOn$/ })).toBeNull();
+      expect(screen.getByRole("heading", { name: "Add another entry" })).toBeInTheDocument();
+      // Edit on the meal card starts from the understood slot and food words.
+      const mealCard = screen.getByText(context.pending.card.noTimeMeal).closest(".voice-fact-card, article, section") as HTMLElement;
+      fireEvent.click(within(mealCard).getByRole("button", { name: context.pending.card.edit }));
+      expect(within(mealCard).getByRole("combobox")).toHaveValue("LUNCH");
+      expect(within(mealCard).getByRole("textbox")).toHaveValue("chicken rice");
     });
 
     it("a typed redirect does not claim the words went to a speech service", async () => {
@@ -947,8 +964,8 @@ describe("Tell JagaOn screen", () => {
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
       expect(screen.getByRole("status")).toHaveTextContent(context.pending.state.declined);
-      // Owner decision 2026-10-15: "Type instead" opens the typing box; "Tell JagaOn again" is the way back to the microphone.
-      fireEvent.click(screen.getByRole("button", { name: context.pending.review.tellAgain }));
+      // Owner decision 2026-10-15: "Type instead" opens the typing box; "Speak instead" is the way back to the microphone.
+      fireEvent.click(screen.getByRole("button", { name: context.pending.typing.speakInstead }));
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
       expect(checkAvailability).toHaveBeenCalledTimes(2);
     });
