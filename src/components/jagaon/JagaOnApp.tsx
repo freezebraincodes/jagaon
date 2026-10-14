@@ -1045,6 +1045,7 @@ export function JagaOnApp({
             history={runtime?.history ?? null}
             selection={appointmentNotes}
             explainer={historyExplainer}
+            previewInsights={runtime?.previewInsights ?? null}
           />
         );
       case "MEDICATION_SCHEDULE":

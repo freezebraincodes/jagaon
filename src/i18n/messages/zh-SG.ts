@@ -62,6 +62,19 @@ export const zhSGMessages: AppMessages = {
     previewTag: "预览",
     moreBadgeLabel: (count) => `${count} 项护理检查到期`,
   },
+  // HSA-bounded mode PREVIEW (owner decision 2026-10-14): draft, human acceptance pending (English-only demo scope).
+  hsaTrend: {
+    title: "同时发生的变化",
+    slotSubjects: { BEFORE_BREAKFAST: "早餐前血糖", BEFORE_DINNER: "晚餐前血糖" },
+    headline: (subject, percent, direction) => `${subject}${direction === "LOWER" ? "低了" : "高了"} ${percent}%`,
+    since: (days, habit, count) => `自您开始记录“${habit}”以来的 ${days} 天（已记录 ${count} 次）`,
+    before: "之前",
+    after: "之后",
+    medianCaption: (unit) => `中位数 ${unit}`,
+    readingCounts: (before, after) => `之前 ${before} 次读数，之后 ${after} 次。`,
+    note: (habit) => `这只显示时间先后，不能证明是“${habit}”造成的。很多因素都会影响血糖。`,
+    notEnough: "记录还不够，暂时无法显示预览趋势。",
+  },
   // Owner decision 2026-10-12: My notes (human acceptance pending).
   myNotes: {
     title: "我的笔记",

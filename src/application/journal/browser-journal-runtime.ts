@@ -41,6 +41,8 @@ import { createIntelligenceCoordinator } from "@/application/intelligence/intell
 import { createRecordedHistoryQuery } from "@/application/history/recorded-history-query";
 import type { RecordedHistoryQueryPort } from "@/application/history/recorded-history-contracts";
 import { seedSyntheticHistory } from "@/application/history/synthetic-history-seed";
+import { createPreviewInsightsQuery } from "@/application/preview/preview-insights-query";
+import type { PreviewInsightsQueryPort } from "@/application/preview/preview-insights-contracts";
 import { createCarePlanCommandService } from "@/application/care-plan/care-plan-command-service";
 import { createReminderReconciliation } from "@/application/care-plan/reminder-reconciliation";
 import { createInquiryService } from "@/application/inquiry/inquiry-service";
@@ -125,6 +127,11 @@ export type JagaOnRuntime = {
     commands: PersonalNoteCommandService;
     query: PersonalNoteQueryPort;
   };
+  /**
+   * HSA-bounded mode PREVIEW (owner decision 2026-10-14): read-only preview insights computed in memory (never stored, never sent to
+   * the AI). The History screen reads them only while HSA-bounded mode is off. Optional only so test doubles may omit it.
+   */
+  previewInsights?: PreviewInsightsQueryPort;
   /** Packet 10B: local encrypted backup export (no network, no write). */
   backup: {
     export(request: { passphrase: string; confirmation: string }, events?: { onStepCompleted?(step: BackupExportStep): void }): Promise<BackupExportResult>;
@@ -249,6 +256,7 @@ export async function createBrowserJournalRuntime(
     instanceId: "browser",
   });
   const historyQuery = createRecordedHistoryQuery(database, { now });
+  const previewInsightsQuery = createPreviewInsightsQuery(database, { now });
   const leaseToken = () => crypto.randomUUID();
   const carePlan = createCarePlanCommandService(database, { now, ids });
   const reminders = createReminderReconciliation(database, { now, newCommandId: createCommandId, leaseToken, instanceId: "browser", carePlan });
@@ -458,6 +466,12 @@ export async function createBrowserJournalRuntime(
         return historyQuery.loadExplainablePattern(request);
       },
     }),
+    previewInsights: Object.freeze({
+      async habitTrend() {
+        await intelligence;
+        return previewInsightsQuery.habitTrend();
+      },
+    } satisfies PreviewInsightsQueryPort),
     medicationSchedule: Object.freeze({
       ...schedule,
       async load(request: Parameters<MedicationSchedulePort["load"]>[0]) {

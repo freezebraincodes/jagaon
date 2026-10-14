@@ -132,6 +132,27 @@ function asResolved<T>(stored: ReturnType<typeof validatePacket6StoredRevision>)
   } as unknown as T;
 }
 
+/**
+ * HSA-bounded mode preview (owner decision 2026-10-14): a read-only, validated read of the latest ACTIVE glucose readings and activity
+ * events whose occurrence falls in one window each, with the same integrity checks as the snapshot. It reads no derived records and
+ * writes nothing; the preview habit trend uses it because its windows (up to 73 days) are wider than the evaluators' bounded windows.
+ */
+export async function loadLatestReadingsAndActivities(
+  database: JagaOnDatabase,
+  windows: { glucose: { start: Instant; end: Instant }; activities: { start: Instant; end: Instant } },
+): Promise<{ glucose: ResolvedGlucoseReading[]; activityEvents: ResolvedActivityEvent[] }> {
+  const revisions = database.table<StoredRow>("recordRevisions");
+  const heads = database.table<RecordHead>("recordHeads");
+  return database.transaction("r", revisions, heads, async () => {
+    const glucose = await latestInWindow(revisions, heads, "GLUCOSE_READING", windows.glucose.start, windows.glucose.end);
+    const activities = await latestInWindow(revisions, heads, "ACTIVITY_EVENT", windows.activities.start, windows.activities.end);
+    return {
+      glucose: glucose.latest.map((stored) => asResolved<ResolvedGlucoseReading>(stored)),
+      activityEvents: activities.latest.map((stored) => asResolved<ResolvedActivityEvent>(stored)),
+    };
+  });
+}
+
 export async function loadIntelligenceSnapshot(database: JagaOnDatabase, evaluatedAt: Instant): Promise<IntelligenceSnapshot> {
   const revisions = database.table<StoredRow>("recordRevisions");
   const heads = database.table<RecordHead>("recordHeads");
