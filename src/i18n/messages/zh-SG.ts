@@ -49,6 +49,85 @@ export const zhSGMessages: AppMessages = {
   },
   // ai-history-fallback.11c.1: owner-decided wording (owner UI decision U12, 2026-10-09, owner-ui-decisions-2026-10-09.md, verbatim). Not
   // an APPROVED_PACKET_11 row.
+  // Owner decision 2026-10-14: HSA-bounded mode. Draft, human acceptance pending.
+  hsa: {
+    settingLabel: "HSA 范围模式",
+    settingBody: "让 JagaOn 保持在新加坡的健康管理范围内。关闭后可预览需要 HSA 批准的功能（模拟演示）。",
+    on: "开",
+    off: "关",
+    confirmTitle: "要关闭 HSA 范围模式吗？",
+    confirmBody: "预览功能超出 HSA 健康管理范围，仅以模拟数据作演示。",
+    confirmAction: "关闭",
+    banner: "预览模式 · 超出 HSA 健康管理范围",
+    previewTag: "预览",
+    moreBadgeLabel: (count) => `${count} 项护理检查到期`,
+  },
+  // Owner decision 2026-10-14 (HSA-bounded mode, PREVIEW): draft, human acceptance pending (English-only demo scope).
+  hsaMealIdeas: {
+    headingBreakfast: "早餐饮食建议",
+    headingLunch: "午餐饮食建议",
+    headingDinner: "晚餐饮食建议",
+    intro: "人们常尝试的较低升糖指数替换：",
+    swapJoin: "可改为",
+    findPlaces: "查找附近较健康的餐饮地点",
+    note: "仅为一般建议，并非饮食计划。",
+  },
+  // HSA-bounded mode PREVIEW (owner decision 2026-10-14): draft, human acceptance pending (English-only demo scope).
+  hsaTrend: {
+    title: "同时发生的变化",
+    slotSubjects: { BEFORE_BREAKFAST: "早餐前血糖", BEFORE_DINNER: "晚餐前血糖" },
+    headline: (subject, percent, direction) => `${subject}${direction === "LOWER" ? "低了" : "高了"} ${percent}%`,
+    since: (days, habit, count) => `自您开始记录“${habit}”以来的 ${days} 天（已记录 ${count} 次）`,
+    before: "之前",
+    after: "之后",
+    medianCaption: (unit) => `中位数 ${unit}`,
+    readingCounts: (before, after) => `之前 ${before} 次读数，之后 ${after} 次。`,
+    note: (habit) => `这只显示时间先后，不能证明是“${habit}”造成的。很多因素都会影响血糖。`,
+    notEnough: "记录还不够，暂时无法显示预览趋势。",
+  },
+  // HSA-bounded mode off, care nudges (owner decision 2026-10-14): draft, human acceptance pending (English-only demo scope).
+  hsaCareNudges: {
+    heading: (dueCount) => (dueCount === 0 ? "护理计划 · 没有到期项目" : `护理计划 · ${dueCount} 项到期`),
+    bellLabel: (dueCount) => (dueCount === 0 ? "没有到期的护理检查" : `${dueCount} 项护理检查到期`),
+    listLabel: "按标准间隔的护理检查",
+    itemLabel: { EYE_SCREENING: "眼睛检查", FOOT_CHECK: "足部检查", BLOOD_TEST: "HbA1c（血液检验）" },
+    dueChip: "到期",
+    dueSoon: (when) => `即将到期 · ${when}后`,
+    dueIn: (when) => `${when}后到期`,
+    months: (count) => `${count} 个月`,
+    weeks: (count) => `${count} 周`,
+    days: (count) => (count === 0 ? "不到一天" : `${count} 天`),
+    lastRecorded: (monthYear, ago) => `上次记录 ${monthYear} · ${ago}`,
+    monthsAgo: (count) => (count === 0 ? "本月" : `${count} 个月前`),
+    noRecord: "还没有记录",
+    cadence: { YEARLY: "通常每年一次", EVERY_3_TO_6_MONTHS: "通常每 3–6 个月一次" },
+    source: "新加坡指引（卫生部/保健促进局）。请向您的护理团队确认。",
+    setDate: "设定日期",
+    note: "预览：根据您记录的检查和标准间隔计算。需要做什么由您的护理团队决定。",
+  },
+  // HSA preview (owner decision 2026-10-14): "Get general information with AI". Every row is a draft, human acceptance pending
+  // (English-only demo scope; present for type completeness).
+  hsaMedicineInfo: {
+    getButton: "用 AI 获取一般信息",
+    noticeTitle: "用 AI 获取一般信息",
+    noticeBody: (name) => `JagaOn 将向 AI 服务查询“${name}”的一般信息。只会发送药物名称，绝不发送您的用药指示、读数或姓名。结果是一般信息，不是建议。`,
+    noticeContinue: "继续",
+    noticeCancel: "取消",
+    loading: "正在查询一般信息…",
+    cardTag: "AI 生成的一般信息",
+    cardTitle: (name) => `关于这种药物：${name}`,
+    usedForLabel: "一般用途",
+    howTakenLabel: "一般用法",
+    generatedOn: (date) => `AI 生成于 ${date}`,
+    searchHealthHub: "在 HealthHub 搜索",
+    opensInNewTab: "（在新标签页打开）",
+    caution: "AI 可能出错。请向药剂师确认。这不会更改您记录的用药指示。",
+    refresh: "刷新",
+    refreshFailed: "目前无法刷新。以下是之前查询的信息。",
+    noReliableInfo: "JagaOn 找不到这个名称的可靠一般信息。请向药剂师确认。",
+    unavailable: "目前无法查询一般信息。请稍后再试。",
+    creditLimitBody: "此演示今天的 AI 额度已用完。没有查询一般信息。",
+  },
   // Owner decision 2026-10-12: My notes (human acceptance pending).
   myNotes: {
     title: "我的笔记",
@@ -168,6 +247,11 @@ export const zhSGMessages: AppMessages = {
         HOUSEHOLD_ACTIVITY: "家务或园艺",
         OTHER: "运动",
       },
+    },
+    // HSA preview (owner decision 2026-10-14, "Tell me about my medicine"): draft, human acceptance pending.
+    medicineInfo: {
+      heading: "药物信息",
+      openInMyMedicines: "在“我的药物”中打开",
     },
   },
   shared: {
@@ -414,6 +498,8 @@ export const zhSGMessages: AppMessages = {
     provenanceDocument: "从处方文件转录",
     sampleQuestionLabel: "示例问题——是您的问题，不是 JagaOn 的建议",
     addQuestion: "为医生或药剂师添加问题",
+    // Owner decision 2026-10-14; draft, human acceptance pending.
+    questionAdded: "已添加到“为预约做准备”中的问题。",
     sourceHistory: "来源记录",
   },
   food: {

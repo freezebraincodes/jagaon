@@ -121,8 +121,8 @@ describe("neutral dose/treatment and health redirect (review I3; 13s.3 owner #3/
   });
 
   it("no safe separation: the whole utterance is the redirect (manual handling)", () => {
-    expect(analyseTranscript("My sugar is 15 mmol do I need more insulin", "en")).toEqual({ ...DOSE, language: "en", candidates: [], extractorVersion: "voice-extractor.13s.6" });
-    expect(analyseTranscript("sugar 15 mmol is that dangerous", "en")).toEqual({ ...HEALTH, language: "en", candidates: [], extractorVersion: "voice-extractor.13s.6" });
+    expect(analyseTranscript("My sugar is 15 mmol do I need more insulin", "en")).toEqual({ ...DOSE, language: "en", candidates: [], extractorVersion: "voice-extractor.13s.7" });
+    expect(analyseTranscript("sugar 15 mmol is that dangerous", "en")).toEqual({ ...HEALTH, language: "en", candidates: [], extractorVersion: "voice-extractor.13s.7" });
     expect(analyseTranscript("我应该吃几片药？", "zh")).toMatchObject({ kind: "REDIRECT", category: "DOSE_TREATMENT", candidates: [] });
     expect(analyseTranscript("我可以吃西瓜吗", "zh")).toMatchObject({ kind: "REDIRECT", category: "HEALTH_QUESTION", candidates: [] });
     expect(analyseTranscript(`${"a ".repeat(700)}how many tablets should I take?`, "en")).toMatchObject({ kind: "REDIRECT" });

@@ -28,9 +28,9 @@ const unresolved = Object.freeze({ kind: "MEDICATION_OCCURRENCE", ...origin, sta
 const mapped = Object.freeze({ ...unresolved, medicineRef: { kind: "MAPPED", phrase: "dark pen", medication: MED, via: "TERMINOLOGY" }, state: "UNDERSTOOD", ambiguity: [] });
 const unsupported = Object.freeze({ kind: "UNSUPPORTED_SPAN", ...origin, span: { start: 0, end: 11 }, sourcePhrase: "I was dizzy" });
 
-describe("voice candidate union (voice-contract.13s.6)", () => {
-  it("is version 13s.6 (feelings and activities, owner decision 2026-10-14; the vocabulary stays 13s.4)", () => {
-    expect([VOICE_CONTRACT_VERSION, VOICE_EXTRACTOR_VERSION, VOICE_VOCABULARY_VERSION]).toEqual(["voice-contract.13s.6", "voice-extractor.13s.6", "voice-vocabulary.13s.4"]);
+describe("voice candidate union (voice-contract.13s.7)", () => {
+  it("is version 13s.7 (medicine-information requests, HSA preview, owner decision 2026-10-14; the vocabulary stays 13s.4)", () => {
+    expect([VOICE_CONTRACT_VERSION, VOICE_EXTRACTOR_VERSION, VOICE_VOCABULARY_VERSION]).toEqual(["voice-contract.13s.7", "voice-extractor.13s.7", "voice-vocabulary.13s.4"]);
   });
 
   it("accepts each kind", () => {

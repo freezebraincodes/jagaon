@@ -28,6 +28,8 @@ import { BookletStamps } from "../history/BookletStamps";
 import { formatDateRange, formatList, formatPosition } from "../history/history-format";
 import { PatternExplanationPanel, type PatternExplainerPort, type PatternExplanationResult } from "../history/PatternExplanationPanel";
 import { AiDisclosureDialog } from "../ai/AiDisclosureDialog";
+import { HabitTrendPreviewCard } from "../history/HabitTrendPreviewCard";
+import type { PreviewInsightsQueryPort } from "@/application/preview/preview-insights-contracts";
 
 type Props = {
   messages: AppMessages;
@@ -39,6 +41,11 @@ type Props = {
    * no source projection is probed.
    */
   explainer?: PatternExplainerPort | null;
+  /**
+   * HSA-bounded mode PREVIEW (owner decision 2026-10-14): read only while the mode is off, for the "What changed alongside" card.
+   * Without it (or while the mode is on) History is unchanged.
+   */
+  previewInsights?: PreviewInsightsQueryPort | null;
 };
 
 /**
@@ -69,7 +76,7 @@ const UNIT = "mmol/L";
  * reading by period); it describes the records, never a cause, and leaves
  * the 7A fact text unchanged.
  */
-export function RecordedHistoryScreen({ messages, locale, history, selection, explainer = null }: Props) {
+export function RecordedHistoryScreen({ messages, locale, history, selection, explainer = null, previewInsights = null }: Props) {
   const msg = messages.history;
   const [period, setPeriod] = useState<HistoryPeriod>("THIS_WEEK");
   const [view, setView] = useState<RecordedHistoryView | null>(null);
@@ -498,12 +505,15 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
           </button>
         </section>
       ) : view.status === "EMPTY" ? (
-        <section className="today-card history-state" aria-labelledby="history-empty-heading">
-          <h2 id="history-empty-heading" className="card-title">
-            {msg.emptyTitle}
-          </h2>
-          <p>{msg.emptyBody}</p>
-        </section>
+        <>
+          <section className="today-card history-state" aria-labelledby="history-empty-heading">
+            <h2 id="history-empty-heading" className="card-title">
+              {msg.emptyTitle}
+            </h2>
+            <p>{msg.emptyBody}</p>
+          </section>
+          <HabitTrendPreviewCard messages={messages} previewInsights={previewInsights} />
+        </>
       ) : projection ? (
         <>
           {view.status === "INSUFFICIENT_EVIDENCE" ? (
@@ -575,6 +585,7 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
               {msg.addFacts}
             </button>
           </HistoryFactsCard>
+          <HabitTrendPreviewCard messages={messages} previewInsights={previewInsights} />
           <BookletStamps messages={messages} locale={locale} stamps={projection.stamps} />
           <button
             type="button"

@@ -16,6 +16,7 @@ import { detectVoiceDistress } from "@/domain/voice/voice-distress-gate";
 import { mergeRemoteCandidates } from "./voice-remote-merge";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import { AiCreditLimitDialog } from "../ai/AiCreditLimitDialog";
+import { useHsaBoundedMode } from "../hsa/hsa-bounded-mode";
 import { FeelingsChatDialog, type FeelingsChatNote } from "../feelings/FeelingsChatDialog";
 import type { FeelingsChatStorage } from "../feelings/feelings-chat-storage";
 import { ContactLink } from "../primitives/ContactLink";
@@ -26,6 +27,7 @@ import type { VoiceMedicineOption } from "./MedicineClarificationDialog";
 import { VoiceActivityCard } from "./VoiceActivityCard";
 import { VoiceFactCard, type VoiceFactOutcome } from "./VoiceFactCard";
 import { VoiceFeelingCard, type VoiceTalkItThroughInput } from "./VoiceFeelingCard";
+import { VoiceMedicineInfoCard } from "./VoiceMedicineInfoCard";
 import { RememberedTermsSection } from "./RememberedTermsSection";
 import { voiceScreenCopy } from "./voice-screen-copy";
 
@@ -80,6 +82,12 @@ import { voiceScreenCopy } from "./voice-screen-copy";
  *   saves the note linked to it (or to nothing). After a save in the chat the Feeling card shows it saved, so it cannot be saved twice.
  *   When a turn fell back because the demo's AI credit is used up, the AI credit-limit dialog is shown once per chat (the chat waits
  *   for its OK, then continues with the bank's questions).
+ * - Owner decision 2026-10-14 (HSA preview, "Tell me about my medicine"): only while HSA-bounded mode is off, the analysis also
+ *   recognises a request for general information about a named medicine ("Tell me about my Metformin", "What is metformin?") and the
+ *   review shows the medicine information card (reviewed HealthHub information when the medicine has it, otherwise the "Get general
+ *   information with AI" flow) with "Open in My medicines" (`onOpenMyMedicines`). It is never saved, and remote extraction is never
+ *   offered for a transcript holding one. With the mode on, these sentences stay not understood, as before. The distress gate and the
+ *   dose/treatment redirect still come first.
  */
 export type VoiceRememberedTerm = Readonly<{ recordId: string; revisionId: string; language: VoiceLanguage; phrase: string; medication: VoiceMedicationRef | null }>;
 export type VoiceTerminologyPort = Readonly<{
@@ -151,6 +159,8 @@ export type TellJagaOnScreenProps = Readonly<{
    * port in tests); the storage adds the doctor question and saves the note. When given, it takes precedence over `onTalkItThrough`.
    */
   feelingsChat?: Readonly<{ chat: FeelingsChatPort } & FeelingsChatStorage>;
+  /** HSA preview (owner decision 2026-10-14): the medicine information card's "Open in My medicines". Absent: no link. */
+  onOpenMyMedicines?: () => void;
   timers?: VoiceTimers;
   startTimeoutMs?: number;
   maxSessionSeconds?: number;
@@ -214,6 +224,8 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
   const { messages, locale, voiceAvailable = true, loadTranscriber, terminology, glucoseEntryUnit, onSaveFacts, onManualEntry, onClose } = props;
   const copy = useMemo(() => voiceScreenCopy(messages, locale), [messages, locale]);
   const language: VoiceLanguage = locale === "zh-SG" ? "zh" : "en";
+  // HSA preview (owner decision 2026-10-14): medicine-information requests are recognised only while HSA-bounded mode is off.
+  const { bounded } = useHsaBoundedMode();
   const passcodeId = useId();
   const [disclosure, dispatchDisclosure] = useReducer(voiceDisclosureReducer, VOICE_DISCLOSURE_INITIAL_STATE);
   const [phase, setPhase] = useState<Phase>(() => (!voiceAvailable ? { kind: "ENDED", reason: "UNAVAILABLE" } : props.resolveProvider || props.checkAvailability ? { kind: "CHECKING" } : { kind: "DISCLOSURE" }));
@@ -325,7 +337,7 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
       }
       try {
         const [directory, medicines] = await Promise.all([terminology.directory(language), terminology.activeMedicines()]);
-        const analysis = analyseTranscript(transcript, language, { medicines: directory, glucoseEntryUnit });
+        const analysis = analyseTranscript(transcript, language, { medicines: directory, glucoseEntryUnit, medicineInformationRequests: !bounded });
         if (!mounted.current) return;
         if (analysis.kind === "DISTRESS") {
           session.discardTranscript();
@@ -341,7 +353,7 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         if (mounted.current) setPhase({ kind: "ENDED", reason: "NOT_UNDERSTOOD" });
       }
     },
-    [terminology, language, glucoseEntryUnit],
+    [terminology, language, glucoseEntryUnit, bounded],
   );
 
   async function accept() {
@@ -425,7 +437,14 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
   }
 
   // Owner decision 2026-10-14: only a REVIEW can offer remote extraction, and the gate withholds any distress transcript as well.
-  const remoteOffered = phase.kind === "REVIEW" && props.remoteExtraction !== undefined && !anySaved && phase.analysis.redirect === null && gateRemoteTranscriptExtraction(phase.transcript, language).kind === "PERMIT";
+  // HSA preview: never for a transcript holding a medicine-information request (it stays on the device).
+  const remoteOffered =
+    phase.kind === "REVIEW" &&
+    props.remoteExtraction !== undefined &&
+    !anySaved &&
+    phase.analysis.redirect === null &&
+    !phase.analysis.candidates.some((candidate) => candidate.kind === "MEDICINE_INFO_REQUEST") &&
+    gateRemoteTranscriptExtraction(phase.transcript, language).kind === "PERMIT";
 
   async function askRemote() {
     const extract = props.remoteExtraction;
@@ -679,7 +698,20 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
             </div>
           ) : null}
           {phase.analysis.candidates.map((candidate, index) =>
-            candidate.kind === "UNSUPPORTED_SPAN" ? null : candidate.kind === "FEELING_NOTE" ? (
+            candidate.kind === "UNSUPPORTED_SPAN" ? null : candidate.kind === "MEDICINE_INFO_REQUEST" ? (
+              // HSA preview: shown only while HSA-bounded mode is off (otherwise listed as not understood, as before).
+              bounded ? null : (
+                <VoiceMedicineInfoCard
+                  key={`${phase.sessionToken}-${phase.generation}-${index}`}
+                  candidate={candidate}
+                  messages={messages}
+                  locale={locale}
+                  copy={copy}
+                  onOpenMyMedicines={props.onOpenMyMedicines}
+                  onInteract={touch}
+                />
+              )
+            ) : candidate.kind === "FEELING_NOTE" ? (
               <VoiceFeelingCard
                 key={`${phase.sessionToken}-${phase.generation}-${index}`}
                 candidate={candidate}
@@ -708,11 +740,11 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
               />
             ),
           )}
-          {phase.analysis.candidates.some((candidate) => candidate.kind === "UNSUPPORTED_SPAN") ? (
+          {phase.analysis.candidates.some((candidate) => candidate.kind === "UNSUPPORTED_SPAN" || (bounded && candidate.kind === "MEDICINE_INFO_REQUEST")) ? (
             <section className="voice-not-understood" aria-labelledby={`${passcodeId}-not-understood`}>
               <h3 id={`${passcodeId}-not-understood`}>{copy.review.notUnderstoodHeading}</h3>
               <ul>
-                {phase.analysis.candidates.filter((candidate) => candidate.kind === "UNSUPPORTED_SPAN").map((candidate, index) => (
+                {phase.analysis.candidates.filter((candidate) => candidate.kind === "UNSUPPORTED_SPAN" || (bounded && candidate.kind === "MEDICINE_INFO_REQUEST")).map((candidate, index) => (
                   <li key={index}>“{candidate.sourcePhrase}”</li>
                 ))}
               </ul>

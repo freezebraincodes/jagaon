@@ -1,5 +1,6 @@
 "use client";
 
+import { clearMedicineInfoLocalState } from "@/application/medicine-info/medicine-info-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SupportedLocale } from "@/domain/patient-settings/locale";
 import type { Instant } from "@/domain/shared/time";
@@ -20,6 +21,7 @@ import {
 import type { DemoOnboardingStoragePort } from "@/application/onboarding/demo-onboarding-repository";
 import { AppShell } from "./AppShell";
 import { TodayScreen } from "./screens/TodayScreen";
+import { useCareNudgeSummary } from "./hsa/care-nudges";
 import { GlucoseEntryScreen } from "./screens/GlucoseEntryScreen";
 import { ReadingTimeScreen } from "./screens/ReadingTimeScreen";
 import { InsulinEntryScreen } from "./screens/InsulinEntryScreen";
@@ -661,6 +663,8 @@ export function JagaOnApp({
 
   const current = stack[stack.length - 1]!;
   const isTopLevel = TOP_LEVEL_SCREENS.includes(current.screen);
+  // HSA-bounded mode off only: care checks due (Today's care card and the More badge), reloaded as the visible screen changes.
+  const careNudges = useCareNudgeSummary(runtime?.careOrganisation.query, current.screen);
 
   const navigate = useCallback((screen: ScreenId, params?: Record<string, string>) => {
     setStack((prev) => [...prev, { screen, params }]);
@@ -785,7 +789,8 @@ export function JagaOnApp({
   const clearLocalStateOwners = useCallback(() => {
     // An owner that is not loaded yet is still attempted, never assumed clear.
     const onboardingOwner = repository ?? repositoryRef.current ?? onboardingRepositoryFactory();
-    const results = [onboardingOwner.clear().ok, appointmentNotes.clear().ok];
+    // Owner decision 2026-10-14: the cached AI medicine information is cleared too.
+    const results = [onboardingOwner.clear().ok, appointmentNotes.clear().ok, clearMedicineInfoLocalState()];
     return results.every(Boolean);
   }, [appointmentNotes, repository, onboardingRepositoryFactory]);
   clearLocalStateOwnersRef.current = clearLocalStateOwners;
@@ -927,6 +932,7 @@ export function JagaOnApp({
             recordDeletion={runtime?.recordDeletion}
             onRecordDeleted={() => void refreshToday()}
             onOpenHistory={() => switchTab("HISTORY")}
+            careNudges={careNudges}
           />
         );
       case "LOG_GLUCOSE":
@@ -984,6 +990,21 @@ export function JagaOnApp({
             locale={locale}
             fixture={fixture}
             goBack={goBack}
+            addCareQuestion={
+              runtime
+                ? async (text) => {
+                    // Owner decision 2026-10-14: the same save as "Add my own question" in Prepare for my appointment, linked to the
+                    // next recorded appointment when there is one; it starts unticked there.
+                    const visit = await runtime.careOrganisation.query.loadVisitPreparation();
+                    const appointment = visit.status === "READY" ? visit.appointment : null;
+                    const result = await runtime.careOrganisation.commands.createCareQuestion({
+                      questionText: { text, language: "und" },
+                      ...(appointment ? { relatedAppointment: { recordType: "APPOINTMENT", recordId: appointment.recordId, revisionId: appointment.revisionId } } : {}),
+                    });
+                    return result.kind === "COMMITTED";
+                  }
+                : undefined
+            }
           />
         );
       case "NEARBY_FOOD":
@@ -993,6 +1014,7 @@ export function JagaOnApp({
             locale={locale}
             goBack={goBack}
             navigate={navigate}
+            initialAttribute={entry.params?.attribute}
           />
         );
       case "GENERAL_FOOD_INFORMATION":
@@ -1049,6 +1071,7 @@ export function JagaOnApp({
             history={runtime?.history ?? null}
             selection={appointmentNotes}
             explainer={historyExplainer}
+            previewInsights={runtime?.previewInsights ?? null}
           />
         );
       case "MEDICATION_SCHEDULE":
@@ -1170,6 +1193,8 @@ export function JagaOnApp({
             // Owner decision 2026-10-14 (design §3.1 steps 4–7): "Talk it through" opens the feelings chat; the note goes to the
             // personal-note service and her doctor question to the existing care-question command (linked to the next appointment).
             feelingsChat={runtime.notes ? { chat: feelingsChatPort, ...createFeelingsChatStorage({ notes: runtime.notes.commands, careOrganisation: runtime.careOrganisation }) } : undefined}
+            // HSA preview (owner decision 2026-10-14): the medicine information card's "Open in My medicines".
+            onOpenMyMedicines={() => navigate("MY_MEDICINES")}
             onClose={() => switchTab("TODAY")}
           />
         );

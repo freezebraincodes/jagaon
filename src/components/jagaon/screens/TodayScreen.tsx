@@ -4,6 +4,9 @@ import { useRef, useState } from "react";
 import { type AppMessages, type SupportedLocale } from "@/i18n/types";
 import type { RecordDeletionPort } from "../data/data-ports";
 import { RecordDeletionDialog } from "../data/RecordDeletionDialog";
+import type { CareNudgeSummary } from "@/application/preview/care-nudges";
+import { useHsaBoundedMode } from "../hsa/hsa-bounded-mode";
+import { CareNudgeHeader, CareNudgeList } from "../hsa/care-nudges";
 import {
   isDemoInsulinPrescription,
   type DemoPatientProfile,
@@ -39,6 +42,7 @@ import {
 import { storedGlucoseContextLabel } from "../journal/glucose-context";
 import { labelAndValue } from "../locale-format";
 import { sourceLabel } from "../onboarding/medicine-labels";
+import { MealIdeasCard } from "../hsa/MealIdeasCard";
 
 type TodayScreenProps = {
   messages: AppMessages;
@@ -54,6 +58,8 @@ type TodayScreenProps = {
   onRecordDeleted?: () => void;
   /** Opens the History tab (as the bottom navigation does). Without it, "View history" stays disabled. */
   onOpenHistory?: () => void;
+  /** PREVIEW (HSA-bounded mode off only): care checks due by standard intervals; ignored while the mode is on. */
+  careNudges?: CareNudgeSummary | null;
 };
 
 type BookletSlot = {
@@ -125,8 +131,11 @@ export function TodayScreen({
   recordDeletion,
   onRecordDeleted,
   onOpenHistory,
+  careNudges = null,
 }: TodayScreenProps) {
   const [deleting, setDeleting] = useState(false);
+  // HSA-bounded mode on (default): the care planning card stays as entered dates only.
+  const nudges = useHsaBoundedMode().bounded ? null : careNudges;
   const deleteOpener = useRef<HTMLButtonElement>(null);
   const msg = messages.today;
   const greetingName = locale === "zh-SG" ? fixture.displayNameZh : fixture.displayName;
@@ -458,10 +467,17 @@ export function TodayScreen({
         </button>
       </section>
 
+      {/* Owner decision 2026-10-14: PREVIEW meal ideas, shown only while HSA-bounded mode is off. */}
+      <MealIdeasCard messages={messages} now={now} navigate={navigate} />
+
       <section className="today-card" aria-labelledby="care-planning-heading">
-        <h2 id="care-planning-heading" className="eyebrow">
-          {msg.careDatesHeading}
-        </h2>
+        {nudges ? (
+          <CareNudgeHeader messages={messages} summary={nudges} headingId="care-planning-heading" />
+        ) : (
+          <h2 id="care-planning-heading" className="eyebrow">
+            {msg.careDatesHeading}
+          </h2>
+        )}
         <ul className="care-dates">
           {fixture.careDates.map((date) => (
             <li key={date.id} className="care-date">
@@ -471,7 +487,8 @@ export function TodayScreen({
             </li>
           ))}
         </ul>
-        <p className="provenance-line">{msg.careDatesNote}</p>
+        {nudges ? <CareNudgeList messages={messages} locale={locale} summary={nudges} onSetDate={() => navigate("PREVENTIVE_CARE")} /> : null}
+        <p className="provenance-line">{nudges ? messages.hsaCareNudges.note : msg.careDatesNote}</p>
         <button type="button" className="text-link text-link--large" onClick={() => navigate("CARE_PREPARATION")}>
           {msg.prepareAppointment}
           <ChevronRightIcon size={20} />

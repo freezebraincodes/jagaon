@@ -273,6 +273,8 @@ export type MedicationMessages = {
   provenanceDocument: string;
   sampleQuestionLabel: string;
   addQuestion: string;
+  /** Owner decision 2026-10-14: shown after the question is saved to Prepare for my appointment. */
+  questionAdded: string;
   sourceHistory: string;
 };
 
@@ -1083,6 +1085,14 @@ export type VoiceMessages = {
     /** Short display names of the activity-event categories ("Walk · 30 minutes"). */
     categories: Readonly<Record<"WALKING" | "FLEXIBILITY_OR_MOBILITY" | "STRENGTH" | "AEROBIC" | "HOUSEHOLD_ACTIVITY" | "OTHER", string>>;
   };
+  /**
+   * HSA preview (owner decision 2026-10-14, "Tell me about my medicine"): the medicine information card in the review area (only while
+   * HSA-bounded mode is off). en-SG: new wording, human acceptance pending; zh-SG: drafts, human acceptance pending.
+   */
+  medicineInfo: {
+    heading: string;
+    openInMyMedicines: string;
+  };
 };
 
 /**
@@ -1132,6 +1142,89 @@ export type AppMessages = {
   aiWording: AiWordingMessages;
   /** Owner UI decision U12: the history fallback line after an attempted remote request (ai-history-fallback.11c.1). */
   aiHistoryFallback: AiHistoryFallbackMessages;
+  /** Owner decision 2026-10-14: HSA-bounded mode (setting, preview banner, preview tag, More badge). */
+  hsa: {
+    settingLabel: string;
+    settingBody: string;
+    on: string;
+    off: string;
+    confirmTitle: string;
+    confirmBody: string;
+    confirmAction: string;
+    banner: string;
+    previewTag: string;
+    moreBadgeLabel: (count: number) => string;
+  };
+  /** Owner decision 2026-10-14 (HSA-bounded mode, PREVIEW): the Today "Meal ideas" tile; the swaps themselves are static English data. */
+  hsaMealIdeas: {
+    headingBreakfast: string;
+    headingLunch: string;
+    headingDinner: string;
+    intro: string;
+    /** Read between the two halves of a swap by screen readers (the arrow is hidden). */
+    swapJoin: string;
+    findPlaces: string;
+    note: string;
+  };
+  /** HSA-bounded mode PREVIEW (owner decision 2026-10-14): "What changed alongside" a new habit, on History while the mode is off. */
+  hsaTrend: {
+    title: string;
+    slotSubjects: Record<"BEFORE_BREAKFAST" | "BEFORE_DINNER", string>;
+    headline: (subject: string, percent: number, direction: "LOWER" | "HIGHER") => string;
+    since: (days: number, habit: string, count: number) => string;
+    before: string;
+    after: string;
+    medianCaption: (unit: string) => string;
+    readingCounts: (before: number, after: number) => string;
+    note: (habit: string) => string;
+    notEnough: string;
+  };
+  /** HSA-bounded mode off only (preview): care checks due by standard intervals on Today's care planning card. */
+  hsaCareNudges: {
+    heading: (dueCount: number) => string;
+    bellLabel: (dueCount: number) => string;
+    listLabel: string;
+    itemLabel: { EYE_SCREENING: string; FOOT_CHECK: string; BLOOD_TEST: string };
+    dueChip: string;
+    dueSoon: (when: string) => string;
+    dueIn: (when: string) => string;
+    months: (count: number) => string;
+    weeks: (count: number) => string;
+    days: (count: number) => string;
+    lastRecorded: (monthYear: string, ago: string) => string;
+    monthsAgo: (count: number) => string;
+    noRecord: string;
+    cadence: { YEARLY: string; EVERY_3_TO_6_MONTHS: string };
+    source: string;
+    setDate: string;
+    note: string;
+  };
+  /**
+   * HSA preview (owner decision 2026-10-14): "Get general information with AI" for a medicine without reviewed information (only when
+   * HSA-bounded mode is off). en-SG: new wording, human acceptance pending; zh-SG: drafts, human acceptance pending.
+   */
+  hsaMedicineInfo: {
+    getButton: string;
+    noticeTitle: string;
+    noticeBody: (name: string) => string;
+    noticeContinue: string;
+    noticeCancel: string;
+    loading: string;
+    cardTag: string;
+    cardTitle: (name: string) => string;
+    usedForLabel: string;
+    howTakenLabel: string;
+    generatedOn: (date: string) => string;
+    searchHealthHub: string;
+    opensInNewTab: string;
+    caution: string;
+    refresh: string;
+    refreshFailed: string;
+    noReliableInfo: string;
+    unavailable: string;
+    /** The AI credit-limit dialog's body for this flow. */
+    creditLimitBody: string;
+  };
   /** Owner decision 2026-10-12: My notes, reached from More (first version: the destination only). */
   myNotes: {
     title: string;

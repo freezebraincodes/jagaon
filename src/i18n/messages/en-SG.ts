@@ -48,6 +48,86 @@ export const enSGMessages: AppMessages = {
   },
   // ai-history-fallback.11c.1: owner-decided wording (owner UI decision U12, 2026-10-09, owner-ui-decisions-2026-10-09.md, verbatim). Not
   // an APPROVED_PACKET_11 row.
+  // Owner decision 2026-10-14: HSA-bounded mode (owner-approved name; preview copy from the approved design).
+  hsa: {
+    settingLabel: "HSA-bounded mode",
+    settingBody:
+      "Keeps JagaOn within Singapore's wellness boundary. Turn off to preview features that would need HSA approval (synthetic demo).",
+    on: "On",
+    off: "Off",
+    confirmTitle: "Turn off HSA-bounded mode?",
+    confirmBody: "Preview features go beyond the HSA wellness boundary. They are shown for demonstration with synthetic data only.",
+    confirmAction: "Turn off",
+    banner: "Preview mode · beyond HSA wellness boundary",
+    previewTag: "Preview",
+    moreBadgeLabel: (count) => `${count} care ${count === 1 ? "check" : "checks"} due`,
+  },
+  // Owner decision 2026-10-14 (HSA-bounded mode, PREVIEW): the Today "Meal ideas" tile.
+  hsaMealIdeas: {
+    headingBreakfast: "Meal ideas for breakfast",
+    headingLunch: "Meal ideas for lunch",
+    headingDinner: "Meal ideas for dinner",
+    intro: "Lower-GI swaps people often try:",
+    swapJoin: "instead, try",
+    findPlaces: "Find healthier places nearby",
+    note: "General ideas, not a diet plan.",
+  },
+  // HSA-bounded mode PREVIEW (owner decision 2026-10-14): describes timing only, never a cause; "lower"/"higher", never better or worse.
+  hsaTrend: {
+    title: "What changed alongside",
+    slotSubjects: { BEFORE_BREAKFAST: "Before-breakfast glucose", BEFORE_DINNER: "Before-dinner glucose" },
+    headline: (subject, percent, direction) => `${subject} ${percent}% ${direction === "LOWER" ? "lower" : "higher"}`,
+    since: (days, habit, count) =>
+      `in the ${days} ${days === 1 ? "day" : "days"} since you started recording “${habit}” (${count} ${count === 1 ? "time" : "times"} recorded)`,
+    before: "Before",
+    after: "After",
+    medianCaption: (unit) => `Median ${unit}`,
+    readingCounts: (before, after) => `From ${before} ${before === 1 ? "reading" : "readings"} before and ${after} after.`,
+    note: (habit) => `This shows timing, not proof that “${habit}” caused it. Many things affect glucose.`,
+    notEnough: "Not enough records yet for a preview trend.",
+  },
+  hsaCareNudges: {
+    heading: (dueCount) => (dueCount === 0 ? "Care planning · nothing due" : `Care planning · ${dueCount} due`),
+    bellLabel: (dueCount) => (dueCount === 0 ? "No care checks due" : `${dueCount} care ${dueCount === 1 ? "check" : "checks"} due`),
+    listLabel: "Care checks by standard interval",
+    itemLabel: { EYE_SCREENING: "Eye screening", FOOT_CHECK: "Foot check", BLOOD_TEST: "HbA1c (blood test)" },
+    dueChip: "Due",
+    dueSoon: (when) => `Due soon · in ${when}`,
+    dueIn: (when) => `Due in ${when}`,
+    months: (count) => `${count} ${count === 1 ? "month" : "months"}`,
+    weeks: (count) => `${count} ${count === 1 ? "week" : "weeks"}`,
+    days: (count) => (count === 0 ? "less than a day" : `${count} ${count === 1 ? "day" : "days"}`),
+    lastRecorded: (monthYear, ago) => `Last recorded ${monthYear} · ${ago}`,
+    monthsAgo: (count) => (count === 0 ? "this month" : `${count} ${count === 1 ? "month" : "months"} ago`),
+    noRecord: "No record yet",
+    cadence: { YEARLY: "Usually yearly", EVERY_3_TO_6_MONTHS: "Usually every 3–6 months" },
+    source: "Singapore guidance (MOH/HPB). Check with your care team.",
+    setDate: "Set a date",
+    note: "Preview: worked out from the checks you recorded and standard intervals. Your care team decides what you need.",
+  },
+  // HSA preview (owner decision 2026-10-14): "Get general information with AI". New wording, human acceptance pending.
+  hsaMedicineInfo: {
+    getButton: "Get general information with AI",
+    noticeTitle: "Get general information with AI",
+    noticeBody: (name) =>
+      `JagaOn will ask an AI service for general information about “${name}”. Only the medicine name is sent — never your directions, readings or name. The result is general information, not advice.`,
+    noticeContinue: "Continue",
+    noticeCancel: "Cancel",
+    loading: "Looking up general information…",
+    cardTag: "AI-generated general information",
+    cardTitle: (name) => `About this medicine: ${name}`,
+    usedForLabel: "What it is generally used for",
+    howTakenLabel: "How it is generally taken",
+    generatedOn: (date) => `AI-generated on ${date}`,
+    searchHealthHub: "Search HealthHub",
+    opensInNewTab: "(opens in a new tab)",
+    caution: "AI can make mistakes. Check with your pharmacist. Your recorded directions are never changed by this.",
+    refresh: "Refresh",
+    refreshFailed: "Couldn’t refresh just now. This is the information looked up earlier.",
+    noReliableInfo: "JagaOn couldn’t find reliable general information for this name. Please check with your pharmacist.",
+    unavailable: "General information can’t be looked up right now. Please try again later.",
+    creditLimitBody: "This demo has used up its AI credit for today. No general information was looked up.",
+  },
   // Owner decision 2026-10-12: My notes replaces the Reminders tile on More; details to follow.
   myNotes: {
     title: "My notes",
@@ -166,6 +246,11 @@ export const enSGMessages: AppMessages = {
         HOUSEHOLD_ACTIVITY: "Housework or gardening",
         OTHER: "Exercise",
       },
+    },
+    // HSA preview (owner decision 2026-10-14, "Tell me about my medicine"): new wording, human acceptance pending.
+    medicineInfo: {
+      heading: "Medicine information",
+      openInMyMedicines: "Open in My medicines",
     },
   },
   shared: {
@@ -420,6 +505,8 @@ export const enSGMessages: AppMessages = {
     provenanceDocument: "Transcribed from a prescription document",
     sampleQuestionLabel: "Sample question — yours, not JagaOn's advice",
     addQuestion: "Add a question for my doctor or pharmacist",
+    // Owner decision 2026-10-14.
+    questionAdded: "Added to your questions in Prepare for my appointment.",
     sourceHistory: "Source history",
   },
   food: {

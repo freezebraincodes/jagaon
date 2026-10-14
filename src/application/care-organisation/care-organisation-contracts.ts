@@ -68,7 +68,15 @@ export type PreventiveCareItemView = {
   history: PreventiveHistoryEntry[];
 };
 
-export type PreventiveCareView = { status: "UNAVAILABLE" } | { status: "READY"; items: PreventiveCareItemView[] };
+/**
+ * A completion the patient reported (planned on any plan of an active catalogue item, or recorded without a plan), by catalogue key and
+ * local date. Relayed as entered; only the HSA-bounded-mode-off preview reads it (`application/preview/care-nudges`).
+ */
+export type ReportedPreventiveCompletion = { catalogueEntryKey: string; localDate: string };
+
+export type PreventiveCareView =
+  | { status: "UNAVAILABLE" }
+  | { status: "READY"; items: PreventiveCareItemView[]; reportedCompletions?: ReportedPreventiveCompletion[] };
 
 export type AppointmentView = {
   recordId: RecordId;

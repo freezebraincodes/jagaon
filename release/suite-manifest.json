@@ -115,6 +115,7 @@
             "src/application/journal/journal-row-codecs.test.ts",
             "src/application/medication-schedule/barrier-counts.test.ts",
             "src/application/medication-schedule/medication-schedule-service.test.ts",
+            "src/application/medicine-info/medicine-info-client.test.ts",
             "src/application/nearby-food/browser-nearby-food.test.ts",
             "src/application/nearby-food/hpb-snapshot-schema.test.ts",
             "src/application/nearby-food/hpb-venue-directory.test.ts",
@@ -126,6 +127,9 @@
             "src/application/onboarding/demo-onboarding-repository.test.ts",
             "src/application/onboarding/prepared-onboarding-fixture.test.ts",
             "src/application/packet9-subscriptions.test.ts",
+            "src/application/preview/meal-ideas.test.ts",
+            "src/application/preview/habit-trend.test.ts",
+            "src/application/preview/preview-insights-query.test.ts",
             "src/application/restore/ai-audit-restore.test.ts",
             "src/application/restore/restore-cleanup-marker.test.ts",
             "src/application/restore/restore-dependency-integrity.test.ts",
@@ -183,6 +187,8 @@
             "src/domain/inquiry/inquiry.test.ts",
             "src/domain/learning/learned-knowledge.test.ts",
             "src/domain/learning/learning-families.test.ts",
+            "src/domain/medicine-info/medicine-info-prompt.test.ts",
+            "src/domain/medicine-info/medicine-info-validator.test.ts",
             "src/domain/notes/personal-note.test.ts",
             "src/domain/notes/note-kind-sentences.test.ts",
             "src/domain/patient-settings/condition.test.ts",
@@ -216,6 +222,7 @@
             "src/domain/voice/voice-extractor-cases.test.ts",
             "src/domain/voice/voice-feeling-activity-cues.test.ts",
             "src/domain/voice/voice-feeling-activity.test.ts",
+            "src/domain/voice/voice-medicine-info.test.ts",
             "src/domain/voice/voice-remote-extraction-gate.test.ts",
             "src/inquiry/inquiry-engine.test.ts",
             "src/learning/familiar-item-learning-evaluator.test.ts",
@@ -231,7 +238,8 @@
             "tests/release/evidence.test.ts",
             "tests/release/release-core.test.ts",
             "tests/release/run-suite.test.ts",
-            "tests/release/traceability.test.ts"
+            "tests/release/traceability.test.ts",
+            "src/application/preview/care-nudges.test.ts"
           ]
         }
       ]
@@ -265,6 +273,7 @@
             "src/domain/ai/ai-language-shell-contracts.test.ts",
             "src/domain/ai/ai-task-contracts.test.ts",
             "src/domain/feelings-chat/feelings-chat-contract.test.ts",
+            "src/domain/medicine-info/medicine-info-contract.test.ts",
             "src/domain/transcript-extraction/transcript-extraction-contract.test.ts",
             "src/domain/voice/voice-contracts.test.ts",
             "src/i18n/get-messages.test.ts",
@@ -303,7 +312,9 @@
             "src/components/jagaon/data/data-components.test.tsx",
             "src/components/jagaon/feelings/FeelingsChatDialog.test.tsx",
             "src/components/jagaon/history/HistoryReadingsChart.test.tsx",
+            "src/components/jagaon/hsa/hsa-bounded-mode.test.tsx",
             "src/components/jagaon/history/PatternExplanationPanel.test.tsx",
+            "src/components/jagaon/medicine-info/MedicineGeneralInfoPreview.test.tsx",
             "src/components/jagaon/nearby-food/OneMapView.test.tsx",
             "src/components/jagaon/onboarding/OnboardingAccessibility.test.tsx",
             "src/components/jagaon/onboarding/OnboardingFlow.test.tsx",
@@ -321,15 +332,18 @@
             "src/components/jagaon/screens/NearbyFoodScreen.test.tsx",
             "src/components/jagaon/screens/PreventiveCareScreen.test.tsx",
             "src/components/jagaon/screens/ReadingTimeScreen.test.tsx",
+            "src/components/jagaon/screens/RecordedHistoryScreen.preview.test.tsx",
             "src/components/jagaon/screens/RecordedHistoryScreen.test.tsx",
             "src/components/jagaon/screens/SettingsScreen.test.tsx",
             "src/components/jagaon/screens/TimeWheelScreens.test.tsx",
+            "src/components/jagaon/screens/TodayScreen.meal-ideas.test.tsx",
             "src/components/jagaon/screens/TodayScreen.test.tsx",
             "src/components/jagaon/voice/JagaOnApp.feelings-chat.test.tsx",
             "src/components/jagaon/voice/JagaOnApp.voice.test.tsx",
             "src/components/jagaon/voice/JagaOnApp.voice-notes.test.tsx",
             "src/components/jagaon/voice/JagaOnApp.webspeech.test.tsx",
             "src/components/jagaon/voice/TellJagaOnScreen.journal.test.tsx",
+            "src/components/jagaon/voice/TellJagaOnScreen.medicine-info.test.tsx",
             "src/components/jagaon/voice/TellJagaOnScreen.test.tsx",
             "src/components/jagaon/voice/TellJagaOnScreen.webspeech.test.tsx",
             "src/components/jagaon/voice/VoiceFeelingActivityCards.test.tsx",
@@ -357,7 +371,8 @@
             "src/storage/stored-event-work-item.test.ts",
             "src/storage/stored-record-revision.test.ts",
             "src/storage/table-catalogue.test.ts",
-            "tests/home.test.tsx"
+            "tests/home.test.tsx",
+            "src/components/jagaon/hsa/care-nudges.test.tsx"
           ]
         }
       ]
@@ -438,6 +453,7 @@
           "runner": "vitest",
           "files": [
             "src/app/api/ai/feelings/route.test.ts",
+            "src/app/api/ai/medicine-info/route.test.ts",
             "src/app/api/ai/shell/ai-spend-ledger.test.ts",
             "src/app/api/ai/shell/route-access-spend.test.ts",
             "src/app/api/ai/shell/route-reparse-usage.test.ts",
