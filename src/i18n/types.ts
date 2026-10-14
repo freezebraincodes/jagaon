@@ -1158,6 +1158,19 @@ export type AppMessages = {
     findPlaces: string;
     note: string;
   };
+  /** HSA-bounded mode PREVIEW (owner decision 2026-10-14): "What changed alongside" a new habit, on History while the mode is off. */
+  hsaTrend: {
+    title: string;
+    slotSubjects: Record<"BEFORE_BREAKFAST" | "BEFORE_DINNER", string>;
+    headline: (subject: string, percent: number, direction: "LOWER" | "HIGHER") => string;
+    since: (days: number, habit: string, count: number) => string;
+    before: string;
+    after: string;
+    medianCaption: (unit: string) => string;
+    readingCounts: (before: number, after: number) => string;
+    note: (habit: string) => string;
+    notEnough: string;
+  };
   /** Owner decision 2026-10-12: My notes, reached from More (first version: the destination only). */
   myNotes: {
     title: string;

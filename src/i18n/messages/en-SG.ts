@@ -72,6 +72,20 @@ export const enSGMessages: AppMessages = {
     findPlaces: "Find healthier places nearby",
     note: "General ideas, not a diet plan.",
   },
+  // HSA-bounded mode PREVIEW (owner decision 2026-10-14): describes timing only, never a cause; "lower"/"higher", never better or worse.
+  hsaTrend: {
+    title: "What changed alongside",
+    slotSubjects: { BEFORE_BREAKFAST: "Before-breakfast glucose", BEFORE_DINNER: "Before-dinner glucose" },
+    headline: (subject, percent, direction) => `${subject} ${percent}% ${direction === "LOWER" ? "lower" : "higher"}`,
+    since: (days, habit, count) =>
+      `in the ${days} ${days === 1 ? "day" : "days"} since you started recording “${habit}” (${count} ${count === 1 ? "time" : "times"} recorded)`,
+    before: "Before",
+    after: "After",
+    medianCaption: (unit) => `Median ${unit}`,
+    readingCounts: (before, after) => `From ${before} ${before === 1 ? "reading" : "readings"} before and ${after} after.`,
+    note: (habit) => `This shows timing, not proof that “${habit}” caused it. Many things affect glucose.`,
+    notEnough: "Not enough records yet for a preview trend.",
+  },
   // Owner decision 2026-10-12: My notes replaces the Reminders tile on More; details to follow.
   myNotes: {
     title: "My notes",

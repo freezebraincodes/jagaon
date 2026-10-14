@@ -117,7 +117,10 @@ describe("Packet 7A runtime import boundary", () => {
         file.startsWith("src/learning/") ||
         file.startsWith("src/application/intelligence/") ||
         file.startsWith("src/application/journal/") ||
-        file === "src/application/history/recorded-history-query.ts",
+        file === "src/application/history/recorded-history-query.ts" ||
+        // HSA-bounded mode preview (owner decision 2026-10-14): the History UI reads the preview contract only.
+        file === "src/application/preview/preview-insights-query.ts" ||
+        file === "src/application/preview/habit-trend.ts",
     );
     expect(forbidden, `Forbidden UI imports:\n${forbidden.join("\n")}`).toEqual([]);
     for (const file of graph) {
