@@ -5924,6 +5924,14 @@ button.summary-tile:hover:not(:disabled) {
   outline: none;
 }
 
+/* Owner decision 2026-10-15: the line leading into the contacts (more support than JagaOn can give). */
+.voice-distress-more-support {
+  margin: 0.5rem 0 0;
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
 .voice-distress-contacts {
   display: flex;
   flex-direction: column;

@@ -380,7 +380,10 @@ describe("Tell JagaOn screen", () => {
         await speakAndStop(context);
         const distress = context.messages.voice.distress;
         const heading = await screen.findByRole("heading", { name: distress.message });
-        expect(distress.message).toBe("It sounds like you're going through something really hard. You don't have to face it alone. Please reach out now:");
+        expect(distress.message).toBe("It sounds like you're going through something really hard. You don't have to face it alone.");
+        // Owner decision 2026-10-15: the line that leads into the contacts says this needs more support than JagaOn can give.
+        expect(distress.moreSupport).toBe("This needs more support than JagaOn can give. These services have trained people ready to talk with you now:");
+        expect(screen.getByRole("alert")).toHaveTextContent(distress.moreSupport);
         expect(heading.closest('[role="alert"]')).not.toBeNull();
         await waitFor(() => expect(heading).toHaveFocus());
         const section = heading.closest("section") as HTMLElement;

@@ -203,7 +203,8 @@ export const zhSGMessages: AppMessages = {
     },
     // Owner decision 2026-10-14 (distress safety): draft, human acceptance pending.
     distress: {
-      message: "听起来您正在经历非常艰难的事情。您不必独自面对。请现在就联系：",
+      message: "听起来您正在经历非常艰难的事情。您不必独自面对。",
+      moreSupport: "这需要比 JagaOn 更多的支持。以下服务有受过训练的人员，现在就可以和您谈谈：",
       sosCall: "SOS（新加坡援人协会）：拨打 1767",
       sosWhatsApp: "或 WhatsApp 9151 1767",
       sosHours: "24 小时",

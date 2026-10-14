@@ -927,6 +927,8 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
             <h2 id={`${passcodeId}-distress`} ref={distressHeading} tabIndex={-1} className="voice-distress-heading">
               {copy.distress.message}
             </h2>
+            {/* Owner decision 2026-10-15: why JagaOn points to people here, leading into the contacts. */}
+            <p className="voice-distress-more-support">{copy.distress.moreSupport}</p>
           </div>
           <div className="voice-distress-contacts">
             <ContactLink href={telHref(help.sosNumber)} icon={<PhoneIcon size={28} />} action={copy.distress.sosCall} detail={copy.distress.sosHours} number={help.sosNumber} />
