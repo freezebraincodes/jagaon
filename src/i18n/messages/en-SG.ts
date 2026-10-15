@@ -560,6 +560,7 @@ export const enSGMessages: AppMessages = {
     // Packet 6 v1 convergence (needs bilingual review)
     locationNote: "Location is only used when you tap. Opening this page does not request it.",
     filtersHeading: "Filters",
+    filtersShowing: "Showing:",
     resetFilters: "Reset",
     within: (distance) => `Within ${distance}`,
     cuisineAny: "Any",

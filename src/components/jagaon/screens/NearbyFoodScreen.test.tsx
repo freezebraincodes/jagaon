@@ -54,7 +54,7 @@ function show(discovery: NearbyFoodDiscoveryPort, locale: "en-SG" | "zh-SG" = "e
   const navigate = vi.fn();
   const view = render(<NearbyFoodScreen messages={messages} locale={locale} discovery={discovery} goBack={vi.fn()} navigate={navigate} />);
   // The filters start folded away (owner decision 2026-10-12); most tests work with them open.
-  if (options.openFilters ?? true) fireEvent.click(screen.getByRole("button", { name: messages.food.filtersHeading }));
+  if (options.openFilters ?? true) fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${messages.food.filtersHeading}`) }));
   return { messages, navigate, view };
 }
 
@@ -393,10 +393,19 @@ describe("NearbyFoodScreen on the provider-neutral port", () => {
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("group", { name: en.food.distanceLabel })).toBeNull();
-    expect(screen.getByText(`${en.food.within("500 m")} · ${en.food.attrWholegrains}`)).toBeInTheDocument();
+    // Owner decision 2026-10-15: "Showing:" with one chip per active filter, and the count on the toggle.
+    const summary = document.querySelector(".food-filters-summary") as HTMLElement;
+    expect(summary).toHaveTextContent(en.food.filtersShowing);
+    expect(within(summary).getAllByRole("button").map((pill) => pill.textContent)).toEqual([en.food.within("500 m"), en.food.attrWholegrains]);
+    expect(toggle).toHaveAccessibleName(`${en.food.filtersHeading} (2)`);
+    // A chip opens the filters.
+    fireEvent.click(within(summary).getByRole("button", { name: en.food.attrWholegrains }));
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(toggle);
     // Reset stays reachable while closed.
     fireEvent.click(screen.getByRole("button", { name: en.food.resetFilters }));
-    expect(screen.queryByText(`${en.food.within("500 m")} · ${en.food.attrWholegrains}`)).toBeNull();
+    expect(document.querySelector(".food-filters-summary")).toBeNull();
+    expect(toggle).toHaveAccessibleName(en.food.filtersHeading);
   });
 });
 
@@ -408,9 +417,10 @@ describe("NearbyFoodScreen initial attribute filter (from Today's meal ideas)", 
   it("pre-selects a valid attribute: named while folded, pressed when opened, and used by the first search", async () => {
     const discovery = port();
     showWith(discovery, "HIGHER_IN_WHOLEGRAINS");
-    const toggle = screen.getByRole("button", { name: en.food.filtersHeading });
+    const toggle = screen.getByRole("button", { name: new RegExp(`^${en.food.filtersHeading}`) });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByText(en.food.attrWholegrains, { selector: ".food-filters-summary" })).toBeInTheDocument();
+    expect(toggle).toHaveTextContent("(1)");
+    expect(screen.getByText(en.food.attrWholegrains, { selector: ".food-filter-pill" })).toBeInTheDocument();
     fireEvent.click(toggle);
     const attributes = screen.getByRole("group", { name: en.food.attributesLabel });
     expect(within(attributes).getByRole("button", { name: en.food.attrWholegrains })).toHaveAttribute("aria-pressed", "true");

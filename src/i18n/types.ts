@@ -319,6 +319,8 @@ export type FoodMessages = {
   // Packet 6 v1 convergence (needs bilingual review)
   locationNote: string;
   filtersHeading: string;
+  /** Owner decision 2026-10-15: before the active filters while the panel is folded. */
+  filtersShowing: string;
   resetFilters: string;
   within: (distance: string) => string;
   cuisineAny: string;

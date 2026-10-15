@@ -117,6 +117,8 @@ function FoodFilters({
           <button type="button" className="food-filters-toggle" aria-expanded={open} aria-controls="food-filters-panel" onClick={() => setOpen(!open)}>
             <FilterIcon size={18} />
             {msg.filtersHeading}
+            {/* Owner decision 2026-10-15: how many filters are on, visible at a glance. */}
+            {active.length > 0 ? <span className="food-filters-count">({active.length})</span> : null}
             <ChevronRightIcon size={18} className={`food-filters-chevron${open ? " food-filters-chevron--open" : ""}`} />
           </button>
         </h2>
@@ -125,7 +127,17 @@ function FoodFilters({
           {msg.resetFilters}
         </button>
       </div>
-      {!open && active.length > 0 ? <p className="food-filters-summary">{active.join(" · ")}</p> : null}
+      {/* Owner decision 2026-10-15: while folded, the active filters read as filters ("Showing:" and small chips that open the panel). */}
+      {!open && active.length > 0 ? (
+        <p className="food-filters-summary">
+          <span className="food-filters-summary-label">{msg.filtersShowing}</span>
+          {active.map((label) => (
+            <button key={label} type="button" className="food-filter-pill" aria-controls="food-filters-panel" aria-expanded={false} onClick={() => setOpen(true)}>
+              {label}
+            </button>
+          ))}
+        </p>
+      ) : null}
       <div id="food-filters-panel" className="food-filters-panel" hidden={!open}>
         <ToggleChips<"500" | "1000" | "2000">
           label={msg.distanceLabel}
