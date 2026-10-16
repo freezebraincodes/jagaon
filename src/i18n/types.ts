@@ -128,6 +128,10 @@ export type GlucoseMessages = {
   contextBeforeLunch: string;
   contextBeforeDinner: string;
   contextJustChecking: string;
+  /** Owner decision 2026-10-16: after-meal choices for "When was this test?", so the booklet's After columns can be filled. */
+  contextAfterBreakfast: string;
+  contextAfterLunch: string;
+  contextAfterDinner: string;
   keypadLabel: string;
   deleteDigit: string;
   decimalPoint: string;

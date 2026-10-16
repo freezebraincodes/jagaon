@@ -153,17 +153,31 @@ function expectGlucoseDate(date: string) {
 }
 
 describe("glucose entry", () => {
-  it("uses the frame 02 title and the five context chips", () => {
+  it("uses the frame 02 title and the context chips, before and after each meal (owner decision 2026-10-16)", () => {
     renderGlucose();
     expect(screen.getByRole("heading", { level: 1, name: en.today.recordReading })).toBeInTheDocument();
     const group = screen.getByRole("group", { name: en.glucose.whenQuestion });
     expect(within(group).getAllByRole("radio").map((radio) => radio.closest("label")!.textContent)).toEqual([
       en.glucose.contextBeforeBreakfast,
+      en.glucose.contextAfterBreakfast,
       en.glucose.contextBeforeLunch,
+      en.glucose.contextAfterLunch,
       en.glucose.contextBeforeDinner,
+      en.glucose.contextAfterDinner,
       en.glucose.contextBedtime,
       en.glucose.contextJustChecking,
     ]);
+  });
+
+  it("stores an after-meal choice as exactly that slot", async () => {
+    const { commands } = renderGlucose();
+    chooseContext(en.glucose.contextAfterLunch);
+    fireEvent.change(glucoseValueInput(), { target: { value: "8.4" } });
+    fireEvent.click(screen.getByRole("button", { name: en.glucose.saveAction }));
+    expect(await screen.findByText(en.glucose.saved)).toBeInTheDocument();
+    expect(commands.recordGlucose).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: expect.objectContaining({ context: { kind: "PATIENT_SELECTED_SLOT", slot: "AFTER_LUNCH" } }) }),
+    );
   });
 
   it("shows a glucose success only after the command service commits", async () => {
