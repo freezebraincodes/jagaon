@@ -90,7 +90,7 @@ describe("Screen 10 Prepare for my visit", () => {
     expect(boxes.map((box) => box.checked)).toEqual([false, false, false, false]);
     const glucose = within(include).getByRole("checkbox", { name: new RegExp(en.carePreparation.glucoseReadings) });
     // The 14 local days ending today (owner instruction 2026-10-12; was 30 days, from 5 Sept).
-    expect(glucose.closest("label")?.textContent).toContain("21 Sept 2026 – 4 Oct 2026 · 2 readings · listed by time");
+    expect(glucose.closest("label")?.textContent).toContain("30 Sept 2026 – 4 Oct 2026 · 2 readings · listed by time"); // Owner decision 2026-10-16: the 5-day period
     // An empty group cannot be chosen, so nothing empty is silently included.
     expect((within(include).getByRole("checkbox", { name: new RegExp(en.carePreparation.walks) }) as HTMLInputElement).disabled).toBe(true);
     expect(screen.getByText(en.carePreparation.emptySelection)).toBeTruthy();
@@ -123,7 +123,7 @@ describe("Screen 10 Prepare for my visit", () => {
     const selection = onPreview.mock.calls[0]![0];
     expect(selection.factGroups.map((group) => [group.key, group.sources.length])).toEqual([["GLUCOSE", 1]]);
     expect(selection.questions.map((question) => question.text)).toEqual(["Can I travel with my pen?"]);
-    expect(selection.period).toMatchObject({ startDate: "2026-09-21", endDate: "2026-10-04" });
+    expect(selection.period).toMatchObject({ startDate: "2026-09-30", endDate: "2026-10-04" });
     expect(selection.appointment?.payload.appointmentLabel).toBe("Dr Lim, Bukit Merah Polyclinic");
     // Nothing unticked is included; the ticked items are not listed as unselected.
     expect(selection.notSelected).toEqual([]);
