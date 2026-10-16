@@ -108,7 +108,7 @@ export type VoiceTerminologyPort = Readonly<{
 export type VoiceLimitFallback = Readonly<{ available: () => Promise<boolean>; use: () => void }>;
 export type VoiceSaveOutcome = Readonly<{ kind: "SAVED" }> | Readonly<{ kind: "NOT_SAVED" }>;
 export type VoiceRemoteExtraction = (transcript: string, language: VoiceLanguage, signal: AbortSignal) => Promise<Readonly<{ kind: "CANDIDATES"; candidates: readonly VoiceCandidate[] }> | Readonly<{ kind: "UNAVAILABLE" | "WITHHELD" | "DECLINED" }>>;
-export type VoiceManualEntryKind = "GLUCOSE" | "MEAL" | "MEDICATION";
+export type VoiceManualEntryKind = "GLUCOSE" | "MEAL" | "ACTIVITY" | "MEDICATION";
 
 export type TellJagaOnScreenProps = Readonly<{
   messages: AppMessages;
@@ -685,6 +685,9 @@ export function TellJagaOnScreen(props: TellJagaOnScreenProps) {
         </button>
         <button type="button" className="btn btn-secondary btn-wide" onClick={() => onManualEntry("MEAL")}>
           {copy.review.manualMeal}
+        </button>
+        <button type="button" className="btn btn-secondary btn-wide" onClick={() => onManualEntry("ACTIVITY")}>
+          {messages.activityEntry.screenTitle}
         </button>
         <button type="button" className="btn btn-secondary btn-wide" onClick={() => onManualEntry("MEDICATION")}>
           {copy.review.manualMedicine}

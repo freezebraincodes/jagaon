@@ -322,6 +322,7 @@
             "src/components/jagaon/onboarding/OnboardingFlow.test.tsx",
             "src/components/jagaon/onboarding/OnboardingRecovery.test.tsx",
             "src/components/jagaon/primitives/TimeWheel.test.tsx",
+            "src/components/jagaon/screens/ActivityEntryScreen.test.tsx",
             "src/components/jagaon/screens/CarePreparationScreen.test.tsx",
             "src/components/jagaon/screens/CareSummaryPreviewScreen.test.tsx",
             "src/components/jagaon/screens/GlucoseConfirmationDownstream.test.tsx",

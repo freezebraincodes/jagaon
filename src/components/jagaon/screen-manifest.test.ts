@@ -12,6 +12,7 @@ import {
   PACKET_10_CHILD_SCREENS,
   PACKET_13_CHILD_SCREENS,
   MY_NOTES_CHILD_SCREENS,
+  ACTIVITY_ENTRY_CHILD_SCREENS,
   ONBOARDING_ROUTES,
   type ScreenId,
 } from "./screen-manifest";
@@ -58,6 +59,7 @@ describe("screen-manifest", () => {
       ...PACKET_10_CHILD_SCREENS,
       ...PACKET_13_CHILD_SCREENS,
       ...MY_NOTES_CHILD_SCREENS,
+      ...ACTIVITY_ENTRY_CHILD_SCREENS,
     ]);
   });
 
@@ -92,7 +94,10 @@ describe("screen-manifest", () => {
     expect(PACKET_13_CHILD_SCREENS).toEqual(["TELL_JAGAON"]);
     // Owner decision 2026-10-12: My notes adds exactly MY_NOTES (reached from More).
     expect(MY_NOTES_CHILD_SCREENS).toEqual(["MY_NOTES"]);
-    expect(ALL_SCREENS.size).toBe(20);
+    // Owner request 2026-10-16: Record an activity adds exactly RECORD_ACTIVITY (reached from Today and Tell JagaOn).
+    expect(ACTIVITY_ENTRY_CHILD_SCREENS).toEqual(["RECORD_ACTIVITY"]);
+    expect(Object.isFrozen(ACTIVITY_ENTRY_CHILD_SCREENS)).toBe(true);
+    expect(ALL_SCREENS.size).toBe(21);
     expect(ALL_SCREENS.has("MEDICATION_SCHEDULE")).toBe(true);
     expect(ALL_SCREENS.has("HISTORY")).toBe(true);
     expect(ALL_SCREENS.has("MY_MEDICINES")).toBe(true);

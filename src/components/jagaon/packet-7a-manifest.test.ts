@@ -126,8 +126,10 @@ describe("Packet 7A public exports and manifests", () => {
     // Packet 9B adds PREVENTIVE_CARE and CARE_PREPARATION; 9C adds CARE_SUMMARY_PREVIEW.
     // Packet 10 adds exactly DATA_BACKUP. The voice slice adds exactly TELL_JAGAON (a child screen reached from Today).
     // Owner decision 2026-10-12: My notes adds exactly MY_NOTES (reached from More).
-    expect(ALL_SCREENS.size).toBe(20);
+    // Owner request 2026-10-16: Record an activity adds exactly RECORD_ACTIVITY.
+    expect(ALL_SCREENS.size).toBe(21);
     expect(ALL_SCREENS.has("MY_NOTES")).toBe(true);
+    expect(ALL_SCREENS.has("RECORD_ACTIVITY")).toBe(true);
     expect(ALL_SCREENS.has("TELL_JAGAON")).toBe(true);
     expect(HISTORY_PERIODS).toEqual(["THIS_WEEK", "LAST_WEEK", "THIRTY_DAYS"]);
   });
