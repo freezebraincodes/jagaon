@@ -7344,51 +7344,97 @@ button.summary-tile:hover:not(:disabled) {
   white-space: nowrap;
 }
 
-@media (min-width: 30rem) {
-  .booklet-sheet {
-    padding: 1.25rem 1rem 0.75rem;
-  }
+/* Owner decision 2026-10-16: the table keeps roomy columns and scrolls sideways inside its frame; the date column stays pinned
+   on the left and each day's notes stay in view while the readings scroll. */
+.booklet-sheet {
+  padding: 1.25rem 1rem 0.75rem;
+}
 
-  .booklet-table caption {
-    padding-inline: 0.5rem;
-  }
+.booklet-table caption {
+  padding-inline: 1rem;
+}
 
-  .booklet-col-date {
-    width: 4.5rem;
-  }
+.booklet-col-date {
+  width: 5.25rem;
+}
 
-  .booklet-col-bedtime {
-    width: auto;
-  }
+.booklet-table .booklet-date,
+.booklet-table thead .booklet-date-head {
+  padding-left: 1rem;
+}
 
-  .booklet-table th,
-  .booklet-table td {
-    padding: 0.75rem 0.25rem;
-  }
+.booklet-col-bedtime {
+  width: auto;
+}
 
-  .booklet-when-head,
-  .booklet-bedtime-head {
-    font-size: 0.75rem;
-  }
+.booklet-table th,
+.booklet-table td {
+  padding: 0.75rem 0.25rem;
+}
 
-  .booklet-table thead .booklet-when-head {
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
-  }
+.booklet-when-head,
+.booklet-bedtime-head {
+  font-size: 0.75rem;
+}
 
-  .booklet-meal-head {
-    font-size: 0.9375rem;
-  }
+.booklet-table thead .booklet-when-head {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
 
-  .booklet-value {
-    font-size: 1.25rem;
-  }
+.booklet-meal-head {
+  font-size: 0.9375rem;
+}
 
-  .booklet-time {
-    font-size: 0.75rem;
-  }
+.booklet-value {
+  font-size: 1.25rem;
+}
 
-  .booklet-notes {
-    font-size: 0.875rem;
-  }
+.booklet-time {
+  font-size: 0.75rem;
+}
+
+.booklet-notes {
+  font-size: 0.875rem;
+}
+
+/* Positioned, so the hidden screen-reader labels inside the cells are clipped by the sheet instead of widening the page. No side
+   padding: the pinned date column sits at the sheet's edge, so nothing scrolls out beside it. */
+.booklet-sheet {
+  position: relative;
+  padding-inline: 0;
+  container-type: inline-size;
+  scrollbar-width: thin;
+}
+
+.booklet-table {
+  min-width: 42rem;
+}
+
+.booklet-table .booklet-date,
+.booklet-table thead .booklet-date-head {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--card);
+  box-shadow: 1px 0 0 var(--line);
+}
+
+.booklet-table thead .booklet-date-head {
+  background: var(--recess);
+  z-index: 2;
+}
+
+.booklet-day--today .booklet-date {
+  background: var(--card-2);
+}
+
+.booklet-notes-row > td {
+  padding-inline: 1rem;
+}
+
+.booklet-notes {
+  position: sticky;
+  left: 1rem;
+  max-width: calc(100cqi - 2rem);
 }
