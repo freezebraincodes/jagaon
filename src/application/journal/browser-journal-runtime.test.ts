@@ -154,6 +154,8 @@ describe("browser journal runtime", () => {
     const visit = await runtime.careOrganisation.query.loadVisitPreparation();
     if (visit.status !== "READY") throw new Error("ready");
     expect(visit.appointment?.payload.appointmentLabel).toBe("Dr Lim, Bukit Merah Polyclinic");
+    // Owner decision 2026-10-16: the runtime serves the period overview, with the seeded earlier visit for "since your last visit".
+    expect(await runtime.careOrganisation.query.loadPeriodOverview?.("SINCE_LAST_VISIT")).toMatchObject({ status: "READY", choice: "SINCE_LAST_VISIT", questionCount: 1, questionsFor: "Dr Lim" });
 
     expect(await runtime.careOrganisation.commands.createCareQuestion({ questionText: { text: "Bring my meter?", language: "en-SG" } })).toMatchObject({ kind: "COMMITTED" });
     // Reopening the same database does not reseed over the patient's records.

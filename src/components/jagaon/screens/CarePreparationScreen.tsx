@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { CareOrganisationCommandPort, CareOrganisationCommitResult } from "@/application/care-organisation/care-organisation-contracts";
-import type { CareOrganisationQueryPort, CareQuestionView, FactGroupKey, FactGroupView, VisitPreparationView } from "@/application/care-organisation/care-organisation-contracts";
+import type { CareOrganisationQueryPort, CareQuestionView, FactGroupKey, FactGroupView, OverviewPeriodChoice, VisitPreparationView } from "@/application/care-organisation/care-organisation-contracts";
 import { ScreenHeader } from "../primitives/ScreenHeader";
 import {
   BookIcon,
@@ -21,6 +21,7 @@ import {
 } from "../primitives/Icons";
 import { AppointmentEditor, type AppointmentEditorResult } from "../care-organisation/AppointmentEditor";
 import { CareQuestionEditor } from "../care-organisation/CareQuestionEditor";
+import { PeriodOverview } from "../care-organisation/PeriodOverview";
 import { daysBetween, formatLocalDate, formatMonthShort, formatPointTime, formatWeekday, localDateOfPoint } from "../care-organisation/care-format";
 import { useCareLoad } from "../care-organisation/use-care-load";
 
@@ -44,7 +45,13 @@ type ScreenProps = {
   commands: CareOrganisationCommandPort | null;
   /** Packet 9C preview hand-off; resolves false when nothing was prepared. */
   onPreview?: (selection: CarePreparationSelection) => Promise<boolean>;
+  /** Owner decision 2026-10-16: the overview's period, kept by the app so the summary preview shows the same one. */
+  overviewPeriod?: OverviewPeriodChoice;
+  onOverviewPeriodChange?: (choice: OverviewPeriodChoice) => void;
 };
+
+/** Owner decision 2026-10-16: the overview counts the last 30 days until the patient picks another period. */
+export const DEFAULT_OVERVIEW_PERIOD: OverviewPeriodChoice = "LAST_30_DAYS";
 
 type Dialog = { kind: "APPOINTMENT" } | { kind: "ADD_QUESTION" } | { kind: "EDIT_QUESTION"; recordId: string } | null;
 
@@ -55,7 +62,7 @@ const langOf = (language: string) => (language === "und" ? undefined : language)
  * entered, lets them tick factual record groups and their own questions,
  * and never answers, sends or interprets anything.
  */
-export function CarePreparationScreen({ messages, locale, query, commands, onPreview }: ScreenProps) {
+export function CarePreparationScreen({ messages, locale, query, commands, onPreview, overviewPeriod, onOverviewPeriodChange }: ScreenProps) {
   const copy = messages.carePreparation;
   const loader = useMemo(() => (query ? () => query.loadVisitPreparation() : null), [query]);
   const { value: view, reload } = useCareLoad<VisitPreparationView>(loader, { status: "UNAVAILABLE" });
@@ -67,6 +74,7 @@ export function CarePreparationScreen({ messages, locale, query, commands, onPre
   const [rowFailure, setRowFailure] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [previewFailed, setPreviewFailed] = useState(false);
+  const [ownOverviewPeriod, setOwnOverviewPeriod] = useState<OverviewPeriodChoice>(DEFAULT_OVERVIEW_PERIOD);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -160,9 +168,12 @@ export function CarePreparationScreen({ messages, locale, query, commands, onPre
     );
   }
 
+  // Owner decision 2026-10-16: the title names who the recorded appointment is with, as the patient entered it.
+  const title = appointment ? copy.titleWithDoctor(appointment.payload.careContactLabel ?? appointment.payload.appointmentLabel) : copy.title;
+
   return (
     <div className="care-preparation">
-      <ScreenHeader title={copy.title} />
+      <ScreenHeader title={title} />
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
       </p>
@@ -176,6 +187,18 @@ export function CarePreparationScreen({ messages, locale, query, commands, onPre
 
       {ready ? (
         <>
+          <PeriodOverview
+            messages={messages}
+            locale={locale}
+            query={query}
+            choice={overviewPeriod ?? ownOverviewPeriod}
+            onChoiceChange={(choice) => {
+              setOwnOverviewPeriod(choice);
+              onOverviewPeriodChange?.(choice);
+            }}
+            refreshKey={view}
+          />
+
           {appointment ? (
             <AppointmentCard messages={messages} locale={locale} today={ready.period.endDate} appointment={appointment} onChange={commands ? () => setDialog({ kind: "APPOINTMENT" }) : undefined} />
           ) : (

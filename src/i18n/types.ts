@@ -942,6 +942,29 @@ export type CarePreparationMessages = {
   editQuestionNamed: (text: string) => string;
   removeQuestion: string;
   removeQuestionNamed: (text: string) => string;
+  // --- Owner decision 2026-10-16: doctor-named title and the period overview (new wording; zh-SG drafts, human acceptance pending) ---
+  /** The title when an appointment is recorded, naming the care contact the patient entered. */
+  titleWithDoctor: (who: string) => string;
+  overviewHeading: string;
+  overviewPeriodLegend: string;
+  periodLast7Days: string;
+  periodLast14Days: string;
+  periodLast30Days: string;
+  periodSinceLastVisit: string;
+  overviewLoading: string;
+  /** Sentence opening for a period of `days` local days ending today. */
+  overviewInLastDays: (days: number) => string;
+  /** Sentence opening for the period since the visit on `date`. */
+  overviewSinceVisit: (date: LocalDateText) => string;
+  /** `list` is the locale's joined list of the counts below. */
+  overviewLogged: (opening: string, list: string) => string;
+  overviewNothingLogged: (opening: string) => string;
+  overviewGlucose: (count: number) => string;
+  overviewMeals: (count: number) => string;
+  overviewInsulin: (count: number) => string;
+  overviewWalks: (count: number) => string;
+  overviewQuestionsFor: (count: number, who: string) => string;
+  overviewQuestions: (count: number) => string;
 };
 
 /** Packet 9C care-summary preview and print copy (09-bilingual-copy-matrix.md Section 4). */
@@ -987,6 +1010,10 @@ export type CareSummaryMessages = {
   draftNotices: { label: string };
   /** Packet 11C B1a (D3): an unapproved summary made by an earlier version must be prepared again. Human acceptance pending. */
   templateSuperseded: string;
+  /** Owner decision 2026-10-16: the approved summary in large type, read-only, to hand over. New wording; zh-SG drafts. */
+  showOnScreen: string;
+  showOnScreenNote: string;
+  closeShowOnScreen: string;
 };
 
 /**

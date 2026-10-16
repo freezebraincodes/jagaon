@@ -30,6 +30,8 @@ const catalogue = (catalogueEntryKey: string, label: string): PreventiveCareItem
  * test the same day), eye screening 30 days later, the foot check recorded 20 days earlier. Earlier checks the patient reported
  * without a plan (HSA-bounded-mode-off preview, owner decision 2026-10-14) leave every item and the visit unchanged and let the preview
  * show one clear due check (eye screening, about 13 months ago) and one coming up (blood test, about 5 months ago).
+ * Owner decision 2026-10-16: one earlier visit with Dr Lim 35 days before, which the patient reported attending, so the overview on
+ * "Prepare for my appointment" can count "since your last visit".
  */
 export const SYNTHETIC_CARE_ORGANISATION_OFFSETS = Object.freeze({
   appointmentDays: 10,
@@ -39,6 +41,8 @@ export const SYNTHETIC_CARE_ORGANISATION_OFFSETS = Object.freeze({
   footCheckRecordedDays: -20,
   eyeScreeningRecordedDays: -390,
   bloodTestRecordedDays: -145,
+  pastVisitDays: -35,
+  pastVisitLocalTime: "10:20",
 });
 
 const DAY_MS = 86_400_000;
@@ -55,11 +59,13 @@ function localDateFrom(seedAt: Instant, days: number): string {
 export function syntheticCareOrganisationDates(seedAt: Instant) {
   const o = SYNTHETIC_CARE_ORGANISATION_OFFSETS;
   const appointmentDate = localDateFrom(seedAt, o.appointmentDays);
+  const pastVisitDate = localDateFrom(seedAt, o.pastVisitDays);
   return Object.freeze({
     eyeScreening: localDateFrom(seedAt, o.eyeScreeningDays),
     bloodTest: localDateFrom(seedAt, o.bloodTestDays),
     footCheckRecorded: localDateFrom(seedAt, o.footCheckRecordedDays),
     appointmentInstant: new Date(Date.parse(`${appointmentDate}T${o.appointmentLocalTime}:00.000Z`) - SINGAPORE_OFFSET_MS).toISOString(),
+    pastVisitInstant: new Date(Date.parse(`${pastVisitDate}T${o.pastVisitLocalTime}:00.000Z`) - SINGAPORE_OFFSET_MS).toISOString(),
     eyeScreeningRecorded: localDateFrom(seedAt, o.eyeScreeningRecordedDays),
     bloodTestRecorded: localDateFrom(seedAt, o.bloodTestRecordedDays),
   });
@@ -177,11 +183,27 @@ export async function seedSyntheticCareOrganisation(input: {
   );
   // Owner decision 2026-10-12: one short question for the appointment, saved as the add-question screen saves one, so the visit
   // summary can be prepared in the demo without typing. It is the patient's own wording; JagaOn never answers it.
-  if (input.demoQuestion === false) return "SEEDED";
+  if (input.demoQuestion !== false) {
+    committed(
+      await co.createCareQuestion({
+        questionText: { text: SYNTHETIC_CARE_QUESTION_TEXT, language: "und" },
+        relatedAppointment: { recordType: "APPOINTMENT", recordId: appointment.recordId, revisionId: appointment.revisionId },
+      }),
+    );
+  }
+  // Owner decision 2026-10-16: the earlier visit, recorded last so every other fixture identity is unchanged. The patient's own report
+  // that it took place; JagaOn never marks a passed appointment attended.
   committed(
-    await co.createCareQuestion({
-      questionText: { text: SYNTHETIC_CARE_QUESTION_TEXT, language: "und" },
-      relatedAppointment: { recordType: "APPOINTMENT", recordId: appointment.recordId, revisionId: appointment.revisionId },
+    await co.scheduleAppointment({
+      payload: {
+        appointmentLabel: "Dr Lim, Bukit Merah Polyclinic",
+        service: { kind: "UNKNOWN" },
+        mode: "IN_PERSON",
+        status: "PATIENT_REPORTED_ATTENDED",
+        careContactLabel: "Dr Lim",
+        locationLabel: "Bukit Merah Polyclinic",
+      },
+      scheduledAt: { kind: "EXACT", instantUtc: dates.pastVisitInstant as Instant, timeZoneId: SINGAPORE, utcOffsetMinutes: 480 },
     }),
   );
   return "SEEDED";

@@ -1188,6 +1188,25 @@ export const enSGMessages: AppMessages = {
     editQuestionNamed: (text) => `Edit: ${text}`,
     removeQuestion: "Remove",
     removeQuestionNamed: (text) => `Remove: ${text}`,
+    // Owner decision 2026-10-16: doctor-named title and the period overview (plain counts; zero counts are left out).
+    titleWithDoctor: (who) => `Prepare for my appointment with ${who}`,
+    overviewHeading: "Your records at a glance",
+    overviewPeriodLegend: "Period",
+    periodLast7Days: "Last 7 days",
+    periodLast14Days: "Last 14 days",
+    periodLast30Days: "Last 30 days",
+    periodSinceLastVisit: "Since your last visit",
+    overviewLoading: "Counting your records\u2026",
+    overviewInLastDays: (days) => `In the last ${days} days`,
+    overviewSinceVisit: (date) => `Since your visit on ${date}`,
+    overviewLogged: (opening, list) => `${opening} you logged ${list}.`,
+    overviewNothingLogged: (opening) => `${opening} you logged no records.`,
+    overviewGlucose: (count) => (count === 1 ? "1 glucose reading" : `${count} glucose readings`),
+    overviewMeals: (count) => (count === 1 ? "1 meal" : `${count} meals`),
+    overviewInsulin: (count) => (count === 1 ? "1 insulin record" : `${count} insulin records`),
+    overviewWalks: (count) => (count === 1 ? "1 walk" : `${count} walks`),
+    overviewQuestionsFor: (count, who) => (count === 1 ? `You saved 1 question for ${who}.` : `You saved ${count} questions for ${who}.`),
+    overviewQuestions: (count) => (count === 1 ? "You saved 1 question to ask." : `You saved ${count} questions to ask.`),
   },
   careSummary: {
     title: "Preview my summary",
@@ -1228,6 +1247,10 @@ export const enSGMessages: AppMessages = {
     },
     // Packet 11C B1a (D3), new wording, human acceptance pending.
     templateSuperseded: "This summary was made with an earlier version of JagaOn. Prepare it again before you approve it.",
+    // Owner decision 2026-10-16: the approved summary in large type, to hand over on this phone.
+    showOnScreen: "Show on screen",
+    showOnScreenNote: "For reading on this phone. Nothing can be changed here.",
+    closeShowOnScreen: "Close",
   },
   // Tell JagaOn understands more (design §3.1): the feelings chat dialog. `notice`, `continue` and `saveWithoutAi` are the owner's
   // approved wording (2026-10-14); the rest is new wording, human acceptance pending.

@@ -210,6 +210,105 @@ describe("synthetic care-organisation seed", () => {
     expect(await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids })).toBe("SEEDED");
     expect(await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids })).toBe("SKIPPED");
     expect(await h.database.table("recordHeads").where("recordType").equals("PREVENTIVE_CARE_ITEM").count()).toBe(4);
-    expect(await h.database.table("recordHeads").where("recordType").equals("APPOINTMENT").count()).toBe(1);
+    // Owner decision 2026-10-16: the upcoming visit and one earlier visit the patient reported attending (was 1).
+    expect(await h.database.table("recordHeads").where("recordType").equals("APPOINTMENT").count()).toBe(2);
+  });
+
+  it("records the earlier visit with Dr Lim 35 days before the seed day as the patient's own attended report (owner decision 2026-10-16)", async () => {
+    const h = await setup();
+    await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids });
+    const overview = await h.query.loadPeriodOverview!("SINCE_LAST_VISIT");
+    if (overview.status !== "READY") throw new Error("ready");
+    expect(overview.lastVisit).toMatchObject({ localDate: "2026-08-30" });
+    // The upcoming visit is unchanged: still the one shown on visit preparation.
+    const view = await h.query.loadVisitPreparation();
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.appointment?.scheduledAt).toMatchObject({ instantUtc: "2026-10-14T01:40:00.000Z" });
+  });
+});
+
+describe("Screen 10 period overview (owner decision 2026-10-16)", () => {
+  const local = (localDate: string, time: string) => ({
+    kind: "POINT" as const,
+    occurrence: { kind: "EXACT" as const, instantUtc: new Date(Date.parse(`${localDate}T${time}:00.000Z`) - 8 * 3_600_000).toISOString() as Instant, timeZoneId: "Asia/Singapore", utcOffsetMinutes: 480 },
+  });
+
+  async function journalOf(h: Awaited<ReturnType<typeof setup>>) {
+    const journal = createJournalCommandService(h.database, { now: () => NOW, ids });
+    return {
+      glucose: (localDate: string, time = "07:00") =>
+        journal.recordGlucose({
+          payload: { measurement: { enteredValue: "6.6" as never, enteredUnit: "MMOL_L", normalization: null }, measurementMethod: "FINGERSTICK_METER", context: { kind: "UNSPECIFIED" } },
+          temporal: local(localDate, time),
+          recordedAt: NOW,
+        } as never),
+      meal: (localDate: string) =>
+        journal.recordMeal({
+          payload: { intakeKind: "MEAL", intakeSlot: { kind: "STANDARD_MEAL", code: "BREAKFAST" }, occasion: "ROUTINE", foodIncluded: "YES", drinkIncluded: "UNKNOWN", items: [{ kind: "FOOD", label: "Kaya toast" }] },
+          temporal: local(localDate, "07:30"),
+          recordedAt: NOW,
+        } as never),
+      walk: (localDate: string) =>
+        journal.recordActivity({ payload: { activityCategory: "WALKING", patientLabel: "Morning walk", reportedDurationMinutes: 20 }, temporal: local(localDate, "06:45"), recordedAt: NOW } as never),
+    };
+  }
+
+  it("counts each kind of record in the chosen period, the saved questions and who they are for", async () => {
+    const h = await setup();
+    await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids });
+    const journal = await journalOf(h);
+    await journal.glucose("2026-10-04"); // today
+    await journal.glucose("2026-09-28"); // the first of the last 7 days
+    await journal.glucose("2026-09-27"); // 8 days ago: in the last 14 and 30 days only
+    await journal.glucose("2026-09-05"); // the first of the last 30 days
+    await journal.glucose("2026-09-04"); // outside every fixed period
+    await journal.meal("2026-10-02");
+    await journal.meal("2026-09-20");
+    await journal.walk("2026-10-03");
+
+    const counts = async (choice: "LAST_7_DAYS" | "LAST_14_DAYS" | "LAST_30_DAYS") => {
+      const view = await h.query.loadPeriodOverview!(choice);
+      if (view.status !== "READY") throw new Error("ready");
+      return { choice: view.choice, period: [view.period.startDate, view.period.endDate], counts: view.counts };
+    };
+    expect(await counts("LAST_7_DAYS")).toEqual({ choice: "LAST_7_DAYS", period: ["2026-09-28", "2026-10-04"], counts: { GLUCOSE: 2, INSULIN: 0, MEALS: 1, WALKS: 1 } });
+    expect(await counts("LAST_14_DAYS")).toEqual({ choice: "LAST_14_DAYS", period: ["2026-09-21", "2026-10-04"], counts: { GLUCOSE: 3, INSULIN: 0, MEALS: 1, WALKS: 1 } });
+    expect(await counts("LAST_30_DAYS")).toEqual({ choice: "LAST_30_DAYS", period: ["2026-09-05", "2026-10-04"], counts: { GLUCOSE: 4, INSULIN: 0, MEALS: 2, WALKS: 1 } });
+
+    const view = await h.query.loadPeriodOverview!("LAST_30_DAYS");
+    if (view.status !== "READY") throw new Error("ready");
+    expect([view.questionCount, view.questionsFor]).toEqual([1, "Dr Lim"]);
+  });
+
+  it("counts since the visit the patient reported attending, from the visit's own time", async () => {
+    const h = await setup();
+    await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids });
+    const journal = await journalOf(h);
+    await journal.glucose("2026-08-30", "08:00"); // the visit day, before the 10:20 visit
+    await journal.glucose("2026-08-30", "12:00"); // the visit day, after it
+    await journal.glucose("2026-10-01");
+    const view = await h.query.loadPeriodOverview!("SINCE_LAST_VISIT");
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.choice).toBe("SINCE_LAST_VISIT");
+    expect(view.period).toMatchObject({ startAt: "2026-08-30T02:20:00.000Z", startDate: "2026-08-30", endDate: "2026-10-04" });
+    expect(view.counts.GLUCOSE).toBe(2);
+  });
+
+  it("never takes a passed appointment as a visit, and counts the last 30 days when no visit is on record", async () => {
+    const h = await setup("2026-12-01T00:00:00.000Z" as Instant);
+    await seedSyntheticCareOrganisation({ database: h.database, seedAt: NOW, ids });
+    // The 14 Oct appointment has passed but is still only scheduled; the attended 30 Aug visit stays the last visit.
+    const later = await h.query.loadPeriodOverview!("SINCE_LAST_VISIT");
+    expect(later).toMatchObject({ status: "READY", choice: "SINCE_LAST_VISIT", lastVisit: { localDate: "2026-08-30" }, questionsFor: null });
+
+    const empty = await setup();
+    const view = await empty.query.loadPeriodOverview!("SINCE_LAST_VISIT");
+    expect(view).toMatchObject({ status: "READY", choice: "LAST_30_DAYS", lastVisit: null, questionCount: 0, questionsFor: null, counts: { GLUCOSE: 0, INSULIN: 0, MEALS: 0, WALKS: 0 } });
+  });
+
+  it("reports unavailable storage instead of zero counts", async () => {
+    const h = await setup();
+    h.database.close();
+    expect(await h.query.loadPeriodOverview!("LAST_7_DAYS")).toEqual({ status: "UNAVAILABLE" });
   });
 });

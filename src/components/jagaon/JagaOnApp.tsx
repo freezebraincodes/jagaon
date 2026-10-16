@@ -86,7 +86,9 @@ import {
 import { OnboardingFlow, type OnboardingExit } from "./onboarding/OnboardingFlow";
 import { MyMedicinesScreen, type MyMedicinesView } from "./screens/MyMedicinesScreen";
 import { PreventiveCareScreen } from "./screens/PreventiveCareScreen";
-import { CarePreparationScreen, type CarePreparationSelection } from "./screens/CarePreparationScreen";
+import { CarePreparationScreen, DEFAULT_OVERVIEW_PERIOD, type CarePreparationSelection } from "./screens/CarePreparationScreen";
+import { PeriodOverview } from "./care-organisation/PeriodOverview";
+import type { OverviewPeriodChoice } from "@/application/care-organisation/care-organisation-contracts";
 import { CareSummaryPreviewScreen, type CareSummaryAiWordingPort } from "./screens/CareSummaryPreviewScreen";
 import { createBrowserPrintPort, type PrintPort } from "./care-preparation/PrintPort";
 import { createBrowserAiAssistance } from "@/application/ai/browser-history-explainer";
@@ -791,6 +793,9 @@ export function JagaOnApp({
     );
   }, []);
 
+  /** Owner decision 2026-10-16: the overview period chosen on Screen 10, shown again on the summary preview. */
+  const [overviewPeriod, setOverviewPeriod] = useState<OverviewPeriodChoice>(DEFAULT_OVERVIEW_PERIOD);
+
   /** Prepares a snapshot from exactly what was ticked on Screen 10, then opens its preview. */
   const prepareSummary = useCallback(
     async (selection: CarePreparationSelection): Promise<boolean> => {
@@ -1176,6 +1181,8 @@ export function JagaOnApp({
             query={runtime.careOrganisation.query}
             commands={runtime.careOrganisation.commands}
             onPreview={prepareSummary}
+            overviewPeriod={overviewPeriod}
+            onOverviewPeriodChange={setOverviewPeriod}
           />
         );
       case "CARE_SUMMARY_PREVIEW":
@@ -1192,6 +1199,7 @@ export function JagaOnApp({
             onBack={goBack}
             aiWording={careSummaryWording}
             onReplaced={replacePreview}
+            overview={<PeriodOverview messages={messages} locale={locale} query={runtime.careOrganisation.query} choice={overviewPeriod} />}
           />
         );
       case "DATA_BACKUP":
