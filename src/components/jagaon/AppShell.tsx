@@ -42,10 +42,10 @@ export function AppShell({
     }
   }, [currentScreen]);
 
-  // Booklet is the Packet 8 Medication schedule; History is Packet 7A.
+  // Owner decision 2026-10-16: Booklet is the paper-diary table (the Medication schedule moved to More); History is Packet 7A.
   const tabs: Array<{ screen: ScreenId; label: string; icon: ReactNode }> = [
     { screen: "TODAY", label: messages.shared.navToday, icon: <HomeIcon size={26} /> },
-    { screen: "MEDICATION_SCHEDULE", label: messages.shared.navBooklet, icon: <BookletIcon size={26} /> },
+    { screen: "BOOKLET", label: messages.shared.navBooklet, icon: <BookletIcon size={26} /> },
     { screen: "HISTORY", label: messages.shared.navHistory, icon: <ChartIcon size={26} /> },
     { screen: "MORE", label: messages.shared.navMore, icon: <MoreIcon size={26} /> },
   ];

@@ -69,7 +69,7 @@ describe("Packet 6A storage and screen manifest", () => {
   it("keeps the onboarding routes closed and outside the journal screens and tabs", () => {
     expect(ONBOARDING_ROUTES).toBe(DEMO_ONBOARDING_ROUTES);
     expect(PACKET_6A_CHILD_SCREENS).toEqual(["MY_MEDICINES"]);
-    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MEDICATION_SCHEDULE", "HISTORY", "MORE"]);
+    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "BOOKLET", "HISTORY", "MORE"]);
     for (const route of ONBOARDING_ROUTES) expect([...ALL_SCREENS]).not.toContain(route);
   });
 });

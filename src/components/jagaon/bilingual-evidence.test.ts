@@ -114,7 +114,8 @@ describe("bilingual evidence — en-SG and zh-SG parity", () => {
     // Packet 10 adds exactly DATA_BACKUP; the Packet 13 slice adds exactly TELL_JAGAON.
     // Owner decision 2026-10-12: My notes adds exactly MY_NOTES (reached from More).
     // Owner request 2026-10-16: Record an activity adds exactly RECORD_ACTIVITY (reached from Today and Tell JagaOn).
-    expect(ALL_SCREENS.size).toBe(21);
+    // Owner decision 2026-10-16: the Booklet table adds exactly BOOKLET.
+    expect(ALL_SCREENS.size).toBe(22);
     expect(PACKET_6_ENABLED_SCREENS).toContain("MY_NOTES");
     expect(PACKET_6_ENABLED_SCREENS).toContain("RECORD_ACTIVITY");
     expect(PACKET_6_ENABLED_SCREENS).toContain("TELL_JAGAON");

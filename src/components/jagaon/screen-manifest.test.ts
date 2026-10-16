@@ -6,7 +6,8 @@ import {
   PACKET_6_ENABLED_SCREENS,
   PACKET_6A_CHILD_SCREENS,
   PACKET_7A_TOP_LEVEL_SCREENS,
-  PACKET_8_TOP_LEVEL_SCREENS,
+  BOOKLET_TOP_LEVEL_SCREENS,
+  PACKET_8_CHILD_SCREENS,
   PACKET_9B_CHILD_SCREENS,
   PACKET_9C_CHILD_SCREENS,
   PACKET_10_CHILD_SCREENS,
@@ -18,17 +19,20 @@ import {
 } from "./screen-manifest";
 
 describe("screen-manifest", () => {
-  it("has exactly four top-level screens in navigation order: TODAY, MEDICATION_SCHEDULE, HISTORY and MORE", () => {
-    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MEDICATION_SCHEDULE", "HISTORY", "MORE"]);
+  it("has exactly four top-level screens in navigation order: TODAY, BOOKLET, HISTORY and MORE", () => {
+    // Owner decision 2026-10-16: the Booklet tab opens the paper-diary table; the Medication schedule is a child reached from More.
+    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "BOOKLET", "HISTORY", "MORE"]);
     expect(PACKET_7A_TOP_LEVEL_SCREENS).toEqual(["HISTORY"]);
-    expect(PACKET_8_TOP_LEVEL_SCREENS).toEqual(["MEDICATION_SCHEDULE"]);
+    expect(BOOKLET_TOP_LEVEL_SCREENS).toEqual(["BOOKLET"]);
+    expect(PACKET_8_CHILD_SCREENS).toEqual(["MEDICATION_SCHEDULE"]);
     expect(Object.isFrozen(PACKET_7A_TOP_LEVEL_SCREENS)).toBe(true);
-    expect(Object.isFrozen(PACKET_8_TOP_LEVEL_SCREENS)).toBe(true);
+    expect(Object.isFrozen(BOOKLET_TOP_LEVEL_SCREENS)).toBe(true);
+    expect(Object.isFrozen(PACKET_8_CHILD_SCREENS)).toBe(true);
   });
 
-  it("routes the Booklet tab only to the Packet 8 Medication schedule, with no duplicate destination", () => {
-    expect(ALL_SCREENS.has("BOOKLET" as ScreenId)).toBe(false);
-    expect([...ALL_SCREENS].filter((screen) => /SCHEDULE|REMINDER|BOOKLET|CARE_QUESTION/.test(screen))).toEqual(["MEDICATION_SCHEDULE"]);
+  it("has one Booklet table and one Medication schedule, with no duplicate destination", () => {
+    expect([...ALL_SCREENS].filter((screen) => /SCHEDULE|REMINDER|BOOKLET|CARE_QUESTION/.test(screen))).toEqual(["BOOKLET", "MEDICATION_SCHEDULE"]);
+    expect(TOP_LEVEL_SCREENS).not.toContain("MEDICATION_SCHEDULE");
   });
 
   it("lists every Packet 6 child exactly once", () => {
@@ -54,6 +58,7 @@ describe("screen-manifest", () => {
       ...TOP_LEVEL_SCREENS,
       ...PACKET_6_CHILD_SCREENS,
       ...PACKET_6A_CHILD_SCREENS,
+      ...PACKET_8_CHILD_SCREENS,
       ...PACKET_9B_CHILD_SCREENS,
       ...PACKET_9C_CHILD_SCREENS,
       ...PACKET_10_CHILD_SCREENS,
@@ -97,7 +102,8 @@ describe("screen-manifest", () => {
     // Owner request 2026-10-16: Record an activity adds exactly RECORD_ACTIVITY (reached from Today and Tell JagaOn).
     expect(ACTIVITY_ENTRY_CHILD_SCREENS).toEqual(["RECORD_ACTIVITY"]);
     expect(Object.isFrozen(ACTIVITY_ENTRY_CHILD_SCREENS)).toBe(true);
-    expect(ALL_SCREENS.size).toBe(21);
+    // Owner decision 2026-10-16: the Booklet table adds exactly BOOKLET.
+    expect(ALL_SCREENS.size).toBe(22);
     expect(ALL_SCREENS.has("MEDICATION_SCHEDULE")).toBe(true);
     expect(ALL_SCREENS.has("HISTORY")).toBe(true);
     expect(ALL_SCREENS.has("MY_MEDICINES")).toBe(true);
