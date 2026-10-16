@@ -170,7 +170,8 @@ export function TodayScreen({
       slot.at = at;
     }
   }
-  const stamped = slots.filter((slot) => slot.entry).length;
+  // Owner decision 2026-10-15: the booklet counts today's readings (known or unknown time) and sets no target.
+  const readingsToday = todayEntries.filter((entry) => entry.recordType === "GLUCOSE_READING").length;
 
   const latestGlucose =
     journal.entries.find((entry) => entry.recordType === "GLUCOSE_READING") ?? null;
@@ -219,7 +220,7 @@ export function TodayScreen({
           <h2 id="today-booklet-heading" className="card-title">
             {msg.todayBooklet}
           </h2>
-          <span className="booklet-progress">{msg.bookletProgress(stamped, slots.length)}</span>
+          <span className="booklet-progress">{msg.bookletProgress(readingsToday)}</span>
         </div>
         <ul className="booklet-slots">
           {slots.map((slot) => (

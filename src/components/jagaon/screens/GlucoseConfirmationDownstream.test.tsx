@@ -73,7 +73,7 @@ describe.each(["en-SG", "zh-SG"] as const)("CR-11 downstream surfaces (%s)", (lo
     const day3 = renderOn("2026-10-03T14:00:00Z");
     const booklet = day3.container.querySelector(".booklet-slots") as HTMLElement;
     expect([...booklet.querySelectorAll(".booklet-slot-value")].map((node) => node.firstChild?.textContent)).toEqual(["60.0", "0.0"]);
-    expect(day3.container.querySelector(".booklet-progress")?.textContent).toBe(m.today.bookletProgress(2, 3));
+    expect(day3.container.querySelector(".booklet-progress")?.textContent).toBe(m.today.bookletProgress(2));
     const latest = screen.getByRole("region", { name: m.today.latestRecordedReading });
     expect(latest.querySelector(".reading-value")?.textContent).toBe("0.0");
     expect(latest.querySelector(".reading-unit")?.textContent).toBe("mmol/L");

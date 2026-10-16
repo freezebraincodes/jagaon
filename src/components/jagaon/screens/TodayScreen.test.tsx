@@ -314,7 +314,7 @@ describe("TodayScreen", () => {
         now={new Date("2026-10-03T04:00:00Z")}
       />,
     );
-    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(0, 3));
+    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(0));
     // The latest reading stays visible, with its date because it is not today.
     expect(rendered.getByRole("heading", { name: messages.today.latestRecordedReading }))
       .toBeInTheDocument();
@@ -343,7 +343,7 @@ describe("TodayScreen", () => {
     expect(slots[0]).toHaveTextContent("6.2");
     expect(slots[1]).toHaveTextContent(messages.today.notRecorded);
     expect(slots[2]).toHaveTextContent("7.1");
-    expect(container).toHaveTextContent(messages.today.bookletProgress(2, 3));
+    expect(container).toHaveTextContent(messages.today.bookletProgress(2));
   });
 
   it("shows Not recorded on the Activity tile when no activity is recorded, and the tile opens Tell JagaOn", () => {
@@ -496,7 +496,7 @@ describe.each(["en-SG", "zh-SG"] as const)("TodayScreen unknown occurrence time 
 
   it("keeps an unknown-time reading visible on its entry day without a slot or a stamp", () => {
     const rendered = renderToday([unknownReading]);
-    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(0, 3));
+    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(1));  // Owner decision 2026-10-15: it counts as a reading today, though it fills no slot.
     for (const slot of bookletSlots(rendered)) {
       expect(slot).toHaveTextContent(messages.today.notRecorded);
       expect(slot).not.toHaveTextContent("6.8");
@@ -515,7 +515,7 @@ describe.each(["en-SG", "zh-SG"] as const)("TodayScreen unknown occurrence time 
     expect(slots[0]).toHaveTextContent("6.2");
     expect(slots[1]).toHaveTextContent(messages.today.notRecorded);
     expect(slots[2]).toHaveTextContent(messages.today.notRecorded);
-    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(1, 3));
+    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(2));
     expect(rendered.container.querySelector(".booklet-unknown-time")).toHaveTextContent(
       unknownTimeText(formatSingaporeTime(locale, "2026-10-02T05:00:00Z")),
     );
@@ -531,7 +531,7 @@ describe.each(["en-SG", "zh-SG"] as const)("TodayScreen unknown occurrence time 
 
   it("shows the entry date with the entry time when an unknown-time reading was entered on another day", () => {
     const rendered = renderToday([unknownReading], { now: new Date("2026-10-03T04:00:00Z") });
-    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(0, 3));
+    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(0));
     expect(rendered.container.querySelector(".booklet-unknown-time")).toBeNull();
     expect(rendered.container.querySelector(".reading-meta")).toHaveTextContent(unknownTimeText(formatSingaporeDateTime(locale, ENTERED)));
   });

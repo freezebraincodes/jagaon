@@ -283,6 +283,17 @@ describe("MedicationScheduleScreen", () => {
     expect(screen.getByText(en.schedule.barrierSaved)).toBeInTheDocument();
   });
 
+  it("owner decision 2026-10-15: a dose recorded as skipped shows one neutral safety line; taken or not recorded shows none", async () => {
+    const skipped = { recordId: "e2" as never, revisionId: "e2-1" as never, revisionNumber: 1, state: "SKIPPED" as const, amount: null, recordedAt: "2026-10-03T13:20:00.000Z" as never };
+    show(port(ready({ occasions: [occasion("YESTERDAY", skipped)] })));
+    expect(await screen.findByText(en.schedule.skippedSafety)).toHaveAttribute("role", "note");
+    expect(en.schedule.skippedSafety).toBe("If you feel unwell, contact your care team. In an emergency, call 995.");
+    cleanup();
+    show(port(ready({ occasions: [occasion("YESTERDAY", { ...skipped, state: "TAKEN" }), occasion("TODAY")] })));
+    await screen.findAllByRole("article");
+    expect(screen.queryByText(en.schedule.skippedSafety)).toBeNull();
+  });
+
   it("supports Ask me later and Skip this question without recording an answer", async () => {
     const schedule = port(ready({ occasions: [occasion("YESTERDAY", { recordId: "e2" as never, revisionId: "e2-1" as never, revisionNumber: 1, state: "SKIPPED", amount: null, recordedAt: "2026-10-03T13:20:00.000Z" as never }, { kind: "OFFER_AVAILABLE" })] }));
     show(schedule);
