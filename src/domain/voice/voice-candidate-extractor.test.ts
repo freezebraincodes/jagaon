@@ -55,6 +55,50 @@ describe("multi-fact extraction", () => {
     expect(analysed("My sugar was 6.2 for a man", "en").candidates[0]).toMatchObject({ ambiguity: expect.arrayContaining(["UNCERTAINTY"]) });
   });
 
+  it("reads \"I have … for breakfast\" and \"I'm having … for lunch\" as meals, never \"I have diabetes\" (owner report 2026-10-16)", () => {
+    const meals: Array<[string, string, string]> = [
+      ["I have beef noodle for breakfast", "BREAKFAST", "beef noodle"],
+      ["I'm having chicken rice for lunch", "LUNCH", "chicken rice"],
+      ["for breakfast I have beef noodle", "BREAKFAST", "beef noodle"],
+      ["I have beef noodle soup for dinner", "DINNER", "beef noodle soup"],
+    ];
+    for (const [text, slot, itemText] of meals) expect(analysed(text, "en").candidates, text).toEqual([expect.objectContaining({ kind: "MEAL_NOTE", slot, itemText })]);
+    for (const text of ["I have diabetes", "I have a question for my doctor", "I have a check-up after lunch"]) {
+      expect(analysed(text, "en").candidates.map((candidate) => candidate.kind), text).toEqual(["UNSUPPORTED_SPAN"]);
+    }
+    expect(analysed("I have my pills at dinner", "en").candidates.map((candidate) => candidate.kind)).toEqual(["MEDICATION_OCCURRENCE"]);
+    // A plan is never a meal record.
+    for (const text of ["I am going to have chicken rice for dinner", "I want to have laksa"]) {
+      expect(analysed(text, "en").candidates.map((candidate) => candidate.kind), text).toEqual(["UNSUPPORTED_SPAN"]);
+    }
+  });
+
+  it("reads a known food or drink with \"for breakfast/lunch/dinner\" as a meal whatever the verb, and keeps a food list together (owner report 2026-10-16)", () => {
+    const meals: Array<[string, string, string]> = [
+      ["I went for Kaya bread and tea for breakfast", "BREAKFAST", "Kaya bread and tea"],
+      ["beef noodle for breakfast", "BREAKFAST", "beef noodle"],
+      ["I drank milo for breakfast", "BREAKFAST", "milo"],
+      ["I had chicken rice, laksa and teh for lunch", "LUNCH", "chicken rice, laksa and teh"],
+      ["For breakfast I had kaya toast, soft boiled eggs, and kopi", "BREAKFAST", "kaya toast, soft boiled eggs, and kopi"],
+    ];
+    for (const [text, slot, itemText] of meals) expect(analysed(text, "en").candidates, text).toEqual([expect.objectContaining({ kind: "MEAL_NOTE", slot, itemText })]);
+    // A comma before something else still starts a new card; a feeling before a food stays a feeling.
+    expect(analysed("I had chicken rice, my sugar was 6.8", "en").candidates.map((candidate) => candidate.kind)).toEqual(["MEAL_NOTE", "GLUCOSE_READING"]);
+    expect(analysed("Feeling tired, had laksa", "en").candidates.map((candidate) => candidate.kind)).toEqual(["FEELING_NOTE", "MEAL_NOTE"]);
+    // Plans and non-meals are unchanged.
+    for (const text of ["I'll get kopi for breakfast later", "I went for my check-up at lunch"]) {
+      expect(analysed(text, "en").candidates.map((candidate) => candidate.kind), text).toEqual(["UNSUPPORTED_SPAN"]);
+    }
+  });
+
+  it("reads \"I had <a common food>\" as a meal without a meal word, never guessing the meal (owner report 2026-10-16)", () => {
+    expect(analysed("I had roti prata in the evening", "en").candidates).toEqual([expect.objectContaining({ kind: "MEAL_NOTE", slot: "UNSTATED", itemText: "roti prata" })]);
+    expect(analysed("I had chicken rice", "en").candidates).toEqual([expect.objectContaining({ kind: "MEAL_NOTE", slot: "UNSTATED", itemText: "chicken rice" })]);
+    for (const text of ["I had a fever", "I had a headache in the evening"]) {
+      expect(analysed(text, "en").candidates.map((candidate) => candidate.kind), text).toEqual(["UNSUPPORTED_SPAN"]);
+    }
+  });
+
   it('"I need to inject" is never TAKEN; forgot / remembered later / not sure is UNKNOWN', () => {
     for (const text of ["I need to inject my grey pen", "I'm going to take my pill", "I haven't taken my insulin yet"]) expect(analysed(text, "en").candidates[0], text).toMatchObject({ status: "PLANNED" });
     for (const text of ["I forgot my dark pen", "I am not sure I took the white tablet", "maybe I took my pill"]) expect(analysed(text, "en").candidates[0], text).toMatchObject({ status: "UNKNOWN", ambiguity: expect.arrayContaining(["STATUS_UNCLEAR"]) });
