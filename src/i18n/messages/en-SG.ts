@@ -873,6 +873,27 @@ export const enSGMessages: AppMessages = {
       BEDTIME: "bedtime",
     },
     positionLabels: { MORNING: "morning", EVENING: "evening" },
+    // Owner decision 2026-10-16: Notice (a plain sentence) and Trends (the same comparison as two bars). Descriptive only.
+    notice: {
+      title: "Noticed in your readings",
+      higher: (slot) => `Your ${slot} readings in the last 2 weeks are higher than in weeks 3 to 6.`,
+      lower: (slot) => `Your ${slot} readings in the last 2 weeks are lower than in weeks 3 to 6.`,
+      variedMore: (slot) => `Your ${slot} readings in the last 2 weeks varied more than in weeks 3 to 6.`,
+      variedLess: (slot) => `Your ${slot} readings in the last 2 weeks varied less than in weeks 3 to 6.`,
+      notEnough: "Not enough readings yet to compare.",
+      open: "See in History",
+      slots: { BEFORE_BREAKFAST: "before-breakfast", BEFORE_LUNCH: "before-lunch", BEFORE_DINNER: "before-dinner", BEDTIME: "bedtime" },
+    },
+    trends: {
+      title: "Trends: then and now",
+      intro: "Your own readings at the same meal time, weeks 3 to 6 compared with the last 2 weeks.",
+      earlier: "Weeks 3 to 6",
+      recent: "Last 2 weeks",
+      median: "middle value (median)",
+      spread: "spread (interquartile range)",
+      value: (value, unit) => `${value} ${unit}`,
+      slotTitles: { BEFORE_BREAKFAST: "Before breakfast", BEFORE_LUNCH: "Before lunch", BEFORE_DINNER: "Before dinner", BEDTIME: "Bedtime" },
+    },
     periodLabels: { THIS_WEEK: "this week", LAST_WEEK: "last week", THIRTY_DAYS: "30 days" },
     explanation: {
       action: "Show how this comparison was worked out",

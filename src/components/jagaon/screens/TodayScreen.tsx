@@ -43,6 +43,7 @@ import { storedGlucoseContextLabel } from "../journal/glucose-context";
 import { labelAndValue } from "../locale-format";
 import { sourceLabel } from "../onboarding/medicine-labels";
 import { MealIdeasCard } from "../hsa/MealIdeasCard";
+import { NoticeCard, type NoticeView } from "../history/NoticeCard";
 
 type TodayScreenProps = {
   messages: AppMessages;
@@ -60,6 +61,8 @@ type TodayScreenProps = {
   onOpenHistory?: () => void;
   /** PREVIEW (HSA-bounded mode off only): care checks due by standard intervals; ignored while the mode is on. */
   careNudges?: CareNudgeSummary | null;
+  /** Owner decision 2026-10-16: Notice, her own readings compared between two periods (null: not loaded, nothing shown). */
+  notice?: NoticeView;
 };
 
 type BookletSlot = {
@@ -132,6 +135,7 @@ export function TodayScreen({
   onRecordDeleted,
   onOpenHistory,
   careNudges = null,
+  notice = null,
 }: TodayScreenProps) {
   const [deleting, setDeleting] = useState(false);
   // HSA-bounded mode on (default): the care planning card stays as entered dates only.
@@ -343,6 +347,8 @@ export function TodayScreen({
           ) : null}
         </section>
       ) : null}
+
+      <NoticeCard messages={messages} notice={notice} onOpenHistory={onOpenHistory} />
 
       <section className="today-card" aria-labelledby="insulin-today-heading">
         <h2 id="insulin-today-heading" className="eyebrow">
