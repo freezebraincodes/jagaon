@@ -1222,13 +1222,14 @@ export type BookletMessages = {
   after: string;
   bedtime: string;
   /** The full name of each column, for screen readers. */
-  columnNames: Record<"BREAKFAST_BEFORE" | "BREAKFAST_AFTER" | "LUNCH_BEFORE" | "LUNCH_AFTER" | "DINNER_BEFORE" | "DINNER_AFTER" | "BEDTIME", string>;
+  columnNames: Record<"BREAKFAST_BEFORE" | "BREAKFAST_AFTER" | "LUNCH_BEFORE" | "LUNCH_AFTER" | "DINNER_BEFORE" | "DINNER_AFTER" | "BEDTIME" | "OTHER", string>;
+  /** Owner decision 2026-10-16: the last column, for "just checking" readings and readings saved without a meal time. */
+  other: string;
   notRecorded: string;
   nothingRecorded: string;
   today: string;
   notesLabel: string;
   noTime: string;
-  noteReading: (value: string, unit: string) => string;
   noteActivity: (label: string, minutes: number | null) => string;
   noteMedicine: (name: string, state: "TAKEN" | "MISSED" | "DELAYED" | "UNSURE" | "DECLINED_TO_RECORD") => string;
   scheduleRowBody: string;

@@ -7,7 +7,7 @@ import { BOOKLET_COLUMNS, type BookletNote, type BookletQueryPort, type BookletV
 import { ChoiceGroup } from "../primitives/ChoiceGroup";
 import { formatSingaporeTime } from "../journal/singapore-time";
 import { formatDateRange, formatDayParts } from "../history/history-format";
-import { BowlIcon, DropIcon, PillIcon, WalkIcon } from "../primitives/Icons";
+import { BowlIcon, PillIcon, WalkIcon } from "../primitives/Icons";
 
 type Props = {
   messages: AppMessages;
@@ -18,8 +18,8 @@ type Props = {
 const UNIT = "mmol/L";
 const MEALS = ["BREAKFAST", "LUNCH", "DINNER"] as const;
 /** The first column of each meal group (and bedtime) carries the group's ruling line. */
-const GROUP_STARTS: ReadonlySet<string> = new Set(["BREAKFAST_BEFORE", "LUNCH_BEFORE", "DINNER_BEFORE", "BEDTIME"]);
-const NOTE_ICONS = { READING: DropIcon, MEAL: BowlIcon, ACTIVITY: WalkIcon, MEDICINE: PillIcon } as const;
+const GROUP_STARTS: ReadonlySet<string> = new Set(["BREAKFAST_BEFORE", "LUNCH_BEFORE", "DINNER_BEFORE", "BEDTIME", "OTHER"]);
+const NOTE_ICONS = { MEAL: BowlIcon, ACTIVITY: WalkIcon, MEDICINE: PillIcon } as const;
 
 /**
  * Owner decision 2026-10-16: the Booklet tab, laid out like a paper glucose diary. Rows are days (newest first); columns are before
@@ -49,13 +49,7 @@ export function BookletScreen({ messages, locale, booklet }: Props) {
 
   const time = (at: string | null) => (at === null ? msg.noTime : formatSingaporeTime(locale, at));
   const noteText = (note: BookletNote) =>
-    note.kind === "READING"
-      ? msg.noteReading(note.value, note.unit)
-      : note.kind === "MEAL"
-        ? note.label
-        : note.kind === "ACTIVITY"
-          ? msg.noteActivity(note.label, note.minutes)
-          : msg.noteMedicine(note.name, note.state);
+    note.kind === "MEAL" ? note.label : note.kind === "ACTIVITY" ? msg.noteActivity(note.label, note.minutes) : msg.noteMedicine(note.name, note.state);
 
   return (
     <div className="booklet-screen">
@@ -95,7 +89,7 @@ export function BookletScreen({ messages, locale, booklet }: Props) {
             <colgroup>
               <col className="booklet-col-date" />
               {BOOKLET_COLUMNS.map((column) => (
-                <col key={column} className={column === "BEDTIME" ? "booklet-col-bedtime" : "booklet-col-value"} />
+                <col key={column} className={column === "BEDTIME" || column === "OTHER" ? "booklet-col-bedtime" : "booklet-col-value"} />
               ))}
             </colgroup>
             <thead>
@@ -110,6 +104,9 @@ export function BookletScreen({ messages, locale, booklet }: Props) {
                 ))}
                 <th scope="col" rowSpan={2} className="booklet-meal-head booklet-bedtime-head booklet-cell--group-start">
                   {msg.bedtime}
+                </th>
+                <th scope="col" rowSpan={2} className="booklet-meal-head booklet-bedtime-head booklet-cell--group-start" aria-label={msg.columnNames.OTHER}>
+                  {msg.other}
                 </th>
               </tr>
               <tr>

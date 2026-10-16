@@ -12,7 +12,8 @@ import type { HistoryPeriod } from "@/application/history/recorded-history-contr
 /**
  * Owner decision 2026-10-16: the Booklet tab is a read-only table laid out like a paper glucose diary. One row per day (newest first)
  * for the chosen period; each reading sits in the column of the meal time she chose (before or after breakfast, lunch or dinner, or
- * bedtime). Meals, medicines, activity and readings without a meal time go in that day's notes, in time order. Nothing is
+ * bedtime). A "just checking" reading, or one saved without a meal time, goes in the last column, Other (owner decision 2026-10-16).
+ * Meals, medicines and activity go in that day's notes, in time order. Nothing is
  * calculated, compared, coloured or written by AI: the table only places what she recorded.
  */
 
@@ -24,13 +25,13 @@ export const BOOKLET_COLUMNS = [
   "DINNER_BEFORE",
   "DINNER_AFTER",
   "BEDTIME",
+  "OTHER",
 ] as const;
 export type BookletColumn = (typeof BOOKLET_COLUMNS)[number];
 
 export type BookletReading = { value: string; unit: "mmol/L" | "mg/dL"; at: Instant | null };
 
 export type BookletNote =
-  | { kind: "READING"; at: Instant | null; value: string; unit: "mmol/L" | "mg/dL" }
   | { kind: "MEAL"; at: Instant | null; label: string }
   | { kind: "ACTIVITY"; at: Instant | null; label: string; minutes: number | null }
   | { kind: "MEDICINE"; at: Instant | null; name: string; state: MedicationEventPayload["state"] };
@@ -122,9 +123,8 @@ export function createBookletQuery(database: JagaOnDatabase, dependencies: { now
         if (stored.recordType === "GLUCOSE_READING") {
           const payload = revision.payload as GlucoseReadingPayload;
           const reading = { value: payload.measurement.enteredValue, unit: payload.measurement.enteredUnit === "MMOL_L" ? ("mmol/L" as const) : ("mg/dL" as const), at };
-          const column = payload.context.kind === "PATIENT_SELECTED_SLOT" ? COLUMN_BY_SLOT[payload.context.slot] : undefined;
-          if (column) day.readings[column].push(reading);
-          else day.notes.push({ kind: "READING", ...reading });
+          const column = (payload.context.kind === "PATIENT_SELECTED_SLOT" ? COLUMN_BY_SLOT[payload.context.slot] : undefined) ?? "OTHER";
+          day.readings[column].push(reading);
         } else if (stored.recordType === "INTAKE_EVENT") {
           const items = (revision.payload as { items?: Array<{ label?: string }> }).items ?? [];
           const label = items.map((item) => item.label).filter((item): item is string => Boolean(item)).join(", ");
