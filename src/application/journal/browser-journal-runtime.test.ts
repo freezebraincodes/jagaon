@@ -67,9 +67,9 @@ describe("browser journal runtime", () => {
     expect(view.status).toBe("READY");
     if (view.status !== "READY") throw new Error("ready");
     expect(view.comparisons.map((fact) => [fact.factId, fact.kind])).toEqual([
-      // The prepared demo data (owner instruction 2026-10-12) shows an improvement before breakfast (was HIGHER) and has too few recent
-      // before-dinner readings for a governed before-dinner statement (was NO_MATERIAL:BEFORE_DINNER).
+      // The prepared demo data (owner instructions 2026-10-12 and 2026-10-16): lower before breakfast, higher before dinner.
       ["COMPARISON:BEFORE_BREAKFAST", "LOWER"],
+      ["COMPARISON:BEFORE_DINNER", "HIGHER"],
     ]);
     // Chicken rice is recorded too rarely in the prepared data to pass the familiar-item gate.
     expect(view.projection.repeated.map((fact) => [fact.kind, fact.label])).toEqual([
@@ -121,6 +121,26 @@ describe("browser journal runtime", () => {
     expect(await runtime.history.load({ period: "THIRTY_DAYS" })).toEqual(seeded);
   }, INTEGRATION_TIMEOUT_MS);
 
+  it("seeds the prepared demo into a dataset created without it (after Delete all data), once, and never over her records", async () => {
+    const name = `packet-7a-runtime-${crypto.randomUUID()}`;
+    const runtime = await createBrowserJournalRuntime(name, { now: () => NOW, seedSyntheticScenarioOnCreate: false });
+    runtimes.push(runtime);
+    expect((await runtime.query.loadToday()).entries).toEqual([]);
+    await runtime.persistLocale("en-SG");
+
+    expect(await runtime.seedPreparedDemoWhenEmpty()).toBe(true);
+    const view = await runtime.history.load({ period: "THIS_WEEK" });
+    if (view.status !== "READY") throw new Error("ready");
+    expect(view.comparisons.map((fact) => [fact.factId, fact.kind])).toEqual([["COMPARISON:BEFORE_BREAKFAST", "LOWER"], ["COMPARISON:BEFORE_DINNER", "HIGHER"]]);
+    const visit = await runtime.careOrganisation.query.loadVisitPreparation();
+    expect(visit.status === "READY" && visit.appointment?.payload.appointmentLabel).toBe("Dr Lim, Bukit Merah Polyclinic");
+
+    // A second call (or a dataset with her own records) adds nothing.
+    const before = (await runtime.query.loadToday()).entries.length;
+    expect(await runtime.seedPreparedDemoWhenEmpty()).toBe(false);
+    expect((await runtime.query.loadToday()).entries.length).toBe(before);
+  }, INTEGRATION_TIMEOUT_MS);
+
   it("seeds the Packet 9B health checks and appointment once, keeps patient changes and restores them after reset", async () => {
     const runtime = await open();
     const view = await runtime.careOrganisation.query.loadPreventiveCare();
@@ -134,6 +154,8 @@ describe("browser journal runtime", () => {
     const visit = await runtime.careOrganisation.query.loadVisitPreparation();
     if (visit.status !== "READY") throw new Error("ready");
     expect(visit.appointment?.payload.appointmentLabel).toBe("Dr Lim, Bukit Merah Polyclinic");
+    // Owner decision 2026-10-16: the runtime serves the period overview, with the seeded earlier visit for "since your last visit".
+    expect(await runtime.careOrganisation.query.loadPeriodOverview?.("SINCE_LAST_VISIT")).toMatchObject({ status: "READY", choice: "SINCE_LAST_VISIT", questionCount: 1, questionsFor: "Dr Lim" });
 
     expect(await runtime.careOrganisation.commands.createCareQuestion({ questionText: { text: "Bring my meter?", language: "en-SG" } })).toMatchObject({ kind: "COMMITTED" });
     // Reopening the same database does not reseed over the patient's records.
@@ -216,10 +238,10 @@ describe("browser journal runtime", () => {
     const seeded = await runtime.medicationSchedule.load({ locale: "en-SG", medicationRecordIds: scope });
     if (seeded.status !== "READY") throw new Error("ready");
     expect(seeded.occasions.map((entry) => [entry.section, entry.medicineName, entry.scheduledTime])).toEqual([
-      ["YESTERDAY", "Nocturin pen", "21:00"],
-      ["TODAY", "Nocturin pen", "21:00"],
+      ["YESTERDAY", "Lantus", "21:00"],
+      ["TODAY", "Lantus", "21:00"],
     ]);
-    expect(seeded.withoutFixedTime).toEqual([{ medicineName: "Veltora pen" }]);
+    expect(seeded.withoutFixedTime).toEqual([{ medicineName: "Apidra" }]);
     expect(seeded.counts.map((count) => [count.optionKey, count.occasionCount])).toEqual([
       ["ROUTINE_CHANGED", 2],
       ["AWAY_FROM_HOME", 1],

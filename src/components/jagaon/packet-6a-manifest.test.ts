@@ -39,7 +39,16 @@ describe("Packet 6A storage and screen manifest", () => {
     const users = files.filter((file) => /localStorage|sessionStorage/.test(file.text)).map((file) => file.path);
     // Packet 13 slice (P13S S5, deliberate): the TRTC adapter only REMOVES the transcriber plugin's own `TRTC_RT_<userId>` key after
     // a session (privacy cleanup); it never reads or writes JagaOn data.
-    expect(users).toEqual(["src/application/onboarding/demo-onboarding-repository.ts", "src/voice/trtc/trtc-transcriber-adapter.ts"]);
+    // HSA preview "Get general information with AI" (owner-approved 2026-10-14, deliberate): the medicine-information client keeps its
+    // validated answers and the "notice seen" list per normalised medicine name (guarded; no other JagaOn data).
+    // HSA-bounded mode (owner decision 2026-10-14, deliberate): the switch keeps only its own on/off choice ("jagaon.hsaBoundedMode",
+    // guarded; no health data).
+    expect(users).toEqual([
+      "src/application/medicine-info/medicine-info-client.ts",
+      "src/application/onboarding/demo-onboarding-repository.ts",
+      "src/components/jagaon/hsa/hsa-bounded-mode.tsx",
+      "src/voice/trtc/trtc-transcriber-adapter.ts",
+    ]);
   });
 
   it("writes no authoritative revision or domain event from onboarding modules", () => {
@@ -60,7 +69,7 @@ describe("Packet 6A storage and screen manifest", () => {
   it("keeps the onboarding routes closed and outside the journal screens and tabs", () => {
     expect(ONBOARDING_ROUTES).toBe(DEMO_ONBOARDING_ROUTES);
     expect(PACKET_6A_CHILD_SCREENS).toEqual(["MY_MEDICINES"]);
-    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MEDICATION_SCHEDULE", "HISTORY", "MORE"]);
+    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "BOOKLET", "HISTORY", "MORE"]);
     for (const route of ONBOARDING_ROUTES) expect([...ALL_SCREENS]).not.toContain(route);
   });
 });

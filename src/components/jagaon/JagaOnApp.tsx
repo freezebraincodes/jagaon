@@ -1,5 +1,6 @@
 "use client";
 
+import { clearMedicineInfoLocalState } from "@/application/medicine-info/medicine-info-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SupportedLocale } from "@/domain/patient-settings/locale";
 import type { Instant } from "@/domain/shared/time";
@@ -10,6 +11,7 @@ import { DemoBoundaryNotice } from "@/components/demo/DemoBoundaryNotice";
 import { DEMO_BOUNDARY_PLACEMENT } from "@/components/demo/demo-boundary-placement";
 import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-fixture";
 import { TOP_LEVEL_SCREENS, type ScreenId } from "./screen-manifest";
+import { BookletScreen } from "./screens/BookletScreen";
 import { RecordedHistoryScreen } from "./screens/RecordedHistoryScreen";
 import { MyNotesScreen } from "./screens/MyNotesScreen";
 import { MedicationScheduleScreen } from "./screens/MedicationScheduleScreen";
@@ -20,16 +22,20 @@ import {
 import type { DemoOnboardingStoragePort } from "@/application/onboarding/demo-onboarding-repository";
 import { AppShell } from "./AppShell";
 import { TodayScreen } from "./screens/TodayScreen";
+import { useCareNudgeSummary } from "./hsa/care-nudges";
+import { resetHsaBoundedModeLocalState } from "./hsa/hsa-bounded-mode";
 import { GlucoseEntryScreen } from "./screens/GlucoseEntryScreen";
 import { ReadingTimeScreen } from "./screens/ReadingTimeScreen";
 import { InsulinEntryScreen } from "./screens/InsulinEntryScreen";
 import { MealEntryScreen } from "./screens/MealEntryScreen";
+import { ActivityEntryScreen } from "./screens/ActivityEntryScreen";
 import { MedicationInformationScreen } from "./screens/MedicationInformationScreen";
 import { NearbyFoodScreen } from "./screens/NearbyFoodScreen";
 import { FoodGeneralInfoScreen } from "./screens/FoodGeneralInfoScreen";
 import { MoreScreen } from "./screens/MoreScreen";
 import { HelpScreen } from "./screens/HelpScreen";
-import { TellJagaOnScreen } from "./voice/TellJagaOnScreen";
+import type { NoticeView } from "./history/NoticeCard";
+import { TellJagaOnScreen, type VoiceLimitFallback, type VoiceManualEntryKind } from "./voice/TellJagaOnScreen";
 import { browserWebSpeechSupported, checkVoiceAccess, checkVoiceProviderAnswer, VOICE_PROVIDER_LOADERS, type VoiceTranscriberLoader } from "./voice/voice-provider-wiring";
 import { VoiceProviderSettingsSection } from "./voice/VoiceProviderSettingsSection";
 import { DEV_SETTINGS_ENABLED } from "./dev-settings-flag";
@@ -44,6 +50,9 @@ import {
   type VoiceProviderResolution,
 } from "@/application/voice/voice-provider-selection";
 import { createVoiceJournalSave, createVoiceSaveWithRefresh } from "./voice/voice-journal-save";
+import { createFeelingsChatStorage } from "./feelings/feelings-chat-storage";
+import { createFeelingsChatClient } from "@/application/feelings-chat/feelings-chat-client";
+import type { FeelingsChatPort } from "@/application/feelings-chat/feelings-chat-port";
 import type { VoiceTranscriberPort } from "@/application/voice/voice-transcriber-port";
 import {
   createBrowserJournalRuntime,
@@ -75,9 +84,12 @@ import {
   type DemoOnboardingRepository,
 } from "@/application/onboarding/demo-onboarding-repository";
 import { OnboardingFlow, type OnboardingExit } from "./onboarding/OnboardingFlow";
+import { NewUserWelcomeDialog } from "./onboarding/NewUserWelcomeDialog";
 import { MyMedicinesScreen, type MyMedicinesView } from "./screens/MyMedicinesScreen";
 import { PreventiveCareScreen } from "./screens/PreventiveCareScreen";
-import { CarePreparationScreen, type CarePreparationSelection } from "./screens/CarePreparationScreen";
+import { CarePreparationScreen, DEFAULT_OVERVIEW_PERIOD, type CarePreparationSelection } from "./screens/CarePreparationScreen";
+import { PeriodOverview } from "./care-organisation/PeriodOverview";
+import type { OverviewPeriodChoice } from "@/application/care-organisation/care-organisation-contracts";
 import { CareSummaryPreviewScreen, type CareSummaryAiWordingPort } from "./screens/CareSummaryPreviewScreen";
 import { createBrowserPrintPort, type PrintPort } from "./care-preparation/PrintPort";
 import { createBrowserAiAssistance } from "@/application/ai/browser-history-explainer";
@@ -168,6 +180,11 @@ type JagaOnAppProps = {
   webSpeechSupported?: () => boolean;
   devSettingsEnabled?: boolean;
   voicePreferenceStorageFactory?: () => DemoOnboardingStoragePort;
+  /**
+   * Tell JagaOn understands more (owner decision 2026-10-14): the feelings chat port. Default: the browser client of the same-origin
+   * route POST /api/ai/feelings (no passcode: the route has none of its own). Injected in tests (the fake port; never a live call).
+   */
+  feelingsChatPortFactory?: () => FeelingsChatPort;
 };
 
 /**
@@ -221,8 +238,21 @@ const UNAVAILABLE_TERMINOLOGY = Object.freeze({
   forget: async () => Object.freeze({ kind: "FAILED" }),
 });
 
+/** The feelings chat's production port: one client of the same-origin route, created once per app (it calls nothing until a chat turn). */
+function defaultFeelingsChatPort(): FeelingsChatPort {
+  return createFeelingsChatClient();
+}
+
 /** Completion of a delete-all is handled once, by the app-level port wrapper. */
 const noop = () => undefined;
+
+/** Tell JagaOn's chooser and cards: each kind opens its existing entry screen blank. */
+const MANUAL_ENTRY_SCREENS: Readonly<Record<VoiceManualEntryKind, ScreenId>> = {
+  GLUCOSE: "LOG_GLUCOSE",
+  MEAL: "LOG_MEAL",
+  ACTIVITY: "RECORD_ACTIVITY",
+  MEDICATION: "MEDICATION_SCHEDULE",
+};
 
 const EMPTY_TODAY: TodayJournalViewModel = Object.freeze({
   entries: [],
@@ -245,8 +275,10 @@ export function JagaOnApp({
   webSpeechSupported = browserWebSpeechSupported,
   devSettingsEnabled = DEV_SETTINGS_ENABLED,
   voicePreferenceStorageFactory = createBrowserOnboardingStorage,
+  feelingsChatPortFactory = defaultFeelingsChatPort,
 }: JagaOnAppProps = {}) {
   const printPort = useMemo(() => printPortFactory(), [printPortFactory]);
+  const feelingsChatPort = useMemo(() => feelingsChatPortFactory(), [feelingsChatPortFactory]);
   const appointmentNotes = useMemo<AppointmentNoteSelectionRepository>(
     () =>
       createAppointmentNoteSelectionRepository(
@@ -316,7 +348,35 @@ export function JagaOnApp({
   );
   const legacyVoice = voiceTranscriberLoader !== undefined || voiceAvailabilityProbe !== undefined;
   const voiceLanguage = locale === "zh-SG" ? "zh" : "en";
+  // Owner decision 2026-10-15: after Tencent speech's daily demo minutes ran out and she chose "Use browser speech recognition", the
+  // browser's speech is preferred for the rest of that UTC day (the server's minute count resets at UTC midnight). Memory only.
+  const webSpeechFallbackDay = useRef<string | null>(null);
+  const utcDayNow = () => new Date().toISOString().slice(0, 10);
+  const webSpeechResolution = useCallback(async (): Promise<VoiceProviderResolution | null> => {
+    const { providers: enabled, passcodeRequired } = voiceAccessOf(await voiceProvidersProbe());
+    let supported = false;
+    try {
+      supported = webSpeechSupported() === true;
+    } catch {
+      supported = false;
+    }
+    const resolution = resolveVoiceProviderChoice({ enabled, webSpeechSupported: supported, language: voiceLanguage }, { devSettingsEnabled: true, stored: "WEB_SPEECH" });
+    return resolution.kind === "AVAILABLE" && resolution.provider === "WEB_SPEECH" && voiceProviderLoaders.WEB_SPEECH ? { ...resolution, passcodeRequired } : null;
+  }, [voiceProvidersProbe, webSpeechSupported, voiceLanguage, voiceProviderLoaders]);
+  const voiceLimitFallback = useMemo<VoiceLimitFallback>(
+    () => ({
+      available: async () => (await webSpeechResolution().catch(() => null)) !== null,
+      use: () => {
+        webSpeechFallbackDay.current = utcDayNow();
+      },
+    }),
+    [webSpeechResolution],
+  );
   const resolveVoiceProvider = useCallback(async (): Promise<VoiceProviderResolution> => {
+    if (webSpeechFallbackDay.current === utcDayNow()) {
+      const fallback = await webSpeechResolution().catch(() => null);
+      if (fallback) return fallback;
+    }
     const { providers: enabled, passcodeRequired } = voiceAccessOf(await voiceProvidersProbe());
     let supported = false;
     try {
@@ -329,7 +389,7 @@ export function JagaOnApp({
     if (resolution.kind === "AVAILABLE" && !voiceProviderLoaders[resolution.provider]) return { kind: "UNAVAILABLE" };
     // Owner decision 2026-10-12 (optional passcodes): the screen skips its passcode step only when the probe said none is required.
     return resolution.kind === "AVAILABLE" ? { ...resolution, passcodeRequired } : resolution;
-  }, [voiceProvidersProbe, webSpeechSupported, voiceLanguage, devSettingsEnabled, voiceProviderLoaders]);
+  }, [voiceProvidersProbe, webSpeechSupported, voiceLanguage, devSettingsEnabled, voiceProviderLoaders, webSpeechResolution]);
   const loadProviderTranscriber = useCallback(
     (accessPasscode: () => string | null, provider: VoiceProviderId, access: VoiceAccessMode): Promise<VoiceTranscriberPort> => {
       const load = voiceProviderLoaders[provider];
@@ -351,6 +411,8 @@ export function JagaOnApp({
     { screen: "TODAY" },
   ]);
   const [runtime, setRuntime] = useState<JagaOnRuntime | null>(null);
+  const preparedSeedPending = useRef(false);
+  const [preparedSeedRequest, setPreparedSeedRequest] = useState(0);
   const runtimeRef = useRef<JagaOnRuntime | null>(null);
   /**
    * Packet 11C Addendum C, Task C2 (hybrid spec D11): the patient's "Keep wording on this device" setting. The state drives the More
@@ -377,9 +439,15 @@ export function JagaOnApp({
   );
   /** Packet 10A: bumping the epoch re-opens the dataset (retry, delete-all restart). */
   const [runtimeEpoch, setRuntimeEpoch] = useState(0);
-  const runtimeOptions = useRef<BrowserJournalRuntimeOptions>({});
+  // Owner decision 2026-10-16: a new device's dataset opens empty, so "Start demo setup" really starts a new, empty booklet; the
+  // sample records are added only when "Use the prepared demo profile" is chosen (seedPreparedDemoWhenEmpty, below).
+  const runtimeOptions = useRef<BrowserJournalRuntimeOptions>({ seedSyntheticScenarioOnCreate: false });
   const [storageLock, setStorageLock] = useState<StorageLockState | null>(null);
   const [datasetDeleted, setDatasetDeleted] = useState(false);
+  /** Owner decision 2026-10-16: the one-time welcome after a new user's own setup (null when not shown). */
+  const [newUserWelcome, setNewUserWelcome] = useState<{ name: string | null } | null>(null);
+  /** Owner decision 2026-10-16: true while the prepared profile's sample records are being added, so the wait is explained. */
+  const [preparingSample, setPreparingSample] = useState(false);
   /** Packet 10C: resolves once a restored dataset finished reconciliation (or locked). */
   const reconciliationWaiter = useRef<((outcome: "COMPLETED" | "LOCKED") => void) | null>(null);
   const [lockRestoreOpen, setLockRestoreOpen] = useState(false);
@@ -644,6 +712,27 @@ export function JagaOnApp({
 
   const current = stack[stack.length - 1]!;
   const isTopLevel = TOP_LEVEL_SCREENS.includes(current.screen);
+  // HSA-bounded mode off only: care checks due (Today's care card and the More badge), reloaded as the visible screen changes.
+  const careNudges = useCareNudgeSummary(runtime?.careOrganisation.query, current.screen);
+  // Owner decision 2026-10-16: Notice on Today, from the same governed comparison as History; reloaded whenever Today is shown or its
+  // journal changes. A failed or unavailable load shows nothing (never a guess).
+  const [notice, setNotice] = useState<NoticeView>(null);
+  useEffect(() => {
+    if (!runtime || current.screen !== "TODAY") return;
+    let live = true;
+    runtime.history.load({ period: "THIS_WEEK" }).then(
+      (view) => {
+        if (!live) return;
+        setNotice(view.status === "READY" || view.status === "INSUFFICIENT_EVIDENCE" || view.status === "EMPTY" ? { comparisons: view.status === "EMPTY" ? [] : view.comparisons } : null);
+      },
+      () => {
+        if (live) setNotice(null);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [runtime, current.screen, today]);
 
   const navigate = useCallback((screen: ScreenId, params?: Record<string, string>) => {
     setStack((prev) => [...prev, { screen, params }]);
@@ -692,6 +781,14 @@ export function JagaOnApp({
   const finishOnboarding = useCallback((exit: OnboardingExit) => {
     // Packet 11C C7 finding D1: the finished setup's locale is the setup's own; a runtime that opens later never replaces it.
     onboardingLocaleRef.current = true;
+    if (exit.prepared) {
+      preparedSeedPending.current = true;
+      setPreparingSample(true);
+      setPreparedSeedRequest((value) => value + 1);
+    } else {
+      // Owner decision 2026-10-16: a new user's finished (or skipped) setup is welcomed once on Today.
+      setNewUserWelcome({ name: exit.state.preferredName ?? null });
+    }
     setOnboarding(exit.state);
     setPhase({ kind: "APP" });
     setStack(
@@ -706,6 +803,9 @@ export function JagaOnApp({
           ],
     );
   }, []);
+
+  /** Owner decision 2026-10-16: the overview period chosen on Screen 10, shown again on the summary preview. */
+  const [overviewPeriod, setOverviewPeriod] = useState<OverviewPeriodChoice>(DEFAULT_OVERVIEW_PERIOD);
 
   /** Prepares a snapshot from exactly what was ticked on Screen 10, then opens its preview. */
   const prepareSummary = useCallback(
@@ -743,6 +843,20 @@ export function JagaOnApp({
     setToday(await runtime.query.loadToday());
   }, [runtime]);
 
+  // "Use the prepared demo profile": the dataset was created without the demo records (on a first visit, owner decision 2026-10-16, or
+  // after "Delete all data"), so add them now, only into an empty dataset. Runs once the runtime is open.
+  useEffect(() => {
+    if (!runtime || !preparedSeedPending.current) return;
+    preparedSeedPending.current = false;
+    void runtime
+      .seedPreparedDemoWhenEmpty()
+      .then(async (seeded) => {
+        if (seeded && runtimeRef.current === runtime) setToday(await runtime.query.loadToday());
+      })
+      .catch(() => undefined)
+      .finally(() => setPreparingSample(false));
+  }, [runtime, preparedSeedRequest]);
+
   /**
    * Each local key is cleared by the repository that owns it
    * (JAGAON_LOCAL_STATE_KEYS). Every owner is attempted even when another
@@ -751,7 +865,9 @@ export function JagaOnApp({
   const clearLocalStateOwners = useCallback(() => {
     // An owner that is not loaded yet is still attempted, never assumed clear.
     const onboardingOwner = repository ?? repositoryRef.current ?? onboardingRepositoryFactory();
-    const results = [onboardingOwner.clear().ok, appointmentNotes.clear().ok];
+    // Owner decision 2026-10-14: the cached AI medicine information is cleared too.
+    // Owner decision 2026-10-16: the HSA-bounded mode switch returns to the build default.
+    const results = [onboardingOwner.clear().ok, appointmentNotes.clear().ok, clearMedicineInfoLocalState(), resetHsaBoundedModeLocalState()];
     return results.every(Boolean);
   }, [appointmentNotes, repository, onboardingRepositoryFactory]);
   clearLocalStateOwnersRef.current = clearLocalStateOwners;
@@ -893,6 +1009,8 @@ export function JagaOnApp({
             recordDeletion={runtime?.recordDeletion}
             onRecordDeleted={() => void refreshToday()}
             onOpenHistory={() => switchTab("HISTORY")}
+            careNudges={careNudges}
+            notice={notice}
           />
         );
       case "LOG_GLUCOSE":
@@ -943,6 +1061,17 @@ export function JagaOnApp({
             onCommitted={refreshToday}
           />
         );
+      case "RECORD_ACTIVITY":
+        if (!runtime) return <p role="status">{messages.shared.loading}</p>;
+        return (
+          <ActivityEntryScreen
+            messages={messages}
+            locale={locale}
+            commandService={runtime.commands}
+            goBack={goBack}
+            onCommitted={refreshToday}
+          />
+        );
       case "MEDICATION_INFORMATION":
         return (
           <MedicationInformationScreen
@@ -950,6 +1079,21 @@ export function JagaOnApp({
             locale={locale}
             fixture={fixture}
             goBack={goBack}
+            addCareQuestion={
+              runtime
+                ? async (text) => {
+                    // Owner decision 2026-10-14: the same save as "Add my own question" in Prepare for my appointment, linked to the
+                    // next recorded appointment when there is one; it starts unticked there.
+                    const visit = await runtime.careOrganisation.query.loadVisitPreparation();
+                    const appointment = visit.status === "READY" ? visit.appointment : null;
+                    const result = await runtime.careOrganisation.commands.createCareQuestion({
+                      questionText: { text, language: "und" },
+                      ...(appointment ? { relatedAppointment: { recordType: "APPOINTMENT", recordId: appointment.recordId, revisionId: appointment.revisionId } } : {}),
+                    });
+                    return result.kind === "COMMITTED";
+                  }
+                : undefined
+            }
           />
         );
       case "NEARBY_FOOD":
@@ -959,6 +1103,7 @@ export function JagaOnApp({
             locale={locale}
             goBack={goBack}
             navigate={navigate}
+            initialAttribute={entry.params?.attribute}
           />
         );
       case "GENERAL_FOOD_INFORMATION":
@@ -1015,8 +1160,11 @@ export function JagaOnApp({
             history={runtime?.history ?? null}
             selection={appointmentNotes}
             explainer={historyExplainer}
+            previewInsights={runtime?.previewInsights ?? null}
           />
         );
+      case "BOOKLET":
+        return <BookletScreen messages={messages} locale={locale} booklet={runtime?.booklet ?? null} />;
       case "MEDICATION_SCHEDULE":
         return (
           <MedicationScheduleScreen
@@ -1045,6 +1193,8 @@ export function JagaOnApp({
             query={runtime.careOrganisation.query}
             commands={runtime.careOrganisation.commands}
             onPreview={prepareSummary}
+            overviewPeriod={overviewPeriod}
+            onOverviewPeriodChange={setOverviewPeriod}
           />
         );
       case "CARE_SUMMARY_PREVIEW":
@@ -1061,6 +1211,7 @@ export function JagaOnApp({
             onBack={goBack}
             aiWording={careSummaryWording}
             onReplaced={replacePreview}
+            overview={<PeriodOverview messages={messages} locale={locale} query={runtime.careOrganisation.query} choice={overviewPeriod} />}
           />
         );
       case "DATA_BACKUP":
@@ -1093,12 +1244,24 @@ export function JagaOnApp({
           />
         );
       case "MY_NOTES":
-        return <MyNotesScreen messages={messages} />;
+        // Owner decision 2026-10-14 (My notes): the stored notes and the existing permanent deletion of one note.
+        if (!runtime) return <p role="status">{messages.shared.loading}</p>;
+        return <MyNotesScreen messages={messages} locale={locale} notes={runtime.notes ? { query: runtime.notes.query, deletion: runtime.recordDeletion } : undefined} />;
       case "TELL_JAGAON": {
         if (!runtime) return <p role="status">{messages.shared.loading}</p>;
         const voice = runtime.voice;
         // Packet 13 (Q13-6, HELD by the integration gate until the re-review approves): one confirmed fact → the existing command.
-        const saveFact = voice ? createVoiceJournalSave({ commands: runtime.commands, recordMedicationEvent: voice.recordMedicationEvent, now: () => new Date().toISOString() as never }) : null;
+        // Owner decision 2026-10-14 (Tell JagaOn understands more): a feeling saved as a note goes to the personal-note service, an
+        // activity to the existing activity command.
+        const saveFact = voice
+          ? createVoiceJournalSave({
+              commands: runtime.commands,
+              recordMedicationEvent: voice.recordMedicationEvent,
+              recordActivity: runtime.commands.recordActivity,
+              notes: runtime.notes?.commands,
+              now: () => new Date().toISOString() as never,
+            })
+          : null;
         return (
           <TellJagaOnScreen
             messages={messages}
@@ -1107,6 +1270,7 @@ export function JagaOnApp({
             // Web Speech: the production provider choice, or the injected single-provider path (tests, harness).
             checkAvailability={legacyVoice ? legacyAvailability : undefined}
             resolveProvider={legacyVoice ? undefined : resolveVoiceProvider}
+            voiceLimitFallback={legacyVoice ? undefined : voiceLimitFallback}
             loadTranscriber={legacyVoice ? loadLegacyTranscriber : loadProviderTranscriber}
             onSessionActivity={setVoiceSessionActive}
             terminology={voice?.terminology ?? UNAVAILABLE_TERMINOLOGY}
@@ -1120,7 +1284,12 @@ export function JagaOnApp({
             onSaveFacts={saveFact ? createVoiceSaveWithRefresh(saveFact, refreshToday) : async () => ({ kind: "NOT_SAVED" as const })}
             // Finding N-1: a card or the chooser opens that existing entry screen blank (no parameters, nothing carried over); Back to Today
             // is a separate exit to the Today tab.
-            onManualEntry={(kind) => navigate(kind === "GLUCOSE" ? "LOG_GLUCOSE" : kind === "MEAL" ? "LOG_MEAL" : "MEDICATION_SCHEDULE")}
+            onManualEntry={(kind) => navigate(MANUAL_ENTRY_SCREENS[kind])}
+            // Owner decision 2026-10-14 (design §3.1 steps 4–7): "Talk it through" opens the feelings chat; the note goes to the
+            // personal-note service and her doctor question to the existing care-question command (linked to the next appointment).
+            feelingsChat={runtime.notes ? { chat: feelingsChatPort, ...createFeelingsChatStorage({ notes: runtime.notes.commands, careOrganisation: runtime.careOrganisation }) } : undefined}
+            // HSA preview (owner decision 2026-10-14): the medicine information card's "Open in My medicines".
+            onOpenMyMedicines={() => navigate("MY_MEDICINES")}
             onClose={() => switchTab("TODAY")}
           />
         );
@@ -1247,8 +1416,10 @@ export function JagaOnApp({
         onBack={goBack}
         onSwitchTab={switchTab}
       >
+        {preparingSample ? <Banner>{messages.onboarding.preparingSample}</Banner> : null}
         {renderScreen()}
       </AppShell>
+      {newUserWelcome ? <NewUserWelcomeDialog messages={messages} name={newUserWelcome.name} onClose={() => setNewUserWelcome(null)} /> : null}
     </>
   );
 }

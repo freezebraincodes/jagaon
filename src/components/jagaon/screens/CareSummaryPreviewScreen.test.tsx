@@ -552,7 +552,9 @@ describe("Care-summary preview: AI wording action (Packet 11C B4b)", () => {
     await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
     expect(calls[0]!.input).toMatchObject({ snapshotRef: { recordId }, locale: "en-SG", disclosure: "DECLINED" });
     act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "REQUEST_CANCELLED" }));
-    expect(await screen.findByText(en.ai.remoteNotAccepted)).toBeTruthy();
+    await act(async () => undefined);
+    // Owner decision 2026-10-16 (temporary): no "AI wording was not used" line after Cancel; the summary simply stays as it is.
+    expect(screen.queryByText(en.ai.remoteNotAccepted)).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByText(en.ai.careSummary.resultTitle)).toBeNull();
     expect(screen.queryByRole("button", { name: en.ai.retry })).toBeNull();
@@ -1084,7 +1086,8 @@ describe("Care-summary preview: AI credit limit (Owner decision 2026-10-12, AI c
     act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "REMOTE_USE_DECLINED", remoteUse: "CREDIT_LIMIT_REACHED" }));
     await act(async () => undefined);
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(await screen.findByText(en.ai.remoteNotAccepted)).toBeTruthy();
+    // Owner decision 2026-10-16 (temporary): no "AI wording was not used" line after Cancel.
+    expect(screen.queryByText(en.ai.remoteNotAccepted)).toBeNull();
   });
 });
 
@@ -1152,3 +1155,63 @@ describe("Care-summary preview over the real wiring: optional passcode and AI cr
   });
 });
 
+describe("Care-summary preview: overview and “Show on screen” (owner decision 2026-10-16)", () => {
+  it("shows the period overview above the summary", async () => {
+    const { h, recordId } = await prepared();
+    render(
+      <CareSummaryPreviewScreen
+        messages={en}
+        locale="en-SG"
+        recordId={recordId}
+        query={h.query}
+        commands={h.service}
+        print={{ print: vi.fn(async () => "DIALOG_OPENED" as const) }}
+        onBack={vi.fn()}
+        overview={<section aria-label="overview">In the last 30 days you logged 1 glucose reading.</section>}
+      />,
+    );
+    const document = await screen.findByRole("article");
+    const overview = screen.getByRole("region", { name: "overview" });
+    expect(overview.compareDocumentPosition(document) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  }, 60_000);
+
+  it("offers “Show on screen” only once approved, shows the same summary read-only in large type, and closes back to the preview", async () => {
+    const { h, recordId } = await prepared();
+    const print = { print: vi.fn(async () => "DIALOG_OPENED" as const) };
+    renderPreview(h, recordId, { print });
+    await screen.findByRole("article");
+    expect(screen.queryByRole("button", { name: en.careSummary.showOnScreen })).toBeNull();
+    await approveWhenPreviewed(en.careSummary.approveAction);
+    const show = await screen.findByRole("button", { name: en.careSummary.showOnScreen });
+    const printedText = screen.getByRole("article").textContent;
+    fireEvent.click(show);
+
+    const dialog = await screen.findByRole("dialog", { name: en.careSummary.showOnScreen });
+    expect(dialog.className).toContain("care-summary-onscreen");
+    expect(within(dialog).getByRole("article").textContent).toBe(printedText);
+    expect(within(dialog).getByText(en.careSummary.showOnScreenNote)).toBeTruthy();
+    // Read-only: nothing to approve, print or edit, only Close.
+    expect(within(dialog).getAllByRole("button").map((button) => button.textContent)).toEqual([en.careSummary.closeShowOnScreen]);
+    expect(screen.queryByRole("button", { name: en.careSummary.printAction })).toBeNull();
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: en.careSummary.closeShowOnScreen }));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: en.careSummary.closeShowOnScreen }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: en.careSummary.showOnScreen }));
+    expect(screen.getByRole("button", { name: en.careSummary.printAction })).toBeTruthy();
+
+    // Escape also closes it; showing it records no print attempt.
+    fireEvent.click(screen.getByRole("button", { name: en.careSummary.showOnScreen }));
+    fireEvent.keyDown(await screen.findByRole("dialog"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(print.print).not.toHaveBeenCalled();
+    expect(await exportStates(h, recordId)).toEqual([]);
+  }, 60_000);
+
+  it("names “Show on screen” in zh-SG", async () => {
+    const { h, recordId } = await prepared("zh-SG");
+    renderPreview(h, recordId, { locale: "zh-SG" });
+    await approveWhenPreviewed(zh.careSummary.approveAction);
+    expect(await screen.findByRole("button", { name: zh.careSummary.showOnScreen })).toBeTruthy();
+  }, 60_000);
+});

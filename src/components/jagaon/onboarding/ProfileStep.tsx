@@ -8,7 +8,6 @@ import { Button } from "../primitives/Button";
 import { InputField } from "../primitives/Field";
 import { ChevronRightIcon, LanguageIcon, ShieldIcon } from "../primitives/Icons";
 import { Notice } from "../primitives/ScreenHeader";
-import { LanguageChoice } from "./LanguageChoice";
 
 type ProfileStepProps = {
   messages: AppMessages;
@@ -46,7 +45,7 @@ export function ProfileStep({
         autoComplete="off"
         onChange={(e) => setName(e.target.value)}
       />
-      <LanguageChoice messages={messages} locale={locale} onChange={(next) => onLocaleChange(next, name)} />
+      {/* Owner decision 2026-10-16: the demo is English only, so the language choice is hidden during setup. */}
       {languageSwitched ? (
         <Notice icon={<LanguageIcon size={20} />} className="notice--status">
           <p>{msg.languageSwitched(languageName)}</p>

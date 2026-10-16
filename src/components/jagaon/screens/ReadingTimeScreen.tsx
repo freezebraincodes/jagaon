@@ -25,7 +25,13 @@ import {
   singaporeWallClockToInstant,
   toSingaporeParts,
 } from "../journal/singapore-time";
-import { storedGlucoseContextLabel } from "../journal/glucose-context";
+import {
+  GLUCOSE_CONTEXT_CHOICES,
+  glucoseContextChoiceLabel,
+  storedGlucoseContextLabel,
+  toGlucoseContextPayload,
+  type GlucoseContextChoice,
+} from "../journal/glucose-context";
 
 type ReadingTimeScreenProps = {
   messages: AppMessages;
@@ -42,6 +48,13 @@ type DayChoice = "TODAY" | "YESTERDAY" | "OTHER";
 function storedContextCode(record: GlucoseRecordViewModel): string {
   const context = record.payload.context;
   return context.kind === "PATIENT_SELECTED_SLOT" ? context.slot : context.kind;
+}
+
+/** The "When was this test?" chip for a stored context, or null when the record has none of them (it then stays as recorded). */
+function storedContextChoice(record: GlucoseRecordViewModel): GlucoseContextChoice | null {
+  const code = storedContextCode(record);
+  if (code === "OTHER") return "JUST_CHECKING";
+  return (GLUCOSE_CONTEXT_CHOICES as readonly string[]).includes(code) ? (code as GlucoseContextChoice) : null;
 }
 
 export function ReadingTimeScreen({
@@ -61,6 +74,8 @@ export function ReadingTimeScreen({
   const [notSaved, setNotSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [record, setRecord] = useState<GlucoseRecordViewModel | null>(null);
+  // Owner decision 2026-10-16: the edit also changes "When was this test?". Null keeps the stored context unchanged.
+  const [context, setContext] = useState<GlucoseContextChoice | null>(null);
   const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
@@ -73,6 +88,7 @@ export function ReadingTimeScreen({
           return;
         }
         setRecord(loaded);
+        setContext(storedContextChoice(loaded));
         const occurrence = loaded.temporal.occurrence;
         if (occurrence.kind === "EXACT") {
           const local = toSingaporeParts(occurrence.instantUtc);
@@ -124,7 +140,7 @@ export function ReadingTimeScreen({
       recordId: record.recordId,
       expectedRevisionId: record.revisionId,
       expectedRevisionNumber: record.revisionNumber,
-      payload: record.payload,
+      payload: context === null ? record.payload : { ...record.payload, context: toGlucoseContextPayload(context) },
       temporal: exactSingaporeOccurrence(instant),
       recordedAt: new Date().toISOString() as Instant,
     });
@@ -150,7 +166,7 @@ export function ReadingTimeScreen({
 
   return (
     <div className="screen-page journal-entry-screen reading-time-screen">
-      <ScreenHeader title={messages.glucose.whenQuestion} />
+      <ScreenHeader title={msg.editTitle} />
 
       {saved ? <Banner variant="success">{msg.saved}</Banner> : null}
       {notSaved ? <Banner variant="error">{messages.shared.notSaved}</Banner> : null}
@@ -176,6 +192,19 @@ export function ReadingTimeScreen({
       </div>
 
       <form onSubmit={handleSubmit} className="entry-form" noValidate>
+        <ChoiceGroup
+          legend={messages.glucose.whenQuestion}
+          options={GLUCOSE_CONTEXT_CHOICES.map((choice) => ({
+            value: choice,
+            label: glucoseContextChoiceLabel(messages, choice),
+          }))}
+          value={context}
+          onChange={(next) => {
+            setContext(next);
+            setSaved(false);
+          }}
+        />
+
         <ChoiceGroup<DayChoice>
           legend={msg.whichDay}
           variant="segmented"

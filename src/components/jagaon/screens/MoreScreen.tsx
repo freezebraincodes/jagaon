@@ -7,6 +7,7 @@ import {
   CalendarCheckIcon,
   ChevronRightIcon,
   ClipboardIcon,
+  ClockIcon,
   LifebuoyIcon,
   LockIcon,
   PencilIcon,
@@ -62,6 +63,15 @@ export function MoreScreen({ messages, navigate, ...settings }: MoreScreenProps)
           </button>
         </div>
 
+        {/* Owner decision 2026-10-16: the Medication schedule moved here from the Booklet tab. */}
+        <button type="button" className="more-row" onClick={() => navigate("MEDICATION_SCHEDULE")}>
+          <ClockIcon size={30} className="icon more-row-icon" />
+          <span className="more-row-text">
+            <span className="more-row-label">{messages.schedule.title}</span>
+            <span className="more-row-body">{messages.booklet.scheduleRowBody}</span>
+          </span>
+          <ChevronRightIcon size={22} className="icon more-row-chevron" />
+        </button>
         <button type="button" className="more-row" onClick={() => navigate("NEARBY_FOOD")}>
           <BookIcon size={30} className="icon more-row-icon" />
           <span className="more-row-text">

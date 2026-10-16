@@ -122,20 +122,25 @@ describe("Packet 7A public exports and manifests", () => {
     expect(JAGAON_TABLE_NAMES).toHaveLength(16);
     // Packet 10 freeze Section 5: Dexie 2 keeps the same 16 stores.
     expect(JAGAON_DEXIE_VERSION).toBe(2);
-    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MEDICATION_SCHEDULE", "HISTORY", "MORE"]);
+    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "BOOKLET", "HISTORY", "MORE"]);
     // Packet 9B adds PREVENTIVE_CARE and CARE_PREPARATION; 9C adds CARE_SUMMARY_PREVIEW.
     // Packet 10 adds exactly DATA_BACKUP. The voice slice adds exactly TELL_JAGAON (a child screen reached from Today).
     // Owner decision 2026-10-12: My notes adds exactly MY_NOTES (reached from More).
-    expect(ALL_SCREENS.size).toBe(20);
+    // Owner request 2026-10-16: Record an activity adds exactly RECORD_ACTIVITY.
+    // Owner decision 2026-10-16: the Booklet table adds exactly BOOKLET.
+    expect(ALL_SCREENS.size).toBe(22);
     expect(ALL_SCREENS.has("MY_NOTES")).toBe(true);
+    expect(ALL_SCREENS.has("RECORD_ACTIVITY")).toBe(true);
     expect(ALL_SCREENS.has("TELL_JAGAON")).toBe(true);
     expect(HISTORY_PERIODS).toEqual(["THIS_WEEK", "LAST_WEEK", "THIRTY_DAYS"]);
   });
 
   it("ships every 07a copy-matrix row and typed label in both locales", () => {
     const keys = Object.keys(getMessages("en-SG").history).sort();
-    // 54 Packet 7A rows, plus the one Packet 11C Task 7 group `explanation` (pinned in bilingual-evidence.test.ts).
-    expect(keys.filter((key) => key !== "explanation")).toHaveLength(54);
+    // 54 Packet 7A rows (55 with `positionLegend`, owner decision 2026-10-16), plus the Packet 11C Task 7 group `explanation` (pinned
+    // in bilingual-evidence.test.ts) and the owner's 2026-10-16 `notice` and `trends` groups (pinned in NoticeTrends.test.tsx) and
+    // `chartReadout` group (pinned in HistoryReadingsChart.test.tsx).
+    expect(keys.filter((key) => !["explanation", "notice", "trends", "chartReadout"].includes(key))).toHaveLength(55);
     expect(keys).toContain("explanation");
     expect(Object.keys(getMessages("zh-SG").history).sort()).toEqual(keys);
   });

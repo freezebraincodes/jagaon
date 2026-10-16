@@ -113,8 +113,11 @@ describe("bilingual evidence — en-SG and zh-SG parity", () => {
   it("the 11 Packet 6 screens, My medicines, Packet 7A Recorded history, Packet 8 Medication schedule and the Packet 9B care screens are enabled (no Packet 7B or later routes)", () => {
     // Packet 10 adds exactly DATA_BACKUP; the Packet 13 slice adds exactly TELL_JAGAON.
     // Owner decision 2026-10-12: My notes adds exactly MY_NOTES (reached from More).
-    expect(ALL_SCREENS.size).toBe(20);
+    // Owner request 2026-10-16: Record an activity adds exactly RECORD_ACTIVITY (reached from Today and Tell JagaOn).
+    // Owner decision 2026-10-16: the Booklet table adds exactly BOOKLET.
+    expect(ALL_SCREENS.size).toBe(22);
     expect(PACKET_6_ENABLED_SCREENS).toContain("MY_NOTES");
+    expect(PACKET_6_ENABLED_SCREENS).toContain("RECORD_ACTIVITY");
     expect(PACKET_6_ENABLED_SCREENS).toContain("TELL_JAGAON");
     expect(PACKET_6_ENABLED_SCREENS).toContain("CARE_SUMMARY_PREVIEW");
     expect(PACKET_6_ENABLED_SCREENS).toContain("PREVENTIVE_CARE");
@@ -161,17 +164,28 @@ describe("catalogue wording boundaries", () => {
       /lower gi/i, /healthier/i, /recommended dose/i,
     ];
     const chineseProhibited = [/漏服/, /漏用/, /立即服用/, /过期未/, /风险/, /诊断/, /您应该/, /偏高了/, /偏低了/, /低GI/i, /较健康/];
+    // HSA-bounded mode (owner decision 2026-10-14): the `hsa*` blocks are PREVIEW copy, shown only while the mode is off, and may
+    // use wording beyond the wellness boundary (for example "healthier places"). They are checked by the hard-line test below instead.
+    const isPreviewKey = (key: string) => key.startsWith("hsa");
     for (const [key, text] of entries(getMessages("en-SG"))) {
-      if (DENIAL_SENTENCES.has(key) || SOURCE_NAME_KEYS.has(key)) continue;
+      if (DENIAL_SENTENCES.has(key) || SOURCE_NAME_KEYS.has(key) || isPreviewKey(key)) continue;
       for (const pattern of englishProhibited) expect(text, key).not.toMatch(pattern);
     }
     for (const [key, text] of entries(getMessages("zh-SG"))) {
-      if (DENIAL_SENTENCES.has(key) || SOURCE_NAME_KEYS.has(key)) continue;
+      if (DENIAL_SENTENCES.has(key) || SOURCE_NAME_KEYS.has(key) || isPreviewKey(key)) continue;
       for (const pattern of chineseProhibited) expect(text, key).not.toMatch(pattern);
     }
     // The exempted source name is pinned exactly so it cannot drift into a claim.
     expect(getMessages("en-SG").food.governedDatasetSource).toBe("HPB Healthier Dining Partners \u00b7 data.gov.sg");
     expect(getMessages("zh-SG").food.governedDatasetSource).toBe("保健促进局较健康餐饮伙伴 · data.gov.sg");
+  });
+
+  it("keeps PREVIEW copy within the hard lines that hold whatever the HSA-bounded mode (owner decision 2026-10-14)", () => {
+    // No dosing, take-now, double-up or medication-change wording, and no diagnosis, in any preview block.
+    const hardLines = [/take now/i, /take it now/i, /double (up|dose)/i, /recommended dose/i, /catch[- ]up/i, /you should/i, /diagnos/i];
+    const preview = entries(getMessages("en-SG")).filter(([key]) => key.startsWith("hsa"));
+    expect(preview.length).toBeGreaterThan(0);
+    for (const [key, text] of preview) for (const pattern of hardLines) expect(text, key).not.toMatch(pattern);
   });
 
   it("keeps each denial sentence a denial in both locales", () => {
@@ -204,7 +218,7 @@ describe("catalogue wording boundaries", () => {
     for (const locale of ["en-SG", "zh-SG"] as const) {
       const msg = getMessages(locale).onboarding;
       expect(msg.directionsFor("Oxatril (demo)")).toContain("Oxatril (demo)");
-      expect(msg.removeBody("Nocturin pen (demo)")).toContain("Nocturin pen (demo)");
+      expect(msg.removeBody("Lantus (demo)")).toContain("Lantus (demo)");
       expect(msg.editNamed("陈女士（示例）")).toContain("陈女士（示例）");
     }
   });

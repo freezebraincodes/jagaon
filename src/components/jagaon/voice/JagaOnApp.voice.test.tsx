@@ -243,6 +243,7 @@ describe.each(["en-SG", "zh-SG"] as const)("Tell JagaOn manual-entry chooser (N-
   const DESTINATIONS: ReadonlyArray<readonly [string, string]> = [
     [copy.review.manualReading, m.today.recordReading],
     [copy.review.manualMeal, m.meal.screenTitle],
+    [m.activityEntry.screenTitle, m.activityEntry.screenTitle],
     [copy.review.manualMedicine, m.schedule.title],
   ];
 
@@ -257,7 +258,7 @@ describe.each(["en-SG", "zh-SG"] as const)("Tell JagaOn manual-entry chooser (N-
           await reach(app);
           expect(await screen.findByText(proof, {}, { timeout: 30_000 }), state).toBeInTheDocument();
           const chooser = screen.getByRole("region", { name: copy.review.manualHeading });
-          expect(within(chooser).getByRole("heading", { level: 2 }), state).toHaveTextContent(locale === "en-SG" ? "Type another entry" : "输入其他内容");
+          expect(within(chooser).getByRole("heading", { level: 2 }), state).toHaveTextContent(locale === "en-SG" ? "Add another entry" : "添加其他记录");
           const loads = app.control.loads;
           if (heading === null) {
             // Back to Today is a separate exit, outside the chooser.
@@ -270,9 +271,14 @@ describe.each(["en-SG", "zh-SG"] as const)("Tell JagaOn manual-entry chooser (N-
             if (heading === m.today.recordReading) {
               expect((screen.getByRole("textbox", { name: new RegExp(`^${m.glucose.valueLabel}`) }) as HTMLInputElement).value).toBe("");
             }
+            if (heading === m.activityEntry.screenTitle) {
+              // Record an activity opens blank: nothing chosen, no words carried over from the transcript.
+              expect((screen.getByRole("textbox", { name: new RegExp(`^${m.activityEntry.labelField}`) }) as HTMLInputElement).value).toBe("");
+              expect(screen.getAllByRole("radio").filter((radio) => (radio as HTMLInputElement).checked)).toHaveLength(0);
+            }
             if (heading === m.schedule.title) {
               // Medication schedule keeps the person's existing medicines (it is not cleared).
-              expect(await screen.findAllByText(/Nocturin pen/, {}, { timeout: 30_000 })).not.toHaveLength(0);
+              expect(await screen.findAllByText(/Lantus/, {}, { timeout: 30_000 })).not.toHaveLength(0);
             }
             await homeViaTabs();
           }
@@ -336,7 +342,7 @@ describe.each(["en-SG", "zh-SG"] as const)("Tell JagaOn manual-entry chooser (N-
       fireEvent.click(screen.getByRole("button", { name: copy.review.discard }));
       expect(await screen.findByText(copy.state.doneSaved)).toBeInTheDocument();
       // The owner's single chooser heading (2026-10-11), the same on every screen that shows the chooser.
-      expect(copy.review.manualHeading).toBe(locale === "en-SG" ? "Type another entry" : "输入其他内容");
+      expect(copy.review.manualHeading).toBe(locale === "en-SG" ? "Add another entry" : "添加其他记录");
       const chooser = screen.getByRole("region", { name: copy.review.manualHeading });
       fireEvent.click(within(chooser).getByRole("button", { name: copy.review.manualReading }));
       expect(await screen.findByRole("heading", { level: 1, name: m.today.recordReading })).toBeInTheDocument();

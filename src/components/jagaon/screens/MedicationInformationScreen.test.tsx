@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-fixture";
 import { getMessages } from "@/i18n/get-messages";
@@ -31,7 +31,9 @@ describe("MedicationInformationScreen", () => {
         name: messages.medication.recordedHeading,
       });
 
-      expect(reviewed).toHaveTextContent(messages.shared.reviewedOn("2026-10-02"));
+      // Each leaflet carries its own review date: glargine 2026-10-02, glulisine (Apidra) 2026-10-14.
+      const reviewedDate = prescription.medicationId === "insulin-glulisine" ? "2026-10-14" : "2026-10-02";
+      expect(reviewed).toHaveTextContent(messages.shared.reviewedOn(reviewedDate));
       expect(within(reviewed).getByRole("link", { name: `${messages.shared.source}: HealthHub` }))
         .toHaveAttribute("href", expect.stringContaining("healthhub.sg"));
       expect(recorded).toHaveTextContent(prescription.recordedDirection!);
@@ -146,6 +148,38 @@ describe("MedicationInformationScreen", () => {
     expect(history).toHaveTextContent(messages.onboarding.sourcePrescriptionLabel);
     expect(screen.getByText(messages.medication.generalLimit)).toBeInTheDocument();
   });
+  it("adds her own question for the doctor or pharmacist to Prepare for my appointment (owner decision 2026-10-14)", async () => {
+    const fixture = createDemoScenarioFixture();
+    const messages = getMessages("en-SG");
+    const addCareQuestion = vi.fn(async (_text: string) => true);
+    render(<MedicationInformationScreen messages={messages} locale="en-SG" fixture={fixture} goBack={vi.fn()} addCareQuestion={addCareQuestion} />);
+    const medicine = screen.getByRole("article", { name: fixture.recordedPrescriptions[0]!.displayName });
+    const actions = within(medicine).getByRole("region", { name: messages.medication.actionsTag });
+    const add = within(actions).getByRole("button", { name: messages.medication.addQuestion });
+    expect(add).toBeEnabled();
+    expect(add).not.toHaveAccessibleDescription(messages.today.futureFeature);
+    fireEvent.click(add);
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(messages.carePreparation.questionLabel), { target: { value: "  Can I take this before my walk?  " } });
+    fireEvent.click(within(dialog).getByRole("button", { name: messages.shared.save }));
+    await waitFor(() => expect(addCareQuestion).toHaveBeenCalledWith("Can I take this before my walk?"));
+    expect(await within(actions).findByText(messages.medication.questionAdded)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("keeps the question dialog open and reports a failed save", async () => {
+    const fixture = createDemoScenarioFixture();
+    const messages = getMessages("en-SG");
+    render(<MedicationInformationScreen messages={messages} locale="en-SG" fixture={fixture} goBack={vi.fn()} addCareQuestion={vi.fn(async () => false)} />);
+    const medicine = screen.getByRole("article", { name: fixture.recordedPrescriptions[0]!.displayName });
+    fireEvent.click(within(medicine).getByRole("button", { name: messages.medication.addQuestion }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(messages.carePreparation.questionLabel), { target: { value: "Is this the right pen?" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: messages.shared.save }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+    expect(screen.queryByText(messages.medication.questionAdded)).toBeNull();
+  });
+
   it("shows unknown setup facts as unknown and no reviewed content for free text", () => {
     const source = createDemoScenarioFixture();
     const messages = getMessages("en-SG");

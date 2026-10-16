@@ -2,9 +2,8 @@
 
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import { Button } from "../primitives/Button";
-import { DeviceIcon, ChevronRightIcon, BookletIcon } from "../primitives/Icons";
+import { DeviceIcon, ChevronRightIcon, BookletIcon, InfoIcon } from "../primitives/Icons";
 import { Notice } from "../primitives/ScreenHeader";
-import { LanguageChoice } from "./LanguageChoice";
 
 type WelcomeScreenProps = {
   messages: AppMessages;
@@ -14,8 +13,12 @@ type WelcomeScreenProps = {
   onPrepared: () => void;
 };
 
-/** Frame 14. */
-export function WelcomeScreen({ messages, locale, onLocaleChange, onStart, onPrepared }: WelcomeScreenProps) {
+/**
+ * Frame 14. Owner decision 2026-10-16: the demo is English only, so the language choice is hidden here; in its place, a highlight card
+ * in the middle of the screen explains which start to choose (a new, empty booklet through setup, or the prepared profile with sample
+ * records).
+ */
+export function WelcomeScreen({ messages, onStart, onPrepared }: WelcomeScreenProps) {
   const msg = messages.onboarding;
   return (
     <div className="onboarding-page onboarding-page--spread">
@@ -28,10 +31,22 @@ export function WelcomeScreen({ messages, locale, onLocaleChange, onStart, onPre
         </p>
         <h1 className="onboarding-title">{msg.welcomeTitle}</h1>
         <p className="onboarding-lead">{msg.welcomeBody}</p>
-        <div className="onboarding-card">
-          <LanguageChoice messages={messages} locale={locale} onChange={onLocaleChange} />
-        </div>
       </div>
+      <section className="welcome-choice-card" aria-labelledby="welcome-choice-title">
+        <h2 id="welcome-choice-title" className="welcome-choice-title">
+          <InfoIcon size={22} aria-hidden="true" />
+          {msg.choiceTitle}
+        </h2>
+        <ul className="welcome-choice-list">
+          <li>
+            <strong>{msg.startSetup}:</strong> {msg.choiceSetup}
+          </li>
+          <li>
+            <strong>{msg.usePrepared}:</strong> {msg.choicePrepared}
+          </li>
+        </ul>
+        <p className="welcome-choice-tip">{msg.choiceTip}</p>
+      </section>
       <div className="onboarding-actions">
         <Button variant="primary" className="btn-hero" onClick={onStart}>
           <ChevronRightIcon size={24} />

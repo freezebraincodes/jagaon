@@ -11,9 +11,9 @@ import {
 
 const medicine: DemoOnboardingMedicine = {
   id: "11111111-1111-4111-8111-111111111111",
-  catalogueKey: "nocturin-pen-demo",
-  enteredName: "Nocturin pen",
-  displayName: "Nocturin pen",
+  catalogueKey: "lantus-demo",
+  enteredName: "Lantus",
+  displayName: "Lantus",
   genericName: "insulin glargine",
   form: "Pre-filled pen",
   strength: null,
@@ -123,7 +123,7 @@ describe("demo onboarding contracts", () => {
 
   it("rejects unsupported catalogue keys and reviewed content that does not match the catalogue", () => {
     rejects({ ...valid, medicines: [{ ...medicine, catalogueKey: "demo-glargine" }] });
-    rejects({ ...valid, medicines: [{ ...medicine, reviewedContentKey: "insulin-aspart" }] });
+    rejects({ ...valid, medicines: [{ ...medicine, reviewedContentKey: "insulin-glulisine" }] });
     rejects({ ...valid, medicines: [{ ...medicine, genericName: "demo-glargine" }] });
     rejects({
       ...valid,

@@ -5,6 +5,7 @@ import { type AppMessages, type SupportedLocale } from "@/i18n/types";
 import { Banner, ToggleGroup } from "../primitives/Card";
 import type { DeleteAllPort } from "../data/data-ports";
 import { DeleteAllDialog } from "../data/DeleteAllDialog";
+import { HsaBoundedModeSetting } from "../hsa/HsaBoundedModeSetting";
 import {
   ContrastIcon,
   DeviceIcon,
@@ -132,10 +133,8 @@ export function SettingsScreen({
         </span>
         <ToggleGroup
           label={msg.language}
-          options={[
-            { label: msg.english, value: "en-SG" },
-            { label: msg.chinese, value: "zh-SG" },
-          ]}
+          // Owner decision 2026-10-16: the demo is English only; Chinese stays in the code but is not offered.
+          options={[{ label: msg.english, value: "en-SG" }]}
           value={locale}
           onChange={handleLocaleChange}
         />
@@ -165,6 +164,9 @@ export function SettingsScreen({
           />
         </div>
       ) : null}
+
+      {/* Owner decision 2026-10-14: HSA-bounded mode (on by default). */}
+      <HsaBoundedModeSetting messages={messages} />
 
       {/* Owner decision 2026-10-12: hidden until extra contrast exists. */}
       {SHOW_LATER_SETTINGS ? (

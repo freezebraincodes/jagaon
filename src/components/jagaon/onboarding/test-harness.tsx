@@ -92,9 +92,9 @@ export const persistedWithMedicine: DemoOnboardingStateV1 = {
   medicines: [
     {
       id: "44444444-4444-4444-8444-444444444444",
-      catalogueKey: "nocturin-pen-demo",
-      enteredName: "Nocturin pen",
-      displayName: "Nocturin pen",
+      catalogueKey: "lantus-demo",
+      enteredName: "Lantus",
+      displayName: "Lantus",
       genericName: "insulin glargine",
       form: null,
       strength: null,

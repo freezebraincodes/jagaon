@@ -24,10 +24,12 @@ import {
 } from "../primitives/Icons";
 import { HistoryReadingsChart } from "../history/HistoryReadingsChart";
 import { HistoryFactsCard, type HistoryFact } from "../history/HistoryFactsCard";
-import { BookletStamps } from "../history/BookletStamps";
 import { formatDateRange, formatList, formatPosition } from "../history/history-format";
 import { PatternExplanationPanel, type PatternExplainerPort, type PatternExplanationResult } from "../history/PatternExplanationPanel";
 import { AiDisclosureDialog } from "../ai/AiDisclosureDialog";
+import { HabitTrendPreviewCard } from "../history/HabitTrendPreviewCard";
+import { TrendsCard } from "../history/TrendsCard";
+import type { PreviewInsightsQueryPort } from "@/application/preview/preview-insights-contracts";
 
 type Props = {
   messages: AppMessages;
@@ -39,6 +41,11 @@ type Props = {
    * no source projection is probed.
    */
   explainer?: PatternExplainerPort | null;
+  /**
+   * HSA-bounded mode PREVIEW (owner decision 2026-10-14): read only while the mode is off, for the "What changed alongside" card.
+   * Without it (or while the mode is on) History is unchanged.
+   */
+  previewInsights?: PreviewInsightsQueryPort | null;
 };
 
 /**
@@ -69,7 +76,7 @@ const UNIT = "mmol/L";
  * reading by period); it describes the records, never a cause, and leaves
  * the 7A fact text unchanged.
  */
-export function RecordedHistoryScreen({ messages, locale, history, selection, explainer = null }: Props) {
+export function RecordedHistoryScreen({ messages, locale, history, selection, explainer = null, previewInsights = null }: Props) {
   const msg = messages.history;
   const [period, setPeriod] = useState<HistoryPeriod>("THIS_WEEK");
   const [view, setView] = useState<RecordedHistoryView | null>(null);
@@ -361,13 +368,14 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
     openExplanation(shownDisclosure.factId, "ACCEPTED");
   }, [shownDisclosure, openExplanation]);
 
-  // Packet 11C B4a: an explicit decline is passed with the request (audited REMOTE_USE_DECLINED since C5; nothing is sent).
+  // Owner decision 2026-10-16: Cancel (or Escape) only closes the dialog: nothing is explained, sent or audited, and the comparison stays
+  // as it was. (Packet 11C B4a used to open the standard-wording explanation here; that wording is now only the fallback when an
+  // accepted AI request fails.)
   const cancelDisclosure = useCallback(() => {
     if (!shownDisclosure) return;
     decidedDisclosures.current.add(shownDisclosure);
     setPendingDisclosure(null);
-    openExplanation(shownDisclosure.factId, "DECLINED");
-  }, [shownDisclosure, openExplanation]);
+  }, [shownDisclosure]);
 
   const changePeriod = useCallback(
     (next: HistoryPeriod) => {
@@ -498,12 +506,15 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
           </button>
         </section>
       ) : view.status === "EMPTY" ? (
-        <section className="today-card history-state" aria-labelledby="history-empty-heading">
-          <h2 id="history-empty-heading" className="card-title">
-            {msg.emptyTitle}
-          </h2>
-          <p>{msg.emptyBody}</p>
-        </section>
+        <>
+          <section className="today-card history-state" aria-labelledby="history-empty-heading">
+            <h2 id="history-empty-heading" className="card-title">
+              {msg.emptyTitle}
+            </h2>
+            <p>{msg.emptyBody}</p>
+          </section>
+          <HabitTrendPreviewCard messages={messages} previewInsights={previewInsights} />
+        </>
       ) : projection ? (
         <>
           {view.status === "INSUFFICIENT_EVIDENCE" ? (
@@ -524,6 +535,8 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
               headingId="history-readings-heading"
             />
           </section>
+          {/* Owner decision 2026-10-16: Trends, the period comparison drawn as two labelled bars (before the sentences that state it). */}
+          <TrendsCard messages={messages} locale={locale} comparisons={comparisons} />
           <HistoryFactsCard
             messages={messages}
             rangeText={rangeText}
@@ -575,7 +588,8 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
               {msg.addFacts}
             </button>
           </HistoryFactsCard>
-          <BookletStamps messages={messages} locale={locale} stamps={projection.stamps} />
+          <HabitTrendPreviewCard messages={messages} previewInsights={previewInsights} />
+          {/* Owner decision 2026-10-16: the Booklet stamps card is hidden (the Booklet tab now shows each day's readings in full). */}
           <button
             type="button"
             className="btn btn-outline btn-wide history-select-facts"

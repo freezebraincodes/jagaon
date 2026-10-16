@@ -6,10 +6,10 @@ import {
 } from "./demo-medicine-catalogue";
 
 describe("demo medicine catalogue", () => {
-  it("contains exactly the three fictional display choices, frozen", () => {
+  it("contains exactly the three demo display choices, frozen", () => {
     expect(DEMO_MEDICINE_CATALOGUE.map((entry) => entry.displayName)).toEqual([
-      "Nocturin pen",
-      "Veltora pen",
+      "Lantus",
+      "Apidra",
       "Glucotab",
     ]);
     expect(Object.isFrozen(DEMO_MEDICINE_CATALOGUE)).toBe(true);
@@ -17,14 +17,14 @@ describe("demo medicine catalogue", () => {
   });
 
   it("maps only the exact governed generic identities to reviewed content", () => {
-    expect(findDemoCatalogueEntry("nocturin-pen-demo")).toMatchObject({
+    expect(findDemoCatalogueEntry("lantus-demo")).toMatchObject({
       genericName: "insulin glargine",
       reviewedContentKey: "insulin-glargine",
       form: "PRE_FILLED_PEN",
     });
-    expect(findDemoCatalogueEntry("veltora-pen-demo")).toMatchObject({
-      genericName: "insulin aspart",
-      reviewedContentKey: "insulin-aspart",
+    expect(findDemoCatalogueEntry("apidra-demo")).toMatchObject({
+      genericName: "insulin glulisine",
+      reviewedContentKey: "insulin-glulisine",
       form: "PRE_FILLED_PEN",
     });
     expect(findDemoCatalogueEntry("glucotab-demo")).toMatchObject({
@@ -37,20 +37,20 @@ describe("demo medicine catalogue", () => {
 
   it("never uses mockup-only labels as evidence", () => {
     const text = JSON.stringify(DEMO_MEDICINE_CATALOGUE);
-    expect(text).not.toMatch(/demo-glargine|demo-aspart|\{reviewed/);
+    expect(text).not.toMatch(/demo-glargine|demo-glulisine|\{reviewed/);
   });
 
   it("searches locally and case-insensitively by display or generic name", () => {
     expect(searchDemoMedicineCatalogue("").map((entry) => entry.key)).toHaveLength(3);
-    expect(searchDemoMedicineCatalogue("  NOCTURIN ").map((entry) => entry.key)).toEqual([
-      "nocturin-pen-demo",
+    expect(searchDemoMedicineCatalogue("  LANTUS ").map((entry) => entry.key)).toEqual([
+      "lantus-demo",
     ]);
-    expect(searchDemoMedicineCatalogue("aspart").map((entry) => entry.key)).toEqual([
-      "veltora-pen-demo",
+    expect(searchDemoMedicineCatalogue("glulisine").map((entry) => entry.key)).toEqual([
+      "apidra-demo",
     ]);
-    expect(searchDemoMedicineCatalogue("pen").map((entry) => entry.key)).toEqual([
-      "nocturin-pen-demo",
-      "veltora-pen-demo",
+    expect(searchDemoMedicineCatalogue("insulin").map((entry) => entry.key)).toEqual([
+      "lantus-demo",
+      "apidra-demo",
     ]);
     expect(searchDemoMedicineCatalogue("Oxatril (demo)")).toEqual([]);
   });

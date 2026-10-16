@@ -59,6 +59,7 @@ function confirmDeleteAll(messages: ReturnType<typeof getMessages>) {
   fireEvent.click(dialog.getByRole("button", { name: messages.packet10.deletion.deleteAllAction }));
 }
 import { APPOINTMENT_NOTE_SELECTION_KEY } from "@/application/history/appointment-note-selection";
+import { HSA_BOUNDED_MODE_STORAGE_KEY } from "./hsa/hsa-bounded-mode";
 import {
   createDemoOnboardingRepository,
   createMemoryOnboardingStorage,
@@ -212,6 +213,15 @@ function fakeRuntime(options?: BrowserJournalRuntimeOptions): JagaOnRuntime {
         glucose?.recordId === recordId ? glucose : null,
       ),
     },
+    booklet: {
+      load: vi.fn(async ({ period }: { period: "THIS_WEEK" | "LAST_WEEK" | "THIRTY_DAYS" }) => ({
+        status: "READY" as const,
+        period,
+        today: "2026-10-04" as never,
+        range: { startDate: "2026-09-28" as never, endDate: "2026-10-04" as never },
+        days: [],
+      })),
+    },
     history: {
       load: vi.fn(async ({ period }: { period: "THIS_WEEK" | "LAST_WEEK" | "THIRTY_DAYS" }) => ({
         status: "EMPTY" as const,
@@ -292,6 +302,7 @@ function fakeRuntime(options?: BrowserJournalRuntimeOptions): JagaOnRuntime {
     // Packet 11C Addendum C (C2): the patient's "Keep wording on this device" setting (default off).
     keepWordingOnDevice: { read: vi.fn(async () => false), persist: vi.fn(async (_keepOnDevice: boolean) => undefined), subscribe: vi.fn((_listener: () => void) => () => undefined) },
     resetDemo,
+    seedPreparedDemoWhenEmpty: vi.fn(async () => false),
     aiAudit: { append: vi.fn(async () => undefined) },
     recordDeletion: { prepare: vi.fn(), confirm: vi.fn() },
     backup: { export: vi.fn() },
@@ -553,24 +564,22 @@ describe("JagaOnApp journal integration", () => {
     expect(screen.getByPlaceholderText(en.food.locationPlaceholder)).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
 
-    // Language and reset are part of More (frame 12), not a separate route.
-    fireEvent.click(screen.getByRole("button", { name: en.settings.chinese }));
-    expect(await screen.findByText(zh.settings.languageSaved)).toBeInTheDocument();
-    expect(runtime.persistLocale).toHaveBeenCalledWith("zh-SG");
-    expect(document.documentElement.lang).toBe("zh-SG");
-    expect(screen.getByRole("heading", { level: 1, name: zh.more.title })).toBeInTheDocument();
+    // Language and reset are part of More (frame 12), not a separate route. Owner decision 2026-10-16: the demo is English only, so
+    // Settings offers English alone and the journey stays in English.
+    expect(screen.queryByRole("button", { name: en.settings.chinese })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: en.settings.english })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(zh.more.helpInfo) }));
-    expect(await screen.findByRole("link", { name: new RegExp(zh.help.call995) })).toHaveAttribute("href", "tel:995");
-    expect(screen.getByRole("link", { name: new RegExp(zh.help.nurseFirst) })).toHaveAttribute("href", "tel:62626262");
-    expect(screen.getByRole("link", { name: new RegExp(zh.help.accessibleEmergency) })).toHaveAttribute(
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(en.more.helpInfo) }));
+    expect(await screen.findByRole("link", { name: new RegExp(en.help.call995) })).toHaveAttribute("href", "tel:995");
+    expect(screen.getByRole("link", { name: new RegExp(en.help.nurseFirst) })).toHaveAttribute("href", "tel:62626262");
+    expect(screen.getByRole("link", { name: new RegExp(en.help.accessibleEmergency) })).toHaveAttribute(
       "href",
       "sms:70995",
     );
     expect(screen.queryByText(/1777/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: zh.shared.back }));
+    fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
 
-    confirmDeleteAll(zh);
+    confirmDeleteAll(en);
 
     // Delete-all removes IndexedDB and the onboarding key: setup restarts on a new, unseeded dataset.
     expect(await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle })).toBeInTheDocument();
@@ -678,7 +687,7 @@ describe("JagaOnApp journal integration", () => {
     // Today was never re-queried for a write that did not commit.
     expect(runtime.query.loadToday).toHaveBeenCalledTimes(1);
   });
-  it("opens the Medication schedule from Booklet and Recorded history as top-level destinations", async () => {
+  it("opens the Booklet table and Recorded history as top-level destinations, and the Medication schedule from More", async () => {
     const en = getMessages("en-SG");
     const runtime = fakeRuntime();
     render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} />);
@@ -695,16 +704,26 @@ describe("JagaOnApp journal integration", () => {
     const booklet = within(nav).getByRole("button", { name: en.shared.navBooklet });
     expect(booklet).not.toHaveAttribute("aria-disabled");
     fireEvent.click(booklet);
+    // Owner decision 2026-10-16: Booklet is the paper-diary table; the Medication schedule opens from More as a child screen.
+    expect(await screen.findByRole("heading", { level: 1, name: en.booklet.title })).toBeInTheDocument();
+    expect(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navBooklet })).toHaveAttribute("aria-current", "page");
+    expect(runtime.booklet.load).toHaveBeenCalledWith({ period: "THIS_WEEK" });
+    expect(await screen.findByRole("table", { name: /Readings in mmol\/L/ })).toBeInTheDocument();
+
+    fireEvent.click(within(nav).getByRole("button", { name: en.shared.navMore }));
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(en.schedule.title) }));
     expect(await screen.findByRole("heading", { level: 1, name: en.schedule.title })).toBeInTheDocument();
     expect(await screen.findByText(en.schedule.emptyTitle)).toBeInTheDocument();
-    expect(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navBooklet })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: en.shared.back })).toBeInTheDocument();
     // Scoped to the medicines recorded in the current setup only.
     expect(runtime.medicationSchedule.load).toHaveBeenCalledWith({
       locale: "en-SG",
       medicationRecordIds: expect.arrayContaining(["00000000-0000-4000-8000-000000000101"]),
     });
 
-    const historyTab = within(nav).getByRole("button", { name: en.shared.navHistory });
+    fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
+    await screen.findByRole("heading", { level: 1, name: en.more.title });
+    const historyTab = within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navHistory });
     expect(historyTab).not.toHaveAttribute("aria-disabled");
     fireEvent.click(historyTab);
     expect(await screen.findByRole("heading", { level: 1, name: en.history.title })).toBeInTheDocument();
@@ -801,6 +820,33 @@ describe("JagaOnApp journal integration", () => {
     await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle });
     expect(selectionStorage.getItem(APPOINTMENT_NOTE_SELECTION_KEY)).toBeNull();
   });
+
+  it("resets the HSA-bounded mode switch to the build default on delete-all", async () => {
+    const en = getMessages("en-SG");
+    const store = new Map<string, string>([[HSA_BOUNDED_MODE_STORAGE_KEY, "on"]]);
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+      clear: () => store.clear(),
+    });
+    try {
+      render(
+        <JagaOnApp
+          runtimeFactory={async () => fakeRuntime()}
+          onboardingRepositoryFactory={completed()}
+          deleteAllPortFactory={fakeDeleteAll().factory}
+        />,
+      );
+      await screen.findByRole("button", { name: en.today.recordReading });
+      fireEvent.click(screen.getByRole("button", { name: en.shared.navMore }));
+      confirmDeleteAll(en);
+      await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle });
+      expect(store.has(HSA_BOUNDED_MODE_STORAGE_KEY)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe("JagaOnApp onboarding startup gate", () => {
@@ -846,7 +892,7 @@ describe("JagaOnApp onboarding startup gate", () => {
     start(onboardingStorage({ ...createPreparedOnboardingState("zh-SG", NOW), preferredName: "陈女士（示例）" }));
     expect(await screen.findByRole("heading", { level: 1, name: zh.today.greeting("陈女士（示例）") })).toBeInTheDocument();
     expect(screen.getByRole("navigation")).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Nocturin pen" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Lantus" })).toBeInTheDocument();
   });
 
   it("opens a neutral Today with no medicines after an explicit skip, and adds one from there", async () => {
@@ -868,16 +914,16 @@ describe("JagaOnApp onboarding startup gate", () => {
     fireEvent.click(screen.getByRole("button", { name: en.onboarding.addMedicine }));
     expect(screen.getByRole("heading", { level: 1, name: en.medication.screenTitle })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: en.onboarding.addMedicine }));
-    fireEvent.click(screen.getByRole("radio", { name: /Veltora pen/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Apidra/ }));
     fireEvent.click(screen.getByRole("button", { name: en.shared.continue }));
     fireEvent.click(screen.getByRole("button", { name: en.onboarding.saveRecorded }));
     expect(screen.getByRole("heading", { level: 1, name: en.medication.screenTitle })).toBeInTheDocument();
     const saved = JSON.parse(storage.storage.getItem(DEMO_ONBOARDING_STORAGE_KEY)!);
     expect(saved).toMatchObject({ status: "COMPLETED" });
-    expect(saved.medicines[0]).toMatchObject({ displayName: "Veltora pen", reviewedContentKey: "insulin-aspart" });
+    expect(saved.medicines[0]).toMatchObject({ displayName: "Apidra", reviewedContentKey: "insulin-glulisine" });
 
     fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
-    expect(screen.getByRole("group", { name: "Veltora pen" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Apidra" })).toBeInTheDocument();
   });
 
   it("enters the journal from completion and hands Review my medicines to My medicines", async () => {
@@ -1160,6 +1206,40 @@ describe("durable local-state cleanup across app instances (Corrective Pass C)",
     expect(dev.disk.exists).toBe(false);
   });
 
+  it("opens a new device empty, explains the two starts, and welcomes a new user once after their own setup (owner decision 2026-10-16)", async () => {
+    const dev = device(false);
+    mount(dev, ownerStorage({}, false), ownerStorage({}, false));
+    await welcome();
+    // The highlight card says which start to choose.
+    const card = screen.getByRole("region", { name: en.onboarding.choiceTitle });
+    expect(card).toHaveTextContent(`${en.onboarding.startSetup}: ${en.onboarding.choiceSetup}`);
+    expect(card).toHaveTextContent(`${en.onboarding.usePrepared}: ${en.onboarding.choicePrepared}`);
+    expect(card).toHaveTextContent(en.onboarding.choiceTip);
+    // A new device's dataset is created without the sample records; only the prepared profile adds them.
+    await waitFor(() => expect(dev.runtimeFactory).toHaveBeenCalled());
+    expect(dev.runtimeFactory.mock.calls[0]![1]).toMatchObject({ seedSyntheticScenarioOnCreate: false });
+
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.startSetup }));
+    fireEvent.click(await screen.findByRole("button", { name: en.onboarding.skipForNow }));
+    fireEvent.click(await screen.findByRole("button", { name: en.onboarding.openToday }));
+    const dialog = await screen.findByRole("dialog", { name: en.onboarding.newUserWelcomeTitle(null) });
+    expect(dialog).toHaveTextContent(en.onboarding.newUserWelcomeBody);
+    expect(dialog).toHaveTextContent(en.onboarding.newUserWelcomeSample);
+    fireEvent.click(within(dialog).getByRole("button", { name: en.onboarding.newUserWelcomeAction }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("button", { name: en.today.recordReading })).toBeInTheDocument();
+  });
+
+  it("does not show the new-user welcome after the prepared demo profile (owner decision 2026-10-16)", async () => {
+    const dev = device(false);
+    mount(dev, ownerStorage({}, false), ownerStorage({}, false));
+    await welcome();
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.usePrepared }));
+    await screen.findByRole("button", { name: en.today.recordReading });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByRole("dialog", { name: en.onboarding.newUserWelcomeTitle(null) })).toBeNull();
+  });
+
   it("a setup finished before the first runtime opens is never sent back to setup", async () => {
     const dev = device(false);
     const onboarding = ownerStorage({}, false);
@@ -1181,7 +1261,8 @@ describe("durable local-state cleanup across app instances (Corrective Pass C)",
    * Packet 11C C7 finding D1 (fix round 1): the language chosen on Welcome is the setup's own locale. The first runtime's stored locale
    * (en-SG here) never replaces it, whether the runtime opens after the prepared setup finished (a) or while Welcome is still shown (b).
    */
-  it("D1 (a): zh-SG chosen on Welcome stays zh-SG when the first runtime opens after the prepared setup finished", async () => {
+  // Owner decision 2026-10-16: the English-only demo hides the language choice on Welcome; re-enable with it.
+  it.skip("D1 (a): zh-SG chosen on Welcome stays zh-SG when the first runtime opens after the prepared setup finished", async () => {
     const zh = getMessages("zh-SG");
     const dev = device(false);
     dev.holdOpen();
@@ -1199,7 +1280,8 @@ describe("durable local-state cleanup across app instances (Corrective Pass C)",
     expect(document.documentElement.lang).toBe("zh-SG");
   });
 
-  it("D1 (b): zh-SG chosen on Welcome stays zh-SG when the first runtime opens while Welcome is still shown", async () => {
+  // Owner decision 2026-10-16: the English-only demo hides the language choice on Welcome; re-enable with it.
+  it.skip("D1 (b): zh-SG chosen on Welcome stays zh-SG when the first runtime opens while Welcome is still shown", async () => {
     const zh = getMessages("zh-SG");
     const dev = device(false);
     dev.holdOpen();
@@ -1223,6 +1305,25 @@ describe("durable local-state cleanup across app instances (Corrective Pass C)",
     await deleteEverything();
     expect(await screen.findByText(en.packet10.deletion.deleteAllDone)).toBeInTheDocument();
     expect(dev.disk.marker).toBeNull();
+  });
+
+  it("after delete-all, \"Use the prepared demo profile\" adds the demo records to the new, empty dataset (once)", async () => {
+    const dev = device(true);
+    const onboarding = ownerStorage({ [DEMO_ONBOARDING_STORAGE_KEY]: JSON.stringify(prepared) }, false);
+    mount(dev, onboarding, ownerStorage({}, false));
+    await deleteEverything();
+    expect(dev.runtimeFactory.mock.calls.at(-1)![1]).toMatchObject({ seedSyntheticScenarioOnCreate: false });
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.usePrepared }));
+    await screen.findByRole("button", { name: en.today.recordReading });
+    // Counted over every runtime the app opened (a slow machine may open the replacement later than the click).
+    const seedCalls = async () => {
+      let total = 0;
+      for (const result of dev.runtimeFactory.mock.results) total += ((await result.value) as { seedPreparedDemoWhenEmpty: { mock: { calls: unknown[] } } }).seedPreparedDemoWhenEmpty.mock.calls.length;
+      return total;
+    };
+    await waitFor(async () => expect(await seedCalls()).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await seedCalls()).toBe(1);
   });
 
   it("E: an ordinary first launch creates no marker and a legitimate setup is never mistaken for stale state", async () => {
@@ -1307,7 +1408,7 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
   // Integration (shipped English activation + optional passcodes, 2026-10-12; deliberate): the explicit action's disclosure check asks
   // the credential-free passcode probe (exactly one GET, no body, no passcode) before the dialog; that is the only network call. Nothing
   // at startup, history load or local probing; no POST; Cancel sends nothing.
-  it("shipped manifest and records (en-SG): no audit row or network call at startup, history load or probing; the explicit action shows the disclosure first (only the passcode probe); Cancel gives the deterministic explanation and sends nothing", async () => {
+  it("shipped manifest and records (en-SG): no audit row or network call at startup, history load or probing; the explicit action shows the disclosure first (only the passcode probe); Cancel only closes it and sends nothing", async () => {
     const en = getMessages("en-SG");
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
@@ -1336,14 +1437,11 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
     // The probe failed (the spy answers nothing), so the passcode stays required: the field is shown (fail safe).
     expect(within(dialog).getByLabelText(en.aiAccess.passcodeLabel)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: en.ai.cancel }));
-    const panel = await screen.findByRole("region", { name: en.history.explanation.title });
-    await waitFor(() => expect(within(panel).getByRole("status")).not.toBeEmptyDOMElement());
-    expect(within(panel).getByRole("status")).not.toHaveTextContent(en.history.explanation.unavailable);
-    expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
-    expect(within(panel).getByText(en.ai.remoteNotAccepted)).toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(rows).toHaveLength(1);
-    expect(aiInvocationAuditRowSchema.parse(rows[0])).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcomeCode: "REMOTE_USE_DECLINED", providerModel: null, attempts: { count: 0 } });
+    // Owner decision 2026-10-16: Cancel only closes the dialog: no explanation, no audit row.
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await act(async () => undefined);
+    expect(screen.queryByRole("region", { name: en.history.explanation.title })).not.toBeInTheDocument();
+    expect(rows).toHaveLength(0);
     // Still only the passcode probe: Cancel sent nothing.
     expect(fetchSpy.mock.calls).toEqual([[AI_SHELL_ROUTE_PATH, { method: "GET", cache: "no-store", redirect: "error", signal: expect.any(AbortSignal) }]]);
   });
@@ -1435,7 +1533,7 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
     return screen.findByRole("button", { name: en.history.explanation.action });
   }
 
-  it("cancelled: no POST, the deterministic explanation, one audit row with no attempt, provider model or source", async () => {
+  it("cancelled: the dialog only closes; nothing is explained, sent or audited (owner decision 2026-10-16)", async () => {
     const en = getMessages("en-SG");
     const app = await activatedApp();
     render(<JagaOnApp {...app.props} />);
@@ -1445,16 +1543,12 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
     const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
     expect(app.rows).toHaveLength(0);
     fireEvent.click(within(dialog).getByRole("button", { name: en.ai.cancel }));
-    const panel = await screen.findByRole("region", { name: en.history.explanation.title });
-    await waitFor(() => expect(within(panel).getByRole("status")).not.toBeEmptyDOMElement());
-    expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await act(async () => undefined);
+    expect(screen.queryByRole("region", { name: en.history.explanation.title })).toBeNull();
     expect(app.fetcher).not.toHaveBeenCalled();
     expect(app.fetchSpy).not.toHaveBeenCalled();
-    expect(app.rows).toHaveLength(1);
-    // Packet 11C B4a: the panel says AI wording was not used. Packet 11C Addendum C (C5): the explicit decline is audited with the truthful
-    // audit-only REMOTE_USE_DECLINED (REQUEST_CANCELLED under the B4a interim ruling), in a current (11c.2) row.
-    expect(within(panel).getByText(en.ai.remoteNotAccepted)).toBeInTheDocument();
-    expect(aiInvocationAuditRowSchema.parse(app.rows[0])).toMatchObject({ auditSchemaVersion: "ai-invocation-audit.11c.2", outcomeCode: "REMOTE_USE_DECLINED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], measurements: { inputTokens: null, outputTokens: null, costMicroUsd: null }, usageBasis: "NONE" });
+    expect(app.rows).toHaveLength(0);
   });
 
   it("C5: a disclosure closed as moot (period change, leaving the screen) writes one DISCLOSURE_CLOSED_MOOT row each; nothing sent", async () => {
@@ -1840,7 +1934,9 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
     expect(care.runtime.aiAudit.append).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: en.ai.cancel }));
-    expect(await screen.findByText(en.ai.remoteNotAccepted)).toBeInTheDocument();
+    await waitFor(async () => expect(await care.audits.list()).toHaveLength(1));
+    // Owner decision 2026-10-16 (temporary): no "AI wording was not used" line after Cancel; the summary simply stays as it is.
+    expect(screen.queryByText(en.ai.remoteNotAccepted)).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: en.ai.careSummary.resultTitle })).not.toBeInTheDocument();
     expect(screen.getByRole("article").textContent).toBe(before);

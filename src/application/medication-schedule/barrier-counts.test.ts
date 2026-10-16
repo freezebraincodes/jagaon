@@ -12,7 +12,7 @@ function response(id: number, overrides: Partial<CountableResponseInput> = {}): 
     inquiryAnswersCurrentRevision: true,
     basisRevisionId: `e${id}-1`,
     basisRecordId: `e${id}`,
-    occasion: { identity: `rx|night|2026-09-${String(20 + id).padStart(2, "0")}`, localDate: `2026-09-${String(20 + id).padStart(2, "0")}`, scheduledTime: "21:00", medicineName: "Nocturin pen (demo)" },
+    occasion: { identity: `rx|night|2026-09-${String(20 + id).padStart(2, "0")}`, localDate: `2026-09-${String(20 + id).padStart(2, "0")}`, scheduledTime: "21:00", medicineName: "Lantus (demo)" },
     ...overrides,
   };
 }
@@ -33,11 +33,11 @@ describe("factual barrier counts", () => {
           optionKey: "ROUTINE_CHANGED",
           occasionCount: 2,
           evidence: [
-            { localDate: "2026-09-21", scheduledTime: "21:00", medicineName: "Nocturin pen (demo)" },
-            { localDate: "2026-09-22", scheduledTime: "21:00", medicineName: "Nocturin pen (demo)" },
+            { localDate: "2026-09-21", scheduledTime: "21:00", medicineName: "Lantus (demo)" },
+            { localDate: "2026-09-22", scheduledTime: "21:00", medicineName: "Lantus (demo)" },
           ],
         },
-        { optionKey: "AWAY_FROM_HOME", occasionCount: 1, evidence: [{ localDate: "2026-09-23", scheduledTime: "21:00", medicineName: "Nocturin pen (demo)" }] },
+        { optionKey: "AWAY_FROM_HOME", occasionCount: 1, evidence: [{ localDate: "2026-09-23", scheduledTime: "21:00", medicineName: "Lantus (demo)" }] },
       ],
       excludedCorrected: 0,
     });

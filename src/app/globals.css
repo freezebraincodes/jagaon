@@ -32,6 +32,10 @@
   --danger: #b3261e;
   --danger-tint: #fce8e5;
   --reviewed: #2f4a63;
+  /* Owner decision 2026-10-16: History chart colours, one per time of day (morning, afternoon, evening), taken from the JagaOn palette. */
+  --time-morning: var(--amber);
+  --time-afternoon: var(--terracotta);
+  --time-evening: var(--reviewed);
   --reviewed-tint: #eef3f7;
   --reviewed-line: #d3e0ea;
   --safe-top: env(safe-area-inset-top, 0px);
@@ -254,6 +258,20 @@ h1[tabindex="-1"]:focus {
   border-top: 1px solid var(--line);
   padding-bottom: var(--safe-bottom);
   z-index: 100;
+}
+
+/* iPhone (owner feedback 2026-10-14): when a mobile browser's own toolbar slides away while scrolling (Chrome on iOS), a strip can open
+   below a fixed bar and show the page through it. The bar's background continues below its bottom edge, so that strip is always the
+   bar's colour and the bar reads as attached to the screen edge. It sits off-screen otherwise and takes no input. */
+.app-nav::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 100vh;
+  background-color: var(--card);
+  pointer-events: none;
 }
 
 .app-nav-inner {
@@ -2917,10 +2935,51 @@ button.summary-tile:hover:not(:disabled) {
   transform: rotate(90deg);
 }
 
+/* Owner decision 2026-10-15: the neutral safety line under a skipped dose. */
+.schedule-skip-safety {
+  margin: 0;
+  padding: 10px 14px;
+  border-left: 4px solid var(--terracotta, var(--ink));
+  border-radius: var(--radius-sm);
+  background: var(--card-2);
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
 .food-filters-summary {
   margin: -10px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
   color: var(--ink-2);
   font-weight: 600;
+}
+
+/* Owner decision 2026-10-15: the active filters as small chips (tapping one opens the filters). */
+.food-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.25rem;
+  padding: 4px 14px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--card);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.food-filter-pill:focus-visible {
+  outline: 3px solid var(--terracotta, var(--ink));
+  outline-offset: 2px;
+}
+
+.food-filters-count {
+  font-variant-numeric: tabular-nums;
 }
 
 .food-filters-panel {
@@ -3895,11 +3954,38 @@ button.summary-tile:hover:not(:disabled) {
   grid-template-columns: 1.75rem minmax(0, 1fr);
   grid-template-rows: 9.5rem auto;
   column-gap: 0.5rem;
-  row-gap: 0.5rem;
 }
 
 .history-axis {
   position: relative;
+  grid-column: 1;
+  grid-row: 1;
+}
+
+/* Owner decision 2026-10-16: the plot and its day labels scroll sideways together under a fixed axis (30 days). The extra top
+   padding (cancelled by the negative margin) keeps a selected bar's value bubble inside the scroll area's clip. */
+.history-scroll {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-width: 0;
+  margin-top: -1.75rem;
+  padding-top: 1.75rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.history-scroll:focus {
+  outline: none;
+}
+
+.history-scroll-inner {
+  display: grid;
+  grid-template-rows: 9.5rem auto;
+  row-gap: 0.5rem;
+  min-width: 100%;
+  padding-bottom: 0.75rem;
 }
 
 .history-axis-label {
@@ -3921,7 +4007,7 @@ button.summary-tile:hover:not(:disabled) {
 }
 
 .history-plot--month {
-  gap: 1px;
+  gap: 0.25rem;
 }
 
 .history-gridline {
@@ -3964,6 +4050,69 @@ button.summary-tile:hover:not(:disabled) {
   background: var(--ink);
 }
 
+/* Owner decision 2026-10-16: one calm colour per time of day. They name the time of day only: no red or green, no status meaning. */
+.history-bar--morning,
+.history-legend-swatch--morning {
+  background: var(--time-morning);
+}
+
+.history-bar--afternoon,
+.history-legend-swatch--afternoon {
+  background: var(--time-afternoon);
+}
+
+.history-bar--evening,
+.history-legend-swatch--evening {
+  background: var(--time-evening);
+}
+
+/* Owner decision 2026-10-16: pointing at or tapping a bar shows its reading above the chart and over the bar. */
+.history-readout {
+  margin: 0 0 1.75rem;
+  min-height: 1.75rem;
+  font-size: 0.9375rem;
+  color: var(--ink-3);
+}
+
+/* Owner decision 2026-10-16: the chosen reading's day, date, time and value stand out. */
+.history-readout--reading {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  font-weight: 800;
+}
+
+.history-plot {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.history-bar--recorded {
+  position: relative;
+}
+
+.history-bar--selected {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.history-bar-value {
+  position: absolute;
+  bottom: calc(100% + 0.25rem);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.375rem;
+  background: var(--ink);
+  color: var(--card);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1;
+}
+
 /* CR-11 (AC-20z): a recorded 0.0 is drawn as a thin solid line, never as an empty (not-recorded) outline. */
 .history-bar--zero {
   min-height: 3px;
@@ -3981,28 +4130,36 @@ button.summary-tile:hover:not(:disabled) {
 }
 
 .history-day-labels {
-  grid-column: 1 / -1;
   display: flex;
   gap: 0.375rem;
   font-family: var(--font-display);
-  font-weight: 800;
-  font-size: 0.875rem;
   color: var(--ink-2);
 }
 
-.history-day-labels .history-axis-spacer {
-  flex: 0 0 calc(1.75rem + 0.5rem - 0.375rem);
-}
-
 .history-plot--month ~ .history-day-labels {
-  gap: 1px;
+  gap: 0.25rem;
 }
 
+/* Owner decision 2026-10-16: weekday over date for every day. */
 .history-day-label {
   flex: 1 1 0;
   min-width: 0;
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.15;
   white-space: nowrap;
+}
+
+.history-day-label-weekday {
+  font-weight: 800;
+  font-size: 0.8125rem;
+}
+
+.history-day-label-date {
+  font-weight: 600;
+  font-size: 0.75rem;
+  color: var(--ink-3);
 }
 
 .history-chart-note {
@@ -4883,6 +5040,59 @@ button.summary-tile:hover:not(:disabled) {
   min-width: 0;
 }
 
+/* Owner decision 2026-10-14 (My notes): stored notes reuse the care-item card, list and chip styles. */
+.my-notes-themes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.my-notes-theme-lines,
+.my-note-conversation ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.my-note-when {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.my-note-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.my-note-themes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.my-note-conversation summary {
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.my-note-conversation li {
+  overflow-wrap: anywhere;
+}
+
+.my-note-speaker {
+  font-weight: 700;
+}
+
 .care-loading {
   color: var(--ink-2);
 }
@@ -5474,6 +5684,96 @@ button.summary-tile:hover:not(:disabled) {
   min-width: 0;
 }
 
+/* Owner decision 2026-10-16: the period overview on visit preparation and the summary preview (plain counts, no colour by value). */
+.care-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  min-width: 0;
+}
+
+.care-overview .choice-group--segmented .choice-face {
+  min-height: 3rem;
+  padding-inline: 0.5rem;
+  text-align: center;
+}
+
+.care-overview-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.care-overview-text p {
+  margin: 0;
+  font-size: 1.0625rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+/* Owner decision 2026-10-16: "Show on screen" — the approved summary full screen, in large type, read-only. */
+.care-summary-onscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: calc(var(--safe-top) + 16px) 16px calc(var(--safe-bottom) + 24px);
+  background: var(--card);
+  color: var(--ink);
+}
+
+/* Owner decision 2026-10-16: the on-screen summary keeps the app's own column width (the app shell's 30rem, 40rem from 48rem wide), so
+   it reads like the phone screen it is handed over on, never as a wide landscape page. */
+.care-summary-onscreen > * {
+  width: 100%;
+  max-width: calc(30rem - 2 * var(--gutter, 16px));
+  margin-inline: auto;
+}
+
+@media (min-width: 48rem) {
+  .care-summary-onscreen > * {
+    max-width: calc(40rem - 48px);
+  }
+}
+
+.care-summary-onscreen-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.care-summary-onscreen-note {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.care-summary-onscreen .printable-care-summary {
+  border: 0;
+  padding: 0;
+  font-size: 1.375rem;
+  line-height: 1.5;
+}
+
+.care-summary-onscreen .printable-care-summary-app {
+  font-size: 1.5rem;
+}
+
+.care-summary-onscreen .printable-care-summary-section h2 {
+  font-size: 1.75rem;
+}
+
+.care-summary-onscreen .printable-care-summary-label {
+  font-size: 1.5rem;
+}
+
 .printable-care-summary {
   display: flex;
   flex-direction: column;
@@ -5835,10 +6135,46 @@ button.summary-tile:hover:not(:disabled) {
 .voice-listening,
 .voice-review,
 .voice-redirect-only,
-.voice-ended {
+.voice-ended,
+.voice-typing,
+.voice-distress {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  /* Owner request 2026-10-15: more room between groups (the main action, "Type another entry", "Back to Today"). */
+  gap: 1.5rem;
+}
+
+/* Owner decision 2026-10-14 (distress safety): a calm message with the Help screen's contact cards; no status colours. */
+.voice-distress-heading {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.voice-distress-heading:focus {
+  outline: none;
+}
+
+/* Owner decision 2026-10-15: the line leading into the contacts (more support than JagaOn can give). */
+.voice-distress-more-support {
+  margin: 0.5rem 0 0;
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.voice-distress-contacts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.voice-distress-closing {
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  color: var(--ink);
 }
 
 .voice-section-label + .voice-transcript,
@@ -6026,4 +6362,1221 @@ button.summary-tile:hover:not(:disabled) {
 .voice-remember .choice-row:has(> input:checked) {
   background-color: var(--terracotta-tint);
   color: var(--ink);
+}
+
+/* ------------------------------------------------------------------ */
+/* Feelings chat (owner decision 2026-10-14)                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Tell JagaOn understands more (design §3.1): the "Talk it through" dialog, scoped to `.feelings-chat-dialog` only. It keeps the shared
+ * sheet (.alert-dialog: bordered card, vertical scroll, stacked wide actions) and the shared fields (.field, .input), and adds:
+ * - the transcript as calm bubbles: JagaOn's lines (the reviewed kind sentence and its questions) on the left in the reviewed tint, her
+ *   lines on the right in the warm card tint; each line names its speaker in text, so colour is never the only cue;
+ * - the answer box shown quieter (recess) while JagaOn is thinking (read-only, so focus can stay in it);
+ * - the wrap-up's doctor question in its own bordered panel, its two buttons wrapping on narrow screens;
+ * - the standard-questions notice in the shared neutral notice style; no status colours.
+ * Long words and button labels wrap instead of overflowing, so nothing scrolls sideways at 390 px or 200% text; every gap leaves room
+ * for the global 3 px focus-visible outline.
+ */
+.feelings-chat-dialog {
+  max-width: 34rem;
+}
+
+.feelings-chat-dialog .alert-dialog-title {
+  overflow-wrap: anywhere;
+}
+
+.feelings-chat-dialog .alert-dialog-body {
+  gap: 0.875rem;
+  min-width: 0;
+}
+
+.feelings-chat-dialog .btn {
+  min-height: 3.5rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.feelings-chat-transcript {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  min-width: 0;
+}
+
+.feelings-chat-line {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  max-width: 88%;
+  min-width: 0;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.feelings-chat-line-jagaon {
+  align-self: flex-start;
+  background: var(--reviewed-tint);
+  border-color: var(--reviewed-line);
+  border-bottom-left-radius: 0.375rem;
+}
+
+.feelings-chat-line-patient {
+  align-self: flex-end;
+  background: var(--card-2);
+  border-color: var(--line-strong);
+  border-bottom-right-radius: 0.375rem;
+}
+
+.feelings-chat-speaker {
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--ink-2);
+}
+
+.feelings-chat-line-jagaon .feelings-chat-speaker {
+  color: var(--reviewed);
+}
+
+.feelings-chat-dialog .alert-dialog-body > p[role="status"] {
+  font-size: 1rem;
+  color: var(--ink-2);
+}
+
+.feelings-chat-dialog .alert-dialog-body > p[role="alert"],
+.feelings-chat-doctor-question > p[role="alert"] {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.feelings-chat-fallback-notice {
+  background: var(--recess);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+/* Three lines visible, so a drafted summary or doctor question can be read without scrolling inside the box. */
+.feelings-chat-dialog textarea.input {
+  min-height: 6.25rem;
+}
+
+.feelings-chat-dialog textarea.input[readonly] {
+  background-color: var(--recess);
+  color: var(--ink-2);
+}
+
+.feelings-chat-dialog textarea.input:disabled {
+  /* The added doctor question stays readable (the browser's disabled grey is lighter than the ink tokens). */
+  background-color: var(--recess);
+  color: var(--ink);
+  -webkit-text-fill-color: var(--ink);
+  opacity: 1;
+}
+
+.feelings-chat-doctor-question {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.875rem 1rem;
+  border: 2px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card-2);
+}
+
+.feelings-chat-doctor-question .field-label {
+  overflow-wrap: anywhere;
+}
+
+.feelings-chat-doctor-question > p[role="status"] {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.feelings-chat-doctor-question .button-row > .btn {
+  flex: 1 1 9rem;
+}
+
+/* Owner decision 2026-10-15: typing to Tell JagaOn. */
+.voice-typing-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.voice-typing-form textarea.input {
+  min-height: 7.5rem;
+}
+
+/* Owner decision 2026-10-15: the closing line after a chat about a good feeling. */
+.feelings-chat-closing {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+/* Owner decision 2026-10-14: "Speak my answer" in the chat (the voice notice and the recording stay inside the dialog). */
+.feelings-chat-voice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  min-width: 0;
+}
+
+.feelings-chat-speak {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.feelings-chat-mic {
+  display: inline-flex;
+}
+
+.feelings-chat-voice-consent,
+.feelings-chat-voice-session {
+  padding: 0.875rem 1rem;
+  border: 2px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card-2);
+  overflow-wrap: anywhere;
+}
+
+.feelings-chat-voice-title {
+  margin: 0;
+  font-size: 1.0625rem;
+  line-height: 1.3;
+}
+
+.feelings-chat-voice-consent p,
+.feelings-chat-voice-message,
+.feelings-chat-voice-status {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.feelings-chat-voice-live {
+  margin: 0;
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.feelings-chat-voice .button-row > .btn {
+  flex: 1 1 9rem;
+}
+
+/* HSA-bounded mode (owner decision 2026-10-14): preview banner, preview tag, More badge. */
+.preview-mode-banner {
+  position: sticky;
+  top: 0;
+  z-index: 90;
+  display: block;
+  width: 100%;
+  margin: 0 0 0.5rem;
+  padding: calc(var(--safe-top) + 6px) 12px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff3d6;
+  color: #6b4a00;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
+  cursor: pointer;
+}
+
+.preview-mode-banner:focus-visible {
+  outline: 3px solid var(--terracotta);
+  outline-offset: -3px;
+}
+
+.tag--preview {
+  background: #fff3d6;
+  color: #6b4a00;
+  border: 1px solid #f0d48a;
+}
+
+.app-nav-button {
+  position: relative;
+}
+
+.app-nav-badge {
+  position: absolute;
+  top: 6px;
+  left: calc(50% + 6px);
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #d97706;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+/* HSA preview: meal ideas */
+.meal-ideas-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Owner decision 2026-10-15: "Show other ideas", right-aligned in the tile's header (a full-size tap target). */
+.meal-ideas-refresh {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap, 2.75rem);
+  height: var(--tap, 2.75rem);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--card-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.meal-ideas-refresh:hover {
+  border-color: var(--ink);
+}
+
+.meal-ideas-refresh:focus-visible {
+  outline: 3px solid var(--focus, var(--ink));
+  outline-offset: 2px;
+}
+
+.meal-ideas-intro {
+  font-size: 1rem;
+  color: var(--ink-2);
+}
+
+.meal-ideas-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.meal-ideas-swap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.5rem;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background-color: var(--recess);
+  font-size: 1.0625rem;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.meal-ideas-from {
+  font-weight: 700;
+}
+
+.meal-ideas-arrow {
+  color: var(--terracotta);
+  font-weight: 800;
+}
+
+.meal-ideas-note {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+/* HSA preview: habit trend */
+.habit-trend-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.habit-trend-headline {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 800;
+  line-height: 1.25;
+  color: var(--ink);
+}
+
+.habit-trend-since,
+.habit-trend-caption {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.habit-trend-caption {
+  font-size: 0.9375rem;
+}
+
+.habit-trend-bars {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.habit-trend-row {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.habit-trend-row dt {
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.habit-trend-row dd {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.habit-trend-track {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.habit-trend-bar {
+  display: block;
+  height: 1.25rem;
+  border-radius: 0.375rem;
+  background: var(--line-strong);
+}
+
+.habit-trend-row--after .habit-trend-bar {
+  background: var(--reviewed);
+}
+
+.habit-trend-value {
+  flex: none;
+  min-width: 2.5rem;
+  text-align: right;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.habit-trend-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--ink-3);
+}
+
+/* HSA preview: care nudges */
+/* HSA-bounded mode off only: care checks due by standard intervals on Today's care planning card. A visual bell only. */
+.care-nudge-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.care-nudge-heading {
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+.care-nudge-bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 999px;
+  background: var(--amber-tint);
+  color: var(--amber);
+  flex: none;
+}
+
+.care-nudge-bell--due {
+  animation: care-nudge-pulse 1.2s ease-out 1;
+}
+
+.care-nudge-bell-count {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #d97706;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+@keyframes care-nudge-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.45);
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.08);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgba(217, 119, 6, 0);
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .care-nudge-bell--due {
+    animation: none;
+  }
+}
+
+.care-nudges {
+  list-style: none;
+  padding: 12px 0 0;
+  margin: 12px 0 0;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.care-nudge {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.care-nudge-icon {
+  color: var(--ink-2);
+  padding-top: 2px;
+  flex: none;
+}
+
+.care-nudge-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.care-nudge-body p {
+  margin: 0;
+}
+
+.care-nudge-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 10px;
+}
+
+.care-nudge-label {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.care-nudge-chip {
+  display: inline-block;
+  padding: 0.1875rem 0.625rem;
+  border-radius: 0.5rem;
+  background: var(--amber-tint);
+  color: #6b4a00;
+  border: 1px solid #f0d48a;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.care-nudge-when {
+  color: var(--ink-2);
+  font-size: 0.9375rem;
+}
+
+.care-nudge--due-soon .care-nudge-when {
+  color: #6b4a00;
+  font-weight: 700;
+}
+
+.care-nudge-detail {
+  color: var(--ink-2);
+}
+
+.care-nudge-action {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+/* HSA preview: medicine information */
+.medicine-ai {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.medicine-ai-status {
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.medicine-ai-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px dashed #f0d48a;
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
+
+.medicine-ai-eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.medicine-ai-tag {
+  background: var(--card-2);
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+}
+
+.medicine-ai-title {
+  font-size: 1.125rem;
+  font-weight: 800;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.medicine-ai-generic {
+  color: var(--ink-2);
+  font-size: 0.9375rem;
+}
+
+.medicine-ai-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.medicine-ai-facts dt {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.medicine-ai-facts dd {
+  font-size: 1.0625rem;
+  line-height: 1.5;
+}
+
+.medicine-ai-refresh {
+  align-self: flex-start;
+}
+
+.medicine-ai-card .medicine-ai-caution {
+  margin: 0;
+}
+
+.medicine-ai-card .medicine-ai-caution .icon {
+  flex: none;
+}
+
+/* Owner decision 2026-10-16: Notice (Today) and Trends (History). Descriptive only: neutral colours, no status colour, no target band,
+   no threshold line; bars start from zero and only repeat the written values. */
+.notice-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.notice-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.notice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notice-sentence {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.notice-sentence--quiet {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.notice-card .text-link {
+  align-self: flex-start;
+}
+
+.trends-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.trends-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.trends-intro {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.trends-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  margin: 0;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card-2);
+}
+
+.trends-caption {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.trends-measure {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.trends-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.trends-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.trends-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.trends-dates {
+  font-weight: 500;
+  font-size: 0.9375rem;
+  color: var(--ink-2);
+}
+
+.trends-value {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.trends-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: var(--recess);
+  overflow: hidden;
+}
+
+/* Owner decision 2026-10-16: then and now in the JagaOn brand colour, soft for the earlier weeks and full for the last 2 weeks.
+   Navy is left for the History chart's evening bars. Neither shade means good or bad. */
+.trends-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--terracotta-soft);
+}
+
+.trends-row--recent .trends-bar-fill {
+  background: var(--terracotta);
+}
+
+.trends-number {
+  flex: 0 0 auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* Record an activity (owner request 2026-10-16): the chips reuse .choice-group; only the "Other" duration fields are new. */
+.activity-duration-other {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.activity-duration-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.activity-duration-other .field-hint,
+.activity-duration-other .field-error {
+  margin: 0;
+}
+
+/* Owner decision 2026-10-16: the Booklet tab, a paper-diary table. Ruled lines and plain ink only: no colour by value. */
+.booklet-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.booklet-screen .choice-group--segmented .choice-face {
+  padding-inline: 0.5rem;
+}
+
+.booklet-intro,
+.booklet-loading {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+/* The sheet: one card, ruled like a paper booklet. It may scroll sideways on a very narrow screen; the page itself never does. */
+.booklet-sheet {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 1rem 0.25rem 0.25rem;
+  overflow-x: auto;
+}
+
+.booklet-table {
+  width: 100%;
+  min-width: 20rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+
+.booklet-table caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0 0.5rem 0.75rem;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.booklet-col-date {
+  width: 3.25rem;
+}
+
+.booklet-col-bedtime {
+  width: 3rem;
+}
+
+.booklet-table th,
+.booklet-table td {
+  padding: 0.5rem 0.125rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* Column headers: meal names on a soft band, before / after beneath. */
+.booklet-table thead th {
+  background: var(--recess);
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.booklet-table thead tr:first-child th:first-child {
+  border-top-left-radius: 0.625rem;
+}
+
+.booklet-table thead tr:first-child th:last-child {
+  border-top-right-radius: 0.625rem;
+}
+
+.booklet-meal-head {
+  font-size: 0.75rem;
+  padding-top: 0.625rem;
+  word-break: keep-all;
+}
+
+.booklet-date-head {
+  font-size: 0.8125rem;
+  text-align: left;
+}
+
+.booklet-table thead .booklet-date-head {
+  padding-left: 0.5rem;
+}
+
+/* Short headers never break inside a word: "Before" and "Bedtime" stay whole on a 375px phone. */
+.booklet-when-head,
+.booklet-bedtime-head {
+  font-size: 0.625rem;
+  word-break: keep-all;
+  overflow-wrap: normal;
+  hyphens: none;
+}
+
+.booklet-table thead .booklet-when-head {
+  padding: 0.125rem 0 0.5rem;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.booklet-table thead tr:last-child th,
+.booklet-table thead .booklet-date-head,
+.booklet-table thead .booklet-bedtime-head {
+  border-bottom: 2px solid var(--line-strong);
+}
+
+/* Ruling: a line between days, and a faint line between meal groups. */
+.booklet-cell--group-start {
+  border-left: 1px solid var(--line);
+}
+
+.booklet-row > *,
+.booklet-notes-row > td {
+  border-bottom: 1px solid var(--line);
+}
+
+.booklet-day:has(.booklet-notes-row) .booklet-row > * {
+  border-bottom: none;
+}
+
+.booklet-date {
+  text-align: left;
+  padding-left: 0.5rem;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.booklet-weekday {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 0.9375rem;
+}
+
+.booklet-day-date {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.booklet-today {
+  display: inline-block;
+  margin-top: 0.25rem;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 999px;
+  background: var(--terracotta-tint);
+  color: var(--terracotta-dark);
+  font-size: 0.6875rem;
+  font-weight: 800;
+}
+
+.booklet-day--today .booklet-row > *,
+.booklet-day--today .booklet-notes-row > td {
+  background: var(--card-2);
+}
+
+.booklet-cell {
+  line-height: 1.1;
+}
+
+.booklet-blank {
+  color: var(--line-strong);
+  font-weight: 700;
+}
+
+.booklet-reading {
+  display: block;
+}
+
+.booklet-reading + .booklet-reading {
+  margin-top: 0.375rem;
+}
+
+.booklet-value {
+  display: block;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.0625rem;
+}
+
+.booklet-unit {
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+
+.booklet-time {
+  display: block;
+  margin-top: 0.125rem;
+  font-size: 0.6875rem;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.booklet-nothing {
+  text-align: left;
+  padding-left: 0.75rem;
+  font-size: 0.875rem;
+  font-style: italic;
+  color: var(--ink-3);
+}
+
+/* Notes: one item per meal, medicine, activity or untimed reading, each with its own small icon. */
+.booklet-notes-row > td {
+  text-align: left;
+  padding: 0 0.5rem 0.75rem 0.5rem;
+}
+
+.booklet-notes {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0.625rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem 1rem;
+  border-radius: 0.625rem;
+  background: var(--recess);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--ink);
+}
+
+.booklet-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+}
+
+.booklet-note-icon {
+  flex: none;
+  color: var(--ink-2);
+}
+
+.booklet-note-time {
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* Owner decision 2026-10-16: the table keeps roomy columns and scrolls sideways inside its frame; the date column stays pinned
+   on the left and each day's notes stay in view while the readings scroll. */
+.booklet-sheet {
+  padding: 1.25rem 1rem 0.75rem;
+}
+
+.booklet-table caption {
+  padding-inline: 1rem;
+}
+
+.booklet-col-date {
+  width: 5.25rem;
+}
+
+.booklet-table .booklet-date,
+.booklet-table thead .booklet-date-head {
+  padding-left: 1rem;
+}
+
+.booklet-col-bedtime {
+  width: auto;
+}
+
+.booklet-table th,
+.booklet-table td {
+  padding: 0.75rem 0.25rem;
+}
+
+.booklet-when-head,
+.booklet-bedtime-head {
+  font-size: 0.75rem;
+}
+
+.booklet-table thead .booklet-when-head {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.booklet-meal-head {
+  font-size: 0.9375rem;
+}
+
+.booklet-value {
+  font-size: 1.25rem;
+}
+
+.booklet-time {
+  font-size: 0.75rem;
+}
+
+.booklet-notes {
+  font-size: 0.875rem;
+}
+
+/* Positioned, so the hidden screen-reader labels inside the cells are clipped by the sheet instead of widening the page. No side
+   padding: the pinned date column sits at the sheet's edge, so nothing scrolls out beside it. */
+.booklet-sheet {
+  position: relative;
+  padding-inline: 0;
+  container-type: inline-size;
+  scrollbar-width: thin;
+}
+
+.booklet-table {
+  min-width: 42rem;
+}
+
+.booklet-table .booklet-date,
+.booklet-table thead .booklet-date-head {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--card);
+  box-shadow: 1px 0 0 var(--line);
+}
+
+.booklet-table thead .booklet-date-head {
+  background: var(--recess);
+  z-index: 2;
+}
+
+.booklet-day--today .booklet-date {
+  background: var(--card-2);
+}
+
+.booklet-notes-row > td {
+  padding-inline: 1rem;
+}
+
+.booklet-notes {
+  position: sticky;
+  left: 1rem;
+  max-width: calc(100cqi - 2rem);
+}
+
+/* Owner decision 2026-10-16: the Welcome highlight card explaining which start to choose (centred between the intro and the actions). */
+.welcome-choice-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.125rem 1.25rem;
+  border: 1.5px solid var(--terracotta-soft);
+  border-radius: var(--radius-md);
+  background: var(--terracotta-tint);
+  color: var(--ink);
+}
+
+.welcome-choice-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  font-weight: 800;
+  color: var(--terracotta-dark);
+}
+
+.welcome-choice-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  line-height: 1.45;
+}
+
+.welcome-choice-list strong {
+  font-weight: 800;
+}
+
+.welcome-choice-tip {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+/* Owner decision 2026-10-16: the one-time welcome after a new user's setup. */
+.new-user-welcome-sample {
+  margin: 0;
+  padding: 0.75rem 0.875rem;
+  border-radius: 0.75rem;
+  background: var(--recess);
+  color: var(--ink-2);
 }

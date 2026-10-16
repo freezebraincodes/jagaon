@@ -74,7 +74,7 @@ export function isDemoInsulinPrescription(
 ): boolean {
   return prescription.catalogueForm === "PRE_FILLED_PEN" &&
     (prescription.medicationId === "insulin-glargine" ||
-      prescription.medicationId === "insulin-aspart");
+      prescription.medicationId === "insulin-glulisine");
 }
 
 export type DemoUsualFood = {

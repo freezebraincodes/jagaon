@@ -104,7 +104,7 @@ function voiceMismatches(fixture: ExtractionFixture & { expect: "EXTRACT" }, can
       continue;
     }
     if (candidate.source !== "REMOTE_EXTRACTION") out.push("VOICE_SOURCE");
-    if (candidate.kind === "UNSUPPORTED_SPAN") continue;
+    if (candidate.kind === "UNSUPPORTED_SPAN" || candidate.kind === "FEELING_NOTE" || candidate.kind === "ACTIVITY_NOTE" || candidate.kind === "MEDICINE_INFO_REQUEST") continue;
     if (fact.negated && !candidate.ambiguity.includes("NEGATION")) out.push("VOICE_NEGATION_LOST");
     if (fact.uncertain && !candidate.ambiguity.includes("UNCERTAINTY")) out.push("VOICE_UNCERTAINTY_LOST");
     if (candidate.kind === "GLUCOSE_READING" && (candidate.valueText !== fact.value || candidate.unitSource === "APP_DEFAULT")) out.push("VOICE_GLUCOSE");

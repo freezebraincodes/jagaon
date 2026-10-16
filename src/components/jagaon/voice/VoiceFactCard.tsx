@@ -173,6 +173,21 @@ export function VoiceFactCard({ candidate, index, copy, language, medicines, onD
             return direct && direct.action === "SAVE" ? { ...direct, confirmed: true as const } : null;
           })();
 
+  /**
+   * Owner decision 2026-10-15: Edit starts from what JagaOn understood for a meal (slot, food words) or a medicine (a mapped medicine, a
+   * settled status), so she changes only what is wrong. A glucose value is never prefilled: she types the reading herself (CR-11).
+   */
+  function startEditing() {
+    if (candidate.kind === "MEAL_NOTE") {
+      setEditSlot(candidate.slot === "UNSTATED" ? "" : candidate.slot);
+      setEditItems(candidate.itemText ?? "");
+    } else if (candidate.kind === "MEDICATION_OCCURRENCE") {
+      if (candidate.medicineRef.kind === "MAPPED") setEditMedicine(candidate.medicineRef.medication.recordId);
+      if (candidate.status === "TAKEN" || candidate.status === "SKIPPED") setEditStatus(candidate.status);
+    }
+    setEditing(true);
+  }
+
   function editReading() {
     focusAfter.current = "EDIT";
     setConfirming(false);
@@ -408,6 +423,10 @@ export function VoiceFactCard({ candidate, index, copy, language, medicines, onD
         </div>
       ) : null}
 
+      {/* Owner decision 2026-10-15: voice and typed entries are saved without a time; say so, and name the way to add one. */}
+      {(candidate.kind === "GLUCOSE_READING" || candidate.kind === "MEAL_NOTE") && !otherPerson && !done ? (
+        <p className="field-hint voice-card-no-time">{candidate.kind === "GLUCOSE_READING" ? copy.card.noTimeGlucose : copy.card.noTimeMeal}</p>
+      ) : null}
       <div className="voice-fact-actions">
         {!otherPerson && !panelOpen ? (
           <button ref={saveButton} type="button" className="btn btn-primary" disabled={(decision === null && !(latched && !editing && proposalShown)) || busy || done} aria-busy={busy || undefined} onClick={() => (latched && !editing && proposalShown ? openPanel(null) : save())}>
@@ -415,7 +434,7 @@ export function VoiceFactCard({ candidate, index, copy, language, medicines, onD
           </button>
         ) : null}
         {!otherPerson && !editing && !done && !panelOpen ? (
-          <button type="button" className="btn btn-outline" onClick={() => setEditing(true)}>
+          <button type="button" className="btn btn-outline" onClick={startEditing}>
             {copy.card.edit}
           </button>
         ) : null}

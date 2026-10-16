@@ -9,7 +9,7 @@ import { normaliseVoicePhrase } from "@/domain/voice/voice-candidate-extractor";
 import { getMessages } from "@/i18n/get-messages";
 import type { SupportedLocale } from "@/i18n/types";
 import { TellJagaOnScreen, type TellJagaOnScreenProps, type VoiceTerminologyPort } from "./TellJagaOnScreen";
-import { VOICE_SCREEN_PENDING_COPY } from "./voice-screen-copy";
+import { VOICE_SCREEN_PENDING_COPY, VOICE_WEB_SPEECH_COPY } from "./voice-screen-copy";
 
 const DARK: VoiceMedicationRef = { recordType: "MEDICATION", recordId: "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f", revisionId: "7a1c2d3e-4a5b-4c6d-9e7f-0a1b2c3d4e5f" };
 const GREY: VoiceMedicationRef = { recordType: "MEDICATION", recordId: "1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", revisionId: "2b2c3d4e-5f60-4a1b-9c2d-3e4f5a6b7c8d" };
@@ -21,8 +21,8 @@ function fakeTerminology(): VoiceTerminologyPort & { terms: FakeTerm[]; remember
   let next = 0;
   const id = () => `00000000-0000-4000-8000-${String(++next).padStart(12, "0")}`;
   const medicines = [
-    { medication: DARK, names: ["Nocturin pen (demo)"] },
-    { medication: GREY, names: ["Veltora pen (demo)"] },
+    { medication: DARK, names: ["Lantus (demo)"] },
+    { medication: GREY, names: ["Apidra (demo)"] },
   ];
   return {
     terms,
@@ -141,6 +141,22 @@ describe("Tell JagaOn screen", () => {
     expect(context.onSaveFacts).not.toHaveBeenCalled();
   });
 
+  it("offers Tell JagaOn again first under Type another entry, on the review and after a cancel, and it starts again (owner decision 2026-10-14)", async () => {
+    const context = setup({ text: "My sugar was 6.8 mmol" });
+    await speakAndStop(context);
+    const firstAction = () => within(screen.getByText(context.pending.review.manualHeading).closest("section")!).getAllByRole("button")[0]!;
+    await screen.findByText(context.pending.review.manualHeading);
+    expect(firstAction()).toHaveTextContent(context.pending.review.tellAgain);
+    fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
+    expect(await screen.findByText(context.messages.voice.state.cancelled)).toBeInTheDocument();
+    expect(firstAction()).toHaveTextContent(context.pending.review.tellAgain);
+    // Only one start-again button on the cancelled screen.
+    expect(screen.getAllByRole("button", { name: context.pending.review.tellAgain })).toHaveLength(1);
+    fireEvent.click(firstAction());
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(context.onSaveFacts).not.toHaveBeenCalled();
+  });
+
   it("discard and leave-out never save", async () => {
     const context = setup({ text: "My sugar was 6.8 mmol" });
     await speakAndStop(context);
@@ -180,6 +196,116 @@ describe("Tell JagaOn screen", () => {
       expect(context.onManualEntry).not.toHaveBeenCalled();
       cleanup();
     }
+  });
+
+  describe("owner decision 2026-10-15: typing to Tell JagaOn", () => {
+    const typeAndContinue = (context: ReturnType<typeof setup>, text: string) => {
+      fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${context.pending.typing.label}`) }), { target: { value: text } });
+      fireEvent.click(screen.getByRole("button", { name: context.pending.typing.submit }));
+    };
+
+    it("\"Type instead\" on the notice opens the typing box; typed words get the same cards, labelled as typed; no microphone is used", async () => {
+      const context = setup();
+      fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
+      expect(screen.getByRole("status")).toHaveTextContent(context.pending.state.declined);
+      const box = screen.getByRole("textbox", { name: new RegExp(`^${context.pending.typing.label}`) });
+      expect(document.activeElement).toBe(box);
+      expect(screen.getByRole("button", { name: context.pending.typing.submit })).toBeDisabled();
+      // The manual-entry chooser stays available (N-1); while typing, its first button is "Speak instead" (owner decision 2026-10-15).
+      expect(screen.getByRole("button", { name: context.pending.typing.speakInstead })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: context.pending.review.tellAgain })).toBeNull();
+      typeAndContinue(context, "my sugar level is 8.2 I had chicken rice for lunch");
+      expect(await screen.findByText(context.pending.typing.transcriptLabel)).toBeInTheDocument();
+      expect(screen.queryByText(context.messages.voice.review.transcriptLabel)).toBeNull();
+      expect(screen.getByText(context.pending.card.glucose)).toBeInTheDocument();
+      expect(screen.getByText(context.pending.card.meal)).toBeInTheDocument();
+      expect(context.loadTranscriber).not.toHaveBeenCalled();
+    });
+
+    it("a typed card saves through the same review contract", async () => {
+      const context = setup();
+      fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
+      typeAndContinue(context, "I had chicken rice for lunch");
+      const card = (await screen.findByText(context.pending.card.meal)).closest("article, section, div") as HTMLElement;
+      fireEvent.click(within(card.parentElement ?? card).getAllByRole("button", { name: context.pending.card.save })[0]!);
+      await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledTimes(1));
+      expect(context.onSaveFacts.mock.calls[0]![0]).toMatchObject({ kind: "MEAL" });
+    });
+
+    it("typed distress goes straight to the helplines and nothing is shown or saved", async () => {
+      const context = setup();
+      fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
+      typeAndContinue(context, "I don't want to live anymore");
+      expect(await screen.findByRole("heading", { name: context.messages.voice.distress.message })).toBeInTheDocument();
+      expect(screen.queryByText("I don't want to live anymore")).toBeNull();
+      expect(context.onSaveFacts).not.toHaveBeenCalled();
+    });
+
+    it("works without voice: when voice is unavailable, \"Speak or Type to Tell JagaOn\" opens the typing box", async () => {
+      const context = setup({ voiceAvailable: false });
+      fireEvent.click(screen.getByRole("button", { name: context.pending.review.tellAgain }));
+      typeAndContinue(context, "Walked 30 minutes after dinner");
+      expect(await screen.findByText(context.messages.voice.activity.heading)).toBeInTheDocument();
+      expect(context.loadTranscriber).not.toHaveBeenCalled();
+    });
+
+    it("owner decision 2026-10-15: the cards say they save without a time; Edit starts from what was understood; one Speak-or-type button", async () => {
+      const context = setup();
+      fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
+      typeAndContinue(context, "My sugar was 6.2 this morning. I had chicken rice for lunch at 1:00 p.m.");
+      expect(await screen.findByText(context.pending.card.noTimeGlucose)).toBeInTheDocument();
+      expect(screen.getByText(context.pending.card.noTimeMeal)).toBeInTheDocument();
+      // The review offers exactly one "Speak or Type to Tell JagaOn" button.
+      expect(screen.getAllByRole("button", { name: context.pending.review.tellAgain })).toHaveLength(1);
+      expect(screen.queryByRole("button", { name: /^Type to JagaOn$/ })).toBeNull();
+      expect(screen.getByRole("heading", { name: "Add another entry" })).toBeInTheDocument();
+      // Edit on the meal card starts from the understood slot and food words.
+      const mealCard = screen.getByText(context.pending.card.noTimeMeal).closest(".voice-fact-card, article, section") as HTMLElement;
+      fireEvent.click(within(mealCard).getByRole("button", { name: context.pending.card.edit }));
+      expect(within(mealCard).getByRole("combobox")).toHaveValue("LUNCH");
+      expect(within(mealCard).getByRole("textbox")).toHaveValue("chicken rice");
+    });
+
+    it("a typed redirect does not claim the words went to a speech service", async () => {
+      const context = setup();
+      fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
+      typeAndContinue(context, "How much insulin should I take?");
+      expect(await screen.findByText(context.pending.typing.transcriptLabel)).toBeInTheDocument();
+      expect(screen.queryByText(context.messages.voice.redirect.transcribedNote)).toBeNull();
+    });
+  });
+
+  it("owner decision 2026-10-15: Tencent speech's daily limit used up opens a dialog that can switch to the browser's speech recognition", async () => {
+    const copy = VOICE_SCREEN_PENDING_COPY["en-SG"].dailyLimit;
+    let useWebSpeech = false;
+    const resolveProvider = vi.fn(async () => (useWebSpeech ? { kind: "AVAILABLE" as const, provider: "WEB_SPEECH" as const } : { kind: "AVAILABLE" as const, provider: "TRTC" as const }));
+    const voiceLimitFallback = { available: vi.fn(async () => true), use: vi.fn(() => void (useWebSpeech = true)) };
+    const context = setup({ script: { start: { kind: "FAILED", reason: "CREDENTIAL_REFUSED", credentialRefusal: "MINUTES_EXHAUSTED" } }, resolveProvider, voiceLimitFallback });
+    fireEvent.change(await screen.findByLabelText(context.messages.aiAccess.passcodeLabel), { target: { value: PASSCODE } });
+    fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.accept }));
+    const dialog = await screen.findByRole("dialog", { name: copy.title });
+    expect(dialog).toHaveTextContent(copy.body);
+    expect(within(dialog).getAllByRole("button").map((button) => button.textContent)).toEqual([copy.useBrowser, copy.ok]);
+    fireEvent.click(within(dialog).getByRole("button", { name: copy.useBrowser }));
+    expect(voiceLimitFallback.use).toHaveBeenCalledTimes(1);
+    // The screen starts again with the browser's own notice (never Tencent's).
+    expect(await screen.findByRole("dialog", { name: VOICE_WEB_SPEECH_COPY["en-SG"].consentTitle })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: copy.title })).toBeNull();
+  });
+
+  it("owner decision 2026-10-15: without the browser's speech here, the daily-limit dialog offers only OK and the screen keeps manual entry", async () => {
+    const copy = VOICE_SCREEN_PENDING_COPY["en-SG"].dailyLimit;
+    const voiceLimitFallback = { available: vi.fn(async () => false), use: vi.fn() };
+    const context = setup({ script: { start: { kind: "FAILED", reason: "CREDENTIAL_REFUSED", credentialRefusal: "MINUTES_EXHAUSTED" } }, voiceLimitFallback });
+    fireEvent.change(screen.getByLabelText(context.messages.aiAccess.passcodeLabel), { target: { value: PASSCODE } });
+    fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.accept }));
+    const dialog = await screen.findByRole("dialog", { name: copy.title });
+    expect(within(dialog).getAllByRole("button").map((button) => button.textContent)).toEqual([copy.ok]);
+    fireEvent.click(within(dialog).getByRole("button", { name: copy.ok }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText(copy.body)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: context.messages.today.recordReading })).toBeInTheDocument();
+    expect(voiceLimitFallback.use).not.toHaveBeenCalled();
   });
 
   it("unsupported speech is shown as not understood, never dropped, with manual entry", async () => {
@@ -236,6 +362,74 @@ describe("Tell JagaOn screen", () => {
     });
   }
 
+  // Owner decision 2026-10-14 (distress safety): only the calm safety message with helplines; nothing else, nothing saved or sent.
+  describe("distress words (owner decision 2026-10-14)", () => {
+    const LINKS = [
+      ["SOS (Samaritans of Singapore): call 1767", "tel:1767"],
+      ["or WhatsApp 9151 1767", "https://wa.me/6591511767"],
+      ["mindline: call 1771", "tel:1771"],
+      ["or WhatsApp 6669 1771", "https://wa.me/6566691771"],
+      ["If you're in immediate danger, call 995", "tel:995"],
+    ] as const;
+
+    for (const text of ["I don't want to live anymore", "Please help me, I can't go on", "I want to kill myself, how much insulin should I take", "My sugar was 6.8 mmol, I had chicken rice for lunch and I want to end it all"]) {
+      it(`"${text}" shows only the safety message with the five helpline links; no card, transcript, redirect, not-captured list or save`, async () => {
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        const remoteExtraction = vi.fn();
+        const context = setup({ text, remoteExtraction });
+        await speakAndStop(context);
+        const distress = context.messages.voice.distress;
+        const heading = await screen.findByRole("heading", { name: distress.message });
+        expect(distress.message).toBe("It sounds like you're going through something really hard. You don't have to face it alone.");
+        // Owner decision 2026-10-15: the line that leads into the contacts says this needs more support than JagaOn can give.
+        expect(distress.moreSupport).toBe("This needs more support than JagaOn can give. These services have trained people ready to talk with you now:");
+        expect(screen.getByRole("alert")).toHaveTextContent(distress.moreSupport);
+        expect(heading.closest('[role="alert"]')).not.toBeNull();
+        await waitFor(() => expect(heading).toHaveFocus());
+        const section = heading.closest("section") as HTMLElement;
+        const links = within(section).getAllByRole("link");
+        expect(links.map((link) => link.getAttribute("href"))).toEqual(LINKS.map(([, href]) => href));
+        for (const [name, href] of LINKS) expect(within(section).getByRole("link", { name: new RegExp(`^${name.replace(/[()]/g, "\\$&")}`) })).toHaveAttribute("href", href);
+        for (const href of ["https://wa.me/6591511767", "https://wa.me/6566691771"]) expect(links.find((link) => link.getAttribute("href") === href)).toHaveAttribute("target", "_blank");
+        expect(within(section).getByText("24 hours")).toBeInTheDocument();
+        expect(within(section).getByText("round the clock")).toBeInTheDocument();
+        expect(within(section).getByText("You can also talk to someone you trust.")).toBeInTheDocument();
+        // Nothing else: no transcript, card, not-captured list, redirect, manual chooser, remote offer or remembered words.
+        expect(screen.queryByText(context.messages.voice.review.transcriptLabel)).toBeNull();
+        expect(screen.queryByText(text)).toBeNull();
+        expect(screen.queryAllByRole("article")).toHaveLength(0);
+        expect(screen.queryByText(context.pending.review.notUnderstoodHeading)).toBeNull();
+        expect(screen.queryByText(context.pending.review.notUnderstoodBody)).toBeNull();
+        expect(screen.queryByText(context.messages.voice.redirect.body)).toBeNull();
+        expect(screen.queryByText(context.pending.redirect.healthBody)).toBeNull();
+        expect(screen.queryByText(context.messages.voice.redirect.transcribedNote)).toBeNull();
+        expect(screen.queryByText(context.messages.voice.review.nothingFound)).toBeNull();
+        expect(screen.queryByText(context.pending.review.manualHeading)).toBeNull();
+        expect(screen.queryByRole("button", { name: context.pending.remote.offer })).toBeNull();
+        expect(screen.queryByRole("button", { name: context.pending.card.save })).toBeNull();
+        expect(screen.queryByRole("button", { name: context.messages.voice.review.discard })).toBeNull();
+        expect(screen.getAllByRole("button")).toHaveLength(1);
+        fireEvent.click(screen.getByRole("button", { name: context.pending.review.backToToday }));
+        expect(context.onClose).toHaveBeenCalledTimes(1);
+        expect(context.onSaveFacts).not.toHaveBeenCalled();
+        expect(context.onManualEntry).not.toHaveBeenCalled();
+        expect(remoteExtraction).not.toHaveBeenCalled();
+        expect(fetchSpy).not.toHaveBeenCalled();
+        fetchSpy.mockRestore();
+      });
+    }
+
+    it("zh-SG: English distress words in a Chinese session also show the safety message (draft Chinese copy)", async () => {
+      const context = setup({ locale: "zh-SG", text: "血糖六点八，I want to die" });
+      await speakAndStop(context);
+      const heading = await screen.findByRole("heading", { name: context.messages.voice.distress.message });
+      const links = within(heading.closest("section") as HTMLElement).getAllByRole("link");
+      expect(links.map((link) => link.getAttribute("href"))).toEqual(LINKS.map(([, href]) => href));
+      expect(screen.queryAllByRole("article")).toHaveLength(0);
+      expect(context.onSaveFacts).not.toHaveBeenCalled();
+    });
+  });
+
   it("mixed content: the redirect stays visible beside a separately reviewable reading", async () => {
     const context = setup({ text: "sugar 15 mmol, how many units now" });
     await speakAndStop(context);
@@ -269,8 +463,8 @@ describe("Tell JagaOn screen", () => {
     await speakAndStop(context);
     fireEvent.click(await screen.findByRole("button", { name: context.pending.card.chooseMedicine }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByLabelText("Veltora pen (demo)"));
-    fireEvent.click(within(dialog).getByLabelText(context.pending.card.rememberLabel("grey pen", "Veltora pen (demo)")));
+    fireEvent.click(within(dialog).getByLabelText("Apidra (demo)"));
+    fireEvent.click(within(dialog).getByLabelText(context.pending.card.rememberLabel("grey pen", "Apidra (demo)")));
     fireEvent.click(within(dialog).getByRole("button", { name: context.pending.card.chooseMedicine }));
     await waitFor(() => expect(context.terminology.remember).toHaveBeenCalledWith({ language: "en", phrase: "grey pen", medication: GREY }));
     // Remembering records nothing.
@@ -281,9 +475,9 @@ describe("Tell JagaOn screen", () => {
 
     // Next session (same profile): the remembered term is reused, no question; the fact still needs its own Save.
     fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
-    fireEvent.click(await screen.findByRole("button", { name: context.messages.voice.entry }));
+    fireEvent.click(await screen.findByRole("button", { name: context.pending.review.tellAgain }));
     await speakAndStop(context);
-    expect(await screen.findByText("Veltora pen (demo)")).toBeInTheDocument();
+    expect(await screen.findByText("Apidra (demo)")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: context.pending.card.chooseMedicine })).toBeNull();
     expect(context.onSaveFacts).toHaveBeenCalledTimes(1);
   });
@@ -302,7 +496,7 @@ describe("Tell JagaOn screen", () => {
     expect(screen.queryByText(saving.pending.card.amountNotSaved)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: saving.pending.card.chooseMedicine }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByLabelText("Veltora pen (demo)"));
+    fireEvent.click(within(dialog).getByLabelText("Apidra (demo)"));
     fireEvent.click(within(dialog).getByRole("button", { name: saving.pending.card.chooseMedicine }));
     fireEvent.click(await screen.findByRole("button", { name: saving.pending.card.save }));
     await waitFor(() => expect(saving.onSaveFacts).toHaveBeenCalledWith({ kind: "MEDICATION_EVENT", medication: GREY, status: "TAKEN", reportedAmount: { valueText: "10", unitText: "units" } }));
@@ -662,10 +856,12 @@ describe("Tell JagaOn screen", () => {
     });
 
     it("accepted: the transcript is sent once; remote facts are merged under the local floor; nothing is saved without Save", async () => {
-      // Deliberately "had laksa": this case needs a locally not-understood span for the remote meal to fill. Round 4 also makes the
-      // reading beside it need typing (UNCERTAINTY, no one-tap), asserted below.
-      const text = "My sugar was 6.8 mmol, had laksa";
-      const remoteExtraction = vi.fn(async () => ({ kind: "CANDIDATES" as const, candidates: [laksa(text)] }));
+      // Deliberately "had muah chee": this case needs a locally not-understood span for the remote meal to fill (laksa is a known food since
+      // 2026-10-16, muah chee is not). Round 4 also makes the reading beside it need typing (UNCERTAINTY, no one-tap), asserted below.
+      const text = "My sugar was 6.8 mmol, had muah chee";
+      const start = [...text.slice(0, text.indexOf("had muah chee"))].length;
+      const unknownFood: VoiceCandidate = { kind: "MEAL_NOTE", ...REMOTE, span: { start, end: start + 13 }, sourcePhrase: "had muah chee", slot: "UNSTATED", itemText: "muah chee", state: "UNDERSTOOD", ambiguity: [] };
+      const remoteExtraction = vi.fn(async () => ({ kind: "CANDIDATES" as const, candidates: [unknownFood] }));
       const context = setup({ text, remoteExtraction });
       await speakAndStop(context);
       expect(await screen.findByText(context.pending.review.notUnderstoodHeading)).toBeInTheDocument();
@@ -676,7 +872,7 @@ describe("Tell JagaOn screen", () => {
       expect(remoteExtraction).toHaveBeenCalledTimes(1);
       expect(remoteExtraction).toHaveBeenCalledWith(text, "en", expect.any(AbortSignal));
       expect(screen.queryByText(context.pending.review.notUnderstoodHeading)).toBeNull();
-      expect(screen.getByText("laksa")).toBeInTheDocument();
+      expect(screen.getByText("muah chee")).toBeInTheDocument();
       expect(context.onSaveFacts).not.toHaveBeenCalled();
     });
 
@@ -773,7 +969,8 @@ describe("Tell JagaOn screen", () => {
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.disclosure.decline }));
       expect(screen.getByRole("status")).toHaveTextContent(context.pending.state.declined);
-      fireEvent.click(screen.getByRole("button", { name: context.messages.voice.entry }));
+      // Owner decision 2026-10-15: "Type instead" opens the typing box; "Speak instead" is the way back to the microphone.
+      fireEvent.click(screen.getByRole("button", { name: context.pending.typing.speakInstead }));
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
       expect(checkAvailability).toHaveBeenCalledTimes(2);
     });
@@ -893,9 +1090,9 @@ describe("Tell JagaOn screen", () => {
       const context = setup({ text: "I injected my grey pen" });
       context.terminology.terms.push({ recordId: "00000000-0000-4000-8000-0000000000a1", revisionId: "00000000-0000-4000-8000-0000000000b1", language: "en", phrase: "grey pen", medication: GREY });
       await speakAndStop(context);
-      expect(await screen.findByText("Veltora pen (demo)")).toBeInTheDocument();
+      expect(await screen.findByText("Apidra (demo)")).toBeInTheDocument();
       const details = openTerms(context.pending.terms.heading);
-      expect(await within(details).findByText(context.pending.terms.meaning("grey pen", "Veltora pen (demo)"))).toBeInTheDocument();
+      expect(await within(details).findByText(context.pending.terms.meaning("grey pen", "Apidra (demo)"))).toBeInTheDocument();
       fireEvent.click(within(details).getByRole("button", { name: `${context.pending.terms.forget} “grey pen”` }));
       const dialog = screen.getByRole("dialog");
       expect(dialog).toHaveTextContent(context.pending.terms.forgetTitle);
@@ -908,7 +1105,7 @@ describe("Tell JagaOn screen", () => {
       expect(context.onSaveFacts).not.toHaveBeenCalled();
       // Next session: the word is no longer reused; the question appears again.
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
-      fireEvent.click(await screen.findByRole("button", { name: context.messages.voice.entry }));
+      fireEvent.click(await screen.findByRole("button", { name: context.pending.review.tellAgain }));
       await speakAndStop(context);
       expect(await screen.findByRole("button", { name: context.pending.card.chooseMedicine })).toBeInTheDocument();
     });
@@ -917,21 +1114,21 @@ describe("Tell JagaOn screen", () => {
       const context = setup({ text: "I injected my grey pen" });
       context.terminology.terms.push({ recordId: "00000000-0000-4000-8000-0000000000a2", revisionId: "00000000-0000-4000-8000-0000000000b2", language: "en", phrase: "grey pen", medication: GREY });
       await speakAndStop(context);
-      await screen.findByText("Veltora pen (demo)");
+      await screen.findByText("Apidra (demo)");
       const details = openTerms(context.pending.terms.heading);
       fireEvent.click(await within(details).findByRole("button", { name: `${context.pending.terms.change} “grey pen”` }));
       const dialog = screen.getByRole("dialog");
       expect(dialog).toHaveTextContent(context.pending.terms.changeTitle("grey pen"));
-      fireEvent.click(within(dialog).getByLabelText("Nocturin pen (demo)"));
+      fireEvent.click(within(dialog).getByLabelText("Lantus (demo)"));
       expect(within(dialog).queryByRole("checkbox")).toBeNull();
       fireEvent.click(within(dialog).getByRole("button", { name: context.pending.card.chooseMedicine }));
       expect(await within(details).findByText(context.pending.terms.changed)).toBeInTheDocument();
-      expect(await within(details).findByText(context.pending.terms.meaning("grey pen", "Nocturin pen (demo)"))).toBeInTheDocument();
+      expect(await within(details).findByText(context.pending.terms.meaning("grey pen", "Lantus (demo)"))).toBeInTheDocument();
       expect(context.terminology.change).toHaveBeenCalledWith({ recordId: "00000000-0000-4000-8000-0000000000a2", expectedRevisionId: "00000000-0000-4000-8000-0000000000b2", medication: DARK });
       fireEvent.click(screen.getByRole("button", { name: context.messages.voice.review.discard }));
-      fireEvent.click(await screen.findByRole("button", { name: context.messages.voice.entry }));
+      fireEvent.click(await screen.findByRole("button", { name: context.pending.review.tellAgain }));
       await speakAndStop(context);
-      expect(await screen.findByText("Nocturin pen (demo)")).toBeInTheDocument();
+      expect(await screen.findByText("Lantus (demo)")).toBeInTheDocument();
       expect(context.onSaveFacts).not.toHaveBeenCalled();
     });
 
@@ -939,20 +1136,20 @@ describe("Tell JagaOn screen", () => {
       const context = setup({ locale: "zh-SG", text: "我打了灰色的笔" });
       context.terminology.terms.push({ recordId: "00000000-0000-4000-8000-0000000000a3", revisionId: "00000000-0000-4000-8000-0000000000b3", language: "zh", phrase: "灰色的笔", medication: GREY });
       await speakAndStop(context);
-      await screen.findByText("Veltora pen (demo)");
+      await screen.findByText("Apidra (demo)");
       const details = openTerms(context.pending.terms.heading);
       fireEvent.click(await within(details).findByRole("button", { name: `${context.pending.terms.change} “灰色的笔”` }));
       context.terminology.terms[0]!.revisionId = "00000000-0000-4000-8000-0000000000c3";
       const dialog = screen.getByRole("dialog");
-      fireEvent.click(within(dialog).getByLabelText("Nocturin pen (demo)"));
+      fireEvent.click(within(dialog).getByLabelText("Lantus (demo)"));
       fireEvent.click(within(dialog).getByRole("button", { name: context.pending.card.chooseMedicine }));
       expect(await within(details).findByText(context.pending.terms.stale)).toBeInTheDocument();
-      expect(await within(details).findByText(context.pending.terms.meaning("灰色的笔", "Veltora pen (demo)"))).toBeInTheDocument();
+      expect(await within(details).findByText(context.pending.terms.meaning("灰色的笔", "Apidra (demo)"))).toBeInTheDocument();
       fireEvent.click(within(details).getByRole("button", { name: `${context.pending.terms.forget} “灰色的笔”` }));
       fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(context.terminology.forget).not.toHaveBeenCalled();
-      expect(within(details).getByText(context.pending.terms.meaning("灰色的笔", "Veltora pen (demo)"))).toBeInTheDocument();
+      expect(within(details).getByText(context.pending.terms.meaning("灰色的笔", "Apidra (demo)"))).toBeInTheDocument();
     });
 
     it("terminology review #2: a medicine phrase with a time or amount word is never offered for remembering", async () => {
@@ -960,8 +1157,44 @@ describe("Tell JagaOn screen", () => {
       await speakAndStop(context);
       fireEvent.click(await screen.findByRole("button", { name: context.pending.card.chooseMedicine }));
       const dialog = await screen.findByRole("dialog");
-      fireEvent.click(within(dialog).getByLabelText("Veltora pen (demo)"));
+      fireEvent.click(within(dialog).getByLabelText("Apidra (demo)"));
       expect(within(dialog).queryByRole("checkbox")).toBeNull();
     });
+  });
+});
+
+describe("Tell JagaOn screen: feelings and activities (owner decision 2026-10-14)", () => {
+  it("a feeling, an activity and a reading each get their own card; each saves its own intent through onSaveFacts", async () => {
+    const context = setup({ text: "Walked 30 minutes. My sugar was 6.8 mmol. Feeling tired and a bit worried." });
+    await speakAndStop(context);
+    const articles = await screen.findAllByRole("article");
+    expect(articles.map((article) => within(article).getByRole("heading").textContent)).toEqual([context.messages.voice.activity.heading, context.pending.card.glucose, context.messages.voice.feeling.heading]);
+    fireEvent.click(within(articles[2]!).getByRole("button", { name: context.messages.voice.feeling.saveAsNote }));
+    await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledWith({ kind: "FEELING_NOTE", text: "Feeling tired and a bit worried.", cueKeys: ["tired", "worried"] }));
+    fireEvent.click(within(articles[0]!).getByRole("button", { name: context.messages.voice.activity.save }));
+    await waitFor(() => expect(context.onSaveFacts).toHaveBeenCalledWith({ kind: "ACTIVITY", category: "WALKING", label: "Walked 30 minutes", durationMinutes: 30 }));
+    expect(context.onSaveFacts).toHaveBeenCalledTimes(2);
+  });
+
+  it("Talk it through is offered only when the app passes onTalkItThrough, and hands over her words and cues", async () => {
+    const onTalkItThrough = vi.fn();
+    const context = setup({ text: "I'm so tired today", onTalkItThrough });
+    await speakAndStop(context);
+    fireEvent.click(await screen.findByRole("button", { name: context.messages.voice.feeling.talkItThrough }));
+    expect(onTalkItThrough).toHaveBeenCalledWith({ text: "I'm so tired today", cueKeys: ["tired"] });
+    expect(context.onSaveFacts).not.toHaveBeenCalled();
+    cleanup();
+    const without = setup({ text: "I'm so tired today" });
+    await speakAndStop(without);
+    await screen.findByRole("button", { name: without.messages.voice.feeling.saveAsNote });
+    expect(screen.queryByRole("button", { name: without.messages.voice.feeling.talkItThrough })).toBeNull();
+  });
+
+  it("distress still shows only the safety message, with no Feeling card", async () => {
+    const context = setup({ text: "I feel so tired I want to die" });
+    await speakAndStop(context);
+    await screen.findByText(context.messages.voice.distress.message);
+    expect(screen.queryByRole("article")).toBeNull();
+    expect(screen.queryByRole("button", { name: context.messages.voice.feeling.saveAsNote })).toBeNull();
   });
 });

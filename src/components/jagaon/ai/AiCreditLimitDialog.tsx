@@ -6,8 +6,12 @@ import type { AiDisclosureFlow } from "./AiDisclosureDialog";
 
 type Props = {
   messages: AppMessages;
-  /** Which flow's standard wording the text names: the care summary ("Your summary") or the history explanation ("The explanation"). */
-  flow: AiDisclosureFlow;
+  /**
+   * Which flow's standard wording the text names: the care summary ("Your summary"), the history explanation ("The explanation") or
+   * the feelings chat ("JagaOn's standard questions", Tell JagaOn understands more, 2026-10-14), or the HSA preview's medicine
+   * information ("No general information was looked up", `messages.hsaMedicineInfo.creditLimitBody`, 2026-10-14).
+   */
+  flow: AiDisclosureFlow | "FEELINGS_CHAT" | "MEDICINE_INFO";
   /** OK (also Escape): closes the dialog; the standard wording the screen already holds stays shown. */
   onClose: () => void;
 };
@@ -28,7 +32,9 @@ export function AiCreditLimitDialog({ messages, flow, onClose }: Props) {
     <ModalDialog
       className="ai-credit-limit-dialog"
       title={t.title}
-      description={<p>{flow === "PATTERN" ? t.historyBody : t.careSummaryBody}</p>}
+      description={
+        <p>{flow === "PATTERN" ? t.historyBody : flow === "FEELINGS_CHAT" ? t.feelingsChatBody : flow === "MEDICINE_INFO" ? messages.hsaMedicineInfo.creditLimitBody : t.careSummaryBody}</p>
+      }
       onClose={onClose}
       initialFocusSelector="[data-ai-credit-limit-ok]"
       actions={

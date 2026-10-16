@@ -26,8 +26,9 @@ describe("recordTypeSchema", () => {
   });
 
   // Packet 13 (P13S, Q13-8): + PATIENT_TERMINOLOGY (owner storage decision 2026-10-09).
-  it("has exactly 29 record types", () => {
-    expect(RECORD_TYPES).toHaveLength(29);
+  // Owner decision 2026-10-14 (My notes): + PERSONAL_NOTE.
+  it("has exactly 30 record types", () => {
+    expect(RECORD_TYPES).toHaveLength(30);
   });
 
   it("contains the expected closed set of literals", () => {
@@ -53,6 +54,7 @@ describe("recordTypeSchema", () => {
         "BODY_MEASUREMENT",
         "PREVENTIVE_CARE_RECORD",
         "CONTEXT_WINDOW",
+        "PERSONAL_NOTE",
         "LEARNED_KNOWLEDGE",
         "PATTERN_OBSERVATION",
         "PATTERN_EVIDENCE_SNAPSHOT",
@@ -118,7 +120,7 @@ describe("recordOwnerByType", () => {
     expect(getAuthoritativeOwner("REMINDER")).toBe("CARE_PLAN");
   });
 
-  it("assigns GLUCOSE_READING through CONTEXT_WINDOW to HEALTH_RECORDS", () => {
+  it("assigns GLUCOSE_READING through PERSONAL_NOTE to HEALTH_RECORDS", () => {
     const healthRecordTypes: RecordType[] = [
       "GLUCOSE_READING",
       "KETONE_READING",
@@ -129,6 +131,7 @@ describe("recordOwnerByType", () => {
       "BODY_MEASUREMENT",
       "PREVENTIVE_CARE_RECORD",
       "CONTEXT_WINDOW",
+      "PERSONAL_NOTE",
     ];
     for (const rt of healthRecordTypes) {
       expect(getAuthoritativeOwner(rt)).toBe("HEALTH_RECORDS");

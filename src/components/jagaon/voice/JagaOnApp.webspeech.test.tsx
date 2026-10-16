@@ -13,7 +13,7 @@ import { VOICE_PROVIDER_PREFERENCE_KEY, type VoiceProviderId } from "@/applicati
 import { getMessages } from "@/i18n/get-messages";
 import { JagaOnApp } from "../JagaOnApp";
 import { VOICE_PROVIDER_SETTINGS_COPY } from "./voice-provider-settings-copy";
-import { VOICE_WEB_SPEECH_COPY } from "./voice-screen-copy";
+import { VOICE_SCREEN_PENDING_COPY, VOICE_WEB_SPEECH_COPY } from "./voice-screen-copy";
 
 installFakeIndexedDb();
 const TIMEOUT = 240_000;
@@ -87,6 +87,28 @@ const openVoice = async () => {
 const radio = (provider: VoiceProviderId) => screen.getByRole("radio", { name: settingsCopy.providers[provider] }) as HTMLInputElement;
 
 describe("Web Speech provider choice in the app (developer settings; draft copy pending owner approval)", () => {
+  it(
+    "owner decision 2026-10-15: Tencent speech's daily limit used up: the dialog switches to the browser's speech, which stays chosen for the day",
+    async () => {
+      const limit = VOICE_SCREEN_PENDING_COPY["en-SG"].dailyLimit;
+      const app = await mountApp({ devSettings: false, enabled: ["TRTC", "WEB_SPEECH"], passcodeRequired: false, script: { start: { kind: "FAILED", reason: "CREDENTIAL_REFUSED", credentialRefusal: "MINUTES_EXHAUSTED" } } });
+      await openVoice();
+      fireEvent.click(await screen.findByRole("button", { name: m.voice.disclosure.accept }));
+      const dialog = await screen.findByRole("dialog", { name: limit.title });
+      await waitFor(() => expect(app.loaders.TRTC).toHaveBeenCalledTimes(1));
+      app.control.script = { providerStop: { kind: "NOT_APPLICABLE" } };
+      fireEvent.click(within(dialog).getByRole("button", { name: limit.useBrowser }));
+      expect(await screen.findByText(web.consentTitle)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: m.voice.disclosure.accept }));
+      await waitFor(() => expect(app.loaders.WEB_SPEECH).toHaveBeenCalledTimes(1));
+      // Leaving and coming back the same day: the browser's speech is still the one offered.
+      await openVoice();
+      expect(await screen.findByText(web.consentTitle)).toBeInTheDocument();
+      expect(app.loaders.TRTC).toHaveBeenCalledTimes(1);
+    },
+    TIMEOUT,
+  );
+
   it(
     "flag off: no System settings section; the stored choice is not even read; the first enabled, supported provider is used",
     async () => {

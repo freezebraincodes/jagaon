@@ -4,6 +4,9 @@ import { useRef, useState } from "react";
 import { type AppMessages, type SupportedLocale } from "@/i18n/types";
 import type { RecordDeletionPort } from "../data/data-ports";
 import { RecordDeletionDialog } from "../data/RecordDeletionDialog";
+import type { CareNudgeSummary } from "@/application/preview/care-nudges";
+import { useHsaBoundedMode } from "../hsa/hsa-bounded-mode";
+import { CareNudgeHeader, CareNudgeList } from "../hsa/care-nudges";
 import {
   isDemoInsulinPrescription,
   type DemoPatientProfile,
@@ -39,6 +42,8 @@ import {
 import { storedGlucoseContextLabel } from "../journal/glucose-context";
 import { labelAndValue } from "../locale-format";
 import { sourceLabel } from "../onboarding/medicine-labels";
+import { MealIdeasCard } from "../hsa/MealIdeasCard";
+import { NoticeCard, type NoticeView } from "../history/NoticeCard";
 
 type TodayScreenProps = {
   messages: AppMessages;
@@ -54,6 +59,10 @@ type TodayScreenProps = {
   onRecordDeleted?: () => void;
   /** Opens the History tab (as the bottom navigation does). Without it, "View history" stays disabled. */
   onOpenHistory?: () => void;
+  /** PREVIEW (HSA-bounded mode off only): care checks due by standard intervals; ignored while the mode is on. */
+  careNudges?: CareNudgeSummary | null;
+  /** Owner decision 2026-10-16: Notice, her own readings compared between two periods (null: not loaded, nothing shown). */
+  notice?: NoticeView;
 };
 
 type BookletSlot = {
@@ -125,8 +134,12 @@ export function TodayScreen({
   recordDeletion,
   onRecordDeleted,
   onOpenHistory,
+  careNudges = null,
+  notice = null,
 }: TodayScreenProps) {
   const [deleting, setDeleting] = useState(false);
+  // HSA-bounded mode on (default): the care planning card stays as entered dates only.
+  const nudges = useHsaBoundedMode().bounded ? null : careNudges;
   const deleteOpener = useRef<HTMLButtonElement>(null);
   const msg = messages.today;
   const greetingName = locale === "zh-SG" ? fixture.displayNameZh : fixture.displayName;
@@ -161,7 +174,8 @@ export function TodayScreen({
       slot.at = at;
     }
   }
-  const stamped = slots.filter((slot) => slot.entry).length;
+  // Owner decision 2026-10-15: the booklet counts today's readings (known or unknown time) and sets no target.
+  const readingsToday = todayEntries.filter((entry) => entry.recordType === "GLUCOSE_READING").length;
 
   const latestGlucose =
     journal.entries.find((entry) => entry.recordType === "GLUCOSE_READING") ?? null;
@@ -178,6 +192,21 @@ export function TodayScreen({
     : null;
   const latestMeal =
     todayEntries.find((entry) => entry.recordType === "INTAKE_EVENT") ?? null;
+  // The newest activity on any day, with when it happened (or when it was entered, if she gave no time).
+  const latestActivity =
+    journal.entries.find((entry) => entry.recordType === "ACTIVITY_EVENT") ?? null;
+  const latestActivityInstant = latestActivity ? knownOccurrence(latestActivity) : null;
+  const latestActivityWhen = latestActivity
+    ? latestActivityInstant
+      ? isSameSingaporeDay(latestActivityInstant, now)
+        ? formatSingaporeTime(locale, latestActivityInstant)
+        : formatSingaporeDateTime(locale, latestActivityInstant)
+      : msg.enteredAt(
+          isSameSingaporeDay(latestActivity.recordedAt, now)
+            ? formatSingaporeTime(locale, latestActivity.recordedAt)
+            : formatSingaporeDateTime(locale, latestActivity.recordedAt),
+        )
+    : null;
 
   return (
     <div className="today-screen">
@@ -195,7 +224,7 @@ export function TodayScreen({
           <h2 id="today-booklet-heading" className="card-title">
             {msg.todayBooklet}
           </h2>
-          <span className="booklet-progress">{msg.bookletProgress(stamped, slots.length)}</span>
+          <span className="booklet-progress">{msg.bookletProgress(readingsToday)}</span>
         </div>
         <ul className="booklet-slots">
           {slots.map((slot) => (
@@ -319,6 +348,8 @@ export function TodayScreen({
         </section>
       ) : null}
 
+      <NoticeCard messages={messages} notice={notice} onOpenHistory={onOpenHistory} />
+
       <section className="today-card" aria-labelledby="insulin-today-heading">
         <h2 id="insulin-today-heading" className="eyebrow">
           {allPens ? msg.insulinToday : msg.medicinesToday}
@@ -421,25 +452,39 @@ export function TodayScreen({
               : msg.notRecorded}
           </span>
         </button>
-        {/* Synthetic, user-entered activity from the fixture; there is no
-            activity logging in Packet 6, so the tile is not interactive. */}
-        <div className="summary-tile" role="group" aria-labelledby="activity-heading">
+        {/* The latest activity she recorded (Tell JagaOn is where activities are recorded, so the tile opens it). */}
+        <button
+          type="button"
+          className="summary-tile"
+          aria-label={msg.activityTitle}
+          onClick={() => navigate("RECORD_ACTIVITY")}
+          disabled={actionsDisabled}
+        >
           <WalkIcon size={28} className="icon summary-tile-icon" />
-          <h2 id="activity-heading" className="summary-tile-title">
-            {fixture.activity.title}
-          </h2>
-          <p className="summary-tile-body">
-            {[fixture.activity.place, messages.shared.minutes(fixture.activity.minutes), msg.enteredByYou].join(
-              " · ",
-            )}
-          </p>
-        </div>
+          <span className="summary-tile-title">{msg.activityTitle}</span>
+          <span className="summary-tile-body">
+            {latestActivity
+              ? [
+                  latestActivity.displayValue ?? latestActivity.summary,
+                  ...(latestActivity.displayMinutes === undefined ? [] : [messages.shared.minutes(latestActivity.displayMinutes)]),
+                  latestActivityWhen,
+                ].join(" · ")
+              : msg.notRecorded}
+          </span>
+        </button>
       </section>
 
+      {/* Owner decision 2026-10-14: PREVIEW meal ideas, shown only while HSA-bounded mode is off. */}
+      <MealIdeasCard messages={messages} now={now} navigate={navigate} />
+
       <section className="today-card" aria-labelledby="care-planning-heading">
-        <h2 id="care-planning-heading" className="eyebrow">
-          {msg.careDatesHeading}
-        </h2>
+        {nudges ? (
+          <CareNudgeHeader messages={messages} summary={nudges} headingId="care-planning-heading" />
+        ) : (
+          <h2 id="care-planning-heading" className="eyebrow">
+            {msg.careDatesHeading}
+          </h2>
+        )}
         <ul className="care-dates">
           {fixture.careDates.map((date) => (
             <li key={date.id} className="care-date">
@@ -449,7 +494,8 @@ export function TodayScreen({
             </li>
           ))}
         </ul>
-        <p className="provenance-line">{msg.careDatesNote}</p>
+        {nudges ? <CareNudgeList messages={messages} locale={locale} summary={nudges} onSetDate={() => navigate("PREVENTIVE_CARE")} /> : null}
+        <p className="provenance-line">{nudges ? messages.hsaCareNudges.note : msg.careDatesNote}</p>
         <button type="button" className="text-link text-link--large" onClick={() => navigate("CARE_PREPARATION")}>
           {msg.prepareAppointment}
           <ChevronRightIcon size={20} />

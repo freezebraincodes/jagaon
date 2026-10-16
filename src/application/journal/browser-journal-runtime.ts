@@ -39,8 +39,11 @@ import {
 import { createWorkItemId } from "@/application/contracts/event-work";
 import { createIntelligenceCoordinator } from "@/application/intelligence/intelligence-coordinator";
 import { createRecordedHistoryQuery } from "@/application/history/recorded-history-query";
+import { createBookletQuery, type BookletQueryPort } from "@/application/booklet/booklet-query";
 import type { RecordedHistoryQueryPort } from "@/application/history/recorded-history-contracts";
 import { seedSyntheticHistory } from "@/application/history/synthetic-history-seed";
+import { createPreviewInsightsQuery } from "@/application/preview/preview-insights-query";
+import type { PreviewInsightsQueryPort } from "@/application/preview/preview-insights-contracts";
 import { createCarePlanCommandService } from "@/application/care-plan/care-plan-command-service";
 import { createReminderReconciliation } from "@/application/care-plan/reminder-reconciliation";
 import { createInquiryService } from "@/application/inquiry/inquiry-service";
@@ -67,6 +70,8 @@ import type {
   RecordMedicationEventInput,
 } from "./journal-contracts";
 import { createTerminologyService, type TerminologyService } from "@/application/terminology/terminology-service";
+import { createPersonalNoteService, type PersonalNoteCommandService } from "@/application/notes/personal-note-service";
+import { createPersonalNoteQuery, type PersonalNoteQueryPort } from "@/application/notes/personal-note-query";
 import { createJournalCommandService } from "./journal-command-service";
 import { createJournalQueryService } from "./journal-query-service";
 
@@ -76,6 +81,8 @@ export type JagaOnRuntime = {
   query: JournalQueryPort;
   /** Packet 7A: validated descriptive Recorded-history view models. */
   history: RecordedHistoryQueryPort;
+  /** Owner decision 2026-10-16: the Booklet tab's paper-diary table of what she recorded (read-only, no AI). */
+  booklet: BookletQueryPort;
   /** Packet 8: Medication schedule view models and patient-confirmed commands. */
   medicationSchedule: MedicationSchedulePort;
   /** Packet 9B: patient-maintained health checks, appointments and questions (Screens 09–10). */
@@ -97,6 +104,11 @@ export type JagaOnRuntime = {
   };
   resetDemo(): Promise<void>;
   /**
+   * "Use the prepared demo profile" on a dataset created without the demo data (after "Delete all data"): adds the synthetic history,
+   * care plan and care organisation, only into an empty dataset (never over records she created). Resolves whether it seeded.
+   */
+  seedPreparedDemoWhenEmpty(): Promise<boolean>;
+  /**
    * Packet 11C B2b: the append-only local AI invocation audit port (the existing Packet 10 `aiInvocationAudits` table), written only by
    * the wired hybrid service, one validated minimised row per explicit request.
    */
@@ -114,6 +126,20 @@ export type JagaOnRuntime = {
     recordMedicationEvent(input: RecordMedicationEventInput): Promise<JournalCommitResult>;
     terminology: TerminologyService;
   };
+  /**
+   * Owner decision 2026-10-14 (My notes): save one personal note (an explicit patient save; the feelings chat calls it after approval),
+   * list notes newest first and count this week's themes. Deleting a note is `recordDeletion` with recordType PERSONAL_NOTE.
+   * Optional only so test doubles may omit it; the browser runtime always provides it.
+   */
+  notes?: {
+    commands: PersonalNoteCommandService;
+    query: PersonalNoteQueryPort;
+  };
+  /**
+   * HSA-bounded mode PREVIEW (owner decision 2026-10-14): read-only preview insights computed in memory (never stored, never sent to
+   * the AI). The History screen reads them only while HSA-bounded mode is off. Optional only so test doubles may omit it.
+   */
+  previewInsights?: PreviewInsightsQueryPort;
   /** Packet 10B: local encrypted backup export (no network, no write). */
   backup: {
     export(request: { passphrase: string; confirmation: string }, events?: { onStepCompleted?(step: BackupExportStep): void }): Promise<BackupExportResult>;
@@ -238,6 +264,8 @@ export async function createBrowserJournalRuntime(
     instanceId: "browser",
   });
   const historyQuery = createRecordedHistoryQuery(database, { now });
+  const bookletQuery = createBookletQuery(database, { now });
+  const previewInsightsQuery = createPreviewInsightsQuery(database, { now });
   const leaseToken = () => crypto.randomUUID();
   const carePlan = createCarePlanCommandService(database, { now, ids });
   const reminders = createReminderReconciliation(database, { now, newCommandId: createCommandId, leaseToken, instanceId: "browser", carePlan });
@@ -407,11 +435,18 @@ export async function createBrowserJournalRuntime(
   const aiAudits = createAiInvocationAuditRepository(database);
   // Packet 13 (P13S, Q13-9): "forget" is the existing permanent deletion of the one terminology record (no dependents).
   const terminology = createTerminologyService(database, { now, ids, deletion });
+  // Owner decision 2026-10-14 (My notes): personal notes share the authoritative store; delete-all and demo reset clear them with it.
+  const personalNotes = createPersonalNoteService(database, { now, ids });
+  const personalNoteQuery = createPersonalNoteQuery(database);
   const ports = gate.guard({
     // Append only: the patient-facing runtime never reads, lists or rewrites AI audit rows.
     aiAudit: Object.freeze({ append: aiAudits.append } satisfies AiInvocationAuditPort),
     backup: Object.freeze({ export: backupExport.export }),
     voice: Object.freeze({ recordMedicationEvent: afterCommit(journalCommands.recordMedicationEvent), terminology }),
+    notes: Object.freeze({
+      commands: Object.freeze({ createPersonalNote: personalNotes.createPersonalNote }),
+      query: Object.freeze({ listPersonalNotes: personalNoteQuery.listPersonalNotes, themeCounts: personalNoteQuery.themeCounts }),
+    }),
     recordDeletion: Object.freeze({
       async prepare(target: DeletionTarget) {
         await intelligence;
@@ -440,6 +475,13 @@ export async function createBrowserJournalRuntime(
         return historyQuery.loadExplainablePattern(request);
       },
     }),
+    booklet: bookletQuery,
+    previewInsights: Object.freeze({
+      async habitTrend() {
+        await intelligence;
+        return previewInsightsQuery.habitTrend();
+      },
+    } satisfies PreviewInsightsQueryPort),
     medicationSchedule: Object.freeze({
       ...schedule,
       async load(request: Parameters<MedicationSchedulePort["load"]>[0]) {
@@ -484,6 +526,11 @@ export async function createBrowserJournalRuntime(
           await packet8;
           return careOrganisationQuery.loadVisitPreparation();
         },
+        // Owner decision 2026-10-16: the period overview on visit preparation and the summary preview.
+        async loadPeriodOverview(choice: Parameters<NonNullable<CareOrganisationQueryPort["loadPeriodOverview"]>>[0]) {
+          await packet8;
+          return careOrganisationQuery.loadPeriodOverview!(choice);
+        },
       }),
     }),
     resolveLocale: () => localeRepository.resolve(null, now()),
@@ -508,6 +555,15 @@ export async function createBrowserJournalRuntime(
       await seedSyntheticScenarioWhenEmpty();
       await seedCareOrganisationWhenMissing();
       await scheduleIntelligence(true);
+    },
+    async seedPreparedDemoWhenEmpty() {
+      await intelligence;
+      await packet8;
+      if ((await database.table("recordHeads").count()) > 0) return false;
+      await seedSyntheticScenarioWhenEmpty();
+      await seedCareOrganisationWhenMissing();
+      await scheduleIntelligence(true);
+      return true;
     },
   });
 

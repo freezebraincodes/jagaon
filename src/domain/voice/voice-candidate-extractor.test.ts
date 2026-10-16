@@ -2,7 +2,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { VOICE_MAX_CANDIDATES, VOICE_TRANSCRIPT_MAX_CODE_POINTS, VOICE_VOCABULARY_VERSION, candidateMatchesTranscript, voiceAnalysisSchema, type VoiceAnalysis } from "./voice-contracts";
+import { VOICE_MAX_CANDIDATES, VOICE_TRANSCRIPT_MAX_CODE_POINTS, VOICE_VOCABULARY_VERSION, candidateMatchesTranscript, voiceAnalysisSchema, type VoiceAnalysis, type VoiceFactCandidate } from "./voice-contracts";
+
+type VoiceAnalysisCandidate = Extract<VoiceAnalysis, { kind: "ANALYSED" }>["candidates"][number];
 import { analyseTranscript, extractVoiceCandidates, normaliseVoicePhrase, type VoiceMedicineDirectory } from "./voice-candidate-extractor";
 
 const REF_A = { recordType: "MEDICATION", recordId: "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f", revisionId: "7a1c2d3e-4a5b-4c6d-9e7f-0a1b2c3d4e5f" } as const;
@@ -23,6 +25,78 @@ describe("multi-fact extraction", () => {
     for (const candidate of result.candidates) expect(candidate).toMatchObject({ source: "DETERMINISTIC", producerVersion: VOICE_VOCABULARY_VERSION });
     expect(result.candidates[1]).toMatchObject({ slot: "LUNCH", itemText: "chicken rice", sourcePhrase: "I had chicken rice for lunch" });
     expect(result.candidates[2]).toMatchObject({ status: "PLANNED", medicineRef: { kind: "UNRESOLVED", phrase: "grey pen" }, state: "AMBIGUOUS", ambiguity: ["MEDICINE_UNRESOLVED"] });
+  });
+
+  it("splits unpunctuated speech after a number when a new first-person statement starts (owner report 2026-10-14)", () => {
+    const spoken = analysed("my sugar level is 8.2 I had chicken rice for lunch", "en");
+    const punctuated = analysed("my sugar level is 8.2. I had chicken rice for lunch", "en");
+    const shape = (candidate: VoiceAnalysisCandidate) => [candidate.kind, "state" in candidate ? candidate.state : null, "ambiguity" in candidate ? candidate.ambiguity : null];
+    expect(spoken.candidates.map(shape)).toEqual(punctuated.candidates.map(shape));
+    expect(spoken.candidates[1]).toMatchObject({ kind: "MEAL_NOTE", slot: "LUNCH", itemText: "chicken rice", sourcePhrase: "I had chicken rice for lunch" });
+    expect(analysed("sugar 6.8 mmol I ate nasi lemak for breakfast", "en").candidates.map((candidate) => shape(candidate).slice(0, 2))).toEqual([
+      ["GLUCOSE_READING", "UNDERSTOOD"],
+      ["MEAL_NOTE", "UNDERSTOOD"],
+    ]);
+    // Not a new statement: "I think" still qualifies the reading.
+    expect(analysed("my sugar is 8 I think", "en").candidates[0]).toMatchObject({ kind: "GLUCOSE_READING", ambiguity: expect.arrayContaining(["UNCERTAINTY"]) });
+  });
+
+  it("reads \"a.m.\" / \"p.m.\" as part of a time, not a sentence end, so no stray word makes a reading edit-only (owner report 2026-10-15)", () => {
+    const text = "I had chicken rice for lunch at 01:00 p.m. My glucose level is eight when I tested before lunch. I had taken the duck pen injection.";
+    const result = analysed(text, "en");
+    expect(result.candidates.map((candidate) => candidate.kind)).toEqual(["MEAL_NOTE", "GLUCOSE_READING", "MEDICATION_OCCURRENCE"]);
+    expect(result.candidates[0]).toMatchObject({ slot: "LUNCH", itemText: "chicken rice", sourcePhrase: "I had chicken rice for lunch at 01:00 p.m" });
+    // Only the usual unit confirmation (no unit was said); never edit-only.
+    expect(result.candidates[1]).toMatchObject({ valueText: "8", ambiguity: ["UNIT_UNSTATED"] });
+    for (const reading of ["My sugar was 6.2 at 7 a.m.", "My sugar was 6.2 at 7:30 p.m.", "My sugar was 6.2 at 7 A.M."]) {
+      expect(analysed(reading, "en").candidates, reading).toEqual([expect.objectContaining({ kind: "GLUCOSE_READING", ambiguity: ["UNIT_UNSTATED"] })]);
+    }
+    // Other words after a reading still make it edit-only.
+    expect(analysed("My sugar was 6.2 for a man", "en").candidates[0]).toMatchObject({ ambiguity: expect.arrayContaining(["UNCERTAINTY"]) });
+  });
+
+  it("reads \"I have … for breakfast\" and \"I'm having … for lunch\" as meals, never \"I have diabetes\" (owner report 2026-10-16)", () => {
+    const meals: Array<[string, string, string]> = [
+      ["I have beef noodle for breakfast", "BREAKFAST", "beef noodle"],
+      ["I'm having chicken rice for lunch", "LUNCH", "chicken rice"],
+      ["for breakfast I have beef noodle", "BREAKFAST", "beef noodle"],
+      ["I have beef noodle soup for dinner", "DINNER", "beef noodle soup"],
+    ];
+    for (const [text, slot, itemText] of meals) expect(analysed(text, "en").candidates, text).toEqual([expect.objectContaining({ kind: "MEAL_NOTE", slot, itemText })]);
+    for (const text of ["I have diabetes", "I have a question for my doctor", "I have a check-up after lunch"]) {
+      expect(analysed(text, "en").candidates.map((candidate) => candidate.kind), text).toEqual(["UNSUPPORTED_SPAN"]);
+    }
+    expect(analysed("I have my pills at dinner", "en").candidates.map((candidate) => candidate.kind)).toEqual(["MEDICATION_OCCURRENCE"]);
+    // A plan is never a meal record.
+    for (const text of ["I am going to have chicken rice for dinner", "I want to have laksa"]) {
+      expect(analysed(text, "en").candidates.map((candidate) => candidate.kind), text).toEqual(["UNSUPPORTED_SPAN"]);
+    }
+  });
+
+  it("reads a known food or drink with \"for breakfast/lunch/dinner\" as a meal whatever the verb, and keeps a food list together (owner report 2026-10-16)", () => {
+    const meals: Array<[string, string, string]> = [
+      ["I went for Kaya bread and tea for breakfast", "BREAKFAST", "Kaya bread and tea"],
+      ["beef noodle for breakfast", "BREAKFAST", "beef noodle"],
+      ["I drank milo for breakfast", "BREAKFAST", "milo"],
+      ["I had chicken rice, laksa and teh for lunch", "LUNCH", "chicken rice, laksa and teh"],
+      ["For breakfast I had kaya toast, soft boiled eggs, and kopi", "BREAKFAST", "kaya toast, soft boiled eggs, and kopi"],
+    ];
+    for (const [text, slot, itemText] of meals) expect(analysed(text, "en").candidates, text).toEqual([expect.objectContaining({ kind: "MEAL_NOTE", slot, itemText })]);
+    // A comma before something else still starts a new card; a feeling before a food stays a feeling.
+    expect(analysed("I had chicken rice, my sugar was 6.8", "en").candidates.map((candidate) => candidate.kind)).toEqual(["MEAL_NOTE", "GLUCOSE_READING"]);
+    expect(analysed("Feeling tired, had laksa", "en").candidates.map((candidate) => candidate.kind)).toEqual(["FEELING_NOTE", "MEAL_NOTE"]);
+    // Plans and non-meals are unchanged.
+    for (const text of ["I'll get kopi for breakfast later", "I went for my check-up at lunch"]) {
+      expect(analysed(text, "en").candidates.map((candidate) => candidate.kind), text).toEqual(["UNSUPPORTED_SPAN"]);
+    }
+  });
+
+  it("reads \"I had <a common food>\" as a meal without a meal word, never guessing the meal (owner report 2026-10-16)", () => {
+    expect(analysed("I had roti prata in the evening", "en").candidates).toEqual([expect.objectContaining({ kind: "MEAL_NOTE", slot: "UNSTATED", itemText: "roti prata" })]);
+    expect(analysed("I had chicken rice", "en").candidates).toEqual([expect.objectContaining({ kind: "MEAL_NOTE", slot: "UNSTATED", itemText: "chicken rice" })]);
+    for (const text of ["I had a fever", "I had a headache in the evening"]) {
+      expect(analysed(text, "en").candidates.map((candidate) => candidate.kind), text).toEqual(["UNSUPPORTED_SPAN"]);
+    }
   });
 
   it('"I need to inject" is never TAKEN; forgot / remembered later / not sure is UNKNOWN', () => {
@@ -97,6 +171,43 @@ describe("limits", () => {
     expect(extractVoiceCandidates(text, "en")).toEqual(extractVoiceCandidates(text, "en"));
     const source = readFileSync(join(process.cwd(), "src/domain/voice/voice-candidate-extractor.ts"), "utf8");
     expect(source).not.toMatch(/Date\.|Math\.random|crypto|localStorage|sessionStorage|indexedDB|\bfetch\b|process\.env|^import .* from "(?!\.\/|zod)/m);
+  });
+});
+
+describe("distress gate first (owner decision 2026-10-14)", () => {
+  const DISTRESS = { kind: "DISTRESS", candidates: [], cuesVersion: "voice-distress-cues.1", extractorVersion: "voice-extractor.13s.7" } as const;
+  const distress = (text: string, language: "en" | "zh" = "en") => {
+    const result = analyseTranscript(text, language);
+    expect(voiceAnalysisSchema.safeParse(result).success, text).toBe(true);
+    return result;
+  };
+
+  it("returns DISTRESS with zero candidates and nothing from the transcript", () => {
+    expect(distress("I don't want to live anymore")).toEqual({ ...DISTRESS, language: "en", cueKey: "NOT_WANT_TO_LIVE" });
+    expect(JSON.stringify(distress("I don't want to live anymore"))).not.toContain("live");
+  });
+
+  it("beats the HEALTH redirect (\"help\"), the dose redirect and separable facts", () => {
+    expect(analyseTranscript("Please help me", "en")).toMatchObject({ kind: "REDIRECT", category: "HEALTH_QUESTION" });
+    expect(distress("Please help me, I can't go on")).toEqual({ ...DISTRESS, language: "en", cueKey: "CANNOT_GO_ON" });
+    expect(analyseTranscript("how much insulin should I take", "en")).toMatchObject({ kind: "REDIRECT", category: "DOSE_TREATMENT" });
+    expect(distress("I want to kill myself, how much insulin should I take")).toEqual({ ...DISTRESS, language: "en", cueKey: "KILL_MYSELF" });
+    expect(distress("My sugar was 6.8 mmol, I had chicken rice for lunch and I want to end it all")).toEqual({ ...DISTRESS, language: "en", cueKey: "END_IT_ALL" });
+  });
+
+  it("beats TRANSCRIPT_TOO_LONG", () => {
+    const long = `${"sugar 6.8 mmol ".repeat(100)}I am suicidal`;
+    expect([...long].length).toBeGreaterThan(VOICE_TRANSCRIPT_MAX_CODE_POINTS);
+    expect(distress(long)).toEqual({ ...DISTRESS, language: "en", cueKey: "SUICIDE" });
+  });
+
+  it("applies the English cues in a Chinese session too", () => {
+    expect(distress("血糖六点八，I want to die", "zh")).toEqual({ ...DISTRESS, language: "zh", cueKey: "WANT_TO_DIE" });
+  });
+
+  it("leaves ordinary utterances unchanged", () => {
+    expect(analysed("This traffic is killing me, my sugar was 6.8 mmol", "en").candidates.map((candidate) => candidate.kind)).toContain("GLUCOSE_READING");
+    expect(analyseTranscript("I'm dying to eat chicken rice", "en").kind).toBe("ANALYSED");
   });
 });
 
@@ -227,7 +338,7 @@ describe("CR-11 fix round 3: signs, ranges and excess precision", () => {
     expect(voiceAnalysisSchema.safeParse(result).success, text).toBe(true);
     if (result.kind !== "ANALYSED") return result.kind;
     return result.candidates
-      .map((c) => (c.kind === "GLUCOSE_READING" ? `G(${c.valueText}${c.ambiguity.length ? ` ${c.ambiguity.join("+")}` : ""})` : c.kind === "MEDICATION_OCCURRENCE" ? `D(${c.reportedAmount ? `${c.reportedAmount.valueText} ${c.reportedAmount.unitText}` : "-"}${c.ambiguity.length ? ` ${c.ambiguity.join("+")}` : ""})` : c.kind === "MEAL_NOTE" ? "M" : "U"))
+      .map((c) => (c.kind === "GLUCOSE_READING" ? `G(${c.valueText}${c.ambiguity.length ? ` ${c.ambiguity.join("+")}` : ""})` : c.kind === "MEDICATION_OCCURRENCE" ? `D(${c.reportedAmount ? `${c.reportedAmount.valueText} ${c.reportedAmount.unitText}` : "-"}${c.ambiguity.length ? ` ${c.ambiguity.join("+")}` : ""})` : c.kind === "MEAL_NOTE" ? "M" : c.kind === "FEELING_NOTE" ? "F" : c.kind === "ACTIVITY_NOTE" ? "A" : "U"))
       .join(" ");
   };
 
@@ -269,7 +380,8 @@ describe("CR-11 fix round 3: signs, ranges and excess precision", () => {
       ["I injected 8–10 units of my dark pen", "en", "D(10 units UNCERTAINTY)"],
       ["我吃了2–3片药", "zh", "D(3 片 UNCERTAINTY+MEDICINE_UNRESOLVED)"],
       ["sugar was 6.8 - before breakfast", "en", "G(6.8)"],
-      ["sugar was 6.8, - I felt fine", "en", "G(6.8 UNIT_UNSTATED+UNCERTAINTY) U"],
+      // 13s.6: "I felt fine" is now a feeling (F); the reading beside it is unchanged (the C1 backstop still applies).
+      ["sugar was 6.8, - I felt fine", "en", "G(6.8 UNIT_UNSTATED+UNCERTAINTY) F"],
       ["血糖6.8 - 早餐前", "zh", "G(6.8)"],
       ["sugar plus six mmol", "en", "U"],
       ["血糖正六毫摩尔", "zh", "U"],
@@ -751,7 +863,7 @@ describe("owner decision 2026-10-12: English second person is clause-local", () 
  */
 describe("owner decision 2026-10-12, fix round 1: a clause without its own subject keeps an earlier \"you\" of its sentence", () => {
   const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
-  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c): c is VoiceFactCandidate => c.kind === "GLUCOSE_READING" || c.kind === "MEAL_NOTE" || c.kind === "MEDICATION_OCCURRENCE");
 
   it.each([
     ["you had chicken rice and took the dark pen", "MEDICATION_OCCURRENCE"],
@@ -793,7 +905,7 @@ describe("owner decision 2026-10-12, fix round 1: a clause without its own subje
  */
 describe("owner decision 2026-10-12, fix round 2: only a subject-form first person outweighs an earlier \"you\"", () => {
   const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
-  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c): c is VoiceFactCandidate => c.kind === "GLUCOSE_READING" || c.kind === "MEAL_NOTE" || c.kind === "MEDICATION_OCCURRENCE");
 
   it.each([
     ["you had lunch then took my dark pen", "MEDICATION_OCCURRENCE"],
@@ -834,7 +946,7 @@ describe("owner decision 2026-10-12, fix round 2: only a subject-form first pers
  */
 describe("owner decision 2026-10-12, fix round 3: only a first person before the fact's verb or cue cancels, and leaves UNCERTAINTY", () => {
   const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
-  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c): c is VoiceFactCandidate => c.kind === "GLUCOSE_READING" || c.kind === "MEAL_NOTE" || c.kind === "MEDICATION_OCCURRENCE");
 
   it.each([
     ["you had lunch then took the dark pen I gave", "MEDICATION_OCCURRENCE"],
@@ -888,7 +1000,7 @@ describe("owner decision 2026-10-12, fix round 3: only a first person before the
  */
 describe("owner decision 2026-10-12, fix round 4: a subjectless fact right after a sentence with \"you\" is edit-only", () => {
   const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
-  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c): c is VoiceFactCandidate => c.kind === "GLUCOSE_READING" || c.kind === "MEAL_NOTE" || c.kind === "MEDICATION_OCCURRENCE");
 
   it.each([
     ["You took metformin. Took the dark pen.", "MEDICATION_OCCURRENCE"],
@@ -922,7 +1034,7 @@ describe("owner decision 2026-10-12, fix round 4: a subjectless fact right after
  */
 describe("owner decision 2026-10-12, fix round 5: the nearest earlier sentence with a subject decides", () => {
   const DIRECTORY: VoiceMedicineDirectory = { terms: [{ phrase: "dark pen", medication: REF_A }], names: [{ name: "Metformin", medication: REF_B }] };
-  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c) => c.kind !== "UNSUPPORTED_SPAN");
+  const factsOf = (text: string) => analysed(text, "en", DIRECTORY).candidates.filter((c): c is VoiceFactCandidate => c.kind === "GLUCOSE_READING" || c.kind === "MEAL_NOTE" || c.kind === "MEDICATION_OCCURRENCE");
   const editOnly = { state: "AMBIGUOUS", ambiguity: expect.arrayContaining(["UNCERTAINTY"]) };
 
   it("walks back over subjectless sentences to the \"you\"", () => {

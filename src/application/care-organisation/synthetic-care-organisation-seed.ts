@@ -23,12 +23,53 @@ const catalogue = (catalogueEntryKey: string, label: string): PreventiveCareItem
   label,
 });
 
-export const SYNTHETIC_CARE_ORGANISATION_DATES = Object.freeze({
-  eyeScreening: "2026-11-03",
-  bloodTest: "2026-10-14",
-  footCheckRecorded: "2026-09-14",
-  appointmentInstant: "2026-10-14T01:40:00.000Z",
+/**
+ * Owner decision 2026-10-16: the demo's care dates are relative to the day the profile is prepared (like the recorded history), so the
+ * appointment is always upcoming and the health checks keep the same spacing whenever the demo is prepared. Days from the seed's
+ * Singapore date (the same spacing as the original fixed dates seeded on 4 Oct): the visit with Dr Lim 10 days later at 09:40 (the blood
+ * test the same day), eye screening 30 days later, the foot check recorded 20 days earlier. Earlier checks the patient reported
+ * without a plan (HSA-bounded-mode-off preview, owner decision 2026-10-14) leave every item and the visit unchanged and let the preview
+ * show one clear due check (eye screening, about 13 months ago) and one coming up (blood test, about 5 months ago).
+ * Owner decision 2026-10-16: one earlier visit with Dr Lim 35 days before, which the patient reported attending, so the overview on
+ * "Prepare for my appointment" can count "since your last visit".
+ */
+export const SYNTHETIC_CARE_ORGANISATION_OFFSETS = Object.freeze({
+  appointmentDays: 10,
+  appointmentLocalTime: "09:40",
+  bloodTestDays: 10,
+  eyeScreeningDays: 30,
+  footCheckRecordedDays: -20,
+  eyeScreeningRecordedDays: -390,
+  bloodTestRecordedDays: -145,
+  pastVisitDays: -35,
+  pastVisitLocalTime: "10:20",
 });
+
+const DAY_MS = 86_400_000;
+const SINGAPORE_OFFSET_MS = 8 * 3_600_000;
+
+/** The Singapore local date `days` after (or before) the seed's own Singapore date. */
+function localDateFrom(seedAt: Instant, days: number): string {
+  const local = new Date(Date.parse(seedAt) + SINGAPORE_OFFSET_MS);
+  const midnight = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
+  return new Date(midnight + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** The demo's care dates for a profile prepared at `seedAt`. */
+export function syntheticCareOrganisationDates(seedAt: Instant) {
+  const o = SYNTHETIC_CARE_ORGANISATION_OFFSETS;
+  const appointmentDate = localDateFrom(seedAt, o.appointmentDays);
+  const pastVisitDate = localDateFrom(seedAt, o.pastVisitDays);
+  return Object.freeze({
+    eyeScreening: localDateFrom(seedAt, o.eyeScreeningDays),
+    bloodTest: localDateFrom(seedAt, o.bloodTestDays),
+    footCheckRecorded: localDateFrom(seedAt, o.footCheckRecordedDays),
+    appointmentInstant: new Date(Date.parse(`${appointmentDate}T${o.appointmentLocalTime}:00.000Z`) - SINGAPORE_OFFSET_MS).toISOString(),
+    pastVisitInstant: new Date(Date.parse(`${pastVisitDate}T${o.pastVisitLocalTime}:00.000Z`) - SINGAPORE_OFFSET_MS).toISOString(),
+    eyeScreeningRecorded: localDateFrom(seedAt, o.eyeScreeningRecordedDays),
+    bloodTestRecorded: localDateFrom(seedAt, o.bloodTestRecordedDays),
+  });
+}
 
 export const SYNTHETIC_CARE_QUESTION_TEXT = "Should I change anything before my next appointment?";
 
@@ -61,6 +102,7 @@ export async function seedSyntheticCareOrganisation(input: {
   let step = 0;
   const now = () => new Date(Date.parse(input.seedAt) - 3_600_000 + (step += 1) * 1000).toISOString() as Instant;
   const carePlan = createCarePlanCommandService(input.database, { now, ids: input.ids });
+  const dates = syntheticCareOrganisationDates(input.seedAt);
   const co = createCareOrganisationService(input.database, { now, ids: input.ids, carePlan });
 
   committed(
@@ -68,7 +110,7 @@ export async function seedSyntheticCareOrganisation(input: {
       payload: {
         identity: catalogue("EYE_SCREENING", "Eye screening"),
         trackingState: "ACTIVE",
-        schedule: { kind: "TARGET_DATE", targetDate: localDateSchema.parse(SYNTHETIC_CARE_ORGANISATION_DATES.eyeScreening) },
+        schedule: { kind: "TARGET_DATE", targetDate: localDateSchema.parse(dates.eyeScreening) },
         patientReportedPlanText: { text: "Appointment letter, 2 Sep 2026", language: "en-SG" },
         patientNote: { text: "Afternoon slot", language: "en-SG" },
       },
@@ -79,7 +121,7 @@ export async function seedSyntheticCareOrganisation(input: {
       payload: {
         identity: catalogue("BLOOD_TEST", "Blood test"),
         trackingState: "ACTIVE",
-        schedule: { kind: "TARGET_DATE", targetDate: localDateSchema.parse(SYNTHETIC_CARE_ORGANISATION_DATES.bloodTest) },
+        schedule: { kind: "TARGET_DATE", targetDate: localDateSchema.parse(dates.bloodTest) },
         patientNote: { text: "Same day as visit", language: "en-SG" },
       },
     }),
@@ -89,7 +131,7 @@ export async function seedSyntheticCareOrganisation(input: {
       payload: {
         identity: catalogue("FOOT_CHECK", "Foot check"),
         trackingState: "ACTIVE",
-        schedule: { kind: "TARGET_DATE", targetDate: localDateSchema.parse(SYNTHETIC_CARE_ORGANISATION_DATES.footCheckRecorded) },
+        schedule: { kind: "TARGET_DATE", targetDate: localDateSchema.parse(dates.footCheckRecorded) },
       },
     }),
   );
@@ -110,9 +152,21 @@ export async function seedSyntheticCareOrganisation(input: {
         careReference: { kind: "PLANNED_ITEM", item: { recordType: "PREVENTIVE_CARE_ITEM", recordId: footCheck.recordId, revisionId: footCheck.revisionId } },
         completionReport: { kind: "PATIENT_REPORTED_COMPLETED" },
       },
-      occurrence: day(SYNTHETIC_CARE_ORGANISATION_DATES.footCheckRecorded),
+      occurrence: day(dates.footCheckRecorded),
     }),
   );
+  // Earlier checks the patient reported without a plan. They are not part of any item, so My health checks is unchanged.
+  for (const [key, label, localDate] of [
+    ["EYE_SCREENING", "Eye screening", dates.eyeScreeningRecorded],
+    ["BLOOD_TEST", "Blood test", dates.bloodTestRecorded],
+  ] as const) {
+    committed(
+      await co.recordPreventiveOutcome({
+        payload: { careReference: { kind: "UNPLANNED", identity: catalogue(key, label) }, completionReport: { kind: "PATIENT_REPORTED_COMPLETED" } },
+        occurrence: day(localDate),
+      }),
+    );
+  }
   const appointment = committed(
     await co.scheduleAppointment({
       payload: {
@@ -124,16 +178,32 @@ export async function seedSyntheticCareOrganisation(input: {
         careContactLabel: "Dr Lim",
         locationLabel: "Bukit Merah Polyclinic",
       },
-      scheduledAt: { kind: "EXACT", instantUtc: SYNTHETIC_CARE_ORGANISATION_DATES.appointmentInstant as Instant, timeZoneId: SINGAPORE, utcOffsetMinutes: 480 },
+      scheduledAt: { kind: "EXACT", instantUtc: dates.appointmentInstant as Instant, timeZoneId: SINGAPORE, utcOffsetMinutes: 480 },
     }),
   );
   // Owner decision 2026-10-12: one short question for the appointment, saved as the add-question screen saves one, so the visit
   // summary can be prepared in the demo without typing. It is the patient's own wording; JagaOn never answers it.
-  if (input.demoQuestion === false) return "SEEDED";
+  if (input.demoQuestion !== false) {
+    committed(
+      await co.createCareQuestion({
+        questionText: { text: SYNTHETIC_CARE_QUESTION_TEXT, language: "und" },
+        relatedAppointment: { recordType: "APPOINTMENT", recordId: appointment.recordId, revisionId: appointment.revisionId },
+      }),
+    );
+  }
+  // Owner decision 2026-10-16: the earlier visit, recorded last so every other fixture identity is unchanged. The patient's own report
+  // that it took place; JagaOn never marks a passed appointment attended.
   committed(
-    await co.createCareQuestion({
-      questionText: { text: SYNTHETIC_CARE_QUESTION_TEXT, language: "und" },
-      relatedAppointment: { recordType: "APPOINTMENT", recordId: appointment.recordId, revisionId: appointment.revisionId },
+    await co.scheduleAppointment({
+      payload: {
+        appointmentLabel: "Dr Lim, Bukit Merah Polyclinic",
+        service: { kind: "UNKNOWN" },
+        mode: "IN_PERSON",
+        status: "PATIENT_REPORTED_ATTENDED",
+        careContactLabel: "Dr Lim",
+        locationLabel: "Bukit Merah Polyclinic",
+      },
+      scheduledAt: { kind: "EXACT", instantUtc: dates.pastVisitInstant as Instant, timeZoneId: SINGAPORE, utcOffsetMinutes: 480 },
     }),
   );
   return "SEEDED";

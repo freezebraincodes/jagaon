@@ -307,6 +307,12 @@ export function MedicationScheduleScreen({ messages, locale, schedule, medicatio
               {record?.amount ? <dd className="schedule-tile-detail">{amountLabel(copy, record.amount)}</dd> : null}
             </div>
           </dl>
+          {/* Owner decision 2026-10-15: after a skipped dose, one neutral safety line (missing insulin can become urgent). */}
+          {record?.state === "SKIPPED" ? (
+            <p className="schedule-skip-safety" role="note">
+              {copy.skippedSafety}
+            </p>
+          ) : null}
           <p className="source-attr">{copy.sourceFixture(formatScheduleDay(locale, occasion.scheduleSource.date))}</p>
           <div className="card-links">
             <button
@@ -669,7 +675,10 @@ export function MedicationScheduleScreen({ messages, locale, schedule, medicatio
 
   return (
     <div className="schedule-screen">
-      <h1 className="screen-title">{copy.title}</h1>
+      {/* Owner decision 2026-10-16: a child screen reached from More, so its title clears the Back button. */}
+      <header className="screen-header">
+        <h1 className="screen-title">{copy.title}</h1>
+      </header>
       <Notice>
         <p>{copy.notAdvice}</p>
       </Notice>

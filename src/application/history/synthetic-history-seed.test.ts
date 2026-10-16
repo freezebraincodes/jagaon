@@ -46,33 +46,63 @@ describe("deterministic synthetic Recorded-history seed", () => {
     expect(dinnerTimes.every((time) => time >= "18:05" && time <= "19:20")).toBe(true);
   });
 
-  it("spans 42 days with deliberate gaps, one correction, an improvement before breakfast and few readings in the last 14 days", () => {
+  it("is a full booklet: three readings a day for 42 days, daily meals with five gaps in the month, walks 3 to 5 times a week (owner request 2026-10-16)", () => {
     const rows = PREPARED_DEMO_HISTORY_ROWS;
     const glucose = rows.filter((row): row is Extract<typeof row, { kind: "GLUCOSE" }> => row.kind === "GLUCOSE");
-    const kinds = rows.reduce<Record<string, number>>((acc, row) => ({ ...acc, [row.kind]: (acc[row.kind] ?? 0) + 1 }), {});
-    expect(kinds).toEqual({ GLUCOSE: 49, MEAL: 15, ACTIVITY: 9 });
+    const meals = rows.filter((row): row is Extract<typeof row, { kind: "MEAL" }> => row.kind === "MEAL");
+    const walks = rows.filter((row): row is Extract<typeof row, { kind: "ACTIVITY" }> => row.kind === "ACTIVITY");
     expect(Math.min(...rows.map((row) => row.daysAgo))).toBe(1);
     expect(Math.max(...rows.map((row) => row.daysAgo))).toBe(42);
-    const breakfast = glucose.filter((row) => row.slot === "BEFORE_BREAKFAST");
-    const dinner = glucose.filter((row) => row.slot === "BEFORE_DINNER");
-    // Fewer readings than one per day in each slot: some days are intentionally not recorded.
-    expect([breakfast.length, dinner.length]).toEqual([34, 15]);
+    // Three readings every day: before breakfast, before dinner and one after-meal check.
+    for (let day = 1; day <= 42; day += 1) {
+      const slots = glucose.filter((row) => row.daysAgo === day).map((row) => row.slot);
+      expect(slots).toHaveLength(3);
+      expect(slots).toEqual(expect.arrayContaining(["BEFORE_BREAKFAST", "BEFORE_DINNER"]));
+      expect(slots.filter((slot) => slot.startsWith("AFTER_"))).toHaveLength(1);
+    }
+    // Breakfast, lunch and dinner every day, except five missed meals in the last 30 days.
+    expect(meals.filter((row) => row.daysAgo <= 30)).toHaveLength(30 * 3 - 5);
+    expect(meals.filter((row) => row.daysAgo > 30)).toHaveLength(12 * 3);
+    // Exercise three to five times a week: tai chi three times a week until about two and a half weeks ago, then morning walks five
+    // times a week starting 16 days ago (so the preview's "What changed alongside" card has four weeks of readings before them).
+    const label = (name: string) => walks.filter((row) => row.label === name);
+    expect(label("Tai chi").every((row) => row.daysAgo >= 17 && row.category === "FLEXIBILITY_OR_MOBILITY")).toBe(true);
+    expect(label("Tai chi")).toHaveLength(11);
+    expect(Math.max(...label("Morning walk").map((row) => row.daysAgo))).toBe(16);
+    expect(label("Morning walk")).toHaveLength(11);
+    for (let week = 0; week < 6; week += 1) {
+      const count = walks.filter((row) => row.daysAgo > week * 7 && row.daysAgo <= (week + 1) * 7).length;
+      expect(count, `week ${week + 1} back`).toBeGreaterThanOrEqual(3);
+      expect(count, `week ${week + 1} back`).toBeLessThanOrEqual(5);
+    }
     expect(glucose.filter((row) => row.correctedTime)).toEqual([expect.objectContaining({ daysAgo: 2, time: "07:37", correctedTime: "07:07", slot: "BEFORE_BREAKFAST" })]);
     const value = (row: { value: string }) => Number(row.value);
-    // Earlier weeks about 7.0–8.2 mmol/L before breakfast; the last two weeks about 5.6–6.6; before dinner moderate throughout.
+    const median = (values: number[]) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      const middle = sorted.length / 2;
+      return Number.isInteger(middle) ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[Math.floor(middle)]!;
+    };
+    const breakfast = glucose.filter((row) => row.slot === "BEFORE_BREAKFAST");
+    const dinner = glucose.filter((row) => row.slot === "BEFORE_DINNER");
+    // The comparisons keep their story: before breakfast lower, before dinner higher in the last two weeks.
     expect(breakfast.filter((row) => row.daysAgo > 14).every((row) => value(row) >= 7.0 && value(row) <= 8.2)).toBe(true);
     expect(breakfast.filter((row) => row.daysAgo <= 14).every((row) => value(row) >= 5.6 && value(row) <= 6.6)).toBe(true);
-    expect(dinner.every((row) => value(row) >= 7.0 && value(row) <= 8.6)).toBe(true);
+    expect(dinner.filter((row) => row.daysAgo > 14).every((row) => value(row) >= 7.0 && value(row) <= 8.6)).toBe(true);
+    expect(dinner.filter((row) => row.daysAgo <= 14).every((row) => value(row) >= 8.8 && value(row) <= 9.4)).toBe(true);
+    expect(median(breakfast.filter((row) => row.daysAgo > 14).map(value))).toBe(7.5);
+    expect(median(breakfast.filter((row) => row.daysAgo <= 13).map(value))).toBe(6.1);
+    expect(median(dinner.filter((row) => row.daysAgo > 14).map(value))).toBe(7.8);
+    expect(median(dinner.filter((row) => row.daysAgo <= 13).map(value))).toBe(9.1);
     // Plausible synthetic values only: one decimal place, never a confirmation-range value.
-    expect(glucose.every((row) => /^\d\.\d$/.test(row.value) && value(row) > 0 && value(row) <= 50)).toBe(true);
-    // The visit summary's 14 days (today and the 13 days before) stay well under the care-summary request's 32-fact limit and within its
-    // English remote wording budget (with the appointment and one question: 14 facts).
-    expect(glucose.filter((row) => row.daysAgo <= 13)).toHaveLength(11);
-    expect(glucose.filter((row) => row.daysAgo <= 14)).toHaveLength(13);
-    // Fewer before-dinner readings in the last two weeks: too few for a before-dinner comparison, so History shows one comparison.
-    expect(dinner.filter((row) => row.daysAgo <= 14)).toHaveLength(3);
-    expect(new Set(rows.filter((row) => row.kind === "MEAL").map((row) => (row.kind === "MEAL" ? row.label : "")))).toEqual(new Set(["Kaya toast", "Chicken rice"]));
-    expect(new Set(rows.filter((row) => row.kind === "ACTIVITY").map((row) => (row.kind === "ACTIVITY" ? row.label : "")))).toEqual(new Set(["Morning walk"]));
+    expect(glucose.every((row) => /^\d+\.\d$/.test(row.value) && value(row) > 0 && value(row) <= 50)).toBe(true);
+    // The 5-day visit summary (today and the 4 days before) holds 12 readings: with the appointment and one question, 15 facts,
+    // inside the care-summary request's 32-fact limit and its English remote wording budget.
+    expect(glucose.filter((row) => row.daysAgo <= 4)).toHaveLength(12);
+    // Each day reads in time order: the before-breakfast reading comes before breakfast, before dinner before dinner.
+    for (let day = 1; day <= 42; day += 1) {
+      const times = rows.filter((row) => row.daysAgo === day).map((row) => row.time);
+      expect(times).toEqual([...times].sort());
+    }
   });
 
   it("refuses a row dated today or with an unreadable time instead of seeding it", () => {

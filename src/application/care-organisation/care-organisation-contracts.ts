@@ -68,7 +68,15 @@ export type PreventiveCareItemView = {
   history: PreventiveHistoryEntry[];
 };
 
-export type PreventiveCareView = { status: "UNAVAILABLE" } | { status: "READY"; items: PreventiveCareItemView[] };
+/**
+ * A completion the patient reported (planned on any plan of an active catalogue item, or recorded without a plan), by catalogue key and
+ * local date. Relayed as entered; only the HSA-bounded-mode-off preview reads it (`application/preview/care-nudges`).
+ */
+export type ReportedPreventiveCompletion = { catalogueEntryKey: string; localDate: string };
+
+export type PreventiveCareView =
+  | { status: "UNAVAILABLE" }
+  | { status: "READY"; items: PreventiveCareItemView[]; reportedCompletions?: ReportedPreventiveCompletion[] };
 
 export type AppointmentView = {
   recordId: RecordId;
@@ -100,8 +108,36 @@ export type VisitPreparationView =
       factGroups: FactGroupView[];
     };
 
+/**
+ * Owner decision 2026-10-16: the period the overview on "Prepare for my appointment" counts over. It sets only those counts; the
+ * visit summary keeps its own preparation period.
+ */
+export const OVERVIEW_PERIOD_CHOICES = Object.freeze(["LAST_7_DAYS", "LAST_14_DAYS", "LAST_30_DAYS", "SINCE_LAST_VISIT"] as const);
+export type OverviewPeriodChoice = (typeof OVERVIEW_PERIOD_CHOICES)[number];
+
+/**
+ * Owner decision 2026-10-16: plain counts of what the patient logged in the chosen period, and of the questions they saved. Nothing
+ * is judged or compared. `choice` is the period actually counted: "since your last visit" falls back to the last 30 days when no
+ * visit the patient reported attending is on record (`lastVisit` null).
+ */
+export type PeriodOverviewView =
+  | { status: "UNAVAILABLE" }
+  | {
+      status: "READY";
+      choice: OverviewPeriodChoice;
+      period: { startAt: Instant; endAtExclusive: Instant; startDate: string; endDate: string };
+      /** The latest past appointment the patient reported attending, if any. */
+      lastVisit: { recordId: RecordId; localDate: string } | null;
+      counts: Record<FactGroupKey, number>;
+      questionCount: number;
+      /** Who the saved questions are for: the upcoming appointment's care contact or label, as the patient entered it. */
+      questionsFor: string | null;
+    };
+
 export type CareOrganisationQueryPort = {
   loadPreventiveCare(): Promise<PreventiveCareView>;
   loadVisitPreparation(): Promise<VisitPreparationView>;
+  /** Owner decision 2026-10-16: the period overview; absent means no overview is shown. */
+  loadPeriodOverview?(choice: OverviewPeriodChoice): Promise<PeriodOverviewView>;
 };
 

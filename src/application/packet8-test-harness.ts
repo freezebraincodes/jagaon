@@ -14,10 +14,10 @@ import type { Instant, RecordId, RevisionId } from "@/domain/shared";
  * runtime. Never imported by runtime modules.
  */
 
-export const NOCTURIN_MEDICATION = { recordId: "00000000-0000-4000-8000-000000000101", revisionId: "00000000-0000-4000-8000-000000000101" } as const;
+export const LANTUS_MEDICATION = { recordId: "00000000-0000-4000-8000-000000000101", revisionId: "00000000-0000-4000-8000-000000000101" } as const;
 
-export const NOCTURIN_PRESCRIPTION: PrescriptionVersionPayload = {
-  medication: { recordType: "MEDICATION", recordId: NOCTURIN_MEDICATION.recordId as RecordId, revisionId: NOCTURIN_MEDICATION.revisionId as RevisionId },
+export const LANTUS_PRESCRIPTION: PrescriptionVersionPayload = {
+  medication: { recordType: "MEDICATION", recordId: LANTUS_MEDICATION.recordId as RecordId, revisionId: LANTUS_MEDICATION.revisionId as RevisionId },
   sourceInstructionText: { text: "Inject 12 units every night at 9 pm (demo label)", language: "en-SG" },
   doseInstruction: { kind: "FIXED", amount: { value: "12" as never, unit: "UNIT" } },
   schedule: { kind: "FIXED_LOCAL_TIMES", entries: [{ scheduleKey: "night", time: "21:00" as never }] },
@@ -68,17 +68,17 @@ export async function createPacket8Harness(start: string = "2026-10-03T02:00:00.
   });
 
   const medication = await carePlan.registerMedication({
-    recordId: NOCTURIN_MEDICATION.recordId as RecordId,
-    revisionId: NOCTURIN_MEDICATION.revisionId as RevisionId,
+    recordId: LANTUS_MEDICATION.recordId as RecordId,
+    revisionId: LANTUS_MEDICATION.revisionId as RevisionId,
     payload: {
-      identity: { kind: "UNMAPPED", patientEnteredName: "Nocturin pen" },
+      identity: { kind: "UNMAPPED", patientEnteredName: "Lantus" },
       doseForm: "INJECTION_SOLUTION",
       route: "SUBCUTANEOUS",
       deliveryDevice: "INSULIN_PEN",
     },
     recordedAt: clock,
   });
-  const prescription = await carePlan.recordPrescriptionVersion({ payload: NOCTURIN_PRESCRIPTION, recordedAt: clock });
+  const prescription = await carePlan.recordPrescriptionVersion({ payload: LANTUS_PRESCRIPTION, recordedAt: clock });
   if (medication.kind !== "COMMITTED" || prescription.kind !== "COMMITTED") throw new Error("HARNESS_SEED_FAILED");
   const prescriptionRef = { recordType: "PRESCRIPTION_VERSION" as const, recordId: prescription.recordId, revisionId: prescription.revisionId };
 
@@ -94,7 +94,7 @@ export async function createPacket8Harness(start: string = "2026-10-03T02:00:00.
       scheduleKey: "night",
     };
     const base = {
-      medication: { recordType: "MEDICATION" as const, recordId: NOCTURIN_MEDICATION.recordId as RecordId, revisionId: NOCTURIN_MEDICATION.revisionId as RevisionId },
+      medication: { recordType: "MEDICATION" as const, recordId: LANTUS_MEDICATION.recordId as RecordId, revisionId: LANTUS_MEDICATION.revisionId as RevisionId },
       prescriptionVersion: ref,
       intendedOccasion,
     };

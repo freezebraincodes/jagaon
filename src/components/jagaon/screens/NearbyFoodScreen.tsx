@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEv
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { ScreenId } from "../screen-manifest";
 import {
+  FILTERABLE_FOOD_ATTRIBUTES,
   HPB_FNB_PARTNERS_DATASET_ID,
   HPB_HEALTHIER_EATERIES_DATASET_ID,
   NO_FOOD_FILTERS,
@@ -116,6 +117,8 @@ function FoodFilters({
           <button type="button" className="food-filters-toggle" aria-expanded={open} aria-controls="food-filters-panel" onClick={() => setOpen(!open)}>
             <FilterIcon size={18} />
             {msg.filtersHeading}
+            {/* Owner decision 2026-10-15: how many filters are on, visible at a glance. */}
+            {active.length > 0 ? <span className="food-filters-count">({active.length})</span> : null}
             <ChevronRightIcon size={18} className={`food-filters-chevron${open ? " food-filters-chevron--open" : ""}`} />
           </button>
         </h2>
@@ -124,7 +127,17 @@ function FoodFilters({
           {msg.resetFilters}
         </button>
       </div>
-      {!open && active.length > 0 ? <p className="food-filters-summary">{active.join(" · ")}</p> : null}
+      {/* Owner decision 2026-10-15: while folded, the active filters read as filters ("Showing:" and small chips that open the panel). */}
+      {!open && active.length > 0 ? (
+        <p className="food-filters-summary">
+          <span className="food-filters-summary-label">{msg.filtersShowing}</span>
+          {active.map((label) => (
+            <button key={label} type="button" className="food-filter-pill" aria-controls="food-filters-panel" aria-expanded={false} onClick={() => setOpen(true)}>
+              {label}
+            </button>
+          ))}
+        </p>
+      ) : null}
       <div id="food-filters-panel" className="food-filters-panel" hidden={!open}>
         <ToggleChips<"500" | "1000" | "2000">
           label={msg.distanceLabel}
@@ -222,12 +235,27 @@ type NearbyFoodScreenProps = {
   discovery?: NearbyFoodDiscoveryPort;
   goBack: () => void;
   navigate: (screen: ScreenId, params?: Record<string, string>) => void;
+  /**
+   * An attribute filter to start with (e.g. from Today's meal ideas): one of the filterable attribute keys; anything else is ignored.
+   * It only pre-selects an existing filter, whatever the HSA-bounded mode.
+   */
+  initialAttribute?: string;
 };
 
-export function NearbyFoodScreen({ messages, locale, discovery, navigate }: NearbyFoodScreenProps) {
+function initialAttributeFilter(value: string | undefined): FilterableFoodAttribute | null {
+  return (FILTERABLE_FOOD_ATTRIBUTES as readonly string[]).includes(value ?? "") ? (value as FilterableFoodAttribute) : null;
+}
+
+export function NearbyFoodScreen({ messages, locale, discovery, navigate, initialAttribute }: NearbyFoodScreenProps) {
   const msg = messages.food;
   const port = useMemo(() => discovery ?? createBrowserNearbyFood(), [discovery]);
-  const controller = useMemo<NearbyFoodController>(() => createNearbyFoodController(port), [port]);
+  const startAttribute = initialAttributeFilter(initialAttribute);
+  const controller = useMemo<NearbyFoodController>(() => {
+    const created = createNearbyFoodController(port);
+    // Before any search, setting the filters only records them.
+    if (startAttribute) created.setFilters({ ...NO_FOOD_FILTERS, attribute: startAttribute });
+    return created;
+  }, [port, startAttribute]);
   // Closing the screen cancels the active request; StrictMode remounts stay usable.
   useEffect(() => () => controller.abortActive(), [controller]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);

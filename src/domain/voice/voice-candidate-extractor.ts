@@ -10,6 +10,8 @@ import {
   glucoseValueInAppDefaultWindow,
   isMmolEntryValue,
   voiceRedirectMessageKey,
+  VOICE_FEELING_MAX_CUES,
+  VOICE_FEELING_TEXT_MAX_CODE_POINTS,
   type VoiceRedirectCategory,
   type VoiceReportedAmount,
   type VoiceAmbiguityReason,
@@ -17,11 +19,16 @@ import {
   type VoiceCandidate,
   type VoiceLanguage,
   type VoiceMealSlot,
+  type VoiceMedicineInfoRequestCandidate,
   type VoiceMedicationRef,
   type VoiceMedicineRef,
   type VoiceOccurrenceStatus,
 } from "./voice-contracts";
 import { classifyVoiceAdviceRedirect, voiceWordMatcher } from "./voice-advice-redirect";
+import { matchVoiceActivity } from "./voice-activity-cues";
+import { VOICE_DISTRESS_CUES_VERSION, detectVoiceDistress } from "./voice-distress-gate";
+import { matchVoiceFeeling } from "./voice-feeling-cues";
+import { matchVoiceMedicineInfoRequest } from "./voice-medicine-info-cues";
 import {
   EN_MEDICINE_PHRASE_STOPWORDS,
   EN_PRONOUN_ONE_PREFIXES,
@@ -40,7 +47,9 @@ import {
  * (`VoiceMedicineDirectory`); nothing is learned here.
  *
  * `analyseTranscript(transcript, language, options)`:
- * 1. the neutral dose/treatment redirect FIRST; a REDIRECT yields zero candidates (the redirect is never hidden behind a fact);
+ * 0. the distress gate FIRST (owner decision 2026-10-14, `voice-distress-gate`): any distress cue, in any session language and at any
+ *    length, yields DISTRESS with zero candidates; nothing else (redirect, length check, extraction) runs;
+ * 1. the neutral dose/treatment redirect next; a REDIRECT yields zero candidates (the redirect is never hidden behind a fact);
  * 2. a transcript over VOICE_TRANSCRIPT_MAX_CODE_POINTS code points is TRANSCRIPT_TOO_LONG (no candidates);
  * 3. otherwise at most VOICE_MAX_CANDIDATES candidates, ordered by position (`truncated` beyond).
  *
@@ -59,7 +68,20 @@ import {
  * with its 1–2 spoken describing words) gives one MEDICATION_OCCURRENCE with the occurrence status said (PLANNED, TAKEN, SKIPPED;
  * UNKNOWN when unclear, forgotten or unsure). A description is never matched loosely: only an exact remembered term or an exact
  * canonical name maps it; otherwise it stays UNRESOLVED for the clarification question.
+ * Feelings and activities (13s.6, owner decision 2026-10-14; English only): a clause no other fact took, that no glucose reading
+ * touches and that is not a question or a redirected clause may state an activity (`voice-activity-cues.1`: ACTIVITY_NOTE) and/or a
+ * feeling (`voice-feeling-cues.1`: one FEELING_NOTE per transcript with every cue said). Priority: the distress gate first (unchanged);
+ * a dose/treatment/health QUESTION keeps the redirect ("Should I be worried about my sugar?", "Should I exercise after meals?"); a
+ * STATEMENT is never redirected for "worried" or "exercise" (the redirect needs a question form), so it becomes a feeling or activity
+ * card. "After my walk my sugar was 6.1" stays one glucose reading (a time reference, and the reading's clause).
  * Anything else with words or numbers is an UNSUPPORTED_SPAN (shown as not understood; never dropped, never interpreted).
+ * Medicine-information requests (13s.7, owner decision 2026-10-14, HSA preview; English only; only with
+ * `medicineInformationRequests: true`): a whole sentence that asks for general information about one medicine she or JagaOn knows
+ * by name (`voice-medicine-info-cues.1`: "Tell me about my Metformin", "What is metformin?", "What's Lantus for?") becomes one
+ * MEDICINE_INFO_REQUEST and no other candidate. Priority: the distress gate first, then the dose/treatment redirect (any redirect in
+ * the transcript means no request is offered: "How much metformin should I take" stays a redirect), then the length limit. Such a
+ * sentence still counts as other words for the C1 backstop below, exactly as when it was not understood. Without the option (the
+ * default; HSA-bounded mode on) nothing changes: these sentences stay not understood.
  *
  * 13s.3 (safety re-review Cr1–Cr4, I1–I3, M2, M4; owner decisions #2–#4):
  * - Cr1: only first person, fillers, times or qualifier words may precede the glucose cue in its clause; anything else (kid, auntie,
@@ -116,9 +138,15 @@ export type VoiceAnalysisOptions = Readonly<{
    * unambiguous, positively stated reading with no spoken unit is proposed in mmol/L with `unitSource: "APP_DEFAULT"`.
    */
   glucoseEntryUnit?: "MMOL_PER_L" | null;
+  /**
+   * 13s.7 (HSA preview): recognise requests for general information about a named medicine (MEDICINE_INFO_REQUEST). The app passes
+   * true only while HSA-bounded mode is off; absent or false keeps the earlier behaviour exactly.
+   */
+  medicineInformationRequests?: boolean;
 }>;
 /** Internal: clauses already shown as a redirected question (no fact from them, no medicine occurrence beside them). */
-type InternalScope = Readonly<{ exclude: readonly Range[]; withoutMedication: boolean }>;
+/** 13s.7: `otherWords` marks excluded medicine-information sentences, which still count as other words for the C1 backstop. */
+type InternalScope = Readonly<{ exclude: readonly Range[]; withoutMedication: boolean; otherWords?: boolean }>;
 const NO_SCOPE: InternalScope = Object.freeze({ exclude: [], withoutMedication: false });
 
 const EMPTY_DIRECTORY: VoiceMedicineDirectory = Object.freeze({ terms: [], names: [] });
@@ -575,13 +603,22 @@ function bracketedRanges(text: string): Range[] {
   return ranges;
 }
 
+/**
+ * Owner report 2026-10-15: the dot inside "a.m." / "p.m." ("at 1:00 p.m.") is part of the time, not the end of a sentence; splitting
+ * there left a stray "m" that was not understood, which made every reading in the transcript edit-only. The closing dot still ends the
+ * sentence. Speech recognition writes times this way.
+ */
+function isMeridiemInnerDot(text: string, index: number): boolean {
+  return /^[ap]$/i.test(text[index - 1] ?? "") && /^m$/i.test(text[index + 1] ?? "") && (index < 2 || /[\s\d]/.test(text[index - 2]!)) && !/[A-Za-z]/.test(text[index + 2] ?? "");
+}
+
 /** Sentence boundaries: ! ? ; their full-width forms, line breaks, and a period not followed (after spaces) by a digit. */
 function sentenceBoundaries(text: string): number[] {
   const boundaries: number[] = [];
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index]!;
     if ("!?;。！？；\n".includes(char)) boundaries.push(index);
-    else if ((char === "." || char === "．") && !isDigitChar(text.slice(index + 1).trimStart()[0]) && !(/[零〇一二两三四五六七八九十]/.test(text[index - 1] ?? "") && /[零〇一二两三四五六七八九十]/.test(text[index + 1] ?? ""))) boundaries.push(index);
+    else if ((char === "." || char === "．") && !isDigitChar(text.slice(index + 1).trimStart()[0]) && !(/[零〇一二两三四五六七八九十]/.test(text[index - 1] ?? "") && /[零〇一二两三四五六七八九十]/.test(text[index + 1] ?? "")) && !isMeridiemInnerDot(text, index)) boundaries.push(index);
   }
   return boundaries;
 }
@@ -593,7 +630,11 @@ const QUESTION: Readonly<Record<VoiceLanguage, RegExp>> = Object.freeze({
   // 13s.3 (I3): 多少, 几 and the A-not-A form (疼不疼, 打不打) are questions too.
   zh: /[?？吗]|怎么|什么|为什么|要不要|该不该|能不能|可不可以|多少|几|是否|(\p{Script=Han})不\1/u,
 });
-const EN_CLAUSE_CUT = /[,，、]|\s+(?:and|but)\s+(?=(?:i|then|my|took|had|ate|injected|did|used|also|afterwards|after|before|later)\b)|\s+(?:then|but)\s+/gi;
+// Owner report 2026-10-14: speech recognition often gives no punctuation ("my sugar level is 8.2 I had chicken rice for lunch"), so a
+// number (with its spoken unit, if any) followed by "I" and a new statement's verb also ends the clause.
+// Owner report 2026-10-15: likewise "can you give me some motivation I feel very down": "I feel", "I'm feeling" or "I felt" starts a new
+// statement, unless a word before it makes it part of the same one ("why do I feel", "when I feel", "and I feel" is cut above).
+const EN_CLAUSE_CUT = /[,，、]|\s+(?:and|but)\s+(?=(?:i|then|my|took|had|ate|injected|did|used|also|afterwards|after|before|later)\b)|\s+(?:then|but)\s+|(?<=\d(?:\s*(?:mmol(?:\s*\/\s*l)?|mg\s*\/\s*dl|units?))?)\s+(?=i\s+(?:had|have|ate|eat|took|take|injected|used|walked|went|did|feel|felt|am|was|also|just)\b)|(?<![A-Za-z'’](?=[A-Za-z'’]))(?<!(?:^|[^A-Za-z'’])(?:why|how|what|when|whenever|where|do|does|did|if|that|because|whether|and|but|so|then|also|still|until|after|before|while|as|make|makes|made|let|lets|i))\s+(?=i(?:['’]m|\s+am|['’]ve\s+been|\s+have\s+been)?\s+(?:feel|feeling|felt)\b)/gi;
 const ZH_CLAUSE_CUT = /[,，、]|然后|但是|可是|不过/g;
 
 function trimRange(text: string, start: number, end: number): Range | null {
@@ -602,9 +643,27 @@ function trimRange(text: string, start: number, end: number): Range | null {
   return end > start ? { start, end } : null;
 }
 
+/**
+ * Owner report 2026-10-16 ("I had chicken rice, laksa and teh for lunch"): a comma inside a list of foods does not end the meal. The
+ * comma is kept only when the words after it (up to the next cut or sentence end) name a known food and start nothing else: no
+ * "I"/"my", no glucose, medicine, activity or feeling word.
+ */
+function foodListComma(text: string, index: number): boolean {
+  if (text[index] !== "," && text[index] !== "，") return false;
+  const rest = text.slice(index + 1);
+  const next = /^[^,，.!?;。！？；\n]*/.exec(rest)?.[0] ?? "";
+  const segment = next.replace(/\s+(?:and|but|then)\s+(?=(?:i|my|then|took|had|ate)\b).*$/i, "");
+  // The words before the comma must already be part of a food list ("…chicken rice, laksa"), never a feeling or a reading.
+  const before = /[^,，.!?;。！？；\n]*$/.exec(text.slice(0, index))?.[0] ?? "";
+  return EN_KNOWN_FOODS.test(before) && EN_KNOWN_FOODS.test(segment) && !/(?<![A-Za-z])(?:i|i['’]m|my|me|sugar|glucose|reading|took|take|insulin|pen|tablet|walk(?:ed)?|feel(?:ing)?|felt)(?![A-Za-z])/i.test(segment);
+}
+
 function clauses(text: string, language: VoiceLanguage, boundaries: number[], splitAtCue = true): Range[] {
   const cuts: Array<[number, number]> = boundaries.map((index) => [index, index + 1]);
-  for (const match of text.matchAll(language === "zh" ? ZH_CLAUSE_CUT : EN_CLAUSE_CUT)) cuts.push([match.index, match.index + match[0].length]);
+  for (const match of text.matchAll(language === "zh" ? ZH_CLAUSE_CUT : EN_CLAUSE_CUT)) {
+    if (language === "en" && foodListComma(text, match.index)) continue;
+    cuts.push([match.index, match.index + match[0].length]);
+  }
   cuts.sort((left, right) => left[0] - right[0]);
   const ranges: Range[] = [];
   let cursor = 0;
@@ -705,6 +764,30 @@ function occurrenceStatus(clause: string, sentence: string, patterns: Patterns):
   return "UNKNOWN";
 }
 
+/** A plan, not something she did ("going to", "will", "want to"…). */
+const EN_PLAN = /(?<![A-Za-z])(?:going\s+to|gonna|will|shall|want\s+to|wanna|plan(?:ning)?\s+to|later)(?![A-Za-z])|['’]ll(?![A-Za-z])/i;
+/** "have/having/has" as something she did, not a plan ("going to have", "will have", "want to have"…). */
+const EN_HAVE_NOT_PLANNED = /(?<!(?:\bto|\bwill|['’]ll|\bshall|\bgonna|\bwanna|\bshould|\bwould|\bcould|\bmight|\bmay|\bcan)\s+)(?<![A-Za-z])(?:have|having|has)(?![A-Za-z])/i;
+/**
+ * Owner report 2026-10-16: common foods (Singapore dishes and everyday staples) that make "I had …" a meal without a meal word.
+ * Food words only; nothing here is a judgement of the food.
+ */
+const EN_KNOWN_FOODS = new RegExp(
+  `(?<![A-Za-z])(?:${[
+    "roti prata", "prata", "thosai", "dosa", "chapati", "nasi lemak", "nasi padang", "nasi goreng", "nasi briyani", "briyani", "murtabak",
+    "chicken rice", "duck rice", "fried rice", "economy rice", "cai fan", "rice", "porridge", "congee", "bee hoon", "mee goreng", "mee siam",
+    "mee rebus", "laksa", "kway teow", "char kway teow", "hor fun", "ban mian", "wanton mee", "hokkien mee", "noodles?", "yong tau foo",
+    "dim sum", "dumplings?", "pau", "bun", "kaya toast", "toast", "bread", "sandwich", "burger", "pizza", "pasta", "salad", "oats",
+    "cereal", "eggs?", "satay", "soup", "curry", "fish", "chicken", "kueh", "cake", "biscuits?", "fruit", "apple", "banana", "orange",
+    "kaya", "otah", "rojak", "popiah", "chee cheong fun", "carrot cake", "chwee kueh", "lontong", "mee pok", "fishball noodles?",
+    "bak chor mee", "kway chap", "claypot rice", "cereal prawns", "ayam penyet", "roti john", "putu mayam", "ondeh ondeh", "curry puff",
+    "youtiao", "oyster omelette", "fish soup", "thunder tea rice", "beehoon", "noodle soup",
+    // Drinks
+    "tea", "teh", "teh tarik", "kopi", "coffee", "milo", "juice", "soya milk", "soy milk", "bubble tea", "milk", "bandung",
+  ].join("|")})(?![A-Za-z])`,
+  "i",
+);
+
 const MEAL_SLOT_ORDER = ["BREAKFAST", "LUNCH", "DINNER", "SUPPER"] as const;
 function mealSlot(clause: string, vocabulary: VoiceVocabulary, language: VoiceLanguage): VoiceMealSlot {
   let best: { slot: VoiceMealSlot; index: number } | null = null;
@@ -720,11 +803,12 @@ function mealItems(text: string, range: Range, language: VoiceLanguage, patterns
   const clause = text.slice(range.start, range.end);
   let itemStart: number;
   if (language === "en") {
-    const verb = /(?<![A-Za-z])(?:ate|eaten|eat|eating|had|was|is|were)\s+/gi;
+    const verb = /(?<![A-Za-z])(?:ate|eaten|eat|eating|had|have|having|has|was|is|were|went\s+for|got|ordered|bought|drank|drink|drinking)\s+/gi;
     let last: RegExpExecArray | null = null;
     for (let match = verb.exec(clause); match; match = verb.exec(clause)) last = match;
-    if (!last) return null;
-    itemStart = last.index + last[0].length;
+    // Owner report 2026-10-16: no verb ("beef noodle for breakfast"): the food words start the clause, when they name a known food.
+    if (!last && !EN_KNOWN_FOODS.test(clause)) return null;
+    itemStart = last ? last.index + last[0].length : 0;
   } else {
     const verb = /吃了|吃过|吃|是/g;
     let last: RegExpExecArray | null = null;
@@ -750,7 +834,7 @@ function mealItems(text: string, range: Range, language: VoiceLanguage, patterns
     items = items.replace(/^(?:breakfast|lunch|dinner|supper)(?![A-Za-z])\s*/i, "");
     for (let previous = ""; previous !== items; ) {
       previous = items;
-      items = items.replace(/\s*(?<![A-Za-z])(?:today|tonight|yesterday|this\s+(?:morning|afternoon|evening)|now|later|at\s+[0-9A-Za-z:]+(?:\s*(?:am|pm))?)$/i, "").trim();
+      items = items.replace(/\s*(?<![A-Za-z])(?:today|tonight|yesterday|this\s+(?:morning|afternoon|evening)|in\s+the\s+(?:morning|afternoon|evening|night)|now|later|at\s+[0-9A-Za-z:]+(?:\s*(?:am|pm))?)$/i, "").trim();
     }
   } else {
     items = items.replace(/^(?:早餐|早饭|午餐|午饭|中饭|晚餐|晚饭|夜宵|宵夜)/, "").replace(/^(?:今天|现在|刚才)/, "").trim();
@@ -785,7 +869,8 @@ function onlyAllowedWords(segment: string, language: VoiceLanguage, vocabulary: 
     rest = rest.replace(/[零〇一二两三四五六七八九十百点0-9０-９.．,，、\s'’:：]/g, "");
     return !/[\p{Script=Han}A-Za-z]/u.test(rest);
   }
-  let rest = segment.toLowerCase().replace(/[’]/g, "'");
+  // Owner report 2026-10-15: "a.m." / "p.m." are the clock markers "am" / "pm" ("at 7 a.m.").
+  let rest = segment.toLowerCase().replace(/[’]/g, "'").replace(/(?<![a-z])([ap])\.\s?m(?:\.|(?![a-z]))/g, "$1m");
   const phrases = [...qualifierPhrases(vocabulary), ...allowed].filter((phrase) => phrase.includes(" ")).sort((left, right) => right.length - left.length);
   for (const phrase of phrases) rest = rest.replace(new RegExp(`(?<![a-z])${escape(phrase).replace(/ /g, "\\s+")}(?![a-z])`, "g"), " ");
   const single = new Set([...allowed, ...qualifierPhrases(vocabulary), ...vocabulary.integerWords, ...vocabulary.tensWords, ...vocabulary.digitWords, vocabulary.decimalMarker].filter((word) => !word.includes(" ")));
@@ -969,7 +1054,25 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
       factRanges.push(range);
       continue;
     }
-    const isMeal = patterns.eat.test(clause) || (patterns.slot.test(clause) && (language === "zh" ? /是/.test(clause) : /(?<![A-Za-z])(?:had|was|is|were)(?![A-Za-z])/i.test(clause)));
+    // Owner report 2026-10-16: "I have beef noodle for breakfast", "I'm having chicken rice for lunch" (present tense, as speech
+    // recognition often writes it). "have/having/has" count only with "for/at/during" a meal ("I have diabetes", "I have a
+    // check-up after lunch" are never meals).
+    // A plan ("I am going to have…", "I'll have…") is never a meal record.
+    const haveForMeal =
+      language === "en" &&
+      EN_HAVE_NOT_PLANNED.test(clause) &&
+      /(?<![A-Za-z])(?:for|at|during)\s+(?:my\s+|the\s+)?(?:breakfast|lunch|dinner|supper)(?![A-Za-z])/i.test(clause);
+    // Owner report 2026-10-16 ("I had roti prata in the evening"): "had", or a present "have", with a common food counts as a meal
+    // even without a meal word; the meal is then "not said" (never guessed from "evening"). "I had a fever" names no food.
+    const hadKnownFood = language === "en" && (/(?<![A-Za-z])had(?![A-Za-z])/i.test(clause) || EN_HAVE_NOT_PLANNED.test(clause)) && EN_KNOWN_FOODS.test(clause);
+    // Owner report 2026-10-16 ("I went for kaya bread and tea for breakfast", "beef noodle for breakfast"): a common food or drink
+    // with "for/at/during" a meal is a meal whatever the verb, unless it is a plan.
+    const knownFoodForMeal =
+      language === "en" &&
+      EN_KNOWN_FOODS.test(clause) &&
+      /(?<![A-Za-z])(?:for|at|during)\s+(?:my\s+|the\s+)?(?:breakfast|lunch|dinner|supper)(?![A-Za-z])/i.test(clause) &&
+      !EN_PLAN.test(clause);
+    const isMeal = patterns.eat.test(clause) || haveForMeal || hadKnownFood || knownFoodForMeal || (patterns.slot.test(clause) && (language === "zh" ? /是/.test(clause) : /(?<![A-Za-z])(?:had|was|is|were)(?![A-Za-z])/i.test(clause)));
     if (isMeal && !cueInClause.test(clause)) {
       const itemText = mealItems(text, range, language, patterns);
       // I3: 吃 with a count, colour or pill classifier and no food (吃了两颗白色的, "ate two white ones") is never a meal.
@@ -1069,8 +1172,60 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
     glucoseDrafts.push({ start, end, valueText: number.valueText, spoken: number.unitEnd !== null, reasons });
   }
 
+  // 13s.6 (owner decision 2026-10-14, design §2–§4): activities and feelings, English only, from the clauses no other fact took and no
+  // glucose reading touches (their words describe that fact: "after my walk my sugar was 6.1", "lunch was good"), never from a question
+  // or a redirected clause. A clause may hold an activity and, after "and/but/so", a feeling ("Walked 30 minutes and feeling good").
+  // The transcript yields at most ONE feeling: every feeling clause's cues, merged in order, over one span from the first to the last.
+  // These clauses are understood (not UNSUPPORTED), but for glucose readings they still count as other words in the transcript: the
+  // round-4 C1 backstop applies to them unchanged (every reading gets UNCERTAINTY and never the app-default unit), so this feature never
+  // makes a reading easier to save than before.
+  const noteRanges: Range[] = [];
+  if (language === "en") {
+    const feelingParts: Array<{ start: number; end: number; cueKeys: readonly string[] }> = [];
+    let previousFeeling: Range | null = null;
+    for (const range of clauseRanges) {
+      // A cue alone continues a feeling stated in the clause just before it, in the same sentence ("I'm not tired, but worried").
+      const continuation = previousFeeling !== null && sentenceIndex(previousFeeling.start) === sentenceIndex(range.start) && /^[\s,，、]*(?:(?:and|but|then)\s*)?$/i.test(text.slice(previousFeeling.end, range.start));
+      previousFeeling = null;
+      if (factRanges.includes(range) || glucoseDrafts.some((draft) => draft.start < range.end && draft.end > range.start)) continue;
+      const clause = text.slice(range.start, range.end);
+      // Owner report 2026-10-15: a clause that STARTS by stating her feeling and has no "?" is a statement even when a question word
+      // follows ("I feel skeptical about what Dr Lim has told me"); asking for advice ("should I", "can I", "do I") stays a question.
+      const statedFeelingFirst = !/[?？]/.test(clause) && !/(?<![A-Za-z])(?:should|can|could|do|did|am)\s+i(?![A-Za-z])/i.test(clause) && matchVoiceFeeling(clause) !== null;
+      if (!statedFeelingFirst && (QUESTION.en.test(clause) || QUESTION.en.test(text.slice(range.end, range.end + 2)))) continue;
+      const activity = matchVoiceActivity(clause);
+      if (activity) {
+        const origin = base(range.start, range.end);
+        candidates.push({ start: range.start, candidate: Object.freeze({ kind: "ACTIVITY_NOTE", ...origin, category: activity.category, label: origin.sourcePhrase.trim(), durationMinutes: activity.durationMinutes }) });
+        noteRanges.push(range);
+      }
+      const starts = [0, ...[...clause.matchAll(/(?<![A-Za-z])(?:and|but|so|because|though|although)(?![A-Za-z])/gi)].map((match) => match.index)];
+      for (const offset of starts) {
+        const feeling = matchVoiceFeeling(clause.slice(offset), continuation && offset === 0);
+        if (!feeling) continue;
+        feelingParts.push({ start: range.start + offset + feeling.start, end: range.end, cueKeys: feeling.cueKeys });
+        if (!noteRanges.includes(range)) noteRanges.push(range);
+        previousFeeling = range;
+        break;
+      }
+    }
+    if (feelingParts.length > 0) {
+      const start = Math.min(...feelingParts.map((part) => part.start));
+      const end = Math.max(...feelingParts.map((part) => part.end));
+      const cueKeys = [...new Set(feelingParts.flatMap((part) => part.cueKeys))].slice(0, VOICE_FEELING_MAX_CUES);
+      // Her own words: the feeling's span, with the sentence's closing "." or "!" kept; at most 1000 code points.
+      const closing = /^[.!]/.test(text.slice(end, end + 1)) ? 1 : 0;
+      const words = [...text.slice(start, end + closing).trim()].slice(0, VOICE_FEELING_TEXT_MAX_CODE_POINTS).join("").trim();
+      candidates.push({ start, candidate: Object.freeze({ kind: "FEELING_NOTE", ...base(start, end), cueKeys, text: words }) });
+    }
+  }
+
   // Everything else with words is not understood (never dropped).
-  const covered = [...candidates.map(({ candidate }) => candidate.span), ...glucoseDrafts.map((draft) => base(draft.start, draft.end).span)];
+  const covered = [
+    ...candidates.filter(({ candidate }) => candidate.kind !== "FEELING_NOTE" && candidate.kind !== "ACTIVITY_NOTE").map(({ candidate }) => candidate.span),
+    ...glucoseDrafts.map((draft) => base(draft.start, draft.end).span),
+    ...noteRanges.map((range) => base(range.start, range.end).span),
+  ];
   const unsupported: Array<{ start: number; candidate: VoiceCandidate }> = [];
   for (const range of clauseRanges) {
     const clause = text.slice(range.start, range.end);
@@ -1086,11 +1241,14 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
   // gets UNCERTAINTY (not resolvable by an answer; the person must edit) and never the app-default unit.
   for (const draft of glucoseDrafts) {
     const { reasons } = draft;
-    if (unsupported.length > 0) reasons.add("UNCERTAINTY");
+    // 13s.6: a feeling or activity clause counts here exactly as before, when it was not understood.
+    // 13s.7: so does a medicine-information request (it was not understood before).
+    const otherWords = unsupported.length > 0 || noteRanges.length > 0 || scopeOptions.otherWords === true;
+    if (otherWords) reasons.add("UNCERTAINTY");
     // Owner default-unit boundary (#2): the app's entry unit only for an otherwise unambiguous reading inside the app-default window
     // (review I2: "sugar 72" stays UNIT_UNSTATED; 13s.4: the person then confirms the unit explicitly); it never clears another reason.
     // Round 5 (revised B): a hedged reading never gets the app-default unit; the person confirms the unit ("Yes, mmol/L").
-    const appDefault = !draft.spoken && !glucoseHedgeMarked(text.slice(draft.start, draft.end)) && reasons.size === 1 && reasons.has("UNIT_UNSTATED") && unsupported.length === 0 && options.glucoseEntryUnit === "MMOL_PER_L" && glucoseValueInAppDefaultWindow(draft.valueText);
+    const appDefault = !draft.spoken && !glucoseHedgeMarked(text.slice(draft.start, draft.end)) && reasons.size === 1 && reasons.has("UNIT_UNSTATED") && !otherWords && options.glucoseEntryUnit === "MMOL_PER_L" && glucoseValueInAppDefaultWindow(draft.valueText);
     if (appDefault) reasons.delete("UNIT_UNSTATED");
     const ambiguity = ordered(reasons);
     const unit = draft.spoken || appDefault ? "MMOL_PER_L" : "UNSTATED";
@@ -1106,10 +1264,13 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
   });
 }
 
-/** The analysis entry point: the redirect first, then the length limit, then the bounded extraction. */
+/** The analysis entry point: the distress gate first, then the redirect, then the length limit, then the bounded extraction. */
 export function analyseTranscript(transcript: string, language: VoiceLanguage, options: VoiceAnalysisOptions = {}): VoiceAnalysis {
   if (language !== "en" && language !== "zh") throw new TypeError("VOICE_LANGUAGE_INVALID");
   const text = typeof transcript === "string" ? transcript : "";
+  // Owner decision 2026-10-14: distress beats every other result (a dose or health question, an over-long transcript, any fact).
+  const distress = detectVoiceDistress(text);
+  if (distress.kind === "DISTRESS") return Object.freeze({ kind: "DISTRESS", language, candidates: [], cueKey: distress.cueKey, cuesVersion: VOICE_DISTRESS_CUES_VERSION, extractorVersion: VOICE_EXTRACTOR_VERSION });
   // P13X review CRITICAL 2: code-switched speech ("Sugar 15 要不要加 insulin") is redirected by EITHER language's classifier.
   const own = classifyVoiceAdviceRedirect(text, language);
   const redirect = own.kind === "REDIRECT" ? own : classifyVoiceAdviceRedirect(text, language === "en" ? "zh" : "en");
@@ -1120,8 +1281,22 @@ export function analyseTranscript(transcript: string, language: VoiceLanguage, o
   if (redirect.kind === "REDIRECT" && codePointLength(text) > VOICE_TRANSCRIPT_MAX_CODE_POINTS) return redirected();
   if (codePointLength(text) > VOICE_TRANSCRIPT_MAX_CODE_POINTS) return Object.freeze({ kind: "TRANSCRIPT_TOO_LONG", language, candidates: [], extractorVersion: VOICE_EXTRACTOR_VERSION });
   if (redirect.kind === "NONE") {
-    const extraction = extractVoiceCandidates(text, language, options);
-    return Object.freeze({ kind: "ANALYSED", language, candidates: [...extraction.candidates], truncated: extraction.truncated, redirect: null, extractorVersion: VOICE_EXTRACTOR_VERSION });
+    // 13s.7 (HSA preview): whole sentences asking about a named medicine, only when the caller asks for them.
+    const requests = options.medicineInformationRequests === true ? medicineInfoRequests(text, language, options.medicines ?? EMPTY_DIRECTORY) : [];
+    if (requests.length === 0) {
+      const extraction = extractVoiceCandidates(text, language, options);
+      return Object.freeze({ kind: "ANALYSED", language, candidates: [...extraction.candidates], truncated: extraction.truncated, redirect: null, extractorVersion: VOICE_EXTRACTOR_VERSION });
+    }
+    const extraction = extractVoiceCandidates(text, language, options, { exclude: requests.map((request) => request.range), withoutMedication: false, otherWords: true });
+    const candidates = [...extraction.candidates, ...requests.map((request) => request.candidate)].sort((left, right) => left.span.start - right.span.start);
+    return Object.freeze({
+      kind: "ANALYSED",
+      language,
+      candidates: candidates.slice(0, VOICE_MAX_CANDIDATES),
+      truncated: extraction.truncated || candidates.length > VOICE_MAX_CANDIDATES,
+      redirect: null,
+      extractorVersion: VOICE_EXTRACTOR_VERSION,
+    });
   }
   // Mixed safety content (owner requirement 6): the question clauses are shown as the redirect; the facts of the OTHER clauses are
   // offered separately, never a medicine occurrence. When no clause can be separated as the question, or nothing factual remains,
@@ -1138,6 +1313,31 @@ export function analyseTranscript(transcript: string, language: VoiceLanguage, o
     redirect: Object.freeze({ category, messageKey: voiceRedirectMessageKey(category), transcribedNoteKey: VOICE_REDIRECT_TRANSCRIBED_NOTE_KEY }),
     extractorVersion: VOICE_EXTRACTOR_VERSION,
   });
+}
+
+/**
+ * 13s.7 (HSA preview): the sentences that are, as a whole, a request for general information about one named medicine (English only),
+ * with the candidate each one gives. Known names: `voice-medicine-info-cues.1` plus her own medicine names and remembered terms.
+ */
+function medicineInfoRequests(text: string, language: VoiceLanguage, directory: VoiceMedicineDirectory): Array<{ range: Range; candidate: VoiceMedicineInfoRequestCandidate }> {
+  if (language !== "en") return [];
+  const known = [...directory.names.map((entry) => entry.name), ...directory.terms.map((entry) => entry.phrase)];
+  const found: Array<{ range: Range; candidate: VoiceMedicineInfoRequestCandidate }> = [];
+  let cursor = 0;
+  for (const boundary of [...sentenceBoundaries(text), text.length]) {
+    const range = trimRange(text, cursor, boundary);
+    cursor = boundary + 1;
+    if (!range) continue;
+    const sentence = text.slice(range.start, range.end);
+    const name = matchVoiceMedicineInfoRequest(sentence, known);
+    if (name === null || codePointLength(sentence) > VOICE_SOURCE_PHRASE_MAX_CODE_POINTS) continue;
+    const start = codePointLength(text.slice(0, range.start));
+    found.push({
+      range,
+      candidate: Object.freeze({ kind: "MEDICINE_INFO_REQUEST", span: Object.freeze({ start, end: start + codePointLength(sentence) }), sourcePhrase: sentence, source: "DETERMINISTIC", producerVersion: VOICE_VOCABULARY_VERSION, name }),
+    });
+  }
+  return found;
 }
 
 /**

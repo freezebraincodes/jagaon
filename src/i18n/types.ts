@@ -1,5 +1,6 @@
 export type { SupportedLocale } from "../domain/patient-settings/locale";
 import type { Packet10Messages } from "./packet10-types";
+import type { NoteThemeKey } from "../domain/notes/note-themes";
 export type { Packet10Messages } from "./packet10-types";
 
 // ---------------------------------------------------------------------------
@@ -64,7 +65,8 @@ export type TodayMessages = {
   latestRecordedReading: string;
   noEntries: string;
   todayBooklet: string;
-  bookletProgress: (completed: number, total: number) => string;
+  /** Owner decision 2026-10-15: the number of readings recorded today (no "of 3": many people test less often, e.g. with type 2). */
+  bookletProgress: (readingsToday: number) => string;
   slotMorning: string;
   slotAfternoon: string;
   slotEvening: string;
@@ -126,6 +128,10 @@ export type GlucoseMessages = {
   contextBeforeLunch: string;
   contextBeforeDinner: string;
   contextJustChecking: string;
+  /** Owner decision 2026-10-16: after-meal choices for "When was this test?", so the booklet's After columns can be filled. */
+  contextAfterBreakfast: string;
+  contextAfterLunch: string;
+  contextAfterDinner: string;
   keypadLabel: string;
   deleteDigit: string;
   decimalPoint: string;
@@ -152,6 +158,8 @@ export type ReadingTimeMessages = {
   saveAction: string;
   saved: string;
   editTime: string;
+  /** Owner decision 2026-10-16: the edit screen's title (time and meal time). */
+  editTitle: string;
   // Packet 6 v1 convergence (needs bilingual review)
   whichDay: string;
   dayToday: string;
@@ -240,6 +248,35 @@ export type MealMessages = {
   chooseToSave: string;
 };
 
+/** Owner request 2026-10-16: the "Record an activity" tap form (en for the hackathon; zh drafts, acceptance pending). */
+export type ActivityEntryMessages = {
+  screenTitle: string;
+  subtitle: string;
+  whatDidYouDo: string;
+  kindWalk: string;
+  kindRun: string;
+  kindSwim: string;
+  kindCycle: string;
+  kindYoga: string;
+  kindStrength: string;
+  kindHousework: string;
+  kindOther: string;
+  labelField: string;
+  labelHint: string;
+  labelRequired: string;
+  durationLabel: string;
+  durationOther: string;
+  durationNotSure: string;
+  hoursLabel: string;
+  minutesLabel: string;
+  durationHint: string;
+  durationInvalid: string;
+  timeLabel: string;
+  noJudgement: string;
+  saveAction: string;
+  chooseToSave: string;
+};
+
 /** Medication understanding messages (frame 08). */
 export type MedicationMessages = {
   title: string;
@@ -247,8 +284,8 @@ export type MedicationMessages = {
   recordedHeading: string;
   glarginePurpose: string;
   glargineUse: string;
-  aspartPurpose: string;
-  aspartUse: string;
+  glulisinePurpose: string;
+  glulisineUse: string;
   generalLimit: string;
   recordedVerbatim: string;
   askHeading: string;
@@ -272,6 +309,8 @@ export type MedicationMessages = {
   provenanceDocument: string;
   sampleQuestionLabel: string;
   addQuestion: string;
+  /** Owner decision 2026-10-14: shown after the question is saved to Prepare for my appointment. */
+  questionAdded: string;
   sourceHistory: string;
 };
 
@@ -316,6 +355,8 @@ export type FoodMessages = {
   // Packet 6 v1 convergence (needs bilingual review)
   locationNote: string;
   filtersHeading: string;
+  /** Owner decision 2026-10-15: before the active filters while the panel is folded. */
+  filtersShowing: string;
   resetFilters: string;
   within: (distance: string) => string;
   cuisineAny: string;
@@ -418,6 +459,19 @@ export type HelpMessages = {
   // Packet 6 v1 convergence (needs bilingual review)
   generalContacts: string;
   publicInfoUnavailable: string;
+  /** Owner decision 2026-10-14 (distress safety): emotional support contacts. English owner-approved; Chinese drafts. */
+  emotionalSupportHeading: string;
+  sosCall: string;
+  sosWhatsApp: string;
+  sosProvider: string;
+  sosHours: string;
+  mindlineCall: string;
+  mindlineWhatsApp: string;
+  mindlineProvider: string;
+  mindlineHours: string;
+  emotionalSupportVerify: string;
+  sosWebsite: string;
+  mindlineWebsite: string;
 };
 
 /** Packet 6A synthetic onboarding (frames 14–31; needs bilingual review). */
@@ -431,6 +485,18 @@ export type OnboardingMessages = {
   startSetup: string;
   usePrepared: string;
   deviceNote: string;
+  /** Owner decision 2026-10-16: the Welcome card explaining which start to choose. */
+  choiceTitle: string;
+  choiceSetup: string;
+  choicePrepared: string;
+  choiceTip: string;
+  /** Owner decision 2026-10-16: shown once, on Today, after a new user finishes (or skips) setup. */
+  newUserWelcomeTitle: (name: string | null) => string;
+  newUserWelcomeBody: string;
+  newUserWelcomeSample: string;
+  newUserWelcomeAction: string;
+  /** Owner decision 2026-10-16: shown while the prepared profile's sample records are added. */
+  preparingSample: string;
   profileTitle: string;
   preferredNameLabel: string;
   preferredNamePlaceholder: string;
@@ -607,10 +673,37 @@ export type HistoryMessages = {
   familyUnavailable: string;
   disabledFamily: (family: string) => string;
   slotLabels: Record<"BEFORE_BREAKFAST" | "BEFORE_LUNCH" | "BEFORE_DINNER" | "BEDTIME", string>;
-  positionLabels: Record<"MORNING" | "EVENING", string>;
+  positionLabels: Record<"MORNING" | "AFTERNOON" | "EVENING", string>;
+  /** Owner decision 2026-10-16: the chart legend, one colour per time of day. */
+  positionLegend: Record<"MORNING" | "AFTERNOON" | "EVENING", string>;
+  /** Owner decision 2026-10-16: pointing at or tapping a bar shows that reading's day, time and value above the chart. */
+  chartReadout: { hint: string; reading: (day: string, time: string, value: string, unit: string) => string };
   periodLabels: Record<"THIS_WEEK" | "LAST_WEEK" | "THIRTY_DAYS", string>;
   /** Packet 11C Task 7: the explanation panel under an explainable comparison (new application copy; the 7A rows above are unchanged). */
   explanation: HistoryExplanationMessages;
+  /** Owner decision 2026-10-16: Notice, one plain sentence per comparison of her own readings (no cause, no advice). */
+  notice: {
+    title: string;
+    higher: (slot: string) => string;
+    lower: (slot: string) => string;
+    variedMore: (slot: string) => string;
+    variedLess: (slot: string) => string;
+    notEnough: string;
+    open: string;
+    /** The meal time as an adjective ("before-breakfast"). */
+    slots: Record<"BEFORE_BREAKFAST" | "BEFORE_LUNCH" | "BEFORE_DINNER" | "BEDTIME", string>;
+  };
+  /** Owner decision 2026-10-16: Trends, the same comparison drawn as two labelled bars. */
+  trends: {
+    title: string;
+    intro: string;
+    earlier: string;
+    recent: string;
+    median: string;
+    spread: string;
+    value: (value: string, unit: string) => string;
+    slotTitles: Record<"BEFORE_BREAKFAST" | "BEFORE_LUNCH" | "BEFORE_DINNER" | "BEDTIME", string>;
+  };
 };
 
 /**
@@ -664,6 +757,8 @@ export type ScheduleMessages = {
   notRecorded: string;
   recordedTaken: string;
   recordedSkipped: string;
+  /** Owner decision 2026-10-15: a neutral safety line under a dose recorded as skipped (general information, not advice). */
+  skippedSafety: string;
   recordedNotSure: string;
   recordedDeclined: string;
   recordedAt: (time: LocalTimeText) => string;
@@ -865,6 +960,29 @@ export type CarePreparationMessages = {
   editQuestionNamed: (text: string) => string;
   removeQuestion: string;
   removeQuestionNamed: (text: string) => string;
+  // --- Owner decision 2026-10-16: doctor-named title and the period overview (new wording; zh-SG drafts, human acceptance pending) ---
+  /** The title when an appointment is recorded, naming the care contact the patient entered. */
+  titleWithDoctor: (who: string) => string;
+  overviewHeading: string;
+  overviewPeriodLegend: string;
+  periodLast7Days: string;
+  periodLast14Days: string;
+  periodLast30Days: string;
+  periodSinceLastVisit: string;
+  overviewLoading: string;
+  /** Sentence opening for a period of `days` local days ending today. */
+  overviewInLastDays: (days: number) => string;
+  /** Sentence opening for the period since the visit on `date`. */
+  overviewSinceVisit: (date: LocalDateText) => string;
+  /** `list` is the locale's joined list of the counts below. */
+  overviewLogged: (opening: string, list: string) => string;
+  overviewNothingLogged: (opening: string) => string;
+  overviewGlucose: (count: number) => string;
+  overviewMeals: (count: number) => string;
+  overviewInsulin: (count: number) => string;
+  overviewWalks: (count: number) => string;
+  overviewQuestionsFor: (count: number, who: string) => string;
+  overviewQuestions: (count: number) => string;
 };
 
 /** Packet 9C care-summary preview and print copy (09-bilingual-copy-matrix.md Section 4). */
@@ -910,6 +1028,10 @@ export type CareSummaryMessages = {
   draftNotices: { label: string };
   /** Packet 11C B1a (D3): an unapproved summary made by an earlier version must be prepared again. Human acceptance pending. */
   templateSuperseded: string;
+  /** Owner decision 2026-10-16: the approved summary in large type, read-only, to hand over. New wording; zh-SG drafts. */
+  showOnScreen: string;
+  showOnScreenNote: string;
+  closeShowOnScreen: string;
 };
 
 /**
@@ -992,6 +1114,8 @@ export type AiCreditLimitMessages = {
   title: string;
   careSummaryBody: string;
   historyBody: string;
+  /** Tell JagaOn understands more (2026-10-14): the feelings chat continues with JagaOn's standard questions. */
+  feelingsChatBody: string;
   ok: string;
 };
 
@@ -1019,6 +1143,135 @@ export type VoiceMessages = {
     discard: string;
   };
   redirect: { body: string; transcribedNote: string };
+  /**
+   * Owner decision 2026-10-14 (distress safety): the only content shown when a distress cue was said. English owner-approved; Chinese
+   * drafts (human acceptance pending). Each contact row is a separate link; the numbers are part of the text.
+   */
+  distress: {
+    message: string;
+    /** Owner decision 2026-10-15: why JagaOn points to people here (more support than JagaOn can give), before the contacts. */
+    moreSupport: string;
+    sosCall: string;
+    sosWhatsApp: string;
+    sosHours: string;
+    mindlineCall: string;
+    mindlineWhatsApp: string;
+    mindlineHours: string;
+    danger: string;
+    trustedPerson: string;
+  };
+  /**
+   * Owner decision 2026-10-14 (Tell JagaOn understands more, design §3.1 step 3): the Feeling card. English owner-scoped; Chinese drafts
+   * (human acceptance pending; feelings are recognised in English only). The kind sentence shown after saving comes from the reviewed
+   * bank (`note-kind-sentences`), not from here.
+   */
+  feeling: {
+    heading: string;
+    textLabel: string;
+    saveAsNote: string;
+    talkItThrough: string;
+    skip: string;
+    savedToNotes: string;
+    notSaved: string;
+    skipped: string;
+    textRequired: string;
+  };
+  /** Owner decision 2026-10-14 (design §4): the Activity card. English owner-scoped; Chinese drafts (human acceptance pending). */
+  activity: {
+    heading: string;
+    labelLabel: string;
+    durationLabel: string;
+    durationHint: string;
+    durationInvalid: string;
+    noDuration: string;
+    save: string;
+    skip: string;
+    saved: string;
+    notSaved: string;
+    skipped: string;
+    labelRequired: string;
+    /** Short display names of the activity-event categories ("Walk · 30 minutes"). */
+    categories: Readonly<Record<"WALKING" | "FLEXIBILITY_OR_MOBILITY" | "STRENGTH" | "AEROBIC" | "HOUSEHOLD_ACTIVITY" | "OTHER", string>>;
+  };
+  /**
+   * HSA preview (owner decision 2026-10-14, "Tell me about my medicine"): the medicine information card in the review area (only while
+   * HSA-bounded mode is off). en-SG: new wording, human acceptance pending; zh-SG: drafts, human acceptance pending.
+   */
+  medicineInfo: {
+    heading: string;
+    openInMyMedicines: string;
+  };
+};
+
+/**
+ * Tell JagaOn understands more (design §3.1): the feelings chat dialog. en-SG: the AI notice is the owner's approved wording
+ * (2026-10-14), the rest is new wording; zh-SG: drafts, human acceptance pending (English-only hackathon scope).
+ */
+export type FeelingsChatMessages = {
+  title: string;
+  notice: string;
+  continue: string;
+  saveWithoutAi: string;
+  you: string;
+  jagaon: string;
+  answerLabel: string;
+  send: string;
+  skip: string;
+  endChat: string;
+  loading: string;
+  questionAnnouncement: (question: string) => string;
+  fallbackNotice: string;
+  creditLimitNotice: string;
+  wrapUpTitle: string;
+  summaryLabel: string;
+  summaryHint: string;
+  doctorQuestionTitle: string;
+  doctorQuestionHint: string;
+  addToQuestions: string;
+  noThanks: string;
+  questionAdded: string;
+  questionNotAdded: string;
+  saveNote: string;
+  dontSave: string;
+  saving: string;
+  saved: string;
+  saveFailed: string;
+  done: string;
+  /** Owner decision 2026-10-14: answer a chat question by voice (Web Speech or TRTC, as in Tell JagaOn). */
+  speakAnswer: string;
+  voiceAdded: string;
+  voiceNothingHeard: string;
+  voiceUnavailable: string;
+  voiceNotAllowed: string;
+  voiceAccessDenied: string;
+};
+
+/** Owner decision 2026-10-16: the Booklet tab, a read-only table laid out like a paper glucose diary. */
+export type BookletMessages = {
+  title: string;
+  intro: string;
+  loading: string;
+  unavailableTitle: string;
+  unavailableBody: string;
+  retry: string;
+  tableCaption: (range: string, unit: string) => string;
+  dateHeader: string;
+  mealGroups: Record<"BREAKFAST" | "LUNCH" | "DINNER", string>;
+  before: string;
+  after: string;
+  bedtime: string;
+  /** The full name of each column, for screen readers. */
+  columnNames: Record<"BREAKFAST_BEFORE" | "BREAKFAST_AFTER" | "LUNCH_BEFORE" | "LUNCH_AFTER" | "DINNER_BEFORE" | "DINNER_AFTER" | "BEDTIME" | "OTHER", string>;
+  /** Owner decision 2026-10-16: the last column, for "just checking" readings and readings saved without a meal time. */
+  other: string;
+  notRecorded: string;
+  nothingRecorded: string;
+  today: string;
+  notesLabel: string;
+  noTime: string;
+  noteActivity: (label: string, minutes: number | null) => string;
+  noteMedicine: (name: string, state: "TAKEN" | "MISSED" | "DELAYED" | "UNSURE" | "DECLINED_TO_RECORD") => string;
+  scheduleRowBody: string;
 };
 
 export type AppMessages = {
@@ -1032,8 +1285,112 @@ export type AppMessages = {
   aiWording: AiWordingMessages;
   /** Owner UI decision U12: the history fallback line after an attempted remote request (ai-history-fallback.11c.1). */
   aiHistoryFallback: AiHistoryFallbackMessages;
+  /** Owner decision 2026-10-14: HSA-bounded mode (setting, preview banner, preview tag, More badge). */
+  hsa: {
+    settingLabel: string;
+    settingBody: string;
+    on: string;
+    off: string;
+    confirmTitle: string;
+    confirmBody: string;
+    confirmAction: string;
+    banner: string;
+    previewTag: string;
+    moreBadgeLabel: (count: number) => string;
+  };
+  /** Owner decision 2026-10-14 (HSA-bounded mode, PREVIEW): the Today "Meal ideas" tile; the swaps themselves are static English data. */
+  hsaMealIdeas: {
+    headingBreakfast: string;
+    headingLunch: string;
+    headingDinner: string;
+    intro: string;
+    /** Owner decision 2026-10-15: the refresh button's name ("Show other ideas"). */
+    refresh: string;
+    /** Read between the two halves of a swap by screen readers (the arrow is hidden). */
+    swapJoin: string;
+    findPlaces: string;
+    note: string;
+  };
+  /** HSA-bounded mode PREVIEW (owner decision 2026-10-14): "What changed alongside" a new habit, on History while the mode is off. */
+  hsaTrend: {
+    title: string;
+    slotSubjects: Record<"BEFORE_BREAKFAST" | "BEFORE_DINNER", string>;
+    headline: (subject: string, percent: number, direction: "LOWER" | "HIGHER") => string;
+    since: (days: number, habit: string, count: number) => string;
+    before: string;
+    after: string;
+    medianCaption: (unit: string) => string;
+    readingCounts: (before: number, after: number) => string;
+    note: (habit: string) => string;
+    notEnough: string;
+  };
+  /** HSA-bounded mode off only (preview): care checks due by standard intervals on Today's care planning card. */
+  hsaCareNudges: {
+    heading: (dueCount: number) => string;
+    bellLabel: (dueCount: number) => string;
+    listLabel: string;
+    itemLabel: { EYE_SCREENING: string; FOOT_CHECK: string; BLOOD_TEST: string };
+    dueChip: string;
+    dueSoon: (when: string) => string;
+    dueIn: (when: string) => string;
+    months: (count: number) => string;
+    weeks: (count: number) => string;
+    days: (count: number) => string;
+    lastRecorded: (monthYear: string, ago: string) => string;
+    monthsAgo: (count: number) => string;
+    noRecord: string;
+    cadence: { YEARLY: string; EVERY_3_TO_6_MONTHS: string };
+    source: string;
+    setDate: string;
+    note: string;
+  };
+  /**
+   * HSA preview (owner decision 2026-10-14): "Get general information with AI" for a medicine without reviewed information (only when
+   * HSA-bounded mode is off). en-SG: new wording, human acceptance pending; zh-SG: drafts, human acceptance pending.
+   */
+  hsaMedicineInfo: {
+    getButton: string;
+    noticeTitle: string;
+    noticeBody: (name: string) => string;
+    noticeContinue: string;
+    noticeCancel: string;
+    loading: string;
+    cardTag: string;
+    cardTitle: (name: string) => string;
+    usedForLabel: string;
+    howTakenLabel: string;
+    generatedOn: (date: string) => string;
+    searchHealthHub: string;
+    opensInNewTab: string;
+    caution: string;
+    refresh: string;
+    refreshFailed: string;
+    noReliableInfo: string;
+    unavailable: string;
+    /** The AI credit-limit dialog's body for this flow. */
+    creditLimitBody: string;
+  };
   /** Owner decision 2026-10-12: My notes, reached from More (first version: the destination only). */
-  myNotes: { title: string; empty: string };
+  myNotes: {
+    title: string;
+    empty: string;
+    /** Owner decision 2026-10-14 (personal notes): the stored notes list, this week's themes and deleting one note. */
+    loading: string;
+    unavailable: string;
+    themesHeading: string;
+    /** One line per recurring theme, e.g. "Sleep came up in 3 notes this week." (`theme` is a `themeLabels` value). */
+    themeCount: (theme: string, count: number) => string;
+    /** Descriptive labels only (never causes or diagnoses), keyed by the closed note theme keys. */
+    themeLabels: Readonly<Record<NoteThemeKey, string>>;
+    themesLabel: string;
+    conversation: string;
+    speakerJagaOn: string;
+    speakerYou: string;
+    deleteNote: string;
+    /** The record label shown in the existing permanent-deletion dialog. */
+    noteRecordLabel: string;
+    deleted: string;
+  };
   /** Owner decision 2026-10-12 (AI credit dialog): the used-up AI credit dialog (en owner wording; zh drafts, acceptance deferred). */
   aiCreditLimit: AiCreditLimitMessages;
   /** Voice transcription slice (voice-copy.13s.1; human acceptance pending). */
@@ -1051,8 +1408,13 @@ export type AppMessages = {
   help: HelpMessages;
   onboarding: OnboardingMessages;
   history: HistoryMessages;
+  booklet: BookletMessages;
   schedule: ScheduleMessages;
   preventiveCare: PreventiveCareMessages;
   carePreparation: CarePreparationMessages;
   careSummary: CareSummaryMessages;
+  /** Tell JagaOn understands more: the feelings chat dialog (en notice owner-approved 2026-10-14; zh drafts, acceptance pending). */
+  feelingsChat: FeelingsChatMessages;
+  /** Owner request 2026-10-16: the "Record an activity" tap form. */
+  activityEntry: ActivityEntryMessages;
 };

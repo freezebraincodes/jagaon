@@ -26,14 +26,20 @@ import {
  *   occurrence whose phrase does not is dropped, so its text stays not understood (UNSUPPORTED) and nothing can be remembered from it;
  * - safety reasons are NEGATION, UNCERTAINTY, CORRECTION, OTHER_PERSON and MULTIPLE_NUMBERS; adding one to an app-default reading
  *   returns it to an unstated unit (the default applies only to an unambiguous reading).
+ * - 13s.6: a local FEELING_NOTE or ACTIVITY_NOTE is never altered, and a remote fact over its text is dropped (its words stay hers);
+ *   a remote candidate of either kind fails the contract (DETERMINISTIC only), so the whole remote result is not used.
+ * - 13s.7: so is a local MEDICINE_INFO_REQUEST (kept exactly; a remote fact over its sentence is dropped), and a remote candidate of
+ *   that kind fails the contract too. (The app never asks remote extraction about a transcript holding one.)
  */
 const SAFETY: readonly VoiceAmbiguityReason[] = ["NEGATION", "UNCERTAINTY", "CORRECTION", "OTHER_PERSON", "MULTIPLE_NUMBERS"];
 const TRANSCRIPT_WIDE: readonly VoiceAmbiguityReason[] = ["CORRECTION", "OTHER_PERSON"];
 const MMOL = /mmol|毫摩尔|millimole/i;
 
-type Fact = Exclude<VoiceCandidate, { kind: "UNSUPPORTED_SPAN" }>;
+type Fact = Exclude<VoiceCandidate, { kind: "UNSUPPORTED_SPAN" | "FEELING_NOTE" | "ACTIVITY_NOTE" | "MEDICINE_INFO_REQUEST" }>;
 const overlaps = (left: VoiceCandidate, right: VoiceCandidate) => left.span.start < right.span.end && right.span.start < left.span.end;
-const isFact = (candidate: VoiceCandidate): candidate is Fact => candidate.kind !== "UNSUPPORTED_SPAN";
+const isFact = (candidate: VoiceCandidate): candidate is Fact => candidate.kind === "GLUCOSE_READING" || candidate.kind === "MEAL_NOTE" || candidate.kind === "MEDICATION_OCCURRENCE";
+/** 13s.6: her feeling or activity (13s.7: or her medicine-information request), recognised on the device only; kept exactly as it is. */
+const isOwnNote = (candidate: VoiceCandidate) => candidate.kind === "FEELING_NOTE" || candidate.kind === "ACTIVITY_NOTE" || candidate.kind === "MEDICINE_INFO_REQUEST";
 
 function withReasons(candidate: Fact, extra: readonly VoiceAmbiguityReason[]): Fact {
   const reasons = new Set<VoiceAmbiguityReason>([...candidate.ambiguity, ...extra.filter((reason) => SAFETY.includes(reason))]);
@@ -92,10 +98,13 @@ export function mergeRemoteCandidates(input: Readonly<{
       remote.push(parsed.data);
     }
     const localFacts = input.local.candidates.filter(isFact);
+    const ownNotes = input.local.candidates.filter(isOwnNote);
     const wide = TRANSCRIPT_WIDE.filter((reason) => localFacts.some((candidate) => candidate.ambiguity.includes(reason)));
     const stricter = new Map<Fact, Set<VoiceAmbiguityReason>>();
     const added: Fact[] = [];
     for (const candidate of remote) {
+      // 13s.6: a remote fact over her feeling or activity is dropped.
+      if (ownNotes.some((note) => overlaps(note, candidate))) continue;
       const overlapping = localFacts.filter((local) => overlaps(local, candidate));
       if (overlapping.length > 0) {
         for (const local of overlapping.filter((entry) => entry.kind === candidate.kind)) {
@@ -109,7 +118,7 @@ export function mergeRemoteCandidates(input: Readonly<{
       added.push(withReasons(prepared, wide));
     }
     const kept = input.local.candidates
-      .filter((candidate) => isFact(candidate) || !added.some((fact) => overlaps(fact, candidate)))
+      .filter((candidate) => isFact(candidate) || isOwnNote(candidate) || !added.some((fact) => overlaps(fact, candidate)))
       .map((candidate) => (isFact(candidate) && stricter.has(candidate) ? withReasons(candidate, [...stricter.get(candidate)!]) : candidate));
     const candidates = [...kept, ...added].sort((left, right) => left.span.start - right.span.start);
     const merged = {

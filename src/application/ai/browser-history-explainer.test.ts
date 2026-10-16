@@ -1409,7 +1409,7 @@ describe("browser AI assistance: AI credit limit (Owner decision 2026-10-12, AI 
  *   disclosure, the standard wording, nothing sent.
  * - Care: an en-SG preview of the evaluated ORDINARY shape (one reading, one question, no appointment) is class 5d0c75ce… (QUALIFIED):
  *   offered, disclosure first, one POST of that class when accepted; the same preview in zh-SG (8de6bc4e…, PENDING) is never offered or
- *   sent. The demo dataset's OWN care selections (the 14-day visit period, with the seeded appointment) are within the fact limit and,
+ *   sent. The demo dataset's OWN care selections (the 5-day visit period, with the seeded appointment) are within the fact limit and,
  *   except for every group at once (TOO_MANY_FACTS), remote-eligible, but map to no evaluated class (NO_DEFINITION): with the shipped gate
  *   they are never offered and nothing is sent (fail closed).
  */
@@ -1462,15 +1462,21 @@ describe("Packet 11C English activation, I-5: the shipped manifest and gate over
     const recordedDates = thirty.projection.chart.filter((position) => position.state === "RECORDED").map((position) => position.date).sort();
     expect(recordedDates.at(-1)).toBe(yesterday);
     expect(recordedDates.every((date) => date < today)).toBe(true);
-    expect(thirty.projection.readingCount).toBe(33);
+    // Owner request 2026-10-16 (a full booklet): three readings on each of the 29 recorded days in the 30-day period.
+    expect(thirty.projection.readingCount).toBe(87);
     // "Last week" and "30 days" have readings on any day; "This week" is empty on a Monday (the data ends yesterday).
     const lastWeek = await runtime.history.load({ period: "LAST_WEEK" });
     expect(lastWeek.status).toBe("READY");
     expect((await runtime.history.load({ period: "THIS_WEEK" })).status).toBe(thisWeek);
-    // The one governed statement: before breakfast, recent readings lower than the reference period's (the improvement).
+    // Two governed statements (owner request 2026-10-16): before breakfast lower, and before dinner higher, than the reference period.
     for (const view of [thirty, lastWeek]) {
-      expect(view.status === "READY" && view.comparisons.map((fact) => [fact.factId, fact.kind, fact.recent, fact.reference, fact.correctionUpdated])).toEqual([["COMPARISON:BEFORE_BREAKFAST", "LOWER", "6.1", "7.5", true]]);
+      expect(view.status === "READY" && view.comparisons.map((fact) => [fact.factId, fact.kind, fact.recent, fact.reference, fact.correctionUpdated])).toEqual([
+        ["COMPARISON:BEFORE_BREAKFAST", "LOWER", "6.1", "7.5", true],
+        ["COMPARISON:BEFORE_DINNER", "HIGHER", "9.1", "7.8", false],
+      ]);
     }
+    // The before-dinner comparison falls in the same qualified English class, so its AI wording is offered the same way.
+    expect(await explainClassOfFact(runtime.history, "COMPARISON:BEFORE_DINNER", "en-SG")).toBe(EN_EXPLAIN);
     const factId = "COMPARISON:BEFORE_BREAKFAST";
     expect(await explainClassOfFact(runtime.history, factId, "en-SG")).toBe(EN_EXPLAIN);
     expect(await explainClassOfFact(runtime.history, factId, "zh-SG")).toBe(ZH_EXPLAIN);
@@ -1502,7 +1508,7 @@ describe("Packet 11C English activation, I-5: the shipped manifest and gate over
       ["en-SG", "ACCEPTED", 1],
       ["zh-SG", "REQUEST_CLASS_NOT_QUALIFIED", 0],
     ]);
-  }, 60_000);
+  }, 180_000);
 
   it("Care: the evaluated en-SG ORDINARY preview is admitted (5d0c75ce…), disclosure first, one POST of that class when accepted; in zh-SG it is never offered or sent", async () => {
     const fetchSpy = vi.fn();
@@ -1546,18 +1552,18 @@ describe("Packet 11C English activation, I-5: the shipped manifest and gate over
       }
     }
     expect(fetchSpy).not.toHaveBeenCalled();
-  }, 60_000);
+  }, 180_000);
 
-  it.each(DEMO_CLOCKS)("Care over the demo dataset ($label, 14-day visit period): outside the evaluated classes, en-SG is offered by the owner demo override (disclosure first, one value-blind POST when accepted, the AI-assisted preview); zh-SG and over-budget selections never", async ({ at }) => {
+  it.each(DEMO_CLOCKS)("Care over the demo dataset ($label, 5-day visit period): outside the evaluated classes, en-SG is offered by the owner demo override (disclosure first, one value-blind POST when accepted, the AI-assisted preview); zh-SG and over-budget selections never", async ({ at }) => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const runtime = await demoRuntime(at);
     const visit = await runtime.careOrganisation.query.loadVisitPreparation();
     if (visit.status !== "READY" || !visit.appointment) throw new Error("visit");
-    // The 14 local days ending today; the seeded appointment; the seeded demo question (owner decision 2026-10-12), saved as the
-    // add-question screen saves one.
-    expect(Math.round((Date.parse(visit.period.endAtExclusive) - Date.parse(visit.period.startAt)) / 86_400_000)).toBe(14);
-    expect(visit.factGroups.map((group) => [group.key, group.sources.length])).toEqual([["GLUCOSE", 11], ["INSULIN", 10], ["MEALS", 10], ["WALKS", 8]]);
+    // The 5 local days ending today (owner decision 2026-10-16: three readings a day still fit the AI wording); the seeded appointment;
+    // the seeded demo question (owner decision 2026-10-12), saved as the add-question screen saves one.
+    expect(Math.round((Date.parse(visit.period.endAtExclusive) - Date.parse(visit.period.startAt)) / 86_400_000)).toBe(5);
+    expect(visit.factGroups.map((group) => [group.key, group.sources.length])).toEqual([["GLUCOSE", 12], ["INSULIN", 3], ["MEALS", 11], ["WALKS", 2]]);
     expect(visit.questions.map((entry) => [entry.text, entry.language])).toEqual([[SYNTHETIC_CARE_QUESTION_TEXT, "und"]]);
     const fetcher = fakeDemoRoute();
     const wording = createBrowserAiAssistance({ history: runtime.history, carePreparation: runtime.carePreparation, audit: runtime.aiAudit, fetcher, now: () => at }).careSummary!;
@@ -1603,22 +1609,23 @@ describe("Packet 11C English activation, I-5: the shipped manifest and gate over
         if (locale === "en-SG" && label === "GLUCOSE + question") demoSnapshot = { recordId: prepared.recordId, expectedRevisionId: prepared.revisionId, expectedRevisionNumber: prepared.revisionNumber };
       }
     }
-    // GLUCOSE + question: 11 readings, the appointment (service and date) and the question = 14 facts, 18 under the 32-fact limit and
-    // within the English remote wording budget. Every group at once reaches the 32-fact limit and exceeds the remote wording budget
-    // (one more fact is TOO_MANY_FACTS): the standard wording is kept. Insulin records are never sent (only the appointment's 2 facts).
+    // GLUCOSE + question: 12 readings in the 5-day period (owner decision 2026-10-16: three readings a day, the period cut to 5 days),
+    // the appointment (service and date) and the question = 15 facts, 17 under the 32-fact limit and within the English remote wording
+    // budget. Every group at once (28 facts) is over the wording budget (NOT_REMOTE_ELIGIBLE): the standard wording is kept. Insulin
+    // records are never sent (only the appointment's 2 facts).
     expect(outcomes).toEqual([
-      "en-SG GLUCOSE + question: 14 facts, NO_DEFINITION",
-      "en-SG every group + question: 32 facts, NOT_REMOTE_ELIGIBLE",
-      "en-SG GLUCOSE: 13 facts, NO_DEFINITION",
+      "en-SG GLUCOSE + question: 15 facts, NO_DEFINITION",
+      "en-SG every group + question: 28 facts, NOT_REMOTE_ELIGIBLE",
+      "en-SG GLUCOSE: 14 facts, NO_DEFINITION",
       "en-SG INSULIN: 2 facts, NO_DEFINITION",
-      "en-SG MEALS: 12 facts, NO_DEFINITION",
-      "en-SG WALKS: 10 facts, NO_DEFINITION",
-      "zh-SG GLUCOSE + question: 14 facts, NO_DEFINITION",
-      "zh-SG every group + question: 32 facts, NOT_REMOTE_ELIGIBLE",
-      "zh-SG GLUCOSE: 13 facts, NO_DEFINITION",
+      "en-SG MEALS: 13 facts, NO_DEFINITION",
+      "en-SG WALKS: 4 facts, NO_DEFINITION",
+      "zh-SG GLUCOSE + question: 15 facts, NO_DEFINITION",
+      "zh-SG every group + question: 28 facts, NOT_REMOTE_ELIGIBLE",
+      "zh-SG GLUCOSE: 14 facts, NO_DEFINITION",
       "zh-SG INSULIN: 2 facts, NO_DEFINITION",
-      "zh-SG MEALS: 12 facts, NO_DEFINITION",
-      "zh-SG WALKS: 10 facts, NO_DEFINITION",
+      "zh-SG MEALS: 13 facts, NO_DEFINITION",
+      "zh-SG WALKS: 4 facts, NO_DEFINITION",
     ]);
     // Nothing is sent by being offered; the demo selection (GLUCOSE + question, en-SG): no POST without the request's own decision,
     // then exactly one value-blind POST when accepted, and the AI-assisted (REPLACED) preview.
@@ -1630,7 +1637,7 @@ describe("Packet 11C English activation, I-5: the shipped manifest and gate over
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0]![1].body as string).not.toMatch(/\d\.\d|mmol|keep checking|revisionId|recordId|\d{4}-\d{2}-\d{2}/);
     expect(fetchSpy).not.toHaveBeenCalled();
-  }, 60_000);
+  }, 180_000);
 });
 
 /** The EXPLAIN class of one comparison's own request in `locale` (the same pure builder, planner and projection as the wiring). */

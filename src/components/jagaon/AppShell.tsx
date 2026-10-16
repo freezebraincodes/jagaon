@@ -4,6 +4,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import type { AppMessages } from "@/i18n/types";
 import type { ScreenId } from "./screen-manifest";
 import { BookletIcon, ChartIcon, ChevronLeftIcon, HomeIcon, MoreIcon } from "./primitives/Icons";
+import { PreviewModeBanner, useHsaBoundedMode } from "./hsa/hsa-bounded-mode";
 
 type AppShellProps = {
   messages: AppMessages;
@@ -23,6 +24,7 @@ export function AppShell({
   children,
 }: AppShellProps) {
   const mainRef = useRef<HTMLElement>(null);
+  const { moreBadgeCount } = useHsaBoundedMode();
   const previousScreen = useRef(currentScreen);
 
   // On every screen change (not the first load) start at the top and move
@@ -40,16 +42,17 @@ export function AppShell({
     }
   }, [currentScreen]);
 
-  // Booklet is the Packet 8 Medication schedule; History is Packet 7A.
+  // Owner decision 2026-10-16: Booklet is the paper-diary table (the Medication schedule moved to More); History is Packet 7A.
   const tabs: Array<{ screen: ScreenId; label: string; icon: ReactNode }> = [
     { screen: "TODAY", label: messages.shared.navToday, icon: <HomeIcon size={26} /> },
-    { screen: "MEDICATION_SCHEDULE", label: messages.shared.navBooklet, icon: <BookletIcon size={26} /> },
+    { screen: "BOOKLET", label: messages.shared.navBooklet, icon: <BookletIcon size={26} /> },
     { screen: "HISTORY", label: messages.shared.navHistory, icon: <ChartIcon size={26} /> },
     { screen: "MORE", label: messages.shared.navMore, icon: <MoreIcon size={26} /> },
   ];
 
   return (
     <>
+      <PreviewModeBanner messages={messages} onOpenSetting={() => onSwitchTab("MORE")} />
       <main
         ref={mainRef}
         className={`app-main ${isTopLevel ? "app-main--top" : "app-main--child"}`}
@@ -80,6 +83,11 @@ export function AppShell({
               >
                 {tab.icon}
                 <span>{tab.label}</span>
+                {tab.screen === "MORE" && moreBadgeCount > 0 ? (
+                  <span className="app-nav-badge" aria-label={messages.hsa.moreBadgeLabel(moreBadgeCount)}>
+                    {moreBadgeCount}
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>

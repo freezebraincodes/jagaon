@@ -153,17 +153,31 @@ function expectGlucoseDate(date: string) {
 }
 
 describe("glucose entry", () => {
-  it("uses the frame 02 title and the five context chips", () => {
+  it("uses the frame 02 title and the context chips, before and after each meal (owner decision 2026-10-16)", () => {
     renderGlucose();
     expect(screen.getByRole("heading", { level: 1, name: en.today.recordReading })).toBeInTheDocument();
     const group = screen.getByRole("group", { name: en.glucose.whenQuestion });
     expect(within(group).getAllByRole("radio").map((radio) => radio.closest("label")!.textContent)).toEqual([
       en.glucose.contextBeforeBreakfast,
+      en.glucose.contextAfterBreakfast,
       en.glucose.contextBeforeLunch,
+      en.glucose.contextAfterLunch,
       en.glucose.contextBeforeDinner,
+      en.glucose.contextAfterDinner,
       en.glucose.contextBedtime,
       en.glucose.contextJustChecking,
     ]);
+  });
+
+  it("stores an after-meal choice as exactly that slot", async () => {
+    const { commands } = renderGlucose();
+    chooseContext(en.glucose.contextAfterLunch);
+    fireEvent.change(glucoseValueInput(), { target: { value: "8.4" } });
+    fireEvent.click(screen.getByRole("button", { name: en.glucose.saveAction }));
+    expect(await screen.findByText(en.glucose.saved)).toBeInTheDocument();
+    expect(commands.recordGlucose).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: expect.objectContaining({ context: { kind: "PATIENT_SELECTED_SLOT", slot: "AFTER_LUNCH" } }) }),
+    );
   });
 
   it("shows a glucose success only after the command service commits", async () => {
@@ -502,7 +516,7 @@ function insulinAmountInput() {
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const named = (text: string) => new RegExp(escape(text));
 
-const [nocturin, veltora] = fixture.recordedPrescriptions as [
+const [lantus, apidra] = fixture.recordedPrescriptions as [
   (typeof fixture.recordedPrescriptions)[number],
   (typeof fixture.recordedPrescriptions)[number],
 ];
@@ -812,9 +826,9 @@ describe("insulin entry", () => {
 
   it("offers the recorded medicines as cards with their recorded generic names", () => {
     renderInsulin();
-    const name = (rx: typeof nocturin) => new RegExp(`^${escape(rx.displayName)}\\s*${escape(rx.genericName!)}$`);
-    expect(screen.getByRole("radio", { name: name(nocturin) })).toBeChecked();
-    expect(screen.getByRole("radio", { name: name(veltora) })).not.toBeChecked();
+    const name = (rx: typeof lantus) => new RegExp(`^${escape(rx.displayName)}\\s*${escape(rx.genericName!)}$`);
+    expect(screen.getByRole("radio", { name: name(lantus) })).toBeChecked();
+    expect(screen.getByRole("radio", { name: name(apidra) })).not.toBeChecked();
   });
 
   it("never offers an arbitrary free-text medicine as insulin", () => {
@@ -822,7 +836,7 @@ describe("insulin entry", () => {
       ...fixture,
       recordedPrescriptions: [
         {
-          ...nocturin,
+          ...lantus,
           medicationId: "demo-medicine:free-text",
           displayName: "Aspirin",
           genericName: null,
@@ -838,7 +852,7 @@ describe("insulin entry", () => {
 
   it("sends exactly the selected medicine, typed amount and time", async () => {
     const { commands } = renderInsulin();
-    fireEvent.click(screen.getByRole("radio", { name: named(veltora.displayName) }));
+    fireEvent.click(screen.getByRole("radio", { name: named(apidra.displayName) }));
     fireEvent.change(insulinAmountInput(), { target: { value: "6.5" } });
     openTimeEditor();
     setWheelTime("12:05");
@@ -853,8 +867,8 @@ describe("insulin entry", () => {
       state: "TAKEN",
       medication: {
         recordType: "MEDICATION",
-        recordId: veltora.medicationRecordId,
-        revisionId: veltora.medicationRevisionId,
+        recordId: apidra.medicationRecordId,
+        revisionId: apidra.medicationRevisionId,
       },
       amountTaken: { kind: "KNOWN", amount: { value: "6.5", unit: "UNIT" } },
       patientNote: { text: "left arm", language: "en-SG" },
@@ -916,14 +930,14 @@ describe("insulin entry", () => {
 
   it("shows the selected medicine's recorded schedule and direction verbatim with its source", () => {
     renderInsulin();
-    expect(screen.getByText(nocturin.recordedDirection!)).toBeInTheDocument();
+    expect(screen.getByText(lantus.recordedDirection!)).toBeInTheDocument();
     expect(screen.getByText(en.onboarding.sourcePrescriptionLabel)).toBeInTheDocument();
     expect(
-      screen.getByText(`${en.insulin.prescriptionSchedule}: ${nocturin.amountText}, ${nocturin.timingText}`),
+      screen.getByText(`${en.insulin.prescriptionSchedule}: ${lantus.amountText}, ${lantus.timingText}`),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: named(veltora.displayName) }));
-    expect(screen.getByText(veltora.recordedDirection!)).toBeInTheDocument();
-    expect(screen.queryByText(nocturin.recordedDirection!)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: named(apidra.displayName) }));
+    expect(screen.getByText(apidra.recordedDirection!)).toBeInTheDocument();
+    expect(screen.queryByText(lantus.recordedDirection!)).not.toBeInTheDocument();
   });
 
   it("shows correction history as a disabled later-packet row", () => {
@@ -936,7 +950,7 @@ describe("insulin entry", () => {
   it("retains input after a failed write and retries with unchanged values", async () => {
     const recordInsulin = vi.fn().mockResolvedValueOnce(failed).mockResolvedValueOnce(committed);
     renderInsulin(serviceWith({ recordInsulin }));
-    fireEvent.click(screen.getByRole("radio", { name: named(veltora.displayName) }));
+    fireEvent.click(screen.getByRole("radio", { name: named(apidra.displayName) }));
     fireEvent.change(insulinAmountInput(), { target: { value: "4" } });
     openTimeEditor();
     setWheelTime("11:55");
@@ -944,7 +958,7 @@ describe("insulin entry", () => {
 
     expect(await screen.findByText(en.shared.notSaved)).toBeInTheDocument();
     expect(screen.queryByText(en.insulin.saved)).not.toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: named(veltora.displayName) })).toBeChecked();
+    expect(screen.getByRole("radio", { name: named(apidra.displayName) })).toBeChecked();
     expect(insulinAmountInput()).toHaveValue("4");
     expectWheelTime("11:55");
 

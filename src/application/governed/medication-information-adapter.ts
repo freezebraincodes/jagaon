@@ -48,15 +48,17 @@ export type MedicationInformationAdapter = {
 // --- Section: Reviewed medication IDs supported in this demo ---------------
 
 const GLARGINE_ID = "insulin-glargine";
-const ASPART_ID = "insulin-aspart";
+const GLULISINE_ID = "insulin-glulisine";
 
 const SUPPORTED_MEDICATION_IDS: ReadonlySet<string> = new Set([
   GLARGINE_ID,
-  ASPART_ID,
+  GLULISINE_ID,
 ]);
 
 // Review date and leaflet URLs from the approved Packet 6 copy matrix (section 7).
 const REVIEWED_DATE: LocalDateText = "2026-10-02";
+/** The insulin glulisine leaflet was checked on HealthHub on this date (owner decision 2026-10-14). */
+const GLULISINE_REVIEWED_DATE: LocalDateText = "2026-10-14";
 
 const SOURCE_NAME = "HealthHub";
 
@@ -68,11 +70,13 @@ const SOURCE_URLS: Readonly<Record<string, Readonly<Record<"en-SG" | "zh-SG", st
       "zh-SG":
         "https://ch-api.healthhub.sg/api/public/content/786935d0c91f452abdbdbcc18040d18b?v=60f917d4",
     }),
-    [ASPART_ID]: Object.freeze({
+    // Owner decision 2026-10-14: Apidra (insulin glulisine) replaces the earlier demo pen. HealthHub's insulin glulisine leaflet,
+    // checked 2026-10-14. No Chinese leaflet link was checked, so zh-SG points to the same English page (English-only hackathon scope).
+    [GLULISINE_ID]: Object.freeze({
       "en-SG":
-        "https://www.healthhub.sg/medication-devices-and-treatment/medications/insulin-aspart",
+        "https://www.healthhub.sg/medication-devices-and-treatment/medications/insulin-glulisine",
       "zh-SG":
-        "https://ch-api.healthhub.sg/api/public/content/d57318eec386405aac181028a7c1f331?v=5e9ee475",
+        "https://www.healthhub.sg/medication-devices-and-treatment/medications/insulin-glulisine",
     }),
   });
 
@@ -104,15 +108,15 @@ export function createMedicationInformationAdapter(
         };
       }
 
-      if (medicationId === ASPART_ID) {
+      if (medicationId === GLULISINE_ID) {
         return {
-          medicationId: ASPART_ID,
-          displayName: "Insulin aspart",
-          purpose: msg.aspartPurpose,
-          use: msg.aspartUse,
-          reviewedOnLabel: reviewedLabel,
+          medicationId: GLULISINE_ID,
+          displayName: "Insulin glulisine",
+          purpose: msg.glulisinePurpose,
+          use: msg.glulisineUse,
+          reviewedOnLabel: messages.shared.reviewedOn(GLULISINE_REVIEWED_DATE),
           sourceName: SOURCE_NAME,
-          sourceUrl: SOURCE_URLS[ASPART_ID]![locale],
+          sourceUrl: SOURCE_URLS[GLULISINE_ID]![locale],
           available: true,
         };
       }
@@ -136,7 +140,7 @@ export function createMedicationInformationAdapter(
 
 export const DEMO_MEDICATION_IDS = Object.freeze({
   glargine: GLARGINE_ID,
-  aspart: ASPART_ID,
+  glulisine: GLULISINE_ID,
 });
 
 export const DEMO_MEDICATION_REVIEWED_DATE = REVIEWED_DATE;

@@ -33,17 +33,25 @@ describe("Recorded-history query port", () => {
     await reading(journal, "2026-09-29", "18:40", "7.3", "BEFORE_DINNER");
     const projection = ready(await history.load({ period: "THIS_WEEK" })).projection;
     expect(projection.readingCount).toBe(3);
-    const evening = projection.chart.find((p) => p.date === "2026-09-29" && p.position === "EVENING");
-    // The afternoon reading is drawn beside the evening one; the latest value stays the position's own.
-    expect(evening).toEqual({
+    // Owner decision 2026-10-16: three times of day. The 13:05 reading is the afternoon's own; the 18:40 reading the evening's.
+    expect(projection.chart.find((p) => p.date === "2026-09-29" && p.position === "AFTERNOON")).toEqual({
       date: "2026-09-29",
-      position: "EVENING",
+      position: "AFTERNOON",
       state: "RECORDED",
-      valueMmolL: "7.3",
+      valueMmolL: "9.1",
+      readingCount: 1,
+      readings: [{ valueMmolL: "9.1", at: local("2026-09-29", "13:05").occurrence.instantUtc }],
+    });
+    expect(projection.chart.find((p) => p.date === "2026-09-29" && p.position === "EVENING")).toMatchObject({ readings: [{ valueMmolL: "7.3" }] });
+    // Two readings in one time of day are both kept, in time order.
+    await reading(journal, "2026-09-29", "19:30", "7.0", "BEDTIME");
+    const again = ready(await history.load({ period: "THIS_WEEK" })).projection;
+    expect(again.chart.find((p) => p.date === "2026-09-29" && p.position === "EVENING")).toMatchObject({
+      valueMmolL: "7.0",
       readingCount: 2,
       readings: [
-        { valueMmolL: "9.1", at: local("2026-09-29", "13:05").occurrence.instantUtc },
         { valueMmolL: "7.3", at: local("2026-09-29", "18:40").occurrence.instantUtc },
+        { valueMmolL: "7.0", at: local("2026-09-29", "19:30").occurrence.instantUtc },
       ],
     });
     expect(projection.chart.find((p) => p.date === "2026-09-29" && p.position === "MORNING")).toMatchObject({ readings: [{ valueMmolL: "6.2" }] });
@@ -68,8 +76,8 @@ describe("Recorded-history query port", () => {
       { slot: "BEFORE_LUNCH", count: 1 },
       { slot: "BEFORE_DINNER", count: 1 },
     ]);
-    // Six full days plus Sunday morning; Sunday evening has not begun.
-    expect(projection.chart).toHaveLength(13);
+    // Six full days of three times of day, plus Sunday morning; Sunday afternoon has not begun.
+    expect(projection.chart).toHaveLength(19);
     expect(projection.chart[0]).toEqual({
       date: "2026-09-28",
       position: "MORNING",
@@ -78,9 +86,13 @@ describe("Recorded-history query port", () => {
       readingCount: 1,
       readings: [{ valueMmolL: "6.1", at: local("2026-09-28", "07:30").occurrence.instantUtc }],
     });
-    expect(projection.chart[3]).toEqual({ date: "2026-09-29", position: "EVENING", state: "NOT_RECORDED" });
-    expect(projection.chart.find((p) => p.date === "2026-10-01" && p.position === "EVENING")).toMatchObject({ state: "RECORDED", valueMmolL: "8.4" });
-    expect(projection.notRecordedPositions).toHaveLength(8);
+    expect(projection.chart[1]).toEqual({ date: "2026-09-28", position: "AFTERNOON", state: "NOT_RECORDED" });
+    expect(projection.chart.find((p) => p.date === "2026-10-01" && p.position === "AFTERNOON")).toMatchObject({ state: "RECORDED", valueMmolL: "8.4" });
+    // A day with readings at two or more times of day is complete: its empty afternoon is drawn but not listed as missing
+    // (owner decision 2026-10-16). Listed: 29 Sep and 30 Sep afternoon and evening, 1 Oct morning and evening, all of 2 and 3 Oct,
+    // and 4 Oct morning.
+    expect(projection.notRecordedPositions).toHaveLength(13);
+    expect(projection.notRecordedPositions.some((p) => p.date === "2026-09-28")).toBe(false);
     expect(projection.notRecordedPositions.some((p) => "valueMmolL" in p)).toBe(false);
     expect(projection.stamps.slice(0, 2)).toEqual([
       { date: "2026-09-28", recordedPositions: 2, complete: true },
@@ -111,7 +123,7 @@ describe("Recorded-history query port", () => {
     });
     const thirty = ready(await history.load({ period: "THIRTY_DAYS" }));
     expect(thirty.projection.range).toEqual({ startDate: "2026-09-05", endDate: "2026-10-04" });
-    expect(thirty.projection.chart).toHaveLength(59);
+    expect(thirty.projection.chart).toHaveLength(88);
   });
 
   it("reports a supported comparison with its evidence windows and correction provenance", async () => {

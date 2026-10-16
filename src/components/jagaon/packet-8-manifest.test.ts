@@ -129,12 +129,19 @@ describe("Packet 8 bilingual copy", () => {
       /\bnotification/i,
       /\bsent to\b/i,
     ];
-    for (const value of scheduleStrings(en)) {
+    // Owner decision 2026-10-15: the reminders note says plainly that NO notification is sent; a negation, not a delivery claim.
+    const noAlertsNote = (messages: typeof en) => messages.inAppOnly;
+    for (const value of scheduleStrings(en).filter((value) => value !== noAlertsNote(en))) {
       for (const pattern of englishForbidden) expect(value, `${pattern} in "${value}"`).not.toMatch(pattern);
     }
+    expect(noAlertsNote(en)).toBe("This demo doesn't send reminder alerts yet: no sound or notification.");
     const chineseForbidden = [/漏服/, /依从性差/, /风险/, /紧急/, /诊断/, /改善/, /恶化/, /应该(?:服用|注射)/, /响两次/, /通知/];
-    for (const value of scheduleStrings(zh)) {
+    // Owner decision 2026-10-15: the neutral safety line after a skipped dose names the emergency number (紧急 = emergency), which
+    // is safety information, not a judgement of the record.
+    for (const value of scheduleStrings(zh).filter((value) => value !== noAlertsNote(zh) && value !== zh.skippedSafety)) {
       for (const pattern of chineseForbidden) expect(value, `${pattern} in "${value}"`).not.toMatch(pattern);
     }
+    expect(noAlertsNote(zh)).toBe("此演示暂不发送提醒通知：没有声音，也没有通知。");
+    expect(zh.skippedSafety).toBe("如果您感到不适，请联系您的护理团队。紧急情况下，请拨打 995。");
   });
 });

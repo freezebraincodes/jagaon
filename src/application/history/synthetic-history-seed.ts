@@ -20,12 +20,12 @@ export type SyntheticHistoryEntry =
       kind: "GLUCOSE";
       occurredAt: Instant;
       value: string;
-      slot: "BEFORE_BREAKFAST" | "BEFORE_DINNER";
+      slot: "BEFORE_BREAKFAST" | "AFTER_BREAKFAST" | "AFTER_LUNCH" | "BEFORE_DINNER" | "AFTER_DINNER";
       /** The time the patient later corrected the entry to. */
       correctedTo?: Instant;
     }
-  | { kind: "MEAL"; occurredAt: Instant; label: string; slot: "BREAKFAST" | "LUNCH" }
-  | { kind: "ACTIVITY"; occurredAt: Instant; label: string; durationMinutes: number };
+  | { kind: "MEAL"; occurredAt: Instant; label: string; slot: "BREAKFAST" | "LUNCH" | "DINNER" }
+  | { kind: "ACTIVITY"; occurredAt: Instant; label: string; durationMinutes: number; category: "WALKING" | "FLEXIBILITY_OR_MOBILITY" };
 
 /** Local midnight (as a UTC instant in ms) of the seed instant's Singapore date. */
 function localMidnightMs(seedAt: Instant): number {
@@ -46,7 +46,7 @@ function entryOf(row: PreparedDemoHistoryRow, seedAt: Instant): SyntheticHistory
     return { kind: "GLUCOSE", occurredAt, value: row.value, slot: row.slot, ...(row.correctedTime ? { correctedTo: localInstant(seedAt, row.daysAgo, row.correctedTime) } : {}) };
   }
   if (row.kind === "MEAL") return { kind: "MEAL", occurredAt, label: row.label, slot: row.slot };
-  return { kind: "ACTIVITY", occurredAt, label: row.label, durationMinutes: row.durationMinutes };
+  return { kind: "ACTIVITY", occurredAt, label: row.label, durationMinutes: row.durationMinutes, category: row.category ?? "WALKING" };
 }
 
 export function planSyntheticHistory(seedAt: Instant, rows: readonly PreparedDemoHistoryRow[] = PREPARED_DEMO_HISTORY_ROWS): SyntheticHistoryEntry[] {
@@ -116,7 +116,7 @@ export async function seedSyntheticHistory(commands: JournalCommandService, seed
     } else {
       committed(
         await commands.recordActivity({
-          payload: { activityCategory: "WALKING", patientLabel: entry.label, reportedDurationMinutes: entry.durationMinutes },
+          payload: { activityCategory: entry.category, patientLabel: entry.label, reportedDurationMinutes: entry.durationMinutes },
           temporal: point(entry.occurredAt) as never,
           recordedAt,
         }),

@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import Dexie from "dexie";
 import fakeIndexedDB, { IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
 import type { ReminderPayload } from "@/domain/care-plan/reminder";
-import { createPacket8Harness, NOCTURIN_PRESCRIPTION, type Packet8Harness } from "@/application/packet8-test-harness";
+import { createPacket8Harness, LANTUS_PRESCRIPTION, type Packet8Harness } from "@/application/packet8-test-harness";
 
 const originalIndexedDB = Dexie.dependencies.indexedDB;
 const originalKeyRange = Dexie.dependencies.IDBKeyRange;
@@ -27,7 +27,7 @@ async function setup() {
 
 function medicationReminder(h: Packet8Harness, state: ReminderPayload["state"] = "ACTIVE"): ReminderPayload {
   return {
-    label: { text: "Nocturin pen (demo)", language: "und" },
+    label: { text: "Lantus (demo)", language: "und" },
     subject: { kind: "MEDICATION", target: h.prescriptionRef },
     schedule: { kind: "WEEKLY_LOCAL", daysOfWeek: ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"], times: ["21:00" as never], timeZoneId: "Asia/Singapore" },
     state,
@@ -141,7 +141,7 @@ describe("source change reconciliation", () => {
       recordId: h.prescriptionRef.recordId,
       expectedRevisionId: h.prescriptionRef.revisionId,
       expectedRevisionNumber: 1,
-      payload: { ...NOCTURIN_PRESCRIPTION, schedule: { kind: "FIXED_LOCAL_TIMES", entries: [{ scheduleKey: "night", time: "21:30" as never }] } },
+      payload: { ...LANTUS_PRESCRIPTION, schedule: { kind: "FIXED_LOCAL_TIMES", entries: [{ scheduleKey: "night", time: "21:30" as never }] } },
     });
     expect(corrected.kind).toBe("COMMITTED");
     const report = await h.reminders.processPending();
@@ -167,7 +167,7 @@ describe("source change reconciliation", () => {
       recordId: h.prescriptionRef.recordId,
       expectedRevisionId: h.prescriptionRef.revisionId,
       expectedRevisionNumber: 1,
-      payload: NOCTURIN_PRESCRIPTION,
+      payload: LANTUS_PRESCRIPTION,
     });
     if (corrected.kind !== "COMMITTED") throw new Error("correct failed");
     await h.reminders.processPending();

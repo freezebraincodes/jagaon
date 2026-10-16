@@ -71,13 +71,13 @@ describe("SettingsScreen: Keep wording on this device (Packet 11C C2)", () => {
 });
 
 describe("SettingsScreen", () => {
-  it("persists an explicit locale selection", async () => {
+  it("offers English only (owner decision 2026-10-16) and persists it when chosen from a stored Chinese locale", async () => {
     const persistLocale = vi.fn().mockResolvedValue(undefined);
-    const messages = getMessages("en-SG");
+    const messages = getMessages("zh-SG");
     render(
       <SettingsScreen
         messages={messages}
-        locale="en-SG"
+        locale="zh-SG"
         setLocale={vi.fn()}
         persistLocale={persistLocale}
         deleteAll={deletePort()}
@@ -85,8 +85,9 @@ describe("SettingsScreen", () => {
         goBack={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: messages.settings.chinese }));
-    await waitFor(() => expect(persistLocale).toHaveBeenCalledWith("zh-SG"));
+    expect(screen.queryByRole("button", { name: messages.settings.chinese })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: messages.settings.english }));
+    await waitFor(() => expect(persistLocale).toHaveBeenCalledWith("en-SG"));
   });
 
   it("deletes all local data only after the exact typed DELETE confirmation (frame 11)", async () => {

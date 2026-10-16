@@ -144,11 +144,11 @@ describe("TodayScreen", () => {
     );
 
     const glargine = getByRole("group", { name: fixture.recordedPrescriptions[0]!.displayName });
-    const aspart = getByRole("group", { name: fixture.recordedPrescriptions[1]!.displayName });
+    const glulisine = getByRole("group", { name: fixture.recordedPrescriptions[1]!.displayName });
     // The domain unit code is labelled in the active locale, never shown raw.
     expect(within(glargine).getByText("8 units")).toBeInTheDocument();
     expect(glargine).not.toHaveTextContent("UNIT ");
-    expect(within(aspart).getByText(messages.today.notRecorded)).toBeInTheDocument();
+    expect(within(glulisine).getByText(messages.today.notRecorded)).toBeInTheDocument();
   });
 
   it("localises the meal slot while preserving the patient-entered item", () => {
@@ -314,7 +314,7 @@ describe("TodayScreen", () => {
         now={new Date("2026-10-03T04:00:00Z")}
       />,
     );
-    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(0, 3));
+    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(0));
     // The latest reading stays visible, with its date because it is not today.
     expect(rendered.getByRole("heading", { name: messages.today.latestRecordedReading }))
       .toBeInTheDocument();
@@ -343,17 +343,51 @@ describe("TodayScreen", () => {
     expect(slots[0]).toHaveTextContent("6.2");
     expect(slots[1]).toHaveTextContent(messages.today.notRecorded);
     expect(slots[2]).toHaveTextContent("7.1");
-    expect(container).toHaveTextContent(messages.today.bookletProgress(2, 3));
+    expect(container).toHaveTextContent(messages.today.bookletProgress(2));
   });
 
-  it("shows the synthetic user-entered walk as a read-only tile", () => {
-    const { messages, fixture, getByRole } = setup({ locale: "en-SG" });
-    const tile = getByRole("group", { name: fixture.activity.title });
-    expect(tile).toHaveTextContent(fixture.activity.place);
-    expect(tile).toHaveTextContent(messages.shared.minutes(fixture.activity.minutes));
-    expect(tile).toHaveTextContent(messages.today.enteredByYou);
-    expect(within(tile).queryByRole("button")).not.toBeInTheDocument();
+  it("shows Not recorded on the Activity tile when no activity is recorded, and the tile opens Record an activity", () => {
+    const { messages, getByRole, navigate } = setup({ locale: "en-SG" });
+    const tile = getByRole("button", { name: messages.today.activityTitle });
+    expect(tile).toHaveTextContent(messages.today.notRecorded);
+    fireEvent.click(tile);
+    expect(navigate).toHaveBeenCalledWith("RECORD_ACTIVITY");
+    expect(navigate).not.toHaveBeenCalledWith("TELL_JAGAON");
   });
+
+  it("shows the latest recorded activity on the Activity tile, from any day", () => {
+    const messages = getMessages("en-SG");
+    const activity = (id: string, label: string, at: string, minutes?: number): TodayJournalEntry => ({
+      recordId: `00000000-0000-4000-8000-0000000004${id}` as never,
+      revisionId: `00000000-0000-4000-8000-0000000005${id}` as never,
+      recordType: "ACTIVITY_EVENT",
+      revisionNumber: 1,
+      recordedAt: at as never,
+      occurrenceSortInstant: at as never,
+      summary: label,
+      displayValue: label,
+      displayContext: "WALKING",
+      ...(minutes === undefined ? {} : { displayMinutes: minutes }),
+    });
+    const newest = activity("01", "Walked after dinner", "2026-10-01T12:30:00Z", 30);
+    const older = activity("02", "Morning walk", "2026-09-30T00:20:00Z", 28);
+    const { getByRole } = render(
+      <TodayScreen
+        messages={messages}
+        locale="en-SG"
+        fixture={createDemoScenarioFixture()}
+        journal={{ unavailable: false, entries: [journal.entries[0]!, newest, older] }}
+        navigate={vi.fn()}
+        now={NOW}
+      />,
+    );
+    const tile = getByRole("button", { name: messages.today.activityTitle });
+    expect(tile).toHaveTextContent("Walked after dinner");
+    expect(tile).toHaveTextContent(messages.shared.minutes(30));
+    expect(tile).toHaveTextContent(formatSingaporeDateTime("en-SG", "2026-10-01T12:30:00Z" as never));
+    expect(tile).not.toHaveTextContent("Morning walk");
+  });
+
   it("shows frame 31 — no medicines recorded, never missed — after an explicit skip", () => {
     const messages = getMessages("en-SG");
     const navigate = vi.fn();
@@ -463,7 +497,7 @@ describe.each(["en-SG", "zh-SG"] as const)("TodayScreen unknown occurrence time 
 
   it("keeps an unknown-time reading visible on its entry day without a slot or a stamp", () => {
     const rendered = renderToday([unknownReading]);
-    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(0, 3));
+    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(1));  // Owner decision 2026-10-15: it counts as a reading today, though it fills no slot.
     for (const slot of bookletSlots(rendered)) {
       expect(slot).toHaveTextContent(messages.today.notRecorded);
       expect(slot).not.toHaveTextContent("6.8");
@@ -482,7 +516,7 @@ describe.each(["en-SG", "zh-SG"] as const)("TodayScreen unknown occurrence time 
     expect(slots[0]).toHaveTextContent("6.2");
     expect(slots[1]).toHaveTextContent(messages.today.notRecorded);
     expect(slots[2]).toHaveTextContent(messages.today.notRecorded);
-    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(1, 3));
+    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(2));
     expect(rendered.container.querySelector(".booklet-unknown-time")).toHaveTextContent(
       unknownTimeText(formatSingaporeTime(locale, "2026-10-02T05:00:00Z")),
     );
@@ -498,7 +532,7 @@ describe.each(["en-SG", "zh-SG"] as const)("TodayScreen unknown occurrence time 
 
   it("shows the entry date with the entry time when an unknown-time reading was entered on another day", () => {
     const rendered = renderToday([unknownReading], { now: new Date("2026-10-03T04:00:00Z") });
-    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(0, 3));
+    expect(rendered.container).toHaveTextContent(messages.today.bookletProgress(0));
     expect(rendered.container.querySelector(".booklet-unknown-time")).toBeNull();
     expect(rendered.container.querySelector(".reading-meta")).toHaveTextContent(unknownTimeText(formatSingaporeDateTime(locale, ENTERED)));
   });

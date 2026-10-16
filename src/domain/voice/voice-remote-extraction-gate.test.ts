@@ -46,6 +46,16 @@ describe("remote-extraction gate (owner requirement 6; 13s.3 Cr4: stricter than 
     for (const text of ["我打了黑色的笔", "晚上的药我没吃"]) expect(gateRemoteTranscriptExtraction(text, "zh"), text).toMatchObject({ kind: "PERMIT" });
   });
 
+  it("owner decision 2026-10-14: withholds every distress transcript first, whole, at any length and in either language", () => {
+    for (const text of ["I don't want to live anymore", "Sugar 6.8 mmol, I want to end it all", "My sugar was 7.2 this morning and I can’t go on", "I feel suicidal", "Lunch was chicken rice. I cut myself"]) {
+      expect(gateRemoteTranscriptExtraction(text, "en"), text).toEqual(WITHHOLD);
+      expect(gateRemoteTranscriptExtraction(text, "zh"), text).toEqual(WITHHOLD);
+    }
+    expect(gateRemoteTranscriptExtraction(`${"sugar 6.8 ".repeat(130)}I want to die`, "en")).toEqual(WITHHOLD);
+    // The same facts without the distress words are still permitted.
+    expect(gateRemoteTranscriptExtraction("My sugar was 7.2 this morning", "en")).toMatchObject({ kind: "PERMIT" });
+  });
+
   it("permits plain fact transcripts unchanged; withholds empty, over-long or invalid input", () => {
     expect(gateRemoteTranscriptExtraction("My sugar was 6.8 mmol and I injected my dark pen", "en")).toEqual({ kind: "PERMIT", transcript: "My sugar was 6.8 mmol and I injected my dark pen", language: "en" });
     for (const text of ["I need to inject", "I did not inject", "I took 2 metformin", "Sugar 6.8, had two slices of toast, and my knee hurts"]) expect(gateRemoteTranscriptExtraction(text, "en"), text).toMatchObject({ kind: "PERMIT" });

@@ -8,7 +8,7 @@ function rendered(copy: VoiceScreenCopy): string[] {
   const out: string[] = [];
   const visit = (value: unknown) => {
     if (typeof value === "string") out.push(value);
-    else if (typeof value === "function") out.push(String((value as (...args: string[]) => unknown)("dark pen", "Nocturin pen (demo)")));
+    else if (typeof value === "function") out.push(String((value as (...args: string[]) => unknown)("dark pen", "Lantus (demo)")));
     else if (value && typeof value === "object") for (const child of Object.values(value)) visit(child);
   };
   visit(copy);

@@ -84,7 +84,7 @@ describe("Packet 9C manifest", () => {
 
   it("adds one preview child route and leaves the four bottom tabs unchanged", () => {
     expect(PACKET_9C_CHILD_SCREENS).toEqual(["CARE_SUMMARY_PREVIEW"]);
-    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MEDICATION_SCHEDULE", "HISTORY", "MORE"]);
+    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "BOOKLET", "HISTORY", "MORE"]);
   });
 });
 

@@ -47,6 +47,8 @@ export function summarise(result: VoiceAnalysis): string {
       if (c.kind === "GLUCOSE_READING") return `G(${c.valueText} ${c.unit}${c.unitSource ? `:${c.unitSource}` : ""} ${c.ambiguity.join("+") || "OK"})`;
       if (c.kind === "MEAL_NOTE") return `M(${c.slot} ${JSON.stringify(c.itemText)} ${c.ambiguity.join("+") || "OK"})`;
       if (c.kind === "MEDICATION_OCCURRENCE") return `D(${c.status} ${c.medicineRef.kind}:${c.medicineRef.phrase} ${c.ambiguity.join("+") || "OK"}${c.reportedAmount ? ` amt=${c.reportedAmount.valueText} ${c.reportedAmount.unitText}` : ""})`;
+      if (c.kind === "FEELING_NOTE") return `F(${c.cueKeys.join("+")})`;
+      if (c.kind === "ACTIVITY_NOTE") return `A(${c.category} ${c.durationMinutes ?? "-"})`;
       return `U(${JSON.stringify(c.sourcePhrase)})`;
     })
     .join(" ");
