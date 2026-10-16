@@ -783,7 +783,7 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
   it.each([
     ["Cancel", () => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.cancel }))],
     ["Escape", () => fireEvent.keyDown(dialogOf(), { key: "Escape" })],
-  ])("%s from a focused action: focus ends on the opened panel's heading", async (_label, cancel) => {
+  ])("%s from a focused action: the dialog closes and focus returns to the action (owner decision 2026-10-16)", async (_label, cancel) => {
     const run = await wired();
     render(screenElement("en-SG", run.history, run.explainer));
     const action = await screen.findByRole("button", { name: en.history.explanation.action });
@@ -792,9 +792,8 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeNull());
     expect(within(dialogOf()).getByRole("button", { name: en.ai.cancel })).toHaveFocus();
     act(() => cancel());
-    const panel = screen.getByRole("region", { name: en.history.explanation.title });
-    await waitFor(() => expect(within(panel).getByRole("heading", { level: 3 })).toHaveFocus());
-    expect(action).not.toHaveFocus();
+    await waitFor(() => expect(action).toHaveFocus());
+    expect(screen.queryByRole("region", { name: en.history.explanation.title })).not.toBeInTheDocument();
   });
 
   it("activated: the action opens the disclosure first, asked for THIS request; nothing is explained, audited or sent", async () => {
@@ -818,35 +817,24 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
   it.each([
     ["Cancel", () => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.cancel }))],
     ["Escape", () => fireEvent.keyDown(dialogOf(), { key: "Escape" })],
-  ])("%s: the deterministic explanation opens with nothing sent and an audit row that records no attempt; the next action asks again", async (_label, cancel) => {
+  ])("%s only closes the dialog: nothing is explained, sent or audited; the next action asks again (owner decision 2026-10-16)", async (_label, cancel) => {
     const run = await wired();
     render(screenElement("en-SG", run.history, run.explainer));
     const action = await askAction();
     act(() => cancel());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(action).toHaveAttribute("aria-expanded", "true");
-    const panel = screen.getByRole("region", { name: en.history.explanation.title });
-    expect(within(panel).getByRole("heading", { level: 3 })).toHaveFocus();
-    await waitFor(() => expect(panelStatus()).not.toBeEmptyDOMElement());
-    expect(panelStatus()).not.toHaveTextContent(en.history.explanation.unavailable);
-    expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
-    expect(within(panel).queryByText(en.ai.demoTag)).not.toBeInTheDocument();
-    expect(within(panel).queryByText(en.ai.resultCheck)).not.toBeInTheDocument();
-    // Packet 11C B4a: the short non-technical line says AI wording was not used (human acceptance pending).
-    expect(within(panel).getByText(en.ai.remoteNotAccepted)).toBeInTheDocument();
-    expect(run.explain).toHaveBeenCalledTimes(1);
-    expect(run.explain.mock.calls[0]![0]).toEqual({ factId: FACT, locale: "en-SG", disclosure: "DECLINED" });
+    expect(action).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: en.history.explanation.title })).not.toBeInTheDocument();
+    await act(async () => undefined);
+    expect(run.explain).not.toHaveBeenCalled();
     expect(run.fetcher).not.toHaveBeenCalled();
-    expect(run.rows).toHaveLength(1);
-    // Packet 11C Addendum C (C5): an explicit decline is audited with the truthful REMOTE_USE_DECLINED (REQUEST_CANCELLED under the B4a
-    // interim ruling); nothing was sent.
-    expect(run.rows[0]).toMatchObject({ outcomeCode: "REMOTE_USE_DECLINED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], usageBasis: "NONE" });
+    expect(run.rows).toHaveLength(0);
 
-    // Not accepted, so the next explicit action asks again.
+    // Nothing was accepted, so the next explicit action asks again.
     fireEvent.click(action);
     await askAction();
     expect(dialogOf()).toBeInTheDocument();
-    expect(run.explain).toHaveBeenCalledTimes(1);
+    expect(run.explain).not.toHaveBeenCalled();
   });
 
   it("C3: accepted: the AI explanation from one POST with that request's own acceptance; the next request asks again (two requests, two dialogs)", async () => {
@@ -1099,22 +1087,22 @@ describe("Recorded history: AI disclosure before the explanation (Packet 11C B3)
     const second = render(screenElement("en-SG", decided.history, decided.explainer));
     await askAction();
     act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.cancel })));
-    await waitFor(() => expect(decided.rows).toHaveLength(1));
     second.unmount();
     await act(async () => undefined);
-    expect(decided.rows.map((row) => row.outcomeCode)).toEqual(["REMOTE_USE_DECLINED"]);
+    // Owner decision 2026-10-16: Cancel only closes the dialog, so a decided (cancelled) disclosure writes no row at all.
+    expect(decided.rows).toEqual([]);
     expect(run.fetcher).not.toHaveBeenCalled();
   });
 
-  it("C5 under StrictMode (development double effects): one explicit request still writes exactly one row", async () => {
+  it("C5 under StrictMode (development double effects): a cancelled disclosure writes nothing; an open one is reported moot once", async () => {
     const run = await wired();
     render(<StrictMode>{screenElement("en-SG", run.history, run.explainer)}</StrictMode>);
     await askAction();
     act(() => fireEvent.click(within(dialogOf()).getByRole("button", { name: en.ai.cancel })));
-    await waitFor(() => expect(panelStatus()).not.toBeEmptyDOMElement());
     await act(async () => undefined);
-    expect(run.rows.map((row) => row.outcomeCode)).toEqual(["REMOTE_USE_DECLINED"]);
-    expect(run.explain).toHaveBeenCalledTimes(1);
+    // Owner decision 2026-10-16: Cancel only closes the dialog.
+    expect(run.rows).toEqual([]);
+    expect(run.explain).not.toHaveBeenCalled();
 
     // The dialog itself is not reported moot by the StrictMode remount of its effect.
     cleanup();

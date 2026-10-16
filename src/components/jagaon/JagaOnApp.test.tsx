@@ -1408,7 +1408,7 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
   // Integration (shipped English activation + optional passcodes, 2026-10-12; deliberate): the explicit action's disclosure check asks
   // the credential-free passcode probe (exactly one GET, no body, no passcode) before the dialog; that is the only network call. Nothing
   // at startup, history load or local probing; no POST; Cancel sends nothing.
-  it("shipped manifest and records (en-SG): no audit row or network call at startup, history load or probing; the explicit action shows the disclosure first (only the passcode probe); Cancel gives the deterministic explanation and sends nothing", async () => {
+  it("shipped manifest and records (en-SG): no audit row or network call at startup, history load or probing; the explicit action shows the disclosure first (only the passcode probe); Cancel only closes it and sends nothing", async () => {
     const en = getMessages("en-SG");
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
@@ -1437,14 +1437,11 @@ describe("JagaOnApp history explanation wiring (Packet 11C B2b)", () => {
     // The probe failed (the spy answers nothing), so the passcode stays required: the field is shown (fail safe).
     expect(within(dialog).getByLabelText(en.aiAccess.passcodeLabel)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: en.ai.cancel }));
-    const panel = await screen.findByRole("region", { name: en.history.explanation.title });
-    await waitFor(() => expect(within(panel).getByRole("status")).not.toBeEmptyDOMElement());
-    expect(within(panel).getByRole("status")).not.toHaveTextContent(en.history.explanation.unavailable);
-    expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
-    expect(within(panel).getByText(en.ai.remoteNotAccepted)).toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(rows).toHaveLength(1);
-    expect(aiInvocationAuditRowSchema.parse(rows[0])).toMatchObject({ taskType: "EXPLAIN_PATTERN", locale: "en-SG", outcomeCode: "REMOTE_USE_DECLINED", providerModel: null, attempts: { count: 0 } });
+    // Owner decision 2026-10-16: Cancel only closes the dialog: no explanation, no audit row.
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await act(async () => undefined);
+    expect(screen.queryByRole("region", { name: en.history.explanation.title })).not.toBeInTheDocument();
+    expect(rows).toHaveLength(0);
     // Still only the passcode probe: Cancel sent nothing.
     expect(fetchSpy.mock.calls).toEqual([[AI_SHELL_ROUTE_PATH, { method: "GET", cache: "no-store", redirect: "error", signal: expect.any(AbortSignal) }]]);
   });
@@ -1536,7 +1533,7 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
     return screen.findByRole("button", { name: en.history.explanation.action });
   }
 
-  it("cancelled: no POST, the deterministic explanation, one audit row with no attempt, provider model or source", async () => {
+  it("cancelled: the dialog only closes; nothing is explained, sent or audited (owner decision 2026-10-16)", async () => {
     const en = getMessages("en-SG");
     const app = await activatedApp();
     render(<JagaOnApp {...app.props} />);
@@ -1546,16 +1543,12 @@ describe("JagaOnApp AI disclosure (Packet 11C B3)", () => {
     const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
     expect(app.rows).toHaveLength(0);
     fireEvent.click(within(dialog).getByRole("button", { name: en.ai.cancel }));
-    const panel = await screen.findByRole("region", { name: en.history.explanation.title });
-    await waitFor(() => expect(within(panel).getByRole("status")).not.toBeEmptyDOMElement());
-    expect(within(panel).queryByText(en.history.explanation.aiLabel)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await act(async () => undefined);
+    expect(screen.queryByRole("region", { name: en.history.explanation.title })).toBeNull();
     expect(app.fetcher).not.toHaveBeenCalled();
     expect(app.fetchSpy).not.toHaveBeenCalled();
-    expect(app.rows).toHaveLength(1);
-    // Packet 11C B4a: the panel says AI wording was not used. Packet 11C Addendum C (C5): the explicit decline is audited with the truthful
-    // audit-only REMOTE_USE_DECLINED (REQUEST_CANCELLED under the B4a interim ruling), in a current (11c.2) row.
-    expect(within(panel).getByText(en.ai.remoteNotAccepted)).toBeInTheDocument();
-    expect(aiInvocationAuditRowSchema.parse(app.rows[0])).toMatchObject({ auditSchemaVersion: "ai-invocation-audit.11c.2", outcomeCode: "REMOTE_USE_DECLINED", providerModel: null, attempts: { count: 0, structuralRepairUsed: false, timedOut: false }, sourceRevisions: [], measurements: { inputTokens: null, outputTokens: null, costMicroUsd: null }, usageBasis: "NONE" });
+    expect(app.rows).toHaveLength(0);
   });
 
   it("C5: a disclosure closed as moot (period change, leaving the screen) writes one DISCLOSURE_CLOSED_MOOT row each; nothing sent", async () => {
