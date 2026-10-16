@@ -195,11 +195,9 @@ describe("Recorded history screen", () => {
     expect(screen.getByText(h.correctionSummary(1))).toBeInTheDocument();
     expect(screen.getByText(h.nonCausalLimitation)).toBeInTheDocument();
     expect(screen.getByText(h.loggingLimitation)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: h.bookletTitle })).toBeInTheDocument();
-    expect(screen.getByText(h.bookletOnly)).toBeInTheDocument();
-    expect(screen.getByText(h.bookletExplanation)).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /^Readings at two or more times of day on Mon 28 Sep/ })).toBeInTheDocument();
-    expect(screen.getAllByRole("img", { name: /^A reading at one time of day on/ })).toHaveLength(2);
+    // Owner decision 2026-10-16: the Booklet stamps card is hidden on History.
+    expect(screen.queryByRole("heading", { level: 2, name: h.bookletTitle })).toBeNull();
+    expect(screen.queryByText(h.bookletExplanation)).toBeNull();
   });
 
   it("loads another period and ignores a stale response", async () => {
