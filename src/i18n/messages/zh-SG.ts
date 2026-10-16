@@ -853,6 +853,10 @@ export const zhSGMessages: AppMessages = {
     },
     positionLabels: { MORNING: "早上", AFTERNOON: "下午", EVENING: "晚上" },
     positionLegend: { MORNING: "早上", AFTERNOON: "下午", EVENING: "晚上" },
+    chartReadout: {
+      hint: "点按或指向一条柱，查看读数。",
+      reading: (day, time, value, unit) => `${day}，${time}：${value} ${unit}`,
+    },
     // Drafts (English only for the hackathon).
     notice: {
       title: "从您的读数中注意到",
