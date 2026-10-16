@@ -79,14 +79,16 @@ function progress() {
 }
 
 describe("onboarding welcome", () => {
-  it("shows one heading, the compact bilingual boundary, language and both entry actions", () => {
+  it("shows one heading, no language choice (English-only demo) and both entry actions", () => {
     setup();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 1, name: en.onboarding.welcomeTitle })).toBeInTheDocument();
     // Owner decision 2026-10-12: the demo boundary is hidden (DEMO_BOUNDARY_PLACEMENT), Welcome included.
     expect(screen.queryByText(en.onboarding.compactBoundary)).not.toBeInTheDocument();
     expect(screen.queryByText(getMessages("zh-SG").onboarding.compactBoundary)).not.toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: en.settings.english })).toBeChecked();
+    // Owner decision 2026-10-16: the demo is English only, so setup offers no language choice.
+    expect(screen.queryByRole("radio", { name: en.settings.english })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: en.settings.chinese })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: en.onboarding.startSetup })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: en.onboarding.usePrepared })).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
@@ -102,7 +104,8 @@ describe("onboarding welcome", () => {
     expect(screen.queryByText(en.onboarding.compactBoundary)).not.toBeInTheDocument();
   });
 
-  it("persists a complete in-progress state when language changes on Welcome", () => {
+  // Owner decision 2026-10-16: the English-only demo hides the language choice during setup; re-enable with it.
+  it.skip("persists a complete in-progress state when language changes on Welcome", () => {
     const { saves } = setup();
     fireEvent.click(screen.getByRole("radio", { name: en.settings.chinese }));
     expect(

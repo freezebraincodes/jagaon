@@ -174,7 +174,8 @@ describe("frame 28 — local-storage failure", () => {
   });
 });
 
-describe("frame 29 — language switched mid-setup", () => {
+// Owner decision 2026-10-16: the English-only demo hides the language choice during setup; re-enable with it.
+describe.skip("frame 29 — language switched mid-setup", () => {
   it("persists the switch, announces it in the new language and keeps typed values verbatim", () => {
     const { saves } = renderFlow();
     click(en.onboarding.startSetup);
