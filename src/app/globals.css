@@ -2931,6 +2931,18 @@ button.summary-tile:hover:not(:disabled) {
   transform: rotate(90deg);
 }
 
+/* Owner decision 2026-10-15: the neutral safety line under a skipped dose. */
+.schedule-skip-safety {
+  margin: 0;
+  padding: 10px 14px;
+  border-left: 4px solid var(--terracotta, var(--ink));
+  border-radius: var(--radius-sm);
+  background: var(--card-2);
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
 .food-filters-summary {
   margin: -10px 0 0;
   display: flex;

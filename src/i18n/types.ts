@@ -65,7 +65,8 @@ export type TodayMessages = {
   latestRecordedReading: string;
   noEntries: string;
   todayBooklet: string;
-  bookletProgress: (completed: number, total: number) => string;
+  /** Owner decision 2026-10-15: the number of readings recorded today (no "of 3": many people test less often, e.g. with type 2). */
+  bookletProgress: (readingsToday: number) => string;
   slotMorning: string;
   slotAfternoon: string;
   slotEvening: string;
@@ -682,6 +683,8 @@ export type ScheduleMessages = {
   notRecorded: string;
   recordedTaken: string;
   recordedSkipped: string;
+  /** Owner decision 2026-10-15: a neutral safety line under a dose recorded as skipped (general information, not advice). */
+  skippedSafety: string;
   recordedNotSure: string;
   recordedDeclined: string;
   recordedAt: (time: LocalTimeText) => string;
