@@ -59,6 +59,7 @@ function confirmDeleteAll(messages: ReturnType<typeof getMessages>) {
   fireEvent.click(dialog.getByRole("button", { name: messages.packet10.deletion.deleteAllAction }));
 }
 import { APPOINTMENT_NOTE_SELECTION_KEY } from "@/application/history/appointment-note-selection";
+import { HSA_BOUNDED_MODE_STORAGE_KEY } from "./hsa/hsa-bounded-mode";
 import {
   createDemoOnboardingRepository,
   createMemoryOnboardingStorage,
@@ -801,6 +802,33 @@ describe("JagaOnApp journal integration", () => {
     confirmDeleteAll(en);
     await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle });
     expect(selectionStorage.getItem(APPOINTMENT_NOTE_SELECTION_KEY)).toBeNull();
+  });
+
+  it("resets the HSA-bounded mode switch to the build default on delete-all", async () => {
+    const en = getMessages("en-SG");
+    const store = new Map<string, string>([[HSA_BOUNDED_MODE_STORAGE_KEY, "on"]]);
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+      clear: () => store.clear(),
+    });
+    try {
+      render(
+        <JagaOnApp
+          runtimeFactory={async () => fakeRuntime()}
+          onboardingRepositoryFactory={completed()}
+          deleteAllPortFactory={fakeDeleteAll().factory}
+        />,
+      );
+      await screen.findByRole("button", { name: en.today.recordReading });
+      fireEvent.click(screen.getByRole("button", { name: en.shared.navMore }));
+      confirmDeleteAll(en);
+      await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle });
+      expect(store.has(HSA_BOUNDED_MODE_STORAGE_KEY)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
