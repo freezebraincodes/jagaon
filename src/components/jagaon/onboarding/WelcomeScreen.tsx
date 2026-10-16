@@ -46,6 +46,9 @@ export function WelcomeScreen({ messages, onStart, onPrepared }: WelcomeScreenPr
           </li>
         </ul>
         <p className="welcome-choice-tip">{msg.choiceTip}</p>
+        <p className="welcome-choice-restart">
+          <strong>{msg.choiceRestart}</strong>
+        </p>
       </section>
       <div className="onboarding-actions">
         <Button variant="primary" className="btn-hero" onClick={onStart}>

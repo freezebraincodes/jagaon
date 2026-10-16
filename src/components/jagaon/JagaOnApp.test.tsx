@@ -1215,6 +1215,8 @@ describe("durable local-state cleanup across app instances (Corrective Pass C)",
     expect(card).toHaveTextContent(`${en.onboarding.startSetup}: ${en.onboarding.choiceSetup}`);
     expect(card).toHaveTextContent(`${en.onboarding.usePrepared}: ${en.onboarding.choicePrepared}`);
     expect(card).toHaveTextContent(en.onboarding.choiceTip);
+    // The only way back to Welcome is stated, in bold.
+    expect(within(card).getByText(en.onboarding.choiceRestart).tagName).toBe("STRONG");
     // A new device's dataset is created without the sample records; only the prepared profile adds them.
     await waitFor(() => expect(dev.runtimeFactory).toHaveBeenCalled());
     expect(dev.runtimeFactory.mock.calls[0]![1]).toMatchObject({ seedSyntheticScenarioOnCreate: false });
