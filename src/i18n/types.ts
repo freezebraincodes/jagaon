@@ -490,6 +490,8 @@ export type OnboardingMessages = {
   choiceSetup: string;
   choicePrepared: string;
   choiceTip: string;
+  /** Owner decision 2026-10-16: the only way back to Welcome, shown in bold on the card. */
+  choiceRestart: string;
   /** Owner decision 2026-10-16: shown once, on Today, after a new user finishes (or skips) setup. */
   newUserWelcomeTitle: (name: string | null) => string;
   newUserWelcomeBody: string;

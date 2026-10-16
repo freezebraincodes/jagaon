@@ -7565,6 +7565,18 @@ button.summary-tile:hover:not(:disabled) {
   font-weight: 800;
 }
 
+.welcome-choice-restart {
+  margin: 0;
+  padding-top: 0.625rem;
+  border-top: 1px solid var(--terracotta-soft);
+  font-size: 0.9375rem;
+  color: var(--terracotta-dark);
+}
+
+.welcome-choice-restart strong {
+  font-weight: 800;
+}
+
 .welcome-choice-tip {
   margin: 0;
   font-size: 0.9375rem;
