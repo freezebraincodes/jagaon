@@ -381,8 +381,10 @@ export const enSGMessages: AppMessages = {
     newDate: "Correct date",
     newTime: "Correct time",
     saveAction: "Save corrected time",
-    saved: "Corrected time saved",
-    editTime: "Edit time",
+    saved: "Changes saved",
+    // Owner decision 2026-10-16: one Edit action changes the reading's time and its meal time ("When was this test?").
+    editTime: "Edit",
+    editTitle: "Edit reading",
     // Packet 6 v1 convergence (needs bilingual review)
     whichDay: "Which day?",
     dayToday: "Today",
@@ -399,8 +401,8 @@ export const enSGMessages: AppMessages = {
     recordedFor: (reading, when) => `Reading ${reading} — recorded for ${when}`,
     sameAsCurrent: "Same as the time currently recorded.",
     currentlyRecorded: (when) => `Currently recorded: ${when}`,
-    historyNote: "Changing the time updates when this record occurred; the original version remains in history.",
-    saveOccurrence: "Save occurrence time",
+    historyNote: "Changing the time or meal time updates this record; the original version remains in history.",
+    saveOccurrence: "Save changes",
     useNow: "Use time now instead",
     laterThanNow: "This time is later than now. Choose a time that has already passed. Nothing was saved.",
   },

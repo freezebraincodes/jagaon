@@ -154,6 +154,8 @@ export type ReadingTimeMessages = {
   saveAction: string;
   saved: string;
   editTime: string;
+  /** Owner decision 2026-10-16: the edit screen's title (time and meal time). */
+  editTitle: string;
   // Packet 6 v1 convergence (needs bilingual review)
   whichDay: string;
   dayToday: string;
