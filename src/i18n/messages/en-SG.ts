@@ -1188,7 +1188,8 @@ export const enSGMessages: AppMessages = {
     editQuestionNamed: (text) => `Edit: ${text}`,
     removeQuestion: "Remove",
     removeQuestionNamed: (text) => `Remove: ${text}`,
-    // Owner decision 2026-10-16: the period overview (plain counts; zero counts are left out).
+    // Owner decision 2026-10-16: doctor-named title and the period overview (plain counts; zero counts are left out).
+    titleWithDoctor: (who) => `Prepare for my appointment with ${who}`,
     overviewHeading: "Your records at a glance",
     overviewPeriodLegend: "Period",
     periodLast7Days: "Last 7 days",
@@ -1246,6 +1247,10 @@ export const enSGMessages: AppMessages = {
     },
     // Packet 11C B1a (D3), new wording, human acceptance pending.
     templateSuperseded: "This summary was made with an earlier version of JagaOn. Prepare it again before you approve it.",
+    // Owner decision 2026-10-16: the approved summary in large type, to hand over on this phone.
+    showOnScreen: "Show on screen",
+    showOnScreenNote: "For reading on this phone. Nothing can be changed here.",
+    closeShowOnScreen: "Close",
   },
   // Tell JagaOn understands more (design §3.1): the feelings chat dialog. `notice`, `continue` and `saveWithoutAi` are the owner's
   // approved wording (2026-10-14); the rest is new wording, human acceptance pending.

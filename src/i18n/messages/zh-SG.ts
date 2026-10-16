@@ -1159,7 +1159,8 @@ export const zhSGMessages: AppMessages = {
     editQuestionNamed: (text) => `更改：${text}`,
     removeQuestion: "删除",
     removeQuestionNamed: (text) => `删除：${text}`,
-    // Owner decision 2026-10-16: the period overview. Drafts; human acceptance pending.
+    // Owner decision 2026-10-16: doctor-named title and the period overview. Drafts; human acceptance pending.
+    titleWithDoctor: (who) => `为与${who}的复诊做准备`,
     overviewHeading: "记录一览",
     overviewPeriodLegend: "时间段",
     periodLast7Days: "过去 7 天",
@@ -1220,6 +1221,10 @@ export const zhSGMessages: AppMessages = {
     },
     // Packet 11C B1a (D3), new wording (您), human acceptance pending.
     templateSuperseded: "此摘要由较早版本的 JagaOn 制作。请您重新制作摘要，然后再批准。",
+    // Owner decision 2026-10-16: the approved summary in large type. Drafts; human acceptance pending.
+    showOnScreen: "在屏幕上显示",
+    showOnScreenNote: "仅供在此手机上阅读，无法在此更改。",
+    closeShowOnScreen: "关闭",
   },
   // Tell JagaOn understands more: the feelings chat dialog. Every row is a draft, human acceptance pending (English-only hackathon
   // scope; Chinese comes after the hackathon).

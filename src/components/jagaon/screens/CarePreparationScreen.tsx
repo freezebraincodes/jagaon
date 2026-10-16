@@ -168,9 +168,12 @@ export function CarePreparationScreen({ messages, locale, query, commands, onPre
     );
   }
 
+  // Owner decision 2026-10-16: the title names who the recorded appointment is with, as the patient entered it.
+  const title = appointment ? copy.titleWithDoctor(appointment.payload.careContactLabel ?? appointment.payload.appointmentLabel) : copy.title;
+
   return (
     <div className="care-preparation">
-      <ScreenHeader title={copy.title} />
+      <ScreenHeader title={title} />
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
       </p>

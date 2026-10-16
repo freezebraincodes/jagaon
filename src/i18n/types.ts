@@ -942,7 +942,9 @@ export type CarePreparationMessages = {
   editQuestionNamed: (text: string) => string;
   removeQuestion: string;
   removeQuestionNamed: (text: string) => string;
-  // --- Owner decision 2026-10-16: the period overview (new wording; zh-SG drafts, human acceptance pending) ---
+  // --- Owner decision 2026-10-16: doctor-named title and the period overview (new wording; zh-SG drafts, human acceptance pending) ---
+  /** The title when an appointment is recorded, naming the care contact the patient entered. */
+  titleWithDoctor: (who: string) => string;
   overviewHeading: string;
   overviewPeriodLegend: string;
   periodLast7Days: string;
@@ -1008,6 +1010,10 @@ export type CareSummaryMessages = {
   draftNotices: { label: string };
   /** Packet 11C B1a (D3): an unapproved summary made by an earlier version must be prepared again. Human acceptance pending. */
   templateSuperseded: string;
+  /** Owner decision 2026-10-16: the approved summary in large type, read-only, to hand over. New wording; zh-SG drafts. */
+  showOnScreen: string;
+  showOnScreenNote: string;
+  closeShowOnScreen: string;
 };
 
 /**

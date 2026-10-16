@@ -9,7 +9,7 @@ import type { CarePreparationCommandPort, CarePreparationQueryPort, CareSummaryV
 import { printableCareSummary } from "@/application/care-preparation/care-summary-artifact";
 import { isCurrentCareSummaryTemplate } from "@/application/care-preparation/care-summary-locale-pack";
 import { ScreenHeader, Notice } from "../primitives/ScreenHeader";
-import { CheckIcon, ChevronLeftIcon, InfoIcon, LockIcon } from "../primitives/Icons";
+import { CheckIcon, ChevronLeftIcon, EyeIcon, InfoIcon, LockIcon } from "../primitives/Icons";
 import { PrintableCareSummary } from "../care-preparation/PrintableCareSummary";
 import type { PrintPort } from "../care-preparation/PrintPort";
 import { useCareLoad } from "../care-organisation/use-care-load";
@@ -183,6 +183,11 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
   // already running (B1b: that command may still commit). No new request starts, and Approve waits, until every one has settled.
   const unsettled = useRef(0);
   const [unsettledCount, setUnsettledCount] = useState(0);
+  // Owner decision 2026-10-16: "Show on screen" shows the approved summary in large type, read-only; Close returns focus to its button.
+  const [showingOnScreen, setShowingOnScreen] = useState(false);
+  const showOnScreenButton = useRef<HTMLButtonElement | null>(null);
+  const closeOnScreenButton = useRef<HTMLButtonElement | null>(null);
+  const focusAfterOnScreen = useRef<"CLOSE" | "SHOW" | null>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -412,6 +417,13 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
       });
   }, [ready, commands, stale, reload]);
 
+  useEffect(() => {
+    const target = focusAfterOnScreen.current === "CLOSE" ? closeOnScreenButton.current : focusAfterOnScreen.current === "SHOW" ? showOnScreenButton.current : null;
+    if (!target) return;
+    focusAfterOnScreen.current = null;
+    target.focus();
+  });
+
   function noticeFor(code: string): Notice {
     if (code === "SUMMARY_CONTENT_HASH_MISMATCH") return "HASH_MISMATCH";
     if (code === "SUMMARY_TEMPLATE_SUPERSEDED") return "TEMPLATE_SUPERSEDED";
@@ -469,12 +481,38 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
     return `${date ? formatLocalDate(locale, date) : ""} ${formatPointTime(locale, point) ?? ""}`.trim();
   };
 
+  const onScreen = showingOnScreen && ready !== null && printable !== null && ready.snapshotStatus === "APPROVED" && !blocked;
+
+  function openOnScreen() {
+    focusAfterOnScreen.current = "CLOSE";
+    setShowingOnScreen(true);
+  }
+
+  function closeOnScreen() {
+    focusAfterOnScreen.current = "SHOW";
+    setShowingOnScreen(false);
+  }
+
   const backButton = (
     <button type="button" className="btn btn-outline btn-wide" onClick={onBack}>
       <ChevronLeftIcon size={20} />
       {copy.backToPreparation}
     </button>
   );
+
+  if (onScreen && ready && printable) {
+    return (
+      <div className="care-summary-onscreen" role="dialog" aria-modal="true" aria-label={copy.showOnScreen} onKeyDown={(event) => event.key === "Escape" && closeOnScreen()}>
+        <div className="care-summary-onscreen-bar">
+          <p className="care-summary-onscreen-note">{copy.showOnScreenNote}</p>
+          <button type="button" className="btn btn-outline" ref={closeOnScreenButton} onClick={closeOnScreen}>
+            {copy.closeShowOnScreen}
+          </button>
+        </div>
+        <PrintableCareSummary lines={printable.lines} locale={ready.payload.locale} />
+      </div>
+    );
+  }
 
   return (
     <div className="care-summary-preview">
@@ -567,6 +605,10 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
                 </Notice>
                 <button type="button" className="btn btn-primary btn-wide" disabled={busy || replacing} aria-busy={busy || undefined} onClick={() => void printAttempt()}>
                   {copy.printAction}
+                </button>
+                <button type="button" className="btn btn-outline btn-wide" ref={showOnScreenButton} disabled={busy || replacing} onClick={openOnScreen}>
+                  <EyeIcon size={22} />
+                  {copy.showOnScreen}
                 </button>
               </div>
             ) : (

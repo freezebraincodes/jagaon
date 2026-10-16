@@ -72,7 +72,8 @@ describe("Screen 10 Prepare for my visit", () => {
     renderScreen("en-SG", ports);
     expect(screen.getByText(en.carePreparation.loading)).toBeTruthy();
     await screen.findByRole("region", { name: "Dr Lim, Bukit Merah Polyclinic" });
-    expect(screen.getByRole("heading", { level: 1, name: en.carePreparation.title })).toBeTruthy();
+    // Owner decision 2026-10-16: the title names who the recorded appointment is with (was the plain title).
+    expect(screen.getByRole("heading", { level: 1, name: "Prepare for my appointment with Dr Lim" })).toBeTruthy();
     const card = appointmentCard();
     expect(within(card).getByText("Oct")).toBeTruthy();
     expect(within(card).getByText("14")).toBeTruthy();
@@ -236,7 +237,8 @@ describe("Screen 10 Prepare for my visit", () => {
     const ports = await setup();
     const { container } = renderScreen("zh-SG", ports);
     await screen.findByRole("region", { name: "Dr Lim, Bukit Merah Polyclinic" });
-    expect(screen.getByRole("heading", { level: 1, name: zh.carePreparation.title })).toBeTruthy();
+    // Owner decision 2026-10-16: the title names who the recorded appointment is with (was the plain title).
+    expect(screen.getByRole("heading", { level: 1, name: zh.carePreparation.titleWithDoctor("Dr Lim") })).toBeTruthy();
     expect(within(appointmentCard()).getByText("10月")).toBeTruthy();
     expect(within(appointmentCard()).getByText(new RegExp(zh.carePreparation.appointmentEnteredByYou))).toBeTruthy();
     expect(screen.getByText(zh.carePreparation.localOnly)).toBeTruthy();
@@ -250,10 +252,27 @@ describe("Screen 10 Prepare for my visit", () => {
   });
 });
 
-describe("Screen 10 period overview (owner decision 2026-10-16)", () => {
+describe("Screen 10 period overview and doctor-named title (owner decision 2026-10-16)", () => {
   const overview = () => screen.getByRole("region", { name: en.carePreparation.overviewHeading });
   // Counting runs after the preparation view loads, so allow for a slow fake database.
   const slow = { timeout: 10_000 };
+
+  it("keeps the plain title when no appointment is recorded", async () => {
+    const ports = await setup({ seed: false });
+    renderScreen("en-SG", ports);
+    await screen.findByText(en.carePreparation.noAppointmentTitle, {}, slow);
+    expect(screen.getByRole("heading", { level: 1, name: en.carePreparation.title })).toBeTruthy();
+  }, 30_000);
+
+  it("names the appointment's label when no care contact was entered", async () => {
+    const ports = await setup({ seed: false });
+    await ports.commands.scheduleAppointment({
+      payload: { appointmentLabel: "Bukit Merah Polyclinic", service: { kind: "UNKNOWN" }, mode: "UNKNOWN", status: "SCHEDULED" },
+      scheduledAt: { kind: "DATE_ONLY", localDate: "2026-10-05" as never, timeZoneId: "Asia/Singapore" },
+    });
+    renderScreen("en-SG", ports);
+    expect(await screen.findByRole("heading", { level: 1, name: "Prepare for my appointment with Bukit Merah Polyclinic" }, slow)).toBeTruthy();
+  }, 30_000);
 
   it("states plain counts for the last 30 days, leaving out kinds with no records", async () => {
     const ports = await setup({ glucose: 3 });
