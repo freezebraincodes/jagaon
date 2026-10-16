@@ -23,9 +23,9 @@ const merge = (text: string, remote: unknown[], language: "en" | "zh" = "en") =>
 
 describe("remote extraction merge (local analysis is the floor)", () => {
   it("adds a remote fact over text the local extractor did not understand", () => {
-    const text = "My sugar was 6.8 mmol, had laksa";
+    const text = "My sugar was 6.8 mmol, had muah chee";
     expect(local(text).candidates.map((candidate) => candidate.kind)).toEqual(["GLUCOSE_READING", "UNSUPPORTED_SPAN"]);
-    const merged = merge(text, [{ kind: "MEAL_NOTE", ...REMOTE, ...at(text, "had laksa"), slot: "UNSTATED", itemText: "laksa", state: "UNDERSTOOD", ambiguity: [] }]);
+    const merged = merge(text, [{ kind: "MEAL_NOTE", ...REMOTE, ...at(text, "had muah chee"), slot: "UNSTATED", itemText: "muah chee", state: "UNDERSTOOD", ambiguity: [] }]);
     expect(merged.kind).toBe("MERGED");
     if (merged.kind === "MERGED") expect(merged.analysis.candidates.map((candidate) => [candidate.kind, candidate.source])).toEqual([["GLUCOSE_READING", "DETERMINISTIC"], ["MEAL_NOTE", "REMOTE_EXTRACTION"]]);
   });
@@ -55,8 +55,8 @@ describe("remote extraction merge (local analysis is the floor)", () => {
   });
 
   it("carries transcript-wide local flags (another person, correction) onto added remote facts", () => {
-    const text = "my wife's sugar was 9.1 mmol, had laksa";
-    const merged = merge(text, [{ kind: "MEAL_NOTE", ...REMOTE, ...at(text, "had laksa"), slot: "UNSTATED", itemText: "laksa", state: "UNDERSTOOD", ambiguity: [] }]);
+    const text = "my wife's sugar was 9.1 mmol, had muah chee";
+    const merged = merge(text, [{ kind: "MEAL_NOTE", ...REMOTE, ...at(text, "had muah chee"), slot: "UNSTATED", itemText: "muah chee", state: "UNDERSTOOD", ambiguity: [] }]);
     if (merged.kind !== "MERGED") throw new Error("expected a merge");
     expect(merged.analysis.candidates.find((candidate) => candidate.kind === "MEAL_NOTE")).toMatchObject({ state: "AMBIGUOUS", ambiguity: ["OTHER_PERSON"] });
   });
@@ -73,8 +73,8 @@ describe("remote extraction merge (local analysis is the floor)", () => {
   });
 
   it("falls back to local on anything invalid: wrong source, span mismatch, extra fields, non-arrays", () => {
-    const text = "My sugar was 6.8 mmol, had laksa";
-    const good = { kind: "MEAL_NOTE", ...REMOTE, ...at(text, "had laksa"), slot: "UNSTATED", itemText: "laksa", state: "UNDERSTOOD", ambiguity: [] };
+    const text = "My sugar was 6.8 mmol, had muah chee";
+    const good = { kind: "MEAL_NOTE", ...REMOTE, ...at(text, "had muah chee"), slot: "UNSTATED", itemText: "muah chee", state: "UNDERSTOOD", ambiguity: [] };
     for (const bad of [{ ...good, source: "DETERMINISTIC", producerVersion: "voice-vocabulary.13s.3" }, { ...good, span: { start: 0, end: 9 } }, { ...good, advice: "eat less" }, { kind: "DOSE", amount: 10 }]) {
       expect(merge(text, [good, bad]), JSON.stringify(bad).slice(0, 60)).toEqual({ kind: "LOCAL_KEPT" });
     }
@@ -105,17 +105,17 @@ describe("13s.6: a feeling or an activity is never added or altered by remote ex
   });
 
   it("a remote FEELING_NOTE or ACTIVITY_NOTE fails the contract, so the whole remote result is not used", () => {
-    const text = "My sugar was 6.8 mmol, had laksa";
-    const remoteFeeling = { kind: "FEELING_NOTE", ...REMOTE, ...at(text, "had laksa"), cueKeys: ["happy"], text: "had laksa" };
-    const remoteActivity = { kind: "ACTIVITY_NOTE", ...REMOTE, ...at(text, "had laksa"), category: "WALKING", label: "had laksa", durationMinutes: null };
+    const text = "My sugar was 6.8 mmol, had muah chee";
+    const remoteFeeling = { kind: "FEELING_NOTE", ...REMOTE, ...at(text, "had muah chee"), cueKeys: ["happy"], text: "had muah chee" };
+    const remoteActivity = { kind: "ACTIVITY_NOTE", ...REMOTE, ...at(text, "had muah chee"), category: "WALKING", label: "had muah chee", durationMinutes: null };
     expect(merge(text, [remoteFeeling])).toEqual({ kind: "LOCAL_KEPT" });
     expect(merge(text, [remoteActivity])).toEqual({ kind: "LOCAL_KEPT" });
   });
 
   it("other text beside a feeling still takes a remote fact", () => {
-    const text = "Feeling tired, had laksa";
+    const text = "Feeling tired, had muah chee";
     expect(local(text).candidates.map((candidate) => candidate.kind)).toEqual(["FEELING_NOTE", "UNSUPPORTED_SPAN"]);
-    const merged = merge(text, [{ kind: "MEAL_NOTE", ...REMOTE, ...at(text, "had laksa"), slot: "UNSTATED", itemText: "laksa", state: "UNDERSTOOD", ambiguity: [] }]);
+    const merged = merge(text, [{ kind: "MEAL_NOTE", ...REMOTE, ...at(text, "had muah chee"), slot: "UNSTATED", itemText: "muah chee", state: "UNDERSTOOD", ambiguity: [] }]);
     expect(merged.kind).toBe("MERGED");
     if (merged.kind === "MERGED") expect(merged.analysis.candidates.map((candidate) => [candidate.kind, candidate.source])).toEqual([["FEELING_NOTE", "DETERMINISTIC"], ["MEAL_NOTE", "REMOTE_EXTRACTION"]]);
   });

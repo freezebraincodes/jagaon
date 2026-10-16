@@ -643,9 +643,27 @@ function trimRange(text: string, start: number, end: number): Range | null {
   return end > start ? { start, end } : null;
 }
 
+/**
+ * Owner report 2026-10-16 ("I had chicken rice, laksa and teh for lunch"): a comma inside a list of foods does not end the meal. The
+ * comma is kept only when the words after it (up to the next cut or sentence end) name a known food and start nothing else: no
+ * "I"/"my", no glucose, medicine, activity or feeling word.
+ */
+function foodListComma(text: string, index: number): boolean {
+  if (text[index] !== "," && text[index] !== "，") return false;
+  const rest = text.slice(index + 1);
+  const next = /^[^,，.!?;。！？；\n]*/.exec(rest)?.[0] ?? "";
+  const segment = next.replace(/\s+(?:and|but|then)\s+(?=(?:i|my|then|took|had|ate)\b).*$/i, "");
+  // The words before the comma must already be part of a food list ("…chicken rice, laksa"), never a feeling or a reading.
+  const before = /[^,，.!?;。！？；\n]*$/.exec(text.slice(0, index))?.[0] ?? "";
+  return EN_KNOWN_FOODS.test(before) && EN_KNOWN_FOODS.test(segment) && !/(?<![A-Za-z])(?:i|i['’]m|my|me|sugar|glucose|reading|took|take|insulin|pen|tablet|walk(?:ed)?|feel(?:ing)?|felt)(?![A-Za-z])/i.test(segment);
+}
+
 function clauses(text: string, language: VoiceLanguage, boundaries: number[], splitAtCue = true): Range[] {
   const cuts: Array<[number, number]> = boundaries.map((index) => [index, index + 1]);
-  for (const match of text.matchAll(language === "zh" ? ZH_CLAUSE_CUT : EN_CLAUSE_CUT)) cuts.push([match.index, match.index + match[0].length]);
+  for (const match of text.matchAll(language === "zh" ? ZH_CLAUSE_CUT : EN_CLAUSE_CUT)) {
+    if (language === "en" && foodListComma(text, match.index)) continue;
+    cuts.push([match.index, match.index + match[0].length]);
+  }
   cuts.sort((left, right) => left[0] - right[0]);
   const ranges: Range[] = [];
   let cursor = 0;
@@ -746,6 +764,30 @@ function occurrenceStatus(clause: string, sentence: string, patterns: Patterns):
   return "UNKNOWN";
 }
 
+/** A plan, not something she did ("going to", "will", "want to"…). */
+const EN_PLAN = /(?<![A-Za-z])(?:going\s+to|gonna|will|shall|want\s+to|wanna|plan(?:ning)?\s+to|later)(?![A-Za-z])|['’]ll(?![A-Za-z])/i;
+/** "have/having/has" as something she did, not a plan ("going to have", "will have", "want to have"…). */
+const EN_HAVE_NOT_PLANNED = /(?<!(?:\bto|\bwill|['’]ll|\bshall|\bgonna|\bwanna|\bshould|\bwould|\bcould|\bmight|\bmay|\bcan)\s+)(?<![A-Za-z])(?:have|having|has)(?![A-Za-z])/i;
+/**
+ * Owner report 2026-10-16: common foods (Singapore dishes and everyday staples) that make "I had …" a meal without a meal word.
+ * Food words only; nothing here is a judgement of the food.
+ */
+const EN_KNOWN_FOODS = new RegExp(
+  `(?<![A-Za-z])(?:${[
+    "roti prata", "prata", "thosai", "dosa", "chapati", "nasi lemak", "nasi padang", "nasi goreng", "nasi briyani", "briyani", "murtabak",
+    "chicken rice", "duck rice", "fried rice", "economy rice", "cai fan", "rice", "porridge", "congee", "bee hoon", "mee goreng", "mee siam",
+    "mee rebus", "laksa", "kway teow", "char kway teow", "hor fun", "ban mian", "wanton mee", "hokkien mee", "noodles?", "yong tau foo",
+    "dim sum", "dumplings?", "pau", "bun", "kaya toast", "toast", "bread", "sandwich", "burger", "pizza", "pasta", "salad", "oats",
+    "cereal", "eggs?", "satay", "soup", "curry", "fish", "chicken", "kueh", "cake", "biscuits?", "fruit", "apple", "banana", "orange",
+    "kaya", "otah", "rojak", "popiah", "chee cheong fun", "carrot cake", "chwee kueh", "lontong", "mee pok", "fishball noodles?",
+    "bak chor mee", "kway chap", "claypot rice", "cereal prawns", "ayam penyet", "roti john", "putu mayam", "ondeh ondeh", "curry puff",
+    "youtiao", "oyster omelette", "fish soup", "thunder tea rice", "beehoon", "noodle soup",
+    // Drinks
+    "tea", "teh", "teh tarik", "kopi", "coffee", "milo", "juice", "soya milk", "soy milk", "bubble tea", "milk", "bandung",
+  ].join("|")})(?![A-Za-z])`,
+  "i",
+);
+
 const MEAL_SLOT_ORDER = ["BREAKFAST", "LUNCH", "DINNER", "SUPPER"] as const;
 function mealSlot(clause: string, vocabulary: VoiceVocabulary, language: VoiceLanguage): VoiceMealSlot {
   let best: { slot: VoiceMealSlot; index: number } | null = null;
@@ -761,11 +803,12 @@ function mealItems(text: string, range: Range, language: VoiceLanguage, patterns
   const clause = text.slice(range.start, range.end);
   let itemStart: number;
   if (language === "en") {
-    const verb = /(?<![A-Za-z])(?:ate|eaten|eat|eating|had|was|is|were)\s+/gi;
+    const verb = /(?<![A-Za-z])(?:ate|eaten|eat|eating|had|have|having|has|was|is|were|went\s+for|got|ordered|bought|drank|drink|drinking)\s+/gi;
     let last: RegExpExecArray | null = null;
     for (let match = verb.exec(clause); match; match = verb.exec(clause)) last = match;
-    if (!last) return null;
-    itemStart = last.index + last[0].length;
+    // Owner report 2026-10-16: no verb ("beef noodle for breakfast"): the food words start the clause, when they name a known food.
+    if (!last && !EN_KNOWN_FOODS.test(clause)) return null;
+    itemStart = last ? last.index + last[0].length : 0;
   } else {
     const verb = /吃了|吃过|吃|是/g;
     let last: RegExpExecArray | null = null;
@@ -791,7 +834,7 @@ function mealItems(text: string, range: Range, language: VoiceLanguage, patterns
     items = items.replace(/^(?:breakfast|lunch|dinner|supper)(?![A-Za-z])\s*/i, "");
     for (let previous = ""; previous !== items; ) {
       previous = items;
-      items = items.replace(/\s*(?<![A-Za-z])(?:today|tonight|yesterday|this\s+(?:morning|afternoon|evening)|now|later|at\s+[0-9A-Za-z:]+(?:\s*(?:am|pm))?)$/i, "").trim();
+      items = items.replace(/\s*(?<![A-Za-z])(?:today|tonight|yesterday|this\s+(?:morning|afternoon|evening)|in\s+the\s+(?:morning|afternoon|evening|night)|now|later|at\s+[0-9A-Za-z:]+(?:\s*(?:am|pm))?)$/i, "").trim();
     }
   } else {
     items = items.replace(/^(?:早餐|早饭|午餐|午饭|中饭|晚餐|晚饭|夜宵|宵夜)/, "").replace(/^(?:今天|现在|刚才)/, "").trim();
@@ -1011,7 +1054,25 @@ export function extractVoiceCandidates(text: string, language: VoiceLanguage, op
       factRanges.push(range);
       continue;
     }
-    const isMeal = patterns.eat.test(clause) || (patterns.slot.test(clause) && (language === "zh" ? /是/.test(clause) : /(?<![A-Za-z])(?:had|was|is|were)(?![A-Za-z])/i.test(clause)));
+    // Owner report 2026-10-16: "I have beef noodle for breakfast", "I'm having chicken rice for lunch" (present tense, as speech
+    // recognition often writes it). "have/having/has" count only with "for/at/during" a meal ("I have diabetes", "I have a
+    // check-up after lunch" are never meals).
+    // A plan ("I am going to have…", "I'll have…") is never a meal record.
+    const haveForMeal =
+      language === "en" &&
+      EN_HAVE_NOT_PLANNED.test(clause) &&
+      /(?<![A-Za-z])(?:for|at|during)\s+(?:my\s+|the\s+)?(?:breakfast|lunch|dinner|supper)(?![A-Za-z])/i.test(clause);
+    // Owner report 2026-10-16 ("I had roti prata in the evening"): "had", or a present "have", with a common food counts as a meal
+    // even without a meal word; the meal is then "not said" (never guessed from "evening"). "I had a fever" names no food.
+    const hadKnownFood = language === "en" && (/(?<![A-Za-z])had(?![A-Za-z])/i.test(clause) || EN_HAVE_NOT_PLANNED.test(clause)) && EN_KNOWN_FOODS.test(clause);
+    // Owner report 2026-10-16 ("I went for kaya bread and tea for breakfast", "beef noodle for breakfast"): a common food or drink
+    // with "for/at/during" a meal is a meal whatever the verb, unless it is a plan.
+    const knownFoodForMeal =
+      language === "en" &&
+      EN_KNOWN_FOODS.test(clause) &&
+      /(?<![A-Za-z])(?:for|at|during)\s+(?:my\s+|the\s+)?(?:breakfast|lunch|dinner|supper)(?![A-Za-z])/i.test(clause) &&
+      !EN_PLAN.test(clause);
+    const isMeal = patterns.eat.test(clause) || haveForMeal || hadKnownFood || knownFoodForMeal || (patterns.slot.test(clause) && (language === "zh" ? /是/.test(clause) : /(?<![A-Za-z])(?:had|was|is|were)(?![A-Za-z])/i.test(clause)));
     if (isMeal && !cueInClause.test(clause)) {
       const itemText = mealItems(text, range, language, patterns);
       // I3: 吃 with a count, colour or pill classifier and no food (吃了两颗白色的, "ate two white ones") is never a meal.

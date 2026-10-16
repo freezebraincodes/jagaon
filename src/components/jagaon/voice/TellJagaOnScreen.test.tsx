@@ -856,10 +856,12 @@ describe("Tell JagaOn screen", () => {
     });
 
     it("accepted: the transcript is sent once; remote facts are merged under the local floor; nothing is saved without Save", async () => {
-      // Deliberately "had laksa": this case needs a locally not-understood span for the remote meal to fill. Round 4 also makes the
-      // reading beside it need typing (UNCERTAINTY, no one-tap), asserted below.
-      const text = "My sugar was 6.8 mmol, had laksa";
-      const remoteExtraction = vi.fn(async () => ({ kind: "CANDIDATES" as const, candidates: [laksa(text)] }));
+      // Deliberately "had muah chee": this case needs a locally not-understood span for the remote meal to fill (laksa is a known food since
+      // 2026-10-16, muah chee is not). Round 4 also makes the reading beside it need typing (UNCERTAINTY, no one-tap), asserted below.
+      const text = "My sugar was 6.8 mmol, had muah chee";
+      const start = [...text.slice(0, text.indexOf("had muah chee"))].length;
+      const unknownFood: VoiceCandidate = { kind: "MEAL_NOTE", ...REMOTE, span: { start, end: start + 13 }, sourcePhrase: "had muah chee", slot: "UNSTATED", itemText: "muah chee", state: "UNDERSTOOD", ambiguity: [] };
+      const remoteExtraction = vi.fn(async () => ({ kind: "CANDIDATES" as const, candidates: [unknownFood] }));
       const context = setup({ text, remoteExtraction });
       await speakAndStop(context);
       expect(await screen.findByText(context.pending.review.notUnderstoodHeading)).toBeInTheDocument();
@@ -870,7 +872,7 @@ describe("Tell JagaOn screen", () => {
       expect(remoteExtraction).toHaveBeenCalledTimes(1);
       expect(remoteExtraction).toHaveBeenCalledWith(text, "en", expect.any(AbortSignal));
       expect(screen.queryByText(context.pending.review.notUnderstoodHeading)).toBeNull();
-      expect(screen.getByText("laksa")).toBeInTheDocument();
+      expect(screen.getByText("muah chee")).toBeInTheDocument();
       expect(context.onSaveFacts).not.toHaveBeenCalled();
     });
 
