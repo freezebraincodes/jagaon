@@ -552,7 +552,9 @@ describe("Care-summary preview: AI wording action (Packet 11C B4b)", () => {
     await waitFor(() => expect(port.compose).toHaveBeenCalledTimes(1));
     expect(calls[0]!.input).toMatchObject({ snapshotRef: { recordId }, locale: "en-SG", disclosure: "DECLINED" });
     act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "REQUEST_CANCELLED" }));
-    expect(await screen.findByText(en.ai.remoteNotAccepted)).toBeTruthy();
+    await act(async () => undefined);
+    // Owner decision 2026-10-16 (temporary): no "AI wording was not used" line after Cancel; the summary simply stays as it is.
+    expect(screen.queryByText(en.ai.remoteNotAccepted)).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByText(en.ai.careSummary.resultTitle)).toBeNull();
     expect(screen.queryByRole("button", { name: en.ai.retry })).toBeNull();
@@ -1084,7 +1086,8 @@ describe("Care-summary preview: AI credit limit (Owner decision 2026-10-12, AI c
     act(() => calls[0]!.resolve({ kind: "KEPT_DETERMINISTIC", reason: "REMOTE_USE_DECLINED", remoteUse: "CREDIT_LIMIT_REACHED" }));
     await act(async () => undefined);
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(await screen.findByText(en.ai.remoteNotAccepted)).toBeTruthy();
+    // Owner decision 2026-10-16 (temporary): no "AI wording was not used" line after Cancel.
+    expect(screen.queryByText(en.ai.remoteNotAccepted)).toBeNull();
   });
 });
 

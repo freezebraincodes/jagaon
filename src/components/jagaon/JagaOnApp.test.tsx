@@ -1934,7 +1934,9 @@ describe("JagaOnApp care-summary AI wording (Packet 11C B4b)", () => {
     const dialog = await screen.findByRole("dialog", { name: en.ai.remoteTitle });
     expect(care.runtime.aiAudit.append).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: en.ai.cancel }));
-    expect(await screen.findByText(en.ai.remoteNotAccepted)).toBeInTheDocument();
+    await waitFor(async () => expect(await care.audits.list()).toHaveLength(1));
+    // Owner decision 2026-10-16 (temporary): no "AI wording was not used" line after Cancel; the summary simply stays as it is.
+    expect(screen.queryByText(en.ai.remoteNotAccepted)).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: en.ai.careSummary.resultTitle })).not.toBeInTheDocument();
     expect(screen.getByRole("article").textContent).toBe(before);

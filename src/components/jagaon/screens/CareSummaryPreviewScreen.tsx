@@ -297,7 +297,8 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
       case "CANCELLED":
         return t.cancelled;
       case "NOT_ACCEPTED":
-        return t.remoteNotAccepted;
+        // Owner decision 2026-10-16 (temporary): after Cancel the summary simply stays as it is, with no "AI wording was not used" line.
+        return null;
       case "FALLBACK":
         return sentences(t.unavailable, t.careSummary.fallback);
       case "NOT_ELIGIBLE":
