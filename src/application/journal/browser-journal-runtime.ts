@@ -39,6 +39,7 @@ import {
 import { createWorkItemId } from "@/application/contracts/event-work";
 import { createIntelligenceCoordinator } from "@/application/intelligence/intelligence-coordinator";
 import { createRecordedHistoryQuery } from "@/application/history/recorded-history-query";
+import { createBookletQuery, type BookletQueryPort } from "@/application/booklet/booklet-query";
 import type { RecordedHistoryQueryPort } from "@/application/history/recorded-history-contracts";
 import { seedSyntheticHistory } from "@/application/history/synthetic-history-seed";
 import { createPreviewInsightsQuery } from "@/application/preview/preview-insights-query";
@@ -80,6 +81,8 @@ export type JagaOnRuntime = {
   query: JournalQueryPort;
   /** Packet 7A: validated descriptive Recorded-history view models. */
   history: RecordedHistoryQueryPort;
+  /** Owner decision 2026-10-16: the Booklet tab's paper-diary table of what she recorded (read-only, no AI). */
+  booklet: BookletQueryPort;
   /** Packet 8: Medication schedule view models and patient-confirmed commands. */
   medicationSchedule: MedicationSchedulePort;
   /** Packet 9B: patient-maintained health checks, appointments and questions (Screens 09–10). */
@@ -261,6 +264,7 @@ export async function createBrowserJournalRuntime(
     instanceId: "browser",
   });
   const historyQuery = createRecordedHistoryQuery(database, { now });
+  const bookletQuery = createBookletQuery(database, { now });
   const previewInsightsQuery = createPreviewInsightsQuery(database, { now });
   const leaseToken = () => crypto.randomUUID();
   const carePlan = createCarePlanCommandService(database, { now, ids });
@@ -471,6 +475,7 @@ export async function createBrowserJournalRuntime(
         return historyQuery.loadExplainablePattern(request);
       },
     }),
+    booklet: bookletQuery,
     previewInsights: Object.freeze({
       async habitTrend() {
         await intelligence;

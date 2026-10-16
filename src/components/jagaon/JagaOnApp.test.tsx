@@ -212,6 +212,14 @@ function fakeRuntime(options?: BrowserJournalRuntimeOptions): JagaOnRuntime {
         glucose?.recordId === recordId ? glucose : null,
       ),
     },
+    booklet: {
+      load: vi.fn(async ({ period }: { period: "THIS_WEEK" | "LAST_WEEK" | "THIRTY_DAYS" }) => ({
+        status: "READY" as const,
+        period,
+        range: { startDate: "2026-09-28" as never, endDate: "2026-10-04" as never },
+        days: [],
+      })),
+    },
     history: {
       load: vi.fn(async ({ period }: { period: "THIS_WEEK" | "LAST_WEEK" | "THIRTY_DAYS" }) => ({
         status: "EMPTY" as const,
@@ -679,7 +687,7 @@ describe("JagaOnApp journal integration", () => {
     // Today was never re-queried for a write that did not commit.
     expect(runtime.query.loadToday).toHaveBeenCalledTimes(1);
   });
-  it("opens the Medication schedule from Booklet and Recorded history as top-level destinations", async () => {
+  it("opens the Booklet table and Recorded history as top-level destinations, and the Medication schedule from More", async () => {
     const en = getMessages("en-SG");
     const runtime = fakeRuntime();
     render(<JagaOnApp runtimeFactory={async () => runtime} onboardingRepositoryFactory={completed()} />);
@@ -696,16 +704,26 @@ describe("JagaOnApp journal integration", () => {
     const booklet = within(nav).getByRole("button", { name: en.shared.navBooklet });
     expect(booklet).not.toHaveAttribute("aria-disabled");
     fireEvent.click(booklet);
+    // Owner decision 2026-10-16: Booklet is the paper-diary table; the Medication schedule opens from More as a child screen.
+    expect(await screen.findByRole("heading", { level: 1, name: en.booklet.title })).toBeInTheDocument();
+    expect(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navBooklet })).toHaveAttribute("aria-current", "page");
+    expect(runtime.booklet.load).toHaveBeenCalledWith({ period: "THIS_WEEK" });
+    expect(await screen.findByRole("table", { name: /Readings in mmol\/L/ })).toBeInTheDocument();
+
+    fireEvent.click(within(nav).getByRole("button", { name: en.shared.navMore }));
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(en.schedule.title) }));
     expect(await screen.findByRole("heading", { level: 1, name: en.schedule.title })).toBeInTheDocument();
     expect(await screen.findByText(en.schedule.emptyTitle)).toBeInTheDocument();
-    expect(within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navBooklet })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: en.shared.back })).toBeInTheDocument();
     // Scoped to the medicines recorded in the current setup only.
     expect(runtime.medicationSchedule.load).toHaveBeenCalledWith({
       locale: "en-SG",
       medicationRecordIds: expect.arrayContaining(["00000000-0000-4000-8000-000000000101"]),
     });
 
-    const historyTab = within(nav).getByRole("button", { name: en.shared.navHistory });
+    fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
+    await screen.findByRole("heading", { level: 1, name: en.more.title });
+    const historyTab = within(screen.getByRole("navigation")).getByRole("button", { name: en.shared.navHistory });
     expect(historyTab).not.toHaveAttribute("aria-disabled");
     fireEvent.click(historyTab);
     expect(await screen.findByRole("heading", { level: 1, name: en.history.title })).toBeInTheDocument();

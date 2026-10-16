@@ -83,7 +83,7 @@ describe("Packet 9B manifest", () => {
 
   it("adds exactly two child routes and leaves the four bottom tabs unchanged", () => {
     expect(PACKET_9B_CHILD_SCREENS).toEqual(["PREVENTIVE_CARE", "CARE_PREPARATION"]);
-    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MEDICATION_SCHEDULE", "HISTORY", "MORE"]);
+    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "BOOKLET", "HISTORY", "MORE"]);
   });
 
   it("uses the reviewed four-entry catalogue and the four factual record groups only", () => {

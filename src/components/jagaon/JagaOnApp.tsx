@@ -11,6 +11,7 @@ import { DemoBoundaryNotice } from "@/components/demo/DemoBoundaryNotice";
 import { DEMO_BOUNDARY_PLACEMENT } from "@/components/demo/demo-boundary-placement";
 import { createDemoScenarioFixture } from "@/application/governed/demo-scenario-fixture";
 import { TOP_LEVEL_SCREENS, type ScreenId } from "./screen-manifest";
+import { BookletScreen } from "./screens/BookletScreen";
 import { RecordedHistoryScreen } from "./screens/RecordedHistoryScreen";
 import { MyNotesScreen } from "./screens/MyNotesScreen";
 import { MedicationScheduleScreen } from "./screens/MedicationScheduleScreen";
@@ -1143,6 +1144,8 @@ export function JagaOnApp({
             previewInsights={runtime?.previewInsights ?? null}
           />
         );
+      case "BOOKLET":
+        return <BookletScreen messages={messages} locale={locale} booklet={runtime?.booklet ?? null} />;
       case "MEDICATION_SCHEDULE":
         return (
           <MedicationScheduleScreen

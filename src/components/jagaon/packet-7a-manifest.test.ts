@@ -122,12 +122,13 @@ describe("Packet 7A public exports and manifests", () => {
     expect(JAGAON_TABLE_NAMES).toHaveLength(16);
     // Packet 10 freeze Section 5: Dexie 2 keeps the same 16 stores.
     expect(JAGAON_DEXIE_VERSION).toBe(2);
-    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "MEDICATION_SCHEDULE", "HISTORY", "MORE"]);
+    expect(TOP_LEVEL_SCREENS).toEqual(["TODAY", "BOOKLET", "HISTORY", "MORE"]);
     // Packet 9B adds PREVENTIVE_CARE and CARE_PREPARATION; 9C adds CARE_SUMMARY_PREVIEW.
     // Packet 10 adds exactly DATA_BACKUP. The voice slice adds exactly TELL_JAGAON (a child screen reached from Today).
     // Owner decision 2026-10-12: My notes adds exactly MY_NOTES (reached from More).
     // Owner request 2026-10-16: Record an activity adds exactly RECORD_ACTIVITY.
-    expect(ALL_SCREENS.size).toBe(21);
+    // Owner decision 2026-10-16: the Booklet table adds exactly BOOKLET.
+    expect(ALL_SCREENS.size).toBe(22);
     expect(ALL_SCREENS.has("MY_NOTES")).toBe(true);
     expect(ALL_SCREENS.has("RECORD_ACTIVITY")).toBe(true);
     expect(ALL_SCREENS.has("TELL_JAGAON")).toBe(true);

@@ -7056,3 +7056,167 @@ button.summary-tile:hover:not(:disabled) {
 .activity-duration-other .field-error {
   margin: 0;
 }
+
+/* Owner decision 2026-10-16: the Booklet tab, a paper-diary table. Ruled lines and plain ink only: no colour by value. */
+.booklet-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.booklet-screen .choice-group--segmented .choice-face {
+  padding-inline: 0.5rem;
+}
+
+.booklet-intro {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.booklet-loading {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.booklet-sheet {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 0.375rem 0.375rem;
+  overflow-x: auto;
+}
+
+.booklet-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+
+.booklet-table caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0 0.25rem 0.625rem;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.booklet-col-date {
+  width: 3.25rem;
+}
+
+.booklet-col-bedtime {
+  width: 3rem;
+}
+
+.booklet-table th,
+.booklet-table td {
+  border: 1px solid var(--line);
+  padding: 0.25rem 0.125rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.booklet-table thead th {
+  background: var(--recess);
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.booklet-meal-head {
+  font-size: 0.8125rem;
+}
+
+/* Short headers never break inside a word: "Before" and "Bedtime" stay whole on a 375px phone. */
+.booklet-when-head,
+.booklet-bedtime-head {
+  font-size: 0.625rem;
+  font-weight: 700;
+  word-break: keep-all;
+  overflow-wrap: normal;
+  hyphens: none;
+}
+
+.booklet-when-head {
+  color: var(--ink-2);
+}
+
+.booklet-table thead .booklet-when-head,
+.booklet-table thead .booklet-bedtime-head {
+  padding-inline: 0;
+}
+
+.booklet-date-head {
+  font-size: 0.8125rem;
+}
+
+.booklet-date {
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--ink);
+  background: var(--card-2);
+}
+
+.booklet-cell {
+  color: var(--ink-3);
+  font-size: 0.9375rem;
+  line-height: 1.1;
+}
+
+.booklet-value {
+  display: block;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.booklet-unit {
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+
+.booklet-time {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.625rem;
+  color: var(--ink-3);
+}
+
+.booklet-time:last-child {
+  margin-bottom: 0;
+}
+
+.booklet-notes-row td {
+  text-align: left;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--card);
+}
+
+.booklet-notes-label {
+  font-weight: 800;
+  color: var(--ink-2);
+}
+
+.booklet-note + .booklet-note::before {
+  content: " · ";
+  color: var(--ink-3);
+}
+
+.booklet-note-time {
+  color: var(--ink-2);
+  font-weight: 700;
+}
+
+/* A thicker rule between days, like the ruled lines of a paper booklet. */
+.booklet-day + .booklet-day .booklet-row > * {
+  border-top: 2px solid var(--line-strong);
+}

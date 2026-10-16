@@ -1201,6 +1201,31 @@ export type FeelingsChatMessages = {
   voiceAccessDenied: string;
 };
 
+/** Owner decision 2026-10-16: the Booklet tab, a read-only table laid out like a paper glucose diary. */
+export type BookletMessages = {
+  title: string;
+  intro: string;
+  loading: string;
+  unavailableTitle: string;
+  unavailableBody: string;
+  retry: string;
+  tableCaption: (range: string, unit: string) => string;
+  dateHeader: string;
+  mealGroups: Record<"BREAKFAST" | "LUNCH" | "DINNER", string>;
+  before: string;
+  after: string;
+  bedtime: string;
+  /** The full name of each column, for screen readers. */
+  columnNames: Record<"BREAKFAST_BEFORE" | "BREAKFAST_AFTER" | "LUNCH_BEFORE" | "LUNCH_AFTER" | "DINNER_BEFORE" | "DINNER_AFTER" | "BEDTIME", string>;
+  notRecorded: string;
+  notesLabel: string;
+  noTime: string;
+  noteReading: (value: string, unit: string) => string;
+  noteActivity: (label: string, minutes: number | null) => string;
+  noteMedicine: (name: string, state: "TAKEN" | "MISSED" | "DELAYED" | "UNSURE" | "DECLINED_TO_RECORD") => string;
+  scheduleRowBody: string;
+};
+
 export type AppMessages = {
   /** Packet 10 data, backup, restore, deletion and integrity copy. */
   packet10: Packet10Messages;
@@ -1335,6 +1360,7 @@ export type AppMessages = {
   help: HelpMessages;
   onboarding: OnboardingMessages;
   history: HistoryMessages;
+  booklet: BookletMessages;
   schedule: ScheduleMessages;
   preventiveCare: PreventiveCareMessages;
   carePreparation: CarePreparationMessages;
