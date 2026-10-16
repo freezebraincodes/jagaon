@@ -694,6 +694,17 @@ export const enSGMessages: AppMessages = {
     startSetup: "Start demo setup",
     usePrepared: "Use the prepared demo profile",
     deviceNote: "This prototype stores the demo information on this device.",
+    choiceTitle: "Which should I choose?",
+    choiceSetup: "see JagaOn as a new user. You'll go through setup (your name and medicines), and your booklet starts empty.",
+    choicePrepared:
+      "skip setup and open JagaOn with 6 weeks of sample records already in place: readings, meals, exercise, trends, the Booklet and an upcoming appointment with Dr Lim.",
+    choiceTip: "Tip: to see the History, Booklet and appointment summary features, choose the prepared profile.",
+    newUserWelcomeTitle: (name) => (name ? `Welcome to JagaOn, ${name}!` : "Welcome to JagaOn!"),
+    newUserWelcomeBody: "Your booklet is new and empty. Everything you record from now on will appear in Today, Booklet and History.",
+    newUserWelcomeSample:
+      "Want to explore JagaOn with sample records instead? Go to More → Settings → Reset synthetic demo data, then choose Use the prepared demo profile.",
+    newUserWelcomeAction: "Start using JagaOn",
+    preparingSample: "Adding 6 weeks of sample records… This takes a few seconds.",
     profileTitle: "How should JagaOn greet you?",
     preferredNameLabel: "Preferred name",
     preferredNamePlaceholder: "e.g. Mdm Tan",

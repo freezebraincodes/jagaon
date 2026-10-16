@@ -485,6 +485,18 @@ export type OnboardingMessages = {
   startSetup: string;
   usePrepared: string;
   deviceNote: string;
+  /** Owner decision 2026-10-16: the Welcome card explaining which start to choose. */
+  choiceTitle: string;
+  choiceSetup: string;
+  choicePrepared: string;
+  choiceTip: string;
+  /** Owner decision 2026-10-16: shown once, on Today, after a new user finishes (or skips) setup. */
+  newUserWelcomeTitle: (name: string | null) => string;
+  newUserWelcomeBody: string;
+  newUserWelcomeSample: string;
+  newUserWelcomeAction: string;
+  /** Owner decision 2026-10-16: shown while the prepared profile's sample records are added. */
+  preparingSample: string;
   profileTitle: string;
   preferredNameLabel: string;
   preferredNamePlaceholder: string;

@@ -84,6 +84,7 @@ import {
   type DemoOnboardingRepository,
 } from "@/application/onboarding/demo-onboarding-repository";
 import { OnboardingFlow, type OnboardingExit } from "./onboarding/OnboardingFlow";
+import { NewUserWelcomeDialog } from "./onboarding/NewUserWelcomeDialog";
 import { MyMedicinesScreen, type MyMedicinesView } from "./screens/MyMedicinesScreen";
 import { PreventiveCareScreen } from "./screens/PreventiveCareScreen";
 import { CarePreparationScreen, DEFAULT_OVERVIEW_PERIOD, type CarePreparationSelection } from "./screens/CarePreparationScreen";
@@ -438,9 +439,15 @@ export function JagaOnApp({
   );
   /** Packet 10A: bumping the epoch re-opens the dataset (retry, delete-all restart). */
   const [runtimeEpoch, setRuntimeEpoch] = useState(0);
-  const runtimeOptions = useRef<BrowserJournalRuntimeOptions>({});
+  // Owner decision 2026-10-16: a new device's dataset opens empty, so "Start demo setup" really starts a new, empty booklet; the
+  // sample records are added only when "Use the prepared demo profile" is chosen (seedPreparedDemoWhenEmpty, below).
+  const runtimeOptions = useRef<BrowserJournalRuntimeOptions>({ seedSyntheticScenarioOnCreate: false });
   const [storageLock, setStorageLock] = useState<StorageLockState | null>(null);
   const [datasetDeleted, setDatasetDeleted] = useState(false);
+  /** Owner decision 2026-10-16: the one-time welcome after a new user's own setup (null when not shown). */
+  const [newUserWelcome, setNewUserWelcome] = useState<{ name: string | null } | null>(null);
+  /** Owner decision 2026-10-16: true while the prepared profile's sample records are being added, so the wait is explained. */
+  const [preparingSample, setPreparingSample] = useState(false);
   /** Packet 10C: resolves once a restored dataset finished reconciliation (or locked). */
   const reconciliationWaiter = useRef<((outcome: "COMPLETED" | "LOCKED") => void) | null>(null);
   const [lockRestoreOpen, setLockRestoreOpen] = useState(false);
@@ -776,7 +783,11 @@ export function JagaOnApp({
     onboardingLocaleRef.current = true;
     if (exit.prepared) {
       preparedSeedPending.current = true;
+      setPreparingSample(true);
       setPreparedSeedRequest((value) => value + 1);
+    } else {
+      // Owner decision 2026-10-16: a new user's finished (or skipped) setup is welcomed once on Today.
+      setNewUserWelcome({ name: exit.state.preferredName ?? null });
     }
     setOnboarding(exit.state);
     setPhase({ kind: "APP" });
@@ -832,8 +843,8 @@ export function JagaOnApp({
     setToday(await runtime.query.loadToday());
   }, [runtime]);
 
-  // "Use the prepared demo profile" after "Delete all data": the new dataset was created without the demo records, so add them now
-  // (only into an empty dataset; a first visit's dataset already has them). Runs once the runtime is open.
+  // "Use the prepared demo profile": the dataset was created without the demo records (on a first visit, owner decision 2026-10-16, or
+  // after "Delete all data"), so add them now, only into an empty dataset. Runs once the runtime is open.
   useEffect(() => {
     if (!runtime || !preparedSeedPending.current) return;
     preparedSeedPending.current = false;
@@ -842,7 +853,8 @@ export function JagaOnApp({
       .then(async (seeded) => {
         if (seeded && runtimeRef.current === runtime) setToday(await runtime.query.loadToday());
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setPreparingSample(false));
   }, [runtime, preparedSeedRequest]);
 
   /**
@@ -1404,8 +1416,10 @@ export function JagaOnApp({
         onBack={goBack}
         onSwitchTab={switchTab}
       >
+        {preparingSample ? <Banner>{messages.onboarding.preparingSample}</Banner> : null}
         {renderScreen()}
       </AppShell>
+      {newUserWelcome ? <NewUserWelcomeDialog messages={messages} name={newUserWelcome.name} onClose={() => setNewUserWelcome(null)} /> : null}
     </>
   );
 }
