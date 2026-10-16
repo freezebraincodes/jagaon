@@ -167,10 +167,10 @@ describe("Screen 10 visit-preparation projection", () => {
         recordedAt: NOW,
       });
     await glucose("2026-10-03T13:00:00.000Z");
-    // Owner instruction 2026-10-12: the period is the 14 local days ending today (was 30), so it starts at 21 Sep 00:00 SGT.
-    expect(VISIT_PREPARATION_PERIOD_DAYS).toBe(14);
-    await glucose("2026-09-20T16:30:00.000Z"); // 21 Sep 00:30 SGT: the period's first local day
-    await glucose("2026-09-20T15:30:00.000Z"); // 20 Sep 23:30 SGT: outside the 14-day period (was inside the 30-day one)
+    // Owner decision 2026-10-16: the period is the 5 local days ending today (was 14, before that 30), so it starts at 30 Sep 00:00 SGT.
+    expect(VISIT_PREPARATION_PERIOD_DAYS).toBe(5);
+    await glucose("2026-09-29T16:30:00.000Z"); // 30 Sep 00:30 SGT: the period's first local day
+    await glucose("2026-09-29T15:30:00.000Z"); // 29 Sep 23:30 SGT: outside the 5-day period (was inside the 14-day one)
     await glucose("2026-08-01T13:00:00.000Z"); // outside the period
     const initial = await h.query.loadVisitPreparation();
     if (initial.status !== "READY" || !initial.appointment) throw new Error("ready");
@@ -183,7 +183,7 @@ describe("Screen 10 visit-preparation projection", () => {
     })).toMatchObject({ kind: "COMMITTED" });
     const view = await h.query.loadVisitPreparation();
     if (view.status !== "READY") throw new Error("ready");
-    expect(view.period).toEqual({ startAt: "2026-09-20T16:00:00.000Z", endAtExclusive: "2026-10-04T16:00:00.000Z", startDate: "2026-09-21", endDate: "2026-10-04" });
+    expect(view.period).toEqual({ startAt: "2026-09-29T16:00:00.000Z", endAtExclusive: "2026-10-04T16:00:00.000Z", startDate: "2026-09-30", endDate: "2026-10-04" });
     expect(view.questions).toEqual([expect.objectContaining({ text: "可以把笔放在包里吗？", language: "zh-SG", relatedAppointment: appointment.recordId })]);
     expect(view.factGroups.map((group) => [group.key, group.sources.length])).toEqual([
       ["GLUCOSE", 2],

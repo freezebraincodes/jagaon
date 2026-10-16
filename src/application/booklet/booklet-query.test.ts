@@ -58,7 +58,7 @@ describe("Booklet query", () => {
     expect(view.days.flatMap((day) => Object.values(day.readings).flat()).map((r) => r.value)).not.toContain("6.9");
   });
 
-  it("puts meals, activity and a reading without a meal time in that day's notes, in time order", async () => {
+  it("puts meals and activity in that day's notes in time order, and a reading without a meal time in the Other column", async () => {
     const { database, journal } = await setup();
     const recordedAt = "2026-10-04T01:00:00.000Z" as Instant;
     await journal.recordMeal({
@@ -77,9 +77,9 @@ describe("Booklet query", () => {
     expect(thursday.notes).toEqual([
       { kind: "ACTIVITY", at: at("2026-10-01", "06:45"), label: "Morning walk", minutes: 20 },
       { kind: "MEAL", at: at("2026-10-01", "07:30"), label: "Kaya toast" },
-      { kind: "READING", at: at("2026-10-01", "15:20"), value: "6.8", unit: "mmol/L" },
     ]);
-    expect(Object.values(thursday.readings).flat()).toEqual([]);
+    // Owner decision 2026-10-16: a reading with no meal time (or "just checking") is written in the last column, Other.
+    expect(thursday.readings.OTHER).toEqual([{ value: "6.8", unit: "mmol/L", at: at("2026-10-01", "15:20") }]);
   });
 
   it("reports unavailable instead of a partial table when a stored record cannot be read", async () => {

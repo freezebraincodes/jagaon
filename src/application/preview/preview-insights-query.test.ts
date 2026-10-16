@@ -42,22 +42,22 @@ describe("preview insights query: habit trend (HSA-bounded mode preview)", () =>
     const { database, journal } = await openDatabase();
     await seedSyntheticHistory(journal, NOW);
     const trend = await createPreviewInsightsQuery(database, { now: () => NOW }).habitTrend();
-    // Walks start 16 days ago (28 Sep, 08:24). Before: 23 before-breakfast readings from 2 Sep to 28 Sep 07:50, median 7.6. After: 8
-    // readings (the corrected one counted once, at its corrected time), median 6.2. (6.2 − 7.6) / 7.6 = −18.4% → 18% lower
-    // (owner request 2026-10-16: three recent before-breakfast readings were dropped for the before-dinner comparison).
+    // Owner request 2026-10-16 (a full booklet): walks start 16 days ago (28 Sep, 08:42); tai chi before them is a different habit with
+    // no readings in the four weeks before it. Before: 27 before-breakfast readings in the four weeks before the first walk, median 7.5.
+    // After: 15 readings (the corrected one counted once, at its corrected time), median 6.1. (6.1 − 7.5) / 7.5 = −18.7% → 19% lower.
     expect(trend).toEqual({
       ruleVersion: "habit-trend-preview.1",
       habitLabel: "Morning walk",
       slot: "BEFORE_BREAKFAST",
       direction: "LOWER",
-      percentChange: 18,
-      beforeMedian: "7.6",
-      afterMedian: "6.2",
-      beforeCount: 23,
-      afterCount: 8,
-      habitCount: 9,
+      percentChange: 19,
+      beforeMedian: "7.5",
+      afterMedian: "6.1",
+      beforeCount: 27,
+      afterCount: 15,
+      habitCount: 11,
       daysSince: 16,
-      startedAt: "2026-09-28T00:24:00.000Z",
+      startedAt: "2026-09-28T00:42:00.000Z",
       startDate: "2026-09-28",
     });
   });

@@ -39,12 +39,25 @@ describe("Booklet screen", () => {
 
     // Column headers name each meal time in full for screen readers.
     const headers = within(table).getAllByRole("columnheader").map((header) => header.getAttribute("aria-label") ?? header.textContent);
-    expect(headers).toEqual(["Date", "Breakfast", "Lunch", "Dinner", "Bedtime", "Before breakfast", "After breakfast", "Before lunch", "After lunch", "Before dinner", "After dinner"]);
+    expect(headers).toEqual([
+      "Date",
+      "Breakfast",
+      "Lunch",
+      "Dinner",
+      "Bedtime",
+      en.booklet.columnNames.OTHER,
+      "Before breakfast",
+      "After breakfast",
+      "Before lunch",
+      "After lunch",
+      "Before dinner",
+      "After dinner",
+    ]);
 
     const rows = within(table).getAllByRole("row");
     const tuesdayRow = rows.find((row) => within(row).queryByRole("rowheader")?.textContent?.startsWith("Tue13 Oct"))!;
     const cells = within(tuesdayRow).getAllByRole("cell").map((cell) => cell.textContent);
-    expect(cells).toEqual(["6.17:12 am", "–not recorded", "–not recorded", "–not recorded", "9.36:47 pm", "–not recorded", "–not recorded"]);
+    expect(cells).toEqual(["6.17:12 am", "–not recorded", "–not recorded", "–not recorded", "9.36:47 pm", "–not recorded", "–not recorded", "–not recorded"]);
 
     const notes = rows[rows.indexOf(tuesdayRow) + 1]!;
     expect(notes).toHaveTextContent("Notes: 7:30 amKaya toast8:00 amMetformin takenno timeMorning walk, 20 min");

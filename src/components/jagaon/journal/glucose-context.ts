@@ -9,8 +9,11 @@ import type { AppMessages } from "@/i18n/types";
 
 export type GlucoseContextChoice =
   | "BEFORE_BREAKFAST"
+  | "AFTER_BREAKFAST"
   | "BEFORE_LUNCH"
+  | "AFTER_LUNCH"
   | "BEFORE_DINNER"
+  | "AFTER_DINNER"
   | "BEDTIME"
   | "JUST_CHECKING";
 
@@ -18,8 +21,11 @@ export type GlucoseMealChoice = "BREAKFAST" | "LUNCH" | "DINNER";
 
 export type PatientSelectedGlucoseSlot =
   | "BEFORE_BREAKFAST"
+  | "AFTER_BREAKFAST"
   | "BEFORE_LUNCH"
+  | "AFTER_LUNCH"
   | "BEFORE_DINNER"
+  | "AFTER_DINNER"
   | "BEDTIME"
   | "OTHER";
 
@@ -28,10 +34,14 @@ export type GlucoseContextPayload = {
   slot: PatientSelectedGlucoseSlot;
 };
 
+/** Owner decision 2026-10-16: before and after each meal, in the order of the booklet's columns, then bedtime and just checking. */
 export const GLUCOSE_CONTEXT_CHOICES: readonly GlucoseContextChoice[] = Object.freeze([
   "BEFORE_BREAKFAST",
+  "AFTER_BREAKFAST",
   "BEFORE_LUNCH",
+  "AFTER_LUNCH",
   "BEFORE_DINNER",
+  "AFTER_DINNER",
   "BEDTIME",
   "JUST_CHECKING",
 ]);
@@ -51,10 +61,16 @@ export function glucoseContextChoiceLabel(
   switch (choice) {
     case "BEFORE_BREAKFAST":
       return glucose.contextBeforeBreakfast;
+    case "AFTER_BREAKFAST":
+      return glucose.contextAfterBreakfast;
     case "BEFORE_LUNCH":
       return glucose.contextBeforeLunch;
+    case "AFTER_LUNCH":
+      return glucose.contextAfterLunch;
     case "BEFORE_DINNER":
       return glucose.contextBeforeDinner;
+    case "AFTER_DINNER":
+      return glucose.contextAfterDinner;
     case "BEDTIME":
       return glucose.contextBedtime;
     case "JUST_CHECKING":
@@ -99,8 +115,12 @@ export function storedGlucoseContextLabel(
       return glucose.contextBedtime;
     case "OTHER":
       return glucose.contextJustChecking;
+    case "AFTER_BREAKFAST":
+      return glucose.contextAfterBreakfast;
+    case "AFTER_LUNCH":
+      return glucose.contextAfterLunch;
+    case "AFTER_DINNER":
+      return glucose.contextAfterDinner;
   }
-  const match = /^AFTER_(BREAKFAST|LUNCH|DINNER)$/.exec(code);
-  if (!match) return null;
-  return `${glucose.contextAfterMeal} · ${glucoseMealLabel(messages, match[1] as GlucoseMealChoice)}`;
+  return null;
 }

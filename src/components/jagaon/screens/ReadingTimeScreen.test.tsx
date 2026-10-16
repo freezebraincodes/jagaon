@@ -89,9 +89,12 @@ describe("ReadingTimeScreen", () => {
   it("shows the stored reading, its context and the current time on the wheel", async () => {
     renderScreen();
     await loaded();
-    expect(screen.getByRole("heading", { level: 1, name: en.glucose.whenQuestion })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: en.readingTime.editTitle })).toBeInTheDocument();
     expect(screen.getByText("6.2")).toBeInTheDocument();
-    expect(screen.getByText(en.glucose.contextBeforeBreakfast)).toBeInTheDocument();
+    expect(screen.getByText(en.glucose.contextBeforeBreakfast, { selector: ".reading-summary-context" })).toBeInTheDocument();
+    // Owner decision 2026-10-16: "When was this test?" is part of the edit, starting from the stored choice.
+    const when = screen.getByRole("group", { name: en.glucose.whenQuestion });
+    expect(within(when).getByRole("radio", { name: en.glucose.contextBeforeBreakfast })).toBeChecked();
     expect(screen.getByRole("radio", { name: en.readingTime.dayToday })).toBeChecked();
     expect(within(screen.getByRole("listbox", { name: en.readingTime.hourLabel })).getByRole("option", { selected: true })).toHaveTextContent("7");
     expect(within(screen.getByRole("listbox", { name: en.readingTime.minuteLabel })).getByRole("option", { selected: true })).toHaveTextContent("48");
@@ -129,6 +132,23 @@ describe("ReadingTimeScreen", () => {
             utcOffsetMinutes: 480,
           },
         },
+      }),
+    );
+    expect(await screen.findByText(en.readingTime.saved)).toBeInTheDocument();
+  });
+
+  it("changes when the test was taken, keeping the value and time, as one correction (owner decision 2026-10-16)", async () => {
+    const commandService = renderScreen();
+    await loaded();
+    fireEvent.click(within(screen.getByRole("group", { name: en.glucose.whenQuestion })).getByRole("radio", { name: en.glucose.contextBeforeDinner }));
+    fireEvent.click(screen.getByRole("button", { name: en.readingTime.saveOccurrence }));
+    await waitFor(() => expect(commandService.correctGlucoseTime).toHaveBeenCalledTimes(1));
+    expect(commandService.correctGlucoseTime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recordId,
+        expectedRevisionId: revisionId,
+        payload: { ...glucosePayload, context: { kind: "PATIENT_SELECTED_SLOT", slot: "BEFORE_DINNER" } },
+        temporal: expect.objectContaining({ occurrence: expect.objectContaining({ instantUtc: storedInstant }) }),
       }),
     );
     expect(await screen.findByText(en.readingTime.saved)).toBeInTheDocument();
