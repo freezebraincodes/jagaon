@@ -852,6 +852,27 @@ export const zhSGMessages: AppMessages = {
       BEDTIME: "睡前",
     },
     positionLabels: { MORNING: "早上", EVENING: "晚上" },
+    // Drafts (English only for the hackathon).
+    notice: {
+      title: "从您的读数中注意到",
+      higher: (slot) => `最近 2 周您${slot}的读数比第 3 至 6 周高。`,
+      lower: (slot) => `最近 2 周您${slot}的读数比第 3 至 6 周低。`,
+      variedMore: (slot) => `最近 2 周您${slot}的读数波动比第 3 至 6 周大。`,
+      variedLess: (slot) => `最近 2 周您${slot}的读数波动比第 3 至 6 周小。`,
+      notEnough: "读数还不够，暂时无法比较。",
+      open: "在记录历史中查看",
+      slots: { BEFORE_BREAKFAST: "早餐前", BEFORE_LUNCH: "午餐前", BEFORE_DINNER: "晚餐前", BEDTIME: "睡前" },
+    },
+    trends: {
+      title: "趋势：以前和现在",
+      intro: "您在同一用餐时间的读数：第 3 至 6 周与最近 2 周比较。",
+      earlier: "第 3 至 6 周",
+      recent: "最近 2 周",
+      median: "中间值（中位数）",
+      spread: "波动范围（四分位距）",
+      value: (value, unit) => `${value} ${unit}`,
+      slotTitles: { BEFORE_BREAKFAST: "早餐前", BEFORE_LUNCH: "午餐前", BEFORE_DINNER: "晚餐前", BEDTIME: "睡前" },
+    },
     periodLabels: { THIS_WEEK: "本周", LAST_WEEK: "上周", THIRTY_DAYS: "30天" },
     explanation: {
       action: "查看这项比较的依据",

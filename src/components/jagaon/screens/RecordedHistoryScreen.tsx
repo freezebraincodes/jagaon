@@ -29,6 +29,7 @@ import { formatDateRange, formatList, formatPosition } from "../history/history-
 import { PatternExplanationPanel, type PatternExplainerPort, type PatternExplanationResult } from "../history/PatternExplanationPanel";
 import { AiDisclosureDialog } from "../ai/AiDisclosureDialog";
 import { HabitTrendPreviewCard } from "../history/HabitTrendPreviewCard";
+import { TrendsCard } from "../history/TrendsCard";
 import type { PreviewInsightsQueryPort } from "@/application/preview/preview-insights-contracts";
 
 type Props = {
@@ -534,6 +535,8 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
               headingId="history-readings-heading"
             />
           </section>
+          {/* Owner decision 2026-10-16: Trends, the period comparison drawn as two labelled bars (before the sentences that state it). */}
+          <TrendsCard messages={messages} locale={locale} comparisons={comparisons} />
           <HistoryFactsCard
             messages={messages}
             rangeText={rangeText}

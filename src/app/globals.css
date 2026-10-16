@@ -6832,3 +6832,143 @@ button.summary-tile:hover:not(:disabled) {
 .medicine-ai-card .medicine-ai-caution .icon {
   flex: none;
 }
+
+/* Owner decision 2026-10-16: Notice (Today) and Trends (History). Descriptive only: neutral colours, no status colour, no target band,
+   no threshold line; bars start from zero and only repeat the written values. */
+.notice-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.notice-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.notice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notice-sentence {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.notice-sentence--quiet {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.notice-card .text-link {
+  align-self: flex-start;
+}
+
+.trends-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.trends-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.trends-intro {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.trends-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  margin: 0;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card-2);
+}
+
+.trends-caption {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.trends-measure {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.trends-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.trends-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.trends-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.trends-dates {
+  font-weight: 500;
+  font-size: 0.9375rem;
+  color: var(--ink-2);
+}
+
+.trends-value {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.trends-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: var(--recess);
+  overflow: hidden;
+}
+
+.trends-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ink-2);
+}
+
+.trends-row--recent .trends-bar-fill {
+  background: var(--reviewed);
+}
+
+.trends-number {
+  flex: 0 0 auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}

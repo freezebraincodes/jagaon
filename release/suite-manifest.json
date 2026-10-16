@@ -313,6 +313,7 @@
             "src/components/jagaon/feelings/FeelingsChatDialog.test.tsx",
             "src/components/jagaon/feelings/FeelingsChatVoiceAnswer.test.tsx",
             "src/components/jagaon/history/HistoryReadingsChart.test.tsx",
+            "src/components/jagaon/history/NoticeTrends.test.tsx",
             "src/components/jagaon/hsa/hsa-bounded-mode.test.tsx",
             "src/components/jagaon/history/PatternExplanationPanel.test.tsx",
             "src/components/jagaon/medicine-info/MedicineGeneralInfoPreview.test.tsx",

@@ -129,7 +129,8 @@ describe("Packet 7A history catalogue", () => {
       "sourceSummary", "correctionSummary", "evidenceWindow", "completeStamp", "incompleteStamp", "disabledFamily",
     ];
     const LABEL_GROUPS = ["slotLabels", "positionLabels", "periodLabels"];
-    expect([...Object.keys(STATIC), ...PARAMETERISED, ...LABEL_GROUPS, "explanation"].sort()).toEqual(Object.keys(en).sort());
+    // Owner decision 2026-10-16: `notice` and `trends` are pinned in NoticeTrends.test.tsx.
+    expect([...Object.keys(STATIC), ...PARAMETERISED, ...LABEL_GROUPS, "explanation", "notice", "trends"].sort()).toEqual(Object.keys(en).sort());
     // The only 7A message that is not the copy-matrix row is comparisonVariability (IQR); comparisonHigher/Lower keep "median".
     expect(en.comparisonVariability("X", "1", "2", "U")).not.toMatch(/spread|median/);
     expect(zh.comparisonVariability("X", "1", "2", "U")).not.toMatch(/记录范围|中位数/);

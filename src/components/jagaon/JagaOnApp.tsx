@@ -31,6 +31,7 @@ import { NearbyFoodScreen } from "./screens/NearbyFoodScreen";
 import { FoodGeneralInfoScreen } from "./screens/FoodGeneralInfoScreen";
 import { MoreScreen } from "./screens/MoreScreen";
 import { HelpScreen } from "./screens/HelpScreen";
+import type { NoticeView } from "./history/NoticeCard";
 import { TellJagaOnScreen, type VoiceLimitFallback } from "./voice/TellJagaOnScreen";
 import { browserWebSpeechSupported, checkVoiceAccess, checkVoiceProviderAnswer, VOICE_PROVIDER_LOADERS, type VoiceTranscriberLoader } from "./voice/voice-provider-wiring";
 import { VoiceProviderSettingsSection } from "./voice/VoiceProviderSettingsSection";
@@ -693,6 +694,25 @@ export function JagaOnApp({
   const isTopLevel = TOP_LEVEL_SCREENS.includes(current.screen);
   // HSA-bounded mode off only: care checks due (Today's care card and the More badge), reloaded as the visible screen changes.
   const careNudges = useCareNudgeSummary(runtime?.careOrganisation.query, current.screen);
+  // Owner decision 2026-10-16: Notice on Today, from the same governed comparison as History; reloaded whenever Today is shown or its
+  // journal changes. A failed or unavailable load shows nothing (never a guess).
+  const [notice, setNotice] = useState<NoticeView>(null);
+  useEffect(() => {
+    if (!runtime || current.screen !== "TODAY") return;
+    let live = true;
+    runtime.history.load({ period: "THIS_WEEK" }).then(
+      (view) => {
+        if (!live) return;
+        setNotice(view.status === "READY" || view.status === "INSUFFICIENT_EVIDENCE" || view.status === "EMPTY" ? { comparisons: view.status === "EMPTY" ? [] : view.comparisons } : null);
+      },
+      () => {
+        if (live) setNotice(null);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [runtime, current.screen, today]);
 
   const navigate = useCallback((screen: ScreenId, params?: Record<string, string>) => {
     setStack((prev) => [...prev, { screen, params }]);
@@ -961,6 +981,7 @@ export function JagaOnApp({
             onRecordDeleted={() => void refreshToday()}
             onOpenHistory={() => switchTab("HISTORY")}
             careNudges={careNudges}
+            notice={notice}
           />
         );
       case "LOG_GLUCOSE":

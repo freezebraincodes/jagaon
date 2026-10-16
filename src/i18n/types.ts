@@ -630,6 +630,29 @@ export type HistoryMessages = {
   periodLabels: Record<"THIS_WEEK" | "LAST_WEEK" | "THIRTY_DAYS", string>;
   /** Packet 11C Task 7: the explanation panel under an explainable comparison (new application copy; the 7A rows above are unchanged). */
   explanation: HistoryExplanationMessages;
+  /** Owner decision 2026-10-16: Notice, one plain sentence per comparison of her own readings (no cause, no advice). */
+  notice: {
+    title: string;
+    higher: (slot: string) => string;
+    lower: (slot: string) => string;
+    variedMore: (slot: string) => string;
+    variedLess: (slot: string) => string;
+    notEnough: string;
+    open: string;
+    /** The meal time as an adjective ("before-breakfast"). */
+    slots: Record<"BEFORE_BREAKFAST" | "BEFORE_LUNCH" | "BEFORE_DINNER" | "BEDTIME", string>;
+  };
+  /** Owner decision 2026-10-16: Trends, the same comparison drawn as two labelled bars. */
+  trends: {
+    title: string;
+    intro: string;
+    earlier: string;
+    recent: string;
+    median: string;
+    spread: string;
+    value: (value: string, unit: string) => string;
+    slotTitles: Record<"BEFORE_BREAKFAST" | "BEFORE_LUNCH" | "BEFORE_DINNER" | "BEDTIME", string>;
+  };
 };
 
 /**
