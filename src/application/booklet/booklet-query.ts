@@ -38,7 +38,7 @@ export type BookletNote =
 export type BookletDay = { date: LocalDate; readings: Record<BookletColumn, BookletReading[]>; notes: BookletNote[] };
 
 export type BookletView =
-  | { status: "READY"; period: HistoryPeriod; range: { startDate: LocalDate; endDate: LocalDate }; days: BookletDay[] }
+  | { status: "READY"; period: HistoryPeriod; today: LocalDate; range: { startDate: LocalDate; endDate: LocalDate }; days: BookletDay[] }
   | { status: "UNAVAILABLE" };
 
 export type BookletQueryPort = { load(request: { period: HistoryPeriod }): Promise<BookletView> };
@@ -96,7 +96,8 @@ export function createBookletQuery(database: JagaOnDatabase, dependencies: { now
 
   async function load(request: { period: HistoryPeriod }): Promise<BookletView> {
     try {
-      const range = historyRange(request.period, dependencies.now());
+      const now = dependencies.now();
+      const range = historyRange(request.period, now);
       const days = new Map<string, BookletDay>();
       for (let at = Date.parse(`${range.endDate}T00:00:00Z`); at >= Date.parse(`${range.startDate}T00:00:00Z`); at -= DAY_MS) {
         const date = new Date(at).toISOString().slice(0, 10) as LocalDate;
@@ -141,7 +142,7 @@ export function createBookletQuery(database: JagaOnDatabase, dependencies: { now
         for (const column of BOOKLET_COLUMNS) day.readings[column].sort(byTime);
         day.notes.sort(byTime);
       }
-      return { status: "READY", period: request.period, range, days: [...days.values()] };
+      return { status: "READY", period: request.period, today: localDate(now), range, days: [...days.values()] };
     } catch {
       return { status: "UNAVAILABLE" };
     }

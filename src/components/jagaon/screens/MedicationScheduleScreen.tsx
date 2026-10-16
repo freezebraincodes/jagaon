@@ -675,7 +675,10 @@ export function MedicationScheduleScreen({ messages, locale, schedule, medicatio
 
   return (
     <div className="schedule-screen">
-      <h1 className="screen-title">{copy.title}</h1>
+      {/* Owner decision 2026-10-16: a child screen reached from More, so its title clears the Back button. */}
+      <header className="screen-header">
+        <h1 className="screen-title">{copy.title}</h1>
+      </header>
       <Notice>
         <p>{copy.notAdvice}</p>
       </Notice>

@@ -1,12 +1,13 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { HistoryPeriod } from "@/application/history/recorded-history-contracts";
 import { BOOKLET_COLUMNS, type BookletNote, type BookletQueryPort, type BookletView } from "@/application/booklet/booklet-query";
 import { ChoiceGroup } from "../primitives/ChoiceGroup";
 import { formatSingaporeTime } from "../journal/singapore-time";
-import { formatDateRange, formatShortDate } from "../history/history-format";
+import { formatDateRange, formatDayParts } from "../history/history-format";
+import { BowlIcon, DropIcon, PillIcon, WalkIcon } from "../primitives/Icons";
 
 type Props = {
   messages: AppMessages;
@@ -16,6 +17,9 @@ type Props = {
 
 const UNIT = "mmol/L";
 const MEALS = ["BREAKFAST", "LUNCH", "DINNER"] as const;
+/** The first column of each meal group (and bedtime) carries the group's ruling line. */
+const GROUP_STARTS: ReadonlySet<string> = new Set(["BREAKFAST_BEFORE", "LUNCH_BEFORE", "DINNER_BEFORE", "BEDTIME"]);
+const NOTE_ICONS = { READING: DropIcon, MEAL: BowlIcon, ACTIVITY: WalkIcon, MEDICINE: PillIcon } as const;
 
 /**
  * Owner decision 2026-10-16: the Booklet tab, laid out like a paper glucose diary. Rows are days (newest first); columns are before
@@ -100,65 +104,92 @@ export function BookletScreen({ messages, locale, booklet }: Props) {
                   {msg.dateHeader}
                 </th>
                 {MEALS.map((meal) => (
-                  <th key={meal} scope="colgroup" colSpan={2} className="booklet-meal-head">
+                  <th key={meal} scope="colgroup" colSpan={2} className="booklet-meal-head booklet-cell--group-start">
                     {msg.mealGroups[meal]}
                   </th>
                 ))}
-                <th scope="col" rowSpan={2} className="booklet-meal-head booklet-bedtime-head">
+                <th scope="col" rowSpan={2} className="booklet-meal-head booklet-bedtime-head booklet-cell--group-start">
                   {msg.bedtime}
                 </th>
               </tr>
               <tr>
                 {MEALS.flatMap((meal) =>
                   (["BEFORE", "AFTER"] as const).map((when) => (
-                    <th key={`${meal}_${when}`} scope="col" className="booklet-when-head" aria-label={msg.columnNames[`${meal}_${when}`]}>
+                    <th
+                      key={`${meal}_${when}`}
+                      scope="col"
+                      className={`booklet-when-head${when === "BEFORE" ? " booklet-cell--group-start" : ""}`}
+                      aria-label={msg.columnNames[`${meal}_${when}`]}
+                    >
                       {when === "BEFORE" ? msg.before : msg.after}
                     </th>
                   )),
                 )}
               </tr>
             </thead>
-            {view.days.map((day) => (
-              <tbody key={day.date} className="booklet-day">
-                <tr className="booklet-row">
-                  <th scope="row" className="booklet-date">
-                    {formatShortDate(locale, day.date)}
-                  </th>
-                  {BOOKLET_COLUMNS.map((column) => (
-                    <td key={column} className="booklet-cell">
-                      {day.readings[column].length === 0 ? (
-                        <>
-                          <span aria-hidden="true">–</span>
-                          <span className="sr-only">{msg.notRecorded}</span>
-                        </>
-                      ) : (
-                        day.readings[column].map((reading, index) => (
-                          <Fragment key={index}>
-                            <span className="booklet-value">
-                              {reading.value}
-                              {reading.unit === UNIT ? null : <span className="booklet-unit"> {reading.unit}</span>}
-                            </span>
-                            <span className="booklet-time">{time(reading.at)}</span>
-                          </Fragment>
-                        ))
-                      )}
-                    </td>
-                  ))}
-                </tr>
-                {day.notes.length > 0 ? (
-                  <tr className="booklet-notes-row">
-                    <td colSpan={BOOKLET_COLUMNS.length + 1}>
-                      <span className="booklet-notes-label">{msg.notesLabel}: </span>
-                      {day.notes.map((note, index) => (
-                        <span key={index} className={`booklet-note booklet-note--${note.kind.toLowerCase()}`}>
-                          <span className="booklet-note-time">{time(note.at)}</span> {noteText(note)}
-                        </span>
-                      ))}
-                    </td>
+            {view.days.map((day) => {
+              const parts = formatDayParts(locale, day.date);
+              const empty = day.notes.length === 0 && BOOKLET_COLUMNS.every((column) => day.readings[column].length === 0);
+              return (
+                <tbody key={day.date} className={`booklet-day${empty ? " booklet-day--empty" : ""}${day.date === view.today ? " booklet-day--today" : ""}`}>
+                  <tr className="booklet-row">
+                    <th scope="row" className="booklet-date">
+                      <span className="booklet-weekday">{parts.weekday}</span>
+                      <span className="booklet-day-date">{parts.date}</span>
+                      {day.date === view.today ? <span className="booklet-today">{msg.today}</span> : null}
+                    </th>
+                    {empty ? (
+                      // A day with nothing recorded is one quiet line, not seven empty boxes.
+                      <td colSpan={BOOKLET_COLUMNS.length} className="booklet-nothing">
+                        {msg.nothingRecorded}
+                      </td>
+                    ) : (
+                      BOOKLET_COLUMNS.map((column) => (
+                        <td key={column} className={`booklet-cell${GROUP_STARTS.has(column) ? " booklet-cell--group-start" : ""}`}>
+                          {day.readings[column].length === 0 ? (
+                            <>
+                              <span aria-hidden="true" className="booklet-blank">
+                                –
+                              </span>
+                              <span className="sr-only">{msg.notRecorded}</span>
+                            </>
+                          ) : (
+                            day.readings[column].map((reading, index) => (
+                              <span key={index} className="booklet-reading">
+                                <span className="booklet-value">
+                                  {reading.value}
+                                  {reading.unit === UNIT ? null : <span className="booklet-unit"> {reading.unit}</span>}
+                                </span>
+                                <span className="booklet-time">{time(reading.at)}</span>
+                              </span>
+                            ))
+                          )}
+                        </td>
+                      ))
+                    )}
                   </tr>
-                ) : null}
-              </tbody>
-            ))}
+                  {day.notes.length > 0 ? (
+                    <tr className="booklet-notes-row">
+                      <td colSpan={BOOKLET_COLUMNS.length + 1}>
+                        <span className="sr-only">{msg.notesLabel}: </span>
+                        <ul className="booklet-notes">
+                          {day.notes.map((note, index) => {
+                            const Icon = NOTE_ICONS[note.kind];
+                            return (
+                              <li key={index} className={`booklet-note booklet-note--${note.kind.toLowerCase()}`}>
+                                <Icon size={16} className="icon booklet-note-icon" aria-hidden="true" />
+                                <span className="booklet-note-time">{time(note.at)}</span>
+                                <span className="booklet-note-text">{noteText(note)}</span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              );
+            })}
           </table>
         </div>
       )}
