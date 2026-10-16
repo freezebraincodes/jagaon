@@ -1206,6 +1206,40 @@ describe("durable local-state cleanup across app instances (Corrective Pass C)",
     expect(dev.disk.exists).toBe(false);
   });
 
+  it("opens a new device empty, explains the two starts, and welcomes a new user once after their own setup (owner decision 2026-10-16)", async () => {
+    const dev = device(false);
+    mount(dev, ownerStorage({}, false), ownerStorage({}, false));
+    await welcome();
+    // The highlight card says which start to choose.
+    const card = screen.getByRole("region", { name: en.onboarding.choiceTitle });
+    expect(card).toHaveTextContent(`${en.onboarding.startSetup}: ${en.onboarding.choiceSetup}`);
+    expect(card).toHaveTextContent(`${en.onboarding.usePrepared}: ${en.onboarding.choicePrepared}`);
+    expect(card).toHaveTextContent(en.onboarding.choiceTip);
+    // A new device's dataset is created without the sample records; only the prepared profile adds them.
+    await waitFor(() => expect(dev.runtimeFactory).toHaveBeenCalled());
+    expect(dev.runtimeFactory.mock.calls[0]![1]).toMatchObject({ seedSyntheticScenarioOnCreate: false });
+
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.startSetup }));
+    fireEvent.click(await screen.findByRole("button", { name: en.onboarding.skipForNow }));
+    fireEvent.click(await screen.findByRole("button", { name: en.onboarding.openToday }));
+    const dialog = await screen.findByRole("dialog", { name: en.onboarding.newUserWelcomeTitle(null) });
+    expect(dialog).toHaveTextContent(en.onboarding.newUserWelcomeBody);
+    expect(dialog).toHaveTextContent(en.onboarding.newUserWelcomeSample);
+    fireEvent.click(within(dialog).getByRole("button", { name: en.onboarding.newUserWelcomeAction }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("button", { name: en.today.recordReading })).toBeInTheDocument();
+  });
+
+  it("does not show the new-user welcome after the prepared demo profile (owner decision 2026-10-16)", async () => {
+    const dev = device(false);
+    mount(dev, ownerStorage({}, false), ownerStorage({}, false));
+    await welcome();
+    fireEvent.click(screen.getByRole("button", { name: en.onboarding.usePrepared }));
+    await screen.findByRole("button", { name: en.today.recordReading });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByRole("dialog", { name: en.onboarding.newUserWelcomeTitle(null) })).toBeNull();
+  });
+
   it("a setup finished before the first runtime opens is never sent back to setup", async () => {
     const dev = device(false);
     const onboarding = ownerStorage({}, false);
