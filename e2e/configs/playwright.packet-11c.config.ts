@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 
-const ROOT = resolve(__dirname, "../../../..");
+const ROOT = resolve(__dirname, "../..");
 
 /**
  * Packet 11C C7 bilingual browser and accessibility evidence (technical evidence, not owner approval). Two targets, each its own
