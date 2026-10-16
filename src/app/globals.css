@@ -7019,15 +7019,17 @@ button.summary-tile:hover:not(:disabled) {
   overflow: hidden;
 }
 
+/* Owner decision 2026-10-16: then and now in the JagaOn brand colour, soft for the earlier weeks and full for the last 2 weeks.
+   Navy is left for the History chart's evening bars. Neither shade means good or bad. */
 .trends-bar-fill {
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: var(--ink-2);
+  background: var(--terracotta-soft);
 }
 
 .trends-row--recent .trends-bar-fill {
-  background: var(--reviewed);
+  background: var(--terracotta);
 }
 
 .trends-number {
