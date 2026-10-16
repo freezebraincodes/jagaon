@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
 
-const ROOT = path.resolve(__dirname, "../../../..");
+const ROOT = path.resolve(__dirname, "../..");
 
 /**
  * Packet 13 voice browser evidence (technical evidence, not owner approval; presentation human acceptance pending). Two targets, each

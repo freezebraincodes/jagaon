@@ -399,7 +399,7 @@
       "groups": [
         {
           "runner": "playwright",
-          "config": "internal-docs/testing/playwright/configs/playwright.config.ts",
+          "config": "e2e/configs/playwright.config.ts",
           "files": [
             "e2e/packet-10/cross-browser.spec.ts",
             "e2e/packet-10/data-backup.spec.ts"
@@ -407,7 +407,7 @@
         },
         {
           "runner": "playwright",
-          "config": "internal-docs/testing/playwright/configs/playwright.packet-11c.config.ts",
+          "config": "e2e/configs/playwright.packet-11c.config.ts",
           "files": [
             "e2e/packet-11c/harness-care.spec.ts",
             "e2e/packet-11c/harness-history.spec.ts",
@@ -417,7 +417,7 @@
         },
         {
           "runner": "playwright",
-          "config": "internal-docs/testing/playwright/configs/playwright.packet-13.config.ts",
+          "config": "e2e/configs/playwright.packet-13.config.ts",
           "files": [
             "e2e/packet-13/isolation.spec.ts",
             "e2e/packet-13/voice-demo.spec.ts",
@@ -431,7 +431,7 @@
       "groups": [
         {
           "runner": "playwright",
-          "config": "internal-docs/testing/playwright/configs/playwright.packet-12.config.ts",
+          "config": "e2e/configs/playwright.packet-12.config.ts",
           "files": [
             "e2e/packet-12/critical-journey.spec.ts",
             "e2e/packet-12/time-wheel-rapid-keys.spec.ts"
@@ -444,7 +444,7 @@
       "groups": [
         {
           "runner": "playwright",
-          "config": "internal-docs/testing/playwright/configs/playwright.packet-11c.config.ts",
+          "config": "e2e/configs/playwright.packet-11c.config.ts",
           "files": [
             "e2e/packet-11c/production.spec.ts"
           ]

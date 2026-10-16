@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
 
-const ROOT = path.resolve(__dirname, "../../../..");
+const ROOT = path.resolve(__dirname, "../..");
 
 /**
  * Packet 12B B2 critical journey (and later Packet 12 specs). Production build only, own port, never reused (a stale server fails
