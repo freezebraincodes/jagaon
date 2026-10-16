@@ -42,6 +42,7 @@ describe("Booklet query", () => {
     const view = ready(await createBookletQuery(database, { now: () => NOW }).load({ period: "THIS_WEEK" }));
 
     expect(view.range).toEqual({ startDate: "2026-09-28", endDate: "2026-10-04" });
+    expect(view.today).toBe("2026-10-04");
     expect(view.days.map((day) => day.date)).toEqual(["2026-10-04", "2026-10-03", "2026-10-02", "2026-10-01", "2026-09-30", "2026-09-29", "2026-09-28"]);
     const tuesday = view.days.find((day) => day.date === "2026-09-29")!;
     // A fasting reading is written before breakfast, in time order with the before-breakfast one.

@@ -942,6 +942,8 @@ export const enSGMessages: AppMessages = {
       BEDTIME: "Bedtime",
     },
     notRecorded: "not recorded",
+    nothingRecorded: "Nothing recorded",
+    today: "Today",
     notesLabel: "Notes",
     noTime: "no time",
     noteReading: (value, unit) => `Reading ${value} ${unit}`,

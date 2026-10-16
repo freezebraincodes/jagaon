@@ -1218,6 +1218,8 @@ export type BookletMessages = {
   /** The full name of each column, for screen readers. */
   columnNames: Record<"BREAKFAST_BEFORE" | "BREAKFAST_AFTER" | "LUNCH_BEFORE" | "LUNCH_AFTER" | "DINNER_BEFORE" | "DINNER_AFTER" | "BEDTIME", string>;
   notRecorded: string;
+  nothingRecorded: string;
+  today: string;
   notesLabel: string;
   noTime: string;
   noteReading: (value: string, unit: string) => string;

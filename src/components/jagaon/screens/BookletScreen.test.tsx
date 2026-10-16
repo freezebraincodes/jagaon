@@ -26,7 +26,7 @@ const monday: BookletDay = { date: "2026-10-12" as never, readings: empty(), not
 
 function port(): BookletQueryPort & { load: ReturnType<typeof vi.fn> } {
   return {
-    load: vi.fn(async ({ period }) => ({ status: "READY" as const, period, range: { startDate: "2026-10-12" as never, endDate: "2026-10-13" as never }, days: [tuesday, monday] })),
+    load: vi.fn(async ({ period }) => ({ status: "READY" as const, period, today: "2026-10-13" as never, range: { startDate: "2026-10-12" as never, endDate: "2026-10-13" as never }, days: [tuesday, monday] })),
   };
 }
 
@@ -42,14 +42,17 @@ describe("Booklet screen", () => {
     expect(headers).toEqual(["Date", "Breakfast", "Lunch", "Dinner", "Bedtime", "Before breakfast", "After breakfast", "Before lunch", "After lunch", "Before dinner", "After dinner"]);
 
     const rows = within(table).getAllByRole("row");
-    const tuesdayRow = rows.find((row) => within(row).queryByRole("rowheader")?.textContent === "Tue 13 Oct")!;
+    const tuesdayRow = rows.find((row) => within(row).queryByRole("rowheader")?.textContent?.startsWith("Tue13 Oct"))!;
     const cells = within(tuesdayRow).getAllByRole("cell").map((cell) => cell.textContent);
     expect(cells).toEqual(["6.17:12 am", "–not recorded", "–not recorded", "–not recorded", "9.36:47 pm", "–not recorded", "–not recorded"]);
 
     const notes = rows[rows.indexOf(tuesdayRow) + 1]!;
-    expect(notes).toHaveTextContent("Notes: 7:30 am Kaya toast8:00 am Metformin takenno time Morning walk, 20 min");
-    // An empty day has no notes row.
-    const mondayRow = rows.find((row) => within(row).queryByRole("rowheader")?.textContent === "Mon 12 Oct")!;
+    expect(notes).toHaveTextContent("Notes: 7:30 amKaya toast8:00 amMetformin takenno timeMorning walk, 20 min");
+    expect(within(notes).getAllByRole("listitem")).toHaveLength(3);
+    // Today is marked; a day with nothing recorded is one quiet line, with no notes row.
+    expect(within(tuesdayRow).getByRole("rowheader")).toHaveTextContent("Tue13 OctToday");
+    const mondayRow = rows.find((row) => within(row).queryByRole("rowheader")?.textContent === "Mon12 Oct")!;
+    expect(within(mondayRow).getAllByRole("cell").map((cell) => cell.textContent)).toEqual([en.booklet.nothingRecorded]);
     expect(rows.indexOf(mondayRow)).toBe(rows.length - 1);
   });
 
@@ -61,7 +64,7 @@ describe("Booklet screen", () => {
     expect(booklet.load).toHaveBeenLastCalledWith({ period: "THIRTY_DAYS" });
     cleanup();
 
-    const failing = { load: vi.fn().mockResolvedValueOnce({ status: "UNAVAILABLE" }).mockResolvedValue({ status: "READY", period: "THIS_WEEK", range: { startDate: "2026-10-12", endDate: "2026-10-13" }, days: [] }) };
+    const failing = { load: vi.fn().mockResolvedValueOnce({ status: "UNAVAILABLE" }).mockResolvedValue({ status: "READY", period: "THIS_WEEK", today: "2026-10-13", range: { startDate: "2026-10-12", endDate: "2026-10-13" }, days: [] }) };
     render(<BookletScreen messages={en} locale="en-SG" booklet={failing} />);
     fireEvent.click(await screen.findByRole("button", { name: en.booklet.retry }));
     expect(await screen.findByRole("table")).toBeInTheDocument();
