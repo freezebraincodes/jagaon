@@ -32,10 +32,10 @@
   --danger: #b3261e;
   --danger-tint: #fce8e5;
   --reviewed: #2f4a63;
-  /* Owner decision 2026-10-16: History chart colours, one per time of day (morning, afternoon, evening). */
-  --time-morning: #c08a2e;
-  --time-afternoon: #3b8c8c;
-  --time-evening: #2f4a63;
+  /* Owner decision 2026-10-16: History chart colours, one per time of day (morning, afternoon, evening), taken from the JagaOn palette. */
+  --time-morning: var(--amber);
+  --time-afternoon: var(--terracotta);
+  --time-evening: var(--reviewed);
   --reviewed-tint: #eef3f7;
   --reviewed-line: #d3e0ea;
   --safe-top: env(safe-area-inset-top, 0px);
@@ -4037,6 +4037,50 @@ button.summary-tile:hover:not(:disabled) {
 .history-bar--evening,
 .history-legend-swatch--evening {
   background: var(--time-evening);
+}
+
+/* Owner decision 2026-10-16: pointing at or tapping a bar shows its reading above the chart and over the bar. */
+.history-readout {
+  margin: 0;
+  min-height: 1.5rem;
+  font-size: 0.9375rem;
+  color: var(--ink-3);
+}
+
+.history-readout--reading {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.history-plot {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.history-bar--recorded {
+  position: relative;
+}
+
+.history-bar--selected {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.history-bar-value {
+  position: absolute;
+  bottom: calc(100% + 0.25rem);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.375rem;
+  background: var(--ink);
+  color: var(--card);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* CR-11 (AC-20z): a recorded 0.0 is drawn as a thin solid line, never as an empty (not-recorded) outline. */
