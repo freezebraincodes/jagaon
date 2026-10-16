@@ -6,7 +6,10 @@
  * Shape (42 days): before-breakfast readings on most days (a few days not recorded), before-dinner readings on some days (fewer in the
  * last two weeks), routine meals in the last three weeks, morning walks from the last two and a half weeks, and one reading whose time
  * was later corrected (entered as 07:37, corrected to 07:07). The before-breakfast values move from about 7.0–8.2 mmol/L in the earlier
- * weeks to about 5.6–6.6 in the last two weeks (the History comparison shows them lower); the before-dinner values stay moderate.
+ * weeks to about 5.7–6.6 in the last two weeks (the History comparison shows them lower). Owner request 2026-10-16 (a second
+ * comparison for the demo): the before-dinner values move from about 7.4–8.4 in the earlier weeks to about 8.8–9.4 in the last two
+ * weeks, with six recent readings on six days over two weeks, so History also shows them higher. Three recent before-breakfast readings
+ * were dropped (their median stays 6.1) so the reading count below is unchanged.
  * The 13 days before today hold 11 glucose readings: a visit summary of the 14-day period with the appointment and one question is 14
  * facts (15 with two questions), well under the 32-fact limit of a care-summary request and within its English remote wording budget,
  * which the planner measures separately (about 16 readings with the appointment and one question; about 13 with two). All values are
@@ -71,30 +74,30 @@ export const PREPARED_DEMO_HISTORY_ROWS: readonly PreparedDemoHistoryRow[] = Obj
   { daysAgo: 15, time: "07:31", kind: "MEAL", slot: "BREAKFAST", label: "Kaya toast" },
   { daysAgo: 15, time: "18:12", kind: "GLUCOSE", slot: "BEFORE_DINNER", value: "7.8" },
   { daysAgo: 14, time: "07:35", kind: "GLUCOSE", slot: "BEFORE_BREAKFAST", value: "6.6" },
-  { daysAgo: 14, time: "18:55", kind: "GLUCOSE", slot: "BEFORE_DINNER", value: "7.7" },
-  { daysAgo: 13, time: "07:11", kind: "GLUCOSE", slot: "BEFORE_BREAKFAST", value: "6.5" },
+  { daysAgo: 14, time: "18:55", kind: "GLUCOSE", slot: "BEFORE_DINNER", value: "8.9" },
   { daysAgo: 13, time: "07:28", kind: "MEAL", slot: "BREAKFAST", label: "Kaya toast" },
   { daysAgo: 13, time: "08:16", kind: "ACTIVITY", label: "Morning walk", durationMinutes: 30 },
   { daysAgo: 12, time: "07:43", kind: "GLUCOSE", slot: "BEFORE_BREAKFAST", value: "6.3" },
   { daysAgo: 12, time: "12:18", kind: "MEAL", slot: "LUNCH", label: "Chicken rice" },
-  { daysAgo: 12, time: "18:31", kind: "GLUCOSE", slot: "BEFORE_DINNER", value: "8.0" },
+  { daysAgo: 12, time: "18:31", kind: "GLUCOSE", slot: "BEFORE_DINNER", value: "9.2" },
   { daysAgo: 11, time: "08:31", kind: "ACTIVITY", label: "Morning walk", durationMinutes: 25 },
-  { daysAgo: 10, time: "07:24", kind: "GLUCOSE", slot: "BEFORE_BREAKFAST", value: "6.4" },
   { daysAgo: 10, time: "07:41", kind: "MEAL", slot: "BREAKFAST", label: "Kaya toast" },
+  { daysAgo: 10, time: "18:40", kind: "GLUCOSE", slot: "BEFORE_DINNER", value: "9.4" },
   { daysAgo: 9, time: "07:05", kind: "GLUCOSE", slot: "BEFORE_BREAKFAST", value: "6.1" },
   { daysAgo: 9, time: "08:22", kind: "ACTIVITY", label: "Morning walk", durationMinutes: 28 },
   { daysAgo: 9, time: "13:04", kind: "MEAL", slot: "LUNCH", label: "Chicken rice" },
   { daysAgo: 8, time: "07:55", kind: "MEAL", slot: "BREAKFAST", label: "Kaya toast" },
   { daysAgo: 7, time: "07:19", kind: "GLUCOSE", slot: "BEFORE_BREAKFAST", value: "5.9" },
   { daysAgo: 7, time: "08:09", kind: "ACTIVITY", label: "Morning walk", durationMinutes: 32 },
-  { daysAgo: 7, time: "18:05", kind: "GLUCOSE", slot: "BEFORE_DINNER", value: "7.9" },
+  { daysAgo: 7, time: "18:05", kind: "GLUCOSE", slot: "BEFORE_DINNER", value: "9.0" },
   { daysAgo: 6, time: "08:06", kind: "MEAL", slot: "BREAKFAST", label: "Kaya toast" },
   { daysAgo: 6, time: "08:37", kind: "ACTIVITY", label: "Morning walk", durationMinutes: 24 },
   { daysAgo: 5, time: "12:41", kind: "MEAL", slot: "LUNCH", label: "Chicken rice" },
-  { daysAgo: 4, time: "07:13", kind: "GLUCOSE", slot: "BEFORE_BREAKFAST", value: "5.6" },
+  { daysAgo: 5, time: "18:22", kind: "GLUCOSE", slot: "BEFORE_DINNER", value: "8.8" },
   { daysAgo: 4, time: "08:28", kind: "ACTIVITY", label: "Morning walk", durationMinutes: 35 },
   { daysAgo: 3, time: "07:32", kind: "GLUCOSE", slot: "BEFORE_BREAKFAST", value: "6.1" },
   { daysAgo: 3, time: "07:50", kind: "MEAL", slot: "BREAKFAST", label: "Kaya toast" },
+  { daysAgo: 3, time: "18:47", kind: "GLUCOSE", slot: "BEFORE_DINNER", value: "9.3" },
   { daysAgo: 2, time: "07:37", kind: "GLUCOSE", slot: "BEFORE_BREAKFAST", value: "5.7", correctedTime: "07:07" },
   { daysAgo: 2, time: "08:14", kind: "ACTIVITY", label: "Morning walk", durationMinutes: 30 },
   { daysAgo: 2, time: "12:26", kind: "MEAL", slot: "LUNCH", label: "Chicken rice" },
