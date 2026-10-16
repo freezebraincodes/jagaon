@@ -699,10 +699,11 @@ export const enSGMessages: AppMessages = {
     choicePrepared:
       "skip setup and open JagaOn with 6 weeks of sample records already in place: readings, meals, exercise, trends, the Booklet and an upcoming appointment with Dr Lim.",
     choiceTip: "Tip: to see the History, Booklet and appointment summary features, choose the prepared profile.",
+    choiceRestart: "You can come back to this screen at any time: go to More → Settings → Delete all data on this device.",
     newUserWelcomeTitle: (name) => (name ? `Welcome to JagaOn, ${name}!` : "Welcome to JagaOn!"),
     newUserWelcomeBody: "Your booklet is new and empty. Everything you record from now on will appear in Today, Booklet and History.",
     newUserWelcomeSample:
-      "Want to explore JagaOn with sample records instead? Go to More → Settings → Reset synthetic demo data, then choose Use the prepared demo profile.",
+      "Want to explore JagaOn with sample records instead? Go to More → Settings → Delete all data on this device, then choose Use the prepared demo profile.",
     newUserWelcomeAction: "Start using JagaOn",
     preparingSample: "Adding 6 weeks of sample records… This takes a few seconds.",
     profileTitle: "How should JagaOn greet you?",
