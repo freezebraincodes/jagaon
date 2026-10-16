@@ -24,7 +24,6 @@ import {
 } from "../primitives/Icons";
 import { HistoryReadingsChart } from "../history/HistoryReadingsChart";
 import { HistoryFactsCard, type HistoryFact } from "../history/HistoryFactsCard";
-import { BookletStamps } from "../history/BookletStamps";
 import { formatDateRange, formatList, formatPosition } from "../history/history-format";
 import { PatternExplanationPanel, type PatternExplainerPort, type PatternExplanationResult } from "../history/PatternExplanationPanel";
 import { AiDisclosureDialog } from "../ai/AiDisclosureDialog";
@@ -589,7 +588,7 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
             </button>
           </HistoryFactsCard>
           <HabitTrendPreviewCard messages={messages} previewInsights={previewInsights} />
-          <BookletStamps messages={messages} locale={locale} stamps={projection.stamps} />
+          {/* Owner decision 2026-10-16: the Booklet stamps card is hidden (the Booklet tab now shows each day's readings in full). */}
           <button
             type="button"
             className="btn btn-outline btn-wide history-select-facts"
