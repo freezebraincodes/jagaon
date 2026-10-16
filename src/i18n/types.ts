@@ -242,6 +242,35 @@ export type MealMessages = {
   chooseToSave: string;
 };
 
+/** Owner request 2026-10-16: the "Record an activity" tap form (en for the hackathon; zh drafts, acceptance pending). */
+export type ActivityEntryMessages = {
+  screenTitle: string;
+  subtitle: string;
+  whatDidYouDo: string;
+  kindWalk: string;
+  kindRun: string;
+  kindSwim: string;
+  kindCycle: string;
+  kindYoga: string;
+  kindStrength: string;
+  kindHousework: string;
+  kindOther: string;
+  labelField: string;
+  labelHint: string;
+  labelRequired: string;
+  durationLabel: string;
+  durationOther: string;
+  durationNotSure: string;
+  hoursLabel: string;
+  minutesLabel: string;
+  durationHint: string;
+  durationInvalid: string;
+  timeLabel: string;
+  noJudgement: string;
+  saveAction: string;
+  chooseToSave: string;
+};
+
 /** Medication understanding messages (frame 08). */
 export type MedicationMessages = {
   title: string;
@@ -1312,4 +1341,6 @@ export type AppMessages = {
   careSummary: CareSummaryMessages;
   /** Tell JagaOn understands more: the feelings chat dialog (en notice owner-approved 2026-10-14; zh drafts, acceptance pending). */
   feelingsChat: FeelingsChatMessages;
+  /** Owner request 2026-10-16: the "Record an activity" tap form. */
+  activityEntry: ActivityEntryMessages;
 };

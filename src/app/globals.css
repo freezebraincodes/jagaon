@@ -7036,3 +7036,21 @@ button.summary-tile:hover:not(:disabled) {
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
+
+/* Record an activity (owner request 2026-10-16): the chips reuse .choice-group; only the "Other" duration fields are new. */
+.activity-duration-other {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.activity-duration-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.activity-duration-other .field-hint,
+.activity-duration-other .field-error {
+  margin: 0;
+}

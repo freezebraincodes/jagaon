@@ -243,6 +243,7 @@ describe.each(["en-SG", "zh-SG"] as const)("Tell JagaOn manual-entry chooser (N-
   const DESTINATIONS: ReadonlyArray<readonly [string, string]> = [
     [copy.review.manualReading, m.today.recordReading],
     [copy.review.manualMeal, m.meal.screenTitle],
+    [m.activityEntry.screenTitle, m.activityEntry.screenTitle],
     [copy.review.manualMedicine, m.schedule.title],
   ];
 
@@ -269,6 +270,11 @@ describe.each(["en-SG", "zh-SG"] as const)("Tell JagaOn manual-entry chooser (N-
             expect(await screen.findByRole("heading", { level: 1, name: heading }), `${state} → ${label}`).toBeInTheDocument();
             if (heading === m.today.recordReading) {
               expect((screen.getByRole("textbox", { name: new RegExp(`^${m.glucose.valueLabel}`) }) as HTMLInputElement).value).toBe("");
+            }
+            if (heading === m.activityEntry.screenTitle) {
+              // Record an activity opens blank: nothing chosen, no words carried over from the transcript.
+              expect((screen.getByRole("textbox", { name: new RegExp(`^${m.activityEntry.labelField}`) }) as HTMLInputElement).value).toBe("");
+              expect(screen.getAllByRole("radio").filter((radio) => (radio as HTMLInputElement).checked)).toHaveLength(0);
             }
             if (heading === m.schedule.title) {
               // Medication schedule keeps the person's existing medicines (it is not cleared).

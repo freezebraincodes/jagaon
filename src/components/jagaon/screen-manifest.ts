@@ -52,7 +52,9 @@ export type ScreenId =
   /** Child (Packet 13 slice): Tell JagaOn voice logging, reached from Today */
   | "TELL_JAGAON"
   /** Child (owner decision 2026-10-12): My notes, reached from More */
-  | "MY_NOTES";
+  | "MY_NOTES"
+  /** Child (owner request 2026-10-16): Record an activity, reached from Today and Tell JagaOn */
+  | "RECORD_ACTIVITY";
 
 // Settings (language and demo reset) render inside More, as in frame 12.
 
@@ -107,6 +109,8 @@ export const PACKET_10_CHILD_SCREENS: readonly ScreenId[] = Object.freeze(["DATA
 export const PACKET_13_CHILD_SCREENS: readonly ScreenId[] = Object.freeze(["TELL_JAGAON"]);
 /** Owner decision 2026-10-12: My notes, reached from More (replaces the Reminders placeholder tile). */
 export const MY_NOTES_CHILD_SCREENS: readonly ScreenId[] = Object.freeze(["MY_NOTES"]);
+/** Owner request 2026-10-16: Record an activity, the tap form reached from Today's Activity tile and Tell JagaOn's chooser. */
+export const ACTIVITY_ENTRY_CHILD_SCREENS: readonly ScreenId[] = Object.freeze(["RECORD_ACTIVITY"]);
 
 /** Every enabled journal screen (top-level + Packet 6, 6A, 9B, 9C and 10 children). */
 export const PACKET_6_ENABLED_SCREENS: readonly ScreenId[] = Object.freeze([
@@ -118,6 +122,7 @@ export const PACKET_6_ENABLED_SCREENS: readonly ScreenId[] = Object.freeze([
   ...PACKET_10_CHILD_SCREENS,
   ...PACKET_13_CHILD_SCREENS,
   ...MY_NOTES_CHILD_SCREENS,
+  ...ACTIVITY_ENTRY_CHILD_SCREENS,
 ]);
 
 /**

@@ -26,13 +26,14 @@ import { GlucoseEntryScreen } from "./screens/GlucoseEntryScreen";
 import { ReadingTimeScreen } from "./screens/ReadingTimeScreen";
 import { InsulinEntryScreen } from "./screens/InsulinEntryScreen";
 import { MealEntryScreen } from "./screens/MealEntryScreen";
+import { ActivityEntryScreen } from "./screens/ActivityEntryScreen";
 import { MedicationInformationScreen } from "./screens/MedicationInformationScreen";
 import { NearbyFoodScreen } from "./screens/NearbyFoodScreen";
 import { FoodGeneralInfoScreen } from "./screens/FoodGeneralInfoScreen";
 import { MoreScreen } from "./screens/MoreScreen";
 import { HelpScreen } from "./screens/HelpScreen";
 import type { NoticeView } from "./history/NoticeCard";
-import { TellJagaOnScreen, type VoiceLimitFallback } from "./voice/TellJagaOnScreen";
+import { TellJagaOnScreen, type VoiceLimitFallback, type VoiceManualEntryKind } from "./voice/TellJagaOnScreen";
 import { browserWebSpeechSupported, checkVoiceAccess, checkVoiceProviderAnswer, VOICE_PROVIDER_LOADERS, type VoiceTranscriberLoader } from "./voice/voice-provider-wiring";
 import { VoiceProviderSettingsSection } from "./voice/VoiceProviderSettingsSection";
 import { DEV_SETTINGS_ENABLED } from "./dev-settings-flag";
@@ -239,6 +240,14 @@ function defaultFeelingsChatPort(): FeelingsChatPort {
 
 /** Completion of a delete-all is handled once, by the app-level port wrapper. */
 const noop = () => undefined;
+
+/** Tell JagaOn's chooser and cards: each kind opens its existing entry screen blank. */
+const MANUAL_ENTRY_SCREENS: Readonly<Record<VoiceManualEntryKind, ScreenId>> = {
+  GLUCOSE: "LOG_GLUCOSE",
+  MEAL: "LOG_MEAL",
+  ACTIVITY: "RECORD_ACTIVITY",
+  MEDICATION: "MEDICATION_SCHEDULE",
+};
 
 const EMPTY_TODAY: TodayJournalViewModel = Object.freeze({
   entries: [],
@@ -1032,6 +1041,17 @@ export function JagaOnApp({
             onCommitted={refreshToday}
           />
         );
+      case "RECORD_ACTIVITY":
+        if (!runtime) return <p role="status">{messages.shared.loading}</p>;
+        return (
+          <ActivityEntryScreen
+            messages={messages}
+            locale={locale}
+            commandService={runtime.commands}
+            goBack={goBack}
+            onCommitted={refreshToday}
+          />
+        );
       case "MEDICATION_INFORMATION":
         return (
           <MedicationInformationScreen
@@ -1239,7 +1259,7 @@ export function JagaOnApp({
             onSaveFacts={saveFact ? createVoiceSaveWithRefresh(saveFact, refreshToday) : async () => ({ kind: "NOT_SAVED" as const })}
             // Finding N-1: a card or the chooser opens that existing entry screen blank (no parameters, nothing carried over); Back to Today
             // is a separate exit to the Today tab.
-            onManualEntry={(kind) => navigate(kind === "GLUCOSE" ? "LOG_GLUCOSE" : kind === "MEAL" ? "LOG_MEAL" : "MEDICATION_SCHEDULE")}
+            onManualEntry={(kind) => navigate(MANUAL_ENTRY_SCREENS[kind])}
             // Owner decision 2026-10-14 (design §3.1 steps 4–7): "Talk it through" opens the feelings chat; the note goes to the
             // personal-note service and her doctor question to the existing care-question command (linked to the next appointment).
             feelingsChat={runtime.notes ? { chat: feelingsChatPort, ...createFeelingsChatStorage({ notes: runtime.notes.commands, careOrganisation: runtime.careOrganisation }) } : undefined}

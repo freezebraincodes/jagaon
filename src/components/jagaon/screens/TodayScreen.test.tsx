@@ -346,12 +346,13 @@ describe("TodayScreen", () => {
     expect(container).toHaveTextContent(messages.today.bookletProgress(2));
   });
 
-  it("shows Not recorded on the Activity tile when no activity is recorded, and the tile opens Tell JagaOn", () => {
+  it("shows Not recorded on the Activity tile when no activity is recorded, and the tile opens Record an activity", () => {
     const { messages, getByRole, navigate } = setup({ locale: "en-SG" });
     const tile = getByRole("button", { name: messages.today.activityTitle });
     expect(tile).toHaveTextContent(messages.today.notRecorded);
     fireEvent.click(tile);
-    expect(navigate).toHaveBeenCalledWith("TELL_JAGAON");
+    expect(navigate).toHaveBeenCalledWith("RECORD_ACTIVITY");
+    expect(navigate).not.toHaveBeenCalledWith("TELL_JAGAON");
   });
 
   it("shows the latest recorded activity on the Activity tile, from any day", () => {

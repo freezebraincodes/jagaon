@@ -457,7 +457,7 @@ export function TodayScreen({
           type="button"
           className="summary-tile"
           aria-label={msg.activityTitle}
-          onClick={() => navigate("TELL_JAGAON")}
+          onClick={() => navigate("RECORD_ACTIVITY")}
           disabled={actionsDisabled}
         >
           <WalkIcon size={28} className="icon summary-tile-icon" />
