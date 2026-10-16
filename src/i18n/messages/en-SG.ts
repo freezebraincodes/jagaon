@@ -824,7 +824,8 @@ export const enSGMessages: AppMessages = {
     chartDescription: (recorded, positions, unit) =>
       `Chart of ${recorded} recorded readings across ${positions} display positions, in ${unit}. Missing positions are labelled not recorded.`,
     // Owner decision 2026-10-12: every reading is drawn; the note says how.
-    chartSlotsNote: "Two display positions per day: morning (before 12 pm) and evening. Each recorded reading has its own bar.",
+    // Owner decision 2026-10-16: three times of day, as on Today; two readings a day is fine.
+    chartSlotsNote: "Three times of day: morning (before 12 pm), afternoon (12 to 6 pm) and evening (from 6 pm). Each reading has its own bar. Two readings a day is fine.",
     recordedDataTag: "Your recorded data",
     factsTitle: "What these records show",
     periodRange: (range) => `${range}`,
@@ -855,9 +856,9 @@ export const enSGMessages: AppMessages = {
       "This is a record, not a clinical analysis. Numbers describe what you entered and do not explain why.",
     bookletTitle: "Booklet stamps",
     bookletOnly: "logging completion only",
-    bookletExplanation: "A stamp means both display positions were recorded that day. It says nothing about the values.",
-    completeStamp: (date) => `Both display positions recorded on ${date}.`,
-    incompleteStamp: (date, count) => `${count} of 2 display positions recorded on ${date}.`,
+    bookletExplanation: "A stamp means readings were recorded at two or more times of day. It says nothing about the values.",
+    completeStamp: (date) => `Readings at two or more times of day on ${date}.`,
+    incompleteStamp: (date, count) => (count === 0 ? `No reading recorded on ${date}.` : `A reading at one time of day on ${date}.`),
     actionsTag: "Your actions",
     addFacts: "Add these facts to appointment notes",
     selectFacts: "Select facts for appointment notes",
@@ -872,7 +873,8 @@ export const enSGMessages: AppMessages = {
       BEFORE_DINNER: "before dinner",
       BEDTIME: "bedtime",
     },
-    positionLabels: { MORNING: "morning", EVENING: "evening" },
+    positionLabels: { MORNING: "morning", AFTERNOON: "afternoon", EVENING: "evening" },
+    positionLegend: { MORNING: "Morning", AFTERNOON: "Afternoon", EVENING: "Evening" },
     // Owner decision 2026-10-16: Notice (a plain sentence) and Trends (the same comparison as two bars). Descriptive only.
     notice: {
       title: "Noticed in your readings",

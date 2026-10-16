@@ -22,7 +22,11 @@ export type HistoryPeriod = (typeof HISTORY_PERIODS)[number];
 export const HISTORY_LABELLED_SLOTS = Object.freeze(["BEFORE_BREAKFAST", "BEFORE_LUNCH", "BEFORE_DINNER", "BEDTIME"] as const);
 export type HistorySlot = (typeof HISTORY_LABELLED_SLOTS)[number];
 
-export const HISTORY_DISPLAY_POSITIONS = Object.freeze(["MORNING", "EVENING"] as const);
+/**
+ * Owner decision 2026-10-16: three display positions per day, as on Today's booklet: MORNING (before 12:00), AFTERNOON (12:00 to
+ * 17:59) and EVENING (from 18:00), Singapore wall-clock time.
+ */
+export const HISTORY_DISPLAY_POSITIONS = Object.freeze(["MORNING", "AFTERNOON", "EVENING"] as const);
 export type HistoryDisplayPosition = (typeof HISTORY_DISPLAY_POSITIONS)[number];
 
 const periodSchema = z.enum(HISTORY_PERIODS);
@@ -61,7 +65,8 @@ const projectionSchema = z.strictObject({
   chart: z.array(chartPositionSchema),
   notRecordedPositions: z.array(z.strictObject({ date: localDateSchema, position: positionSchema })),
   stamps: z.array(
-    z.strictObject({ date: localDateSchema, recordedPositions: z.number().int().min(0).max(2), complete: z.boolean() }),
+    // `complete`: readings at two or more of the three times of day (owner decision 2026-10-16: two readings a day is fine).
+    z.strictObject({ date: localDateSchema, recordedPositions: z.number().int().min(0).max(3), complete: z.boolean() }),
   ),
   source: z.literal("PATIENT_ENTERED"),
   correctedRecordCount: count,

@@ -167,7 +167,10 @@ describe("Recorded history screen", () => {
     const table = screen.getByRole("table");
     expect(within(table).getAllByRole("row")).toHaveLength(7);
     expect(within(table).getAllByText(en.history.notRecordedLegend)).toHaveLength(2);
-    expect(screen.getByText(en.history.recordedLegend)).toBeInTheDocument();
+    // Owner decision 2026-10-16: the legend names the three times of day, one colour each.
+    for (const label of Object.values(en.history.positionLegend)) expect(screen.getByText(label)).toBeInTheDocument();
+    expect(document.querySelector(".history-bar--morning")).not.toBeNull();
+    expect(document.querySelector(".history-bar--evening")).not.toBeNull();
     expect(screen.getByText(en.history.chartSlotsNote)).toBeInTheDocument();
     expect(document.querySelectorAll(".history-bar--missing")).toHaveLength(2);
     expect(document.querySelectorAll("[class*='target'], [class*='threshold'], [class*='risk']")).toHaveLength(0);
@@ -195,8 +198,8 @@ describe("Recorded history screen", () => {
     expect(screen.getByRole("heading", { level: 2, name: h.bookletTitle })).toBeInTheDocument();
     expect(screen.getByText(h.bookletOnly)).toBeInTheDocument();
     expect(screen.getByText(h.bookletExplanation)).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /^Both display positions recorded on Mon 28 Sep/ })).toBeInTheDocument();
-    expect(screen.getAllByRole("img", { name: /^1 of 2 display positions recorded on/ })).toHaveLength(2);
+    expect(screen.getByRole("img", { name: /^Readings at two or more times of day on Mon 28 Sep/ })).toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: /^A reading at one time of day on/ })).toHaveLength(2);
   });
 
   it("loads another period and ignores a stale response", async () => {

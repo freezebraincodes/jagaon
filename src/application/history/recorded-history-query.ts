@@ -18,6 +18,7 @@ import { evaluateComparableSlotTrend } from "@/patterns/comparable-slot-trend-ev
 import type { ResolvedGlucoseReading } from "@/patterns/pattern-evaluator-contracts";
 import { projectExplainablePattern } from "./explainable-pattern-view";
 import {
+  HISTORY_DISPLAY_POSITIONS,
   HISTORY_LABELLED_SLOTS,
   recordedHistoryViewSchema,
   type ExplainablePatternRequest,
@@ -45,6 +46,8 @@ import {
 
 /** Singapore has a fixed +08:00 offset; the demo's home timezone. */
 const HOME_OFFSET_MINUTES = 480;
+/** Owner decision 2026-10-16: readings at this many of the three times of day complete a day's booklet stamp. */
+const MIN_POSITIONS_FOR_COMPLETE_DAY = 2;
 const DAY_MS = 86_400_000;
 
 type Dependencies = { now(): Instant };
@@ -67,11 +70,13 @@ export function historyRange(period: HistoryPeriod, now: Instant): DateRange {
 /** MORNING is local 00:00–11:59 and EVENING 12:00–23:59 of the recorded day. */
 function displayPosition(instant: string, offset: number): { date: LocalDate; position: HistoryDisplayPosition } {
   const shifted = new Date(instantMs(instant) + offset * 60_000);
-  return { date: shifted.toISOString().slice(0, 10) as LocalDate, position: shifted.getUTCHours() < 12 ? "MORNING" : "EVENING" };
+  // Owner decision 2026-10-16: the same three times of day as Today's booklet.
+  const hour = shifted.getUTCHours();
+  return { date: shifted.toISOString().slice(0, 10) as LocalDate, position: hour < 12 ? "MORNING" : hour < 18 ? "AFTERNOON" : "EVENING" };
 }
 
 function positionStart(date: string, position: HistoryDisplayPosition): number {
-  return Date.parse(`${date}T${position === "MORNING" ? "00" : "12"}:00:00Z`) - HOME_OFFSET_MINUTES * 60_000;
+  return Date.parse(`${date}T${position === "MORNING" ? "00" : position === "AFTERNOON" ? "12" : "18"}:00:00Z`) - HOME_OFFSET_MINUTES * 60_000;
 }
 
 /**
@@ -236,7 +241,7 @@ export function createRecordedHistoryQuery(database: JagaOnDatabase, dependencie
       for (let date = range.startDate; date <= range.endDate; date = addLocalDays(date, 1)) {
         let included = 0;
         let recorded = 0;
-        for (const position of ["MORNING", "EVENING"] as const) {
+        for (const position of HISTORY_DISPLAY_POSITIONS) {
           if (positionStart(date, position) > instantMs(now)) continue;
           included += 1;
           const here = readings.filter((entry) => entry.display.date === date && entry.display.position === position);
@@ -255,7 +260,8 @@ export function createRecordedHistoryQuery(database: JagaOnDatabase, dependencie
             chart.push({ date, position, state: "NOT_RECORDED" });
           }
         }
-        if (included > 0) stamps.push({ date, recordedPositions: recorded, complete: included === 2 && recorded === 2 });
+        // Owner decision 2026-10-16: readings at two or more times of day complete the day (two readings a day is fine).
+        if (included > 0) stamps.push({ date, recordedPositions: recorded, complete: recorded >= MIN_POSITIONS_FOR_COMPLETE_DAY });
       }
 
       const values = readings.map((entry) => storedMmolValue(entry.reading.payload)).filter((value): value is string => value !== null);
@@ -279,8 +285,11 @@ export function createRecordedHistoryQuery(database: JagaOnDatabase, dependencie
 
       const comparisonFacts = comparisons(snapshot, now);
       const repeatedFacts = repeated(snapshot, range);
+      // A complete day's empty time of day is not listed as missing (owner decision 2026-10-16: two readings a day is fine); the chart
+      // still draws it as an empty outline, never as zero.
+      const completeDays = new Set(stamps.filter((stamp) => stamp.complete).map((stamp) => stamp.date));
       const notRecordedPositions = chart
-        .filter((position) => position.state === "NOT_RECORDED")
+        .filter((position) => position.state === "NOT_RECORDED" && !completeDays.has(position.date))
         .map((position) => ({ date: position.date, position: position.position }));
       const valueRange = sortedValues.length > 0 ? { minimum: sortedValues[0]!, maximum: sortedValues.at(-1)! } : null;
 
