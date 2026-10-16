@@ -49,10 +49,11 @@ const FACT_GROUP_RECORD_TYPE = Object.freeze({ GLUCOSE: "GLUCOSE_READING", INSUL
 const HOME_OFFSET_MS = 8 * 3_600_000;
 const DAY_MS = 86_400_000;
 /**
- * Ordinary preparation period: the 14 local days ending today (within the 180-day maximum). Owner instruction 2026-10-12: was 30; 14 days
- * keep an ordinary visit summary's readings within what one care-summary wording request may carry.
+ * Ordinary preparation period: the 5 local days ending today (within the 180-day maximum). Owner instruction 2026-10-12: was 30, then
+ * 14, so an ordinary visit summary's readings fit what one care-summary wording request may carry. Owner decision 2026-10-16: 5 days, so
+ * three readings a day (the fuller demo history) still fit the AI wording (about 16 readings with the appointment and one question).
  */
-export const VISIT_PREPARATION_PERIOD_DAYS = 14;
+export const VISIT_PREPARATION_PERIOD_DAYS = 5;
 
 const localDateOf = (instant: string) => new Date(Date.parse(instant) + HOME_OFFSET_MS).toISOString().slice(0, 10);
 const localMidnightUtc = (localDate: string) => new Date(Date.parse(`${localDate}T00:00:00.000Z`) - HOME_OFFSET_MS).toISOString() as Instant;
