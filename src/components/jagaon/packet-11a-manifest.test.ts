@@ -469,8 +469,16 @@ const ENVIRONMENT_READ = /process\.env|import\.meta\.env/;
 const DEV_SETTINGS_FLAG = "src/components/jagaon/dev-settings-flag.ts";
 /** Owner-approved Tencent build-time exclusion (2026-10-11): the one read of the inlined, non-secret build constant. */
 const BUILD_EXCLUSIONS = "src/config/build-exclusions.ts";
+/** HSA-bounded mode build flags (owner decision 2026-10-16): one public, non-secret read per module. */
+const HSA_PREVIEW_FLAG = "src/components/jagaon/hsa/hsa-preview-flag.ts";
+const HSA_BOUNDED_DEFAULT_FLAG = "src/components/jagaon/hsa/hsa-bounded-default-flag.ts";
 /** The exact environment name each allowed browser-graph module may read (and nothing else). */
-const BROWSER_ENV_READS: Readonly<Record<string, string>> = { [DEV_SETTINGS_FLAG]: "process.env.NEXT_PUBLIC_JAGAON_DEV_SETTINGS", [BUILD_EXCLUSIONS]: "process.env.JAGAON_TRTC_EXCLUDED" };
+const BROWSER_ENV_READS: Readonly<Record<string, string>> = {
+  [DEV_SETTINGS_FLAG]: "process.env.NEXT_PUBLIC_JAGAON_DEV_SETTINGS",
+  [BUILD_EXCLUSIONS]: "process.env.JAGAON_TRTC_EXCLUDED",
+  [HSA_PREVIEW_FLAG]: "process.env.NEXT_PUBLIC_JAGAON_HSA_PREVIEW",
+  [HSA_BOUNDED_DEFAULT_FLAG]: "process.env.NEXT_PUBLIC_JAGAON_HSA_BOUNDED_DEFAULT",
+};
 const PROVIDER_KEY_NAME = /KIE_API_KEY|DEEPSEEK_API_KEY|ONEMAP_ACCESS_TOKEN|TRTC_SDK_SECRET_KEY/;
 
 describe("Packet 11C Checkpoint 2 guards", () => {
@@ -505,7 +513,8 @@ describe("Packet 11C Checkpoint 2 guards", () => {
     // read of the public, non-secret build-time developer-settings flag (exactly `process.env.NEXT_PUBLIC_JAGAON_DEV_SETTINGS`).
     // Tell JagaOn understands more (deliberate): plus the feelings-chat route, which reads its switches, its own spend limit and (last,
     // through readDeepSeekToken) the credential. HSA preview (deliberate): plus the medicine-information route, which reads the same way.
-    expect(SOURCES.filter((file) => ENVIRONMENT_READ.test(strip(readFileSync(join(ROOT, file), "utf8"))))).toEqual(["src/app/api/ai/feelings/route.ts", "src/app/api/ai/medicine-info/route.ts", "src/app/api/ai/shell/route.ts", "src/app/api/ai/transcript/route.ts", "src/app/api/onemap/search/route.ts", "src/app/api/voice/access/route.ts", "src/app/api/voice/usersig/route.ts", DEV_SETTINGS_FLAG, BUILD_EXCLUSIONS].sort());
+    // HSA build flags (owner decision 2026-10-16, deliberate): plus the two public HSA-bounded mode flags, one read per module.
+    expect(SOURCES.filter((file) => ENVIRONMENT_READ.test(strip(readFileSync(join(ROOT, file), "utf8"))))).toEqual(["src/app/api/ai/feelings/route.ts", "src/app/api/ai/medicine-info/route.ts", "src/app/api/ai/shell/route.ts", "src/app/api/ai/transcript/route.ts", "src/app/api/onemap/search/route.ts", "src/app/api/voice/access/route.ts", "src/app/api/voice/usersig/route.ts", DEV_SETTINGS_FLAG, BUILD_EXCLUSIONS, HSA_PREVIEW_FLAG, HSA_BOUNDED_DEFAULT_FLAG].sort());
     for (const [file, read] of Object.entries(BROWSER_ENV_READS)) expect(strip(readFileSync(join(ROOT, file), "utf8")).match(/process\.env\.[A-Z_]+/g), file).toEqual([read]);
     expect(SOURCES.filter((file) => PROVIDER_KEY_NAME.test(readFileSync(join(ROOT, file), "utf8")))).toEqual([
       "src/ai/deepseek/deepseek-catalogue.ts",
@@ -514,9 +523,11 @@ describe("Packet 11C Checkpoint 2 guards", () => {
       "src/app/api/voice/usersig/voice-usersig-config.ts",
     ]);
     for (const file of CLIENT_GRAPH) {
-      // The developer-settings flag module may name only its own public flag (checked exactly above).
+      // Each allowed flag module may name only its own public flag (checked exactly above), in its read and in its own comments.
       const allowed = BROWSER_ENV_READS[file];
-      const text = allowed ? readFileSync(join(ROOT, file), "utf8").replaceAll(allowed, "").replace(/NEXT_PUBLIC_JAGAON_DEV_SETTINGS/g, "") : readFileSync(join(ROOT, file), "utf8");
+      const text = allowed
+        ? readFileSync(join(ROOT, file), "utf8").replaceAll(allowed, "").replaceAll(allowed.replace("process.env.", ""), "")
+        : readFileSync(join(ROOT, file), "utf8");
       expect(text, file).not.toMatch(/process\.env|import\.meta\.env|KIE_API_KEY|DEEPSEEK_API_KEY|ONEMAP_ACCESS_TOKEN|NEXT_PUBLIC_|\bBearer\b|api\.kie|deepseek\.com|readKieToken|readDeepSeekToken|TRTC_SDK_SECRET_KEY|tls-sig-api-v2/);
     }
     expect(CLIENT_GRAPH.filter((file) => file.startsWith("src/ai/") || file.startsWith("src/app/api/"))).toEqual([]);
