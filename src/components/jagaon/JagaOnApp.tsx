@@ -23,6 +23,7 @@ import type { DemoOnboardingStoragePort } from "@/application/onboarding/demo-on
 import { AppShell } from "./AppShell";
 import { TodayScreen } from "./screens/TodayScreen";
 import { useCareNudgeSummary } from "./hsa/care-nudges";
+import { resetHsaBoundedModeLocalState } from "./hsa/hsa-bounded-mode";
 import { GlucoseEntryScreen } from "./screens/GlucoseEntryScreen";
 import { ReadingTimeScreen } from "./screens/ReadingTimeScreen";
 import { InsulinEntryScreen } from "./screens/InsulinEntryScreen";
@@ -848,7 +849,8 @@ export function JagaOnApp({
     // An owner that is not loaded yet is still attempted, never assumed clear.
     const onboardingOwner = repository ?? repositoryRef.current ?? onboardingRepositoryFactory();
     // Owner decision 2026-10-14: the cached AI medicine information is cleared too.
-    const results = [onboardingOwner.clear().ok, appointmentNotes.clear().ok, clearMedicineInfoLocalState()];
+    // Owner decision 2026-10-16: the HSA-bounded mode switch returns to the build default.
+    const results = [onboardingOwner.clear().ok, appointmentNotes.clear().ok, clearMedicineInfoLocalState(), resetHsaBoundedModeLocalState()];
     return results.every(Boolean);
   }, [appointmentNotes, repository, onboardingRepositoryFactory]);
   clearLocalStateOwnersRef.current = clearLocalStateOwners;
