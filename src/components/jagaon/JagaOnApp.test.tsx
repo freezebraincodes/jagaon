@@ -216,6 +216,7 @@ function fakeRuntime(options?: BrowserJournalRuntimeOptions): JagaOnRuntime {
       load: vi.fn(async ({ period }: { period: "THIS_WEEK" | "LAST_WEEK" | "THIRTY_DAYS" }) => ({
         status: "READY" as const,
         period,
+        today: "2026-10-04" as never,
         range: { startDate: "2026-09-28" as never, endDate: "2026-10-04" as never },
         days: [],
       })),

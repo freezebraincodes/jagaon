@@ -919,6 +919,8 @@ export const zhSGMessages: AppMessages = {
       BEDTIME: "睡前",
     },
     notRecorded: "未记录",
+    nothingRecorded: "没有记录",
+    today: "今天",
     notesLabel: "备注",
     noTime: "未注明时间",
     noteReading: (value, unit) => `读数 ${value} ${unit}`,

@@ -7106,27 +7106,26 @@ button.summary-tile:hover:not(:disabled) {
   padding-inline: 0.5rem;
 }
 
-.booklet-intro {
-  margin: 0;
-  color: var(--ink-2);
-}
-
+.booklet-intro,
 .booklet-loading {
   margin: 0;
   color: var(--ink-2);
 }
 
+/* The sheet: one card, ruled like a paper booklet. It may scroll sideways on a very narrow screen; the page itself never does. */
 .booklet-sheet {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  padding: 0.75rem 0.375rem 0.375rem;
+  padding: 1rem 0.25rem 0.25rem;
   overflow-x: auto;
 }
 
 .booklet-table {
   width: 100%;
-  border-collapse: collapse;
+  min-width: 20rem;
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
   font-variant-numeric: tabular-nums;
 }
@@ -7134,7 +7133,7 @@ button.summary-tile:hover:not(:disabled) {
 .booklet-table caption {
   caption-side: top;
   text-align: left;
-  padding: 0 0.25rem 0.625rem;
+  padding: 0 0.5rem 0.75rem;
   font-family: var(--font-display);
   font-weight: 800;
   font-size: 0.875rem;
@@ -7153,12 +7152,12 @@ button.summary-tile:hover:not(:disabled) {
 
 .booklet-table th,
 .booklet-table td {
-  border: 1px solid var(--line);
-  padding: 0.25rem 0.125rem;
+  padding: 0.5rem 0.125rem;
   text-align: center;
   vertical-align: middle;
 }
 
+/* Column headers: meal names on a soft band, before / after beneath. */
 .booklet-table thead th {
   background: var(--recess);
   color: var(--ink);
@@ -7167,51 +7166,124 @@ button.summary-tile:hover:not(:disabled) {
   line-height: 1.15;
 }
 
+.booklet-table thead tr:first-child th:first-child {
+  border-top-left-radius: 0.625rem;
+}
+
+.booklet-table thead tr:first-child th:last-child {
+  border-top-right-radius: 0.625rem;
+}
+
 .booklet-meal-head {
+  font-size: 0.75rem;
+  padding-top: 0.625rem;
+  word-break: keep-all;
+}
+
+.booklet-date-head {
   font-size: 0.8125rem;
+  text-align: left;
+}
+
+.booklet-table thead .booklet-date-head {
+  padding-left: 0.5rem;
 }
 
 /* Short headers never break inside a word: "Before" and "Bedtime" stay whole on a 375px phone. */
 .booklet-when-head,
 .booklet-bedtime-head {
   font-size: 0.625rem;
-  font-weight: 700;
   word-break: keep-all;
   overflow-wrap: normal;
   hyphens: none;
 }
 
-.booklet-when-head {
+.booklet-table thead .booklet-when-head {
+  padding: 0.125rem 0 0.5rem;
+  font-weight: 700;
   color: var(--ink-2);
 }
 
-.booklet-table thead .booklet-when-head,
+.booklet-table thead tr:last-child th,
+.booklet-table thead .booklet-date-head,
 .booklet-table thead .booklet-bedtime-head {
-  padding-inline: 0;
+  border-bottom: 2px solid var(--line-strong);
 }
 
-.booklet-date-head {
-  font-size: 0.8125rem;
+/* Ruling: a line between days, and a faint line between meal groups. */
+.booklet-cell--group-start {
+  border-left: 1px solid var(--line);
+}
+
+.booklet-row > *,
+.booklet-notes-row > td {
+  border-bottom: 1px solid var(--line);
+}
+
+.booklet-day:has(.booklet-notes-row) .booklet-row > * {
+  border-bottom: none;
 }
 
 .booklet-date {
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 1.15;
+  text-align: left;
+  padding-left: 0.5rem;
   color: var(--ink);
+  line-height: 1.2;
+}
+
+.booklet-weekday {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 0.9375rem;
+}
+
+.booklet-day-date {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.booklet-today {
+  display: inline-block;
+  margin-top: 0.25rem;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 999px;
+  background: var(--terracotta-tint);
+  color: var(--terracotta-dark);
+  font-size: 0.6875rem;
+  font-weight: 800;
+}
+
+.booklet-day--today .booklet-row > *,
+.booklet-day--today .booklet-notes-row > td {
   background: var(--card-2);
 }
 
 .booklet-cell {
-  color: var(--ink-3);
-  font-size: 0.9375rem;
   line-height: 1.1;
+}
+
+.booklet-blank {
+  color: var(--line-strong);
+  font-weight: 700;
+}
+
+.booklet-reading {
+  display: block;
+}
+
+.booklet-reading + .booklet-reading {
+  margin-top: 0.375rem;
 }
 
 .booklet-value {
   display: block;
   color: var(--ink);
+  font-family: var(--font-display);
   font-weight: 800;
+  font-size: 1.0625rem;
 }
 
 .booklet-unit {
@@ -7221,40 +7293,102 @@ button.summary-tile:hover:not(:disabled) {
 
 .booklet-time {
   display: block;
-  margin-bottom: 0.25rem;
-  font-size: 0.625rem;
+  margin-top: 0.125rem;
+  font-size: 0.6875rem;
   color: var(--ink-3);
+  white-space: nowrap;
 }
 
-.booklet-time:last-child {
-  margin-bottom: 0;
-}
-
-.booklet-notes-row td {
+.booklet-nothing {
   text-align: left;
-  padding: 0.375rem 0.5rem;
-  font-size: 0.8125rem;
-  line-height: 1.4;
-  color: var(--ink);
-  background: var(--card);
-}
-
-.booklet-notes-label {
-  font-weight: 800;
-  color: var(--ink-2);
-}
-
-.booklet-note + .booklet-note::before {
-  content: " · ";
+  padding-left: 0.75rem;
+  font-size: 0.875rem;
+  font-style: italic;
   color: var(--ink-3);
+}
+
+/* Notes: one item per meal, medicine, activity or untimed reading, each with its own small icon. */
+.booklet-notes-row > td {
+  text-align: left;
+  padding: 0 0.5rem 0.75rem 0.5rem;
+}
+
+.booklet-notes {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0.625rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem 1rem;
+  border-radius: 0.625rem;
+  background: var(--recess);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--ink);
+}
+
+.booklet-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+}
+
+.booklet-note-icon {
+  flex: none;
+  color: var(--ink-2);
 }
 
 .booklet-note-time {
-  color: var(--ink-2);
   font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
 }
 
-/* A thicker rule between days, like the ruled lines of a paper booklet. */
-.booklet-day + .booklet-day .booklet-row > * {
-  border-top: 2px solid var(--line-strong);
+@media (min-width: 30rem) {
+  .booklet-sheet {
+    padding: 1.25rem 1rem 0.75rem;
+  }
+
+  .booklet-table caption {
+    padding-inline: 0.5rem;
+  }
+
+  .booklet-col-date {
+    width: 4.5rem;
+  }
+
+  .booklet-col-bedtime {
+    width: auto;
+  }
+
+  .booklet-table th,
+  .booklet-table td {
+    padding: 0.75rem 0.25rem;
+  }
+
+  .booklet-when-head,
+  .booklet-bedtime-head {
+    font-size: 0.75rem;
+  }
+
+  .booklet-table thead .booklet-when-head {
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  .booklet-meal-head {
+    font-size: 0.9375rem;
+  }
+
+  .booklet-value {
+    font-size: 1.25rem;
+  }
+
+  .booklet-time {
+    font-size: 0.75rem;
+  }
+
+  .booklet-notes {
+    font-size: 0.875rem;
+  }
 }

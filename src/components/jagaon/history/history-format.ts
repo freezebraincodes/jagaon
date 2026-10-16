@@ -44,6 +44,14 @@ export function formatShortDate(locale: SupportedLocale, date: string): string {
   return locale === "zh-SG" ? `${p.month + 1}月${p.day}日${ZH_WEEKDAYS[p.weekday]}` : `${EN_WEEKDAYS_SHORT[p.weekday]} ${p.day} ${EN_MONTHS[p.month]}`;
 }
 
+/** A day split in two lines for a table row: { weekday: "Thu", date: "15 Oct" } / { weekday: "周四", date: "10月15日" }. */
+export function formatDayParts(locale: SupportedLocale, date: string): { weekday: string; date: string } {
+  const p = parts(date);
+  return locale === "zh-SG"
+    ? { weekday: ZH_WEEKDAYS[p.weekday]!, date: `${p.month + 1}月${p.day}日` }
+    : { weekday: EN_WEEKDAYS_SHORT[p.weekday]!, date: `${p.day} ${EN_MONTHS[p.month]}` };
+}
+
 /**
  * Owner decision 2026-10-16: a chart day label in two lines, weekday over date: "Tue" / "13" for a week, "T" / "13" for 30 days
  * (each day has less room); "周二" / "13" and "二" / "13" in Chinese.
