@@ -1,8 +1,19 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { getMessages } from "@/i18n/get-messages";
 import type { HistoryChartPosition } from "@/application/history/recorded-history-contracts";
 import { HistoryReadingsChart } from "./HistoryReadingsChart";
+
+// jsdom has no PointerEvent: without one, fireEvent drops clientX and pointerType.
+if (typeof globalThis.PointerEvent === "undefined") {
+  globalThis.PointerEvent = class extends MouseEvent {
+    pointerType: string;
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerType = init.pointerType ?? "";
+    }
+  } as unknown as typeof PointerEvent;
+}
 
 /** Owner decision 2026-10-12: every reading is drawn; a position never shows only its latest reading. */
 const CHART = [
@@ -48,5 +59,37 @@ describe("HistoryReadingsChart", () => {
       ["Wed 30 Sep evening", messages.history.notRecordedLegend],
     ]);
     expect(container.querySelector("#h-description")!.textContent).toBe(messages.history.chartDescription(3, 4, "mmol/L"));
+  });
+
+  it("shows the nearest bar's day, time and value when tapped or pointed at, and clears it on a second tap (owner decision 2026-10-16)", () => {
+    const messages = getMessages("en-SG");
+    const { container } = render(<HistoryReadingsChart messages={messages} locale="en-SG" period="THIS_WEEK" chart={CHART} headingId="h" />);
+    const bars = [...container.querySelectorAll<HTMLElement>(".history-bar--recorded")];
+    bars.forEach((bar, index) => (bar.getBoundingClientRect = () => ({ left: index * 20, width: 10 }) as DOMRect));
+    const plot = container.querySelector(".history-plot")!;
+    const readout = container.querySelector(".history-readout")!;
+    expect(readout.textContent).toBe(messages.history.chartReadout.hint);
+    expect(readout).toHaveAttribute("aria-hidden", "true");
+
+    // A tap near the second bar (centre 25) picks it, even off the bar itself.
+    fireEvent.pointerUp(plot, { pointerType: "touch", clientX: 27 });
+    expect(readout.textContent).toBe("Tue 29 Sep, 1:05 pm: 9.1 mmol/L");
+    expect(container.querySelector(".history-bar--selected .history-bar-value")!.textContent).toBe("9.1");
+    expect(container.querySelectorAll(".history-bar--selected")).toHaveLength(1);
+
+    // Pointing with a mouse shows the bar under the pointer; leaving returns to the tapped one.
+    fireEvent.pointerMove(plot, { pointerType: "mouse", clientX: 44 });
+    expect(readout.textContent).toBe("Tue 29 Sep, 6:40 pm: 7.3 mmol/L");
+    fireEvent.pointerLeave(plot);
+    expect(readout.textContent).toBe("Tue 29 Sep, 1:05 pm: 9.1 mmol/L");
+
+    fireEvent.pointerUp(plot, { pointerType: "touch", clientX: 25 });
+    expect(readout.textContent).toBe(messages.history.chartReadout.hint);
+    expect(container.querySelector(".history-bar-value")).toBeNull();
+  });
+
+  it("words the readout in both locales", () => {
+    expect(getMessages("en-SG").history.chartReadout.reading("Tue 29 Sep", "7:10 am", "6.2", "mmol/L")).toBe("Tue 29 Sep, 7:10 am: 6.2 mmol/L");
+    expect(getMessages("zh-SG").history.chartReadout.reading("9月29日周二", "上午7:10", "6.2", "mmol/L")).toBe("9月29日周二，上午7:10：6.2 mmol/L");
   });
 });

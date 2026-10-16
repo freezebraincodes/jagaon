@@ -875,6 +875,10 @@ export const enSGMessages: AppMessages = {
     },
     positionLabels: { MORNING: "morning", AFTERNOON: "afternoon", EVENING: "evening" },
     positionLegend: { MORNING: "Morning", AFTERNOON: "Afternoon", EVENING: "Evening" },
+    chartReadout: {
+      hint: "Tap or point to a bar to see the reading.",
+      reading: (day, time, value, unit) => `${day}, ${time}: ${value} ${unit}`,
+    },
     // Owner decision 2026-10-16: Notice (a plain sentence) and Trends (the same comparison as two bars). Descriptive only.
     notice: {
       title: "Noticed in your readings",

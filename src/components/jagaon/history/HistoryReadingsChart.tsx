@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import { HISTORY_DISPLAY_POSITIONS, type HistoryChartPosition, type HistoryPeriod } from "@/application/history/recorded-history-contracts";
 import { formatSingaporeTime } from "../journal/singapore-time";
@@ -26,6 +27,9 @@ const UNIT = "mmol/L";
  * Owner decision 2026-10-12: every reading is drawn. A position with several
  * readings shows one bar per reading, side by side in time order, within the
  * position's own width; the table lists each reading with its time.
+ * Owner decision 2026-10-16: pointing at a bar (mouse) or tapping or clicking it shows that reading's day, time and value in a line
+ * above the chart and over the bar; a second tap on the same bar clears it. The nearest bar to the pointer is chosen, so the thin 30-day
+ * bars are easy to hit. This is a visual aid only: the table below stays the accessible source of every value.
  */
 export function HistoryReadingsChart({ messages, locale, period, chart, headingId }: Props) {
   const msg = messages.history;
@@ -35,6 +39,25 @@ export function HistoryReadingsChart({ messages, locale, period, chart, headingI
   const days = [...new Set(chart.map((position) => position.date))];
   const recordedCount = chart.reduce((total, position) => total + (position.state === "RECORDED" ? position.readings.length : 0), 0);
   const descriptionId = `${headingId}-description`;
+  const plotRef = useRef<HTMLDivElement>(null);
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [pinned, setPinned] = useState<string | null>(null);
+  const readings = new Map(
+    chart.flatMap((position) =>
+      position.state === "RECORDED" ? position.readings.map((reading, index) => [`${position.date}|${position.position}|${index}` as string, { date: position.date, reading }] as const) : [],
+    ),
+  );
+  const selectedKey = [hovered, pinned].find((key) => key !== null && readings.has(key)) ?? null;
+  const selected = selectedKey === null ? null : readings.get(selectedKey)!;
+  const nearestBar = (event: ReactPointerEvent<HTMLElement>): string | null => {
+    let best: { key: string; distance: number } | null = null;
+    for (const bar of plotRef.current?.querySelectorAll<HTMLElement>("[data-reading]") ?? []) {
+      const box = bar.getBoundingClientRect();
+      const distance = Math.abs(box.left + box.width / 2 - event.clientX);
+      if (!best || distance < best.distance) best = { key: bar.dataset.reading!, distance };
+    }
+    return best?.key ?? null;
+  };
 
   return (
     <figure className="history-chart" aria-labelledby={headingId} aria-describedby={descriptionId}>
@@ -51,6 +74,11 @@ export function HistoryReadingsChart({ messages, locale, period, chart, headingI
           {msg.notRecordedLegend}
         </li>
       </ul>
+      <p className={`history-readout${selected ? " history-readout--reading" : ""}`} aria-hidden="true">
+        {selected
+          ? msg.chartReadout.reading(formatShortDate(locale, selected.date), formatSingaporeTime(locale, selected.reading.at), selected.reading.valueMmolL, UNIT)
+          : msg.chartReadout.hint}
+      </p>
       <div className="history-plot-frame" aria-hidden="true">
         <div className="history-axis">
           {ticks.map((tick) => (
@@ -59,7 +87,18 @@ export function HistoryReadingsChart({ messages, locale, period, chart, headingI
             </span>
           ))}
         </div>
-        <div className={`history-plot history-plot--${period === "THIRTY_DAYS" ? "month" : "week"}`}>
+        <div
+          ref={plotRef}
+          className={`history-plot history-plot--${period === "THIRTY_DAYS" ? "month" : "week"}`}
+          onPointerMove={(event) => {
+            if (event.pointerType === "mouse") setHovered(nearestBar(event));
+          }}
+          onPointerLeave={() => setHovered(null)}
+          onPointerUp={(event) => {
+            const key = nearestBar(event);
+            setPinned((current) => (current === key ? null : key));
+          }}
+        >
           {ticks.map((tick) => (
             <span key={tick} className="history-gridline" style={{ bottom: `${(tick / axisMax) * 100}%` }} />
           ))}
@@ -80,14 +119,20 @@ export function HistoryReadingsChart({ messages, locale, period, chart, headingI
                     }
                   >
                     {position.state === "RECORDED" ? (
-                      position.readings.map((reading, index) => (
-                        <span
-                          key={index}
-                          className={`history-bar history-bar--recorded history-bar--${position.position.toLowerCase()}${Number(reading.valueMmolL) === 0 ? " history-bar--zero" : ""}`}
-                          data-value={reading.valueMmolL}
-                          style={{ height: `${(Number(reading.valueMmolL) / axisMax) * 100}%` }}
-                        />
-                      ))
+                      position.readings.map((reading, index) => {
+                        const key = `${position.date}|${position.position}|${index}`;
+                        return (
+                          <span
+                            key={index}
+                            className={`history-bar history-bar--recorded history-bar--${position.position.toLowerCase()}${Number(reading.valueMmolL) === 0 ? " history-bar--zero" : ""}${key === selectedKey ? " history-bar--selected" : ""}`}
+                            data-value={reading.valueMmolL}
+                            data-reading={key}
+                            style={{ height: `${(Number(reading.valueMmolL) / axisMax) * 100}%` }}
+                          >
+                            {key === selectedKey ? <span className="history-bar-value">{reading.valueMmolL}</span> : null}
+                          </span>
+                        );
+                      })
                     ) : (
                       <span className="history-bar history-bar--missing" />
                     )}
