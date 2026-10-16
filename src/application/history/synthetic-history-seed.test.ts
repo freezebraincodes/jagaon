@@ -46,7 +46,7 @@ describe("deterministic synthetic Recorded-history seed", () => {
     expect(dinnerTimes.every((time) => time >= "18:05" && time <= "19:20")).toBe(true);
   });
 
-  it("spans 42 days with deliberate gaps, one correction, an improvement before breakfast and few readings in the last 14 days", () => {
+  it("spans 42 days with deliberate gaps, one correction, lower before breakfast and higher before dinner recently, and few readings in the last 14 days", () => {
     const rows = PREPARED_DEMO_HISTORY_ROWS;
     const glucose = rows.filter((row): row is Extract<typeof row, { kind: "GLUCOSE" }> => row.kind === "GLUCOSE");
     const kinds = rows.reduce<Record<string, number>>((acc, row) => ({ ...acc, [row.kind]: (acc[row.kind] ?? 0) + 1 }), {});
@@ -56,21 +56,24 @@ describe("deterministic synthetic Recorded-history seed", () => {
     const breakfast = glucose.filter((row) => row.slot === "BEFORE_BREAKFAST");
     const dinner = glucose.filter((row) => row.slot === "BEFORE_DINNER");
     // Fewer readings than one per day in each slot: some days are intentionally not recorded.
-    expect([breakfast.length, dinner.length]).toEqual([34, 15]);
+    expect([breakfast.length, dinner.length]).toEqual([31, 18]);
     expect(glucose.filter((row) => row.correctedTime)).toEqual([expect.objectContaining({ daysAgo: 2, time: "07:37", correctedTime: "07:07", slot: "BEFORE_BREAKFAST" })]);
     const value = (row: { value: string }) => Number(row.value);
-    // Earlier weeks about 7.0–8.2 mmol/L before breakfast; the last two weeks about 5.6–6.6; before dinner moderate throughout.
+    // Earlier weeks about 7.0–8.2 mmol/L before breakfast; the last two weeks about 5.7–6.6. Before dinner (owner request 2026-10-16):
+    // about 7.4–8.4 in the earlier weeks, about 8.8–9.4 in the last two weeks, with six recent readings inside the last 13 days.
     expect(breakfast.filter((row) => row.daysAgo > 14).every((row) => value(row) >= 7.0 && value(row) <= 8.2)).toBe(true);
     expect(breakfast.filter((row) => row.daysAgo <= 14).every((row) => value(row) >= 5.6 && value(row) <= 6.6)).toBe(true);
-    expect(dinner.every((row) => value(row) >= 7.0 && value(row) <= 8.6)).toBe(true);
+    expect(dinner.filter((row) => row.daysAgo > 14).every((row) => value(row) >= 7.0 && value(row) <= 8.6)).toBe(true);
+    expect(dinner.filter((row) => row.daysAgo <= 14).every((row) => value(row) >= 8.8 && value(row) <= 9.4)).toBe(true);
+    expect(dinner.filter((row) => row.daysAgo <= 13)).toHaveLength(6);
     // Plausible synthetic values only: one decimal place, never a confirmation-range value.
     expect(glucose.every((row) => /^\d\.\d$/.test(row.value) && value(row) > 0 && value(row) <= 50)).toBe(true);
     // The visit summary's 14 days (today and the 13 days before) stay well under the care-summary request's 32-fact limit and within its
-    // English remote wording budget (with the appointment and one question: 14 facts).
-    expect(glucose.filter((row) => row.daysAgo <= 13)).toHaveLength(11);
+    // English remote wording budget (with the appointment and one question: 15 facts).
+    expect(glucose.filter((row) => row.daysAgo <= 13)).toHaveLength(12);
     expect(glucose.filter((row) => row.daysAgo <= 14)).toHaveLength(13);
-    // Fewer before-dinner readings in the last two weeks: too few for a before-dinner comparison, so History shows one comparison.
-    expect(dinner.filter((row) => row.daysAgo <= 14)).toHaveLength(3);
+    // Enough before-dinner readings in the last two weeks for a second comparison (owner request 2026-10-16).
+    expect(dinner.filter((row) => row.daysAgo <= 14)).toHaveLength(6);
     expect(new Set(rows.filter((row) => row.kind === "MEAL").map((row) => (row.kind === "MEAL" ? row.label : "")))).toEqual(new Set(["Kaya toast", "Chicken rice"]));
     expect(new Set(rows.filter((row) => row.kind === "ACTIVITY").map((row) => (row.kind === "ACTIVITY" ? row.label : "")))).toEqual(new Set(["Morning walk"]));
   });

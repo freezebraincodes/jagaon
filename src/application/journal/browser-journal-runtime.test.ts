@@ -67,9 +67,9 @@ describe("browser journal runtime", () => {
     expect(view.status).toBe("READY");
     if (view.status !== "READY") throw new Error("ready");
     expect(view.comparisons.map((fact) => [fact.factId, fact.kind])).toEqual([
-      // The prepared demo data (owner instruction 2026-10-12) shows an improvement before breakfast (was HIGHER) and has too few recent
-      // before-dinner readings for a governed before-dinner statement (was NO_MATERIAL:BEFORE_DINNER).
+      // The prepared demo data (owner instructions 2026-10-12 and 2026-10-16): lower before breakfast, higher before dinner.
       ["COMPARISON:BEFORE_BREAKFAST", "LOWER"],
+      ["COMPARISON:BEFORE_DINNER", "HIGHER"],
     ]);
     // Chicken rice is recorded too rarely in the prepared data to pass the familiar-item gate.
     expect(view.projection.repeated.map((fact) => [fact.kind, fact.label])).toEqual([
@@ -131,7 +131,7 @@ describe("browser journal runtime", () => {
     expect(await runtime.seedPreparedDemoWhenEmpty()).toBe(true);
     const view = await runtime.history.load({ period: "THIS_WEEK" });
     if (view.status !== "READY") throw new Error("ready");
-    expect(view.comparisons.map((fact) => [fact.factId, fact.kind])).toEqual([["COMPARISON:BEFORE_BREAKFAST", "LOWER"]]);
+    expect(view.comparisons.map((fact) => [fact.factId, fact.kind])).toEqual([["COMPARISON:BEFORE_BREAKFAST", "LOWER"], ["COMPARISON:BEFORE_DINNER", "HIGHER"]]);
     const visit = await runtime.careOrganisation.query.loadVisitPreparation();
     expect(visit.status === "READY" && visit.appointment?.payload.appointmentLabel).toBe("Dr Lim, Bukit Merah Polyclinic");
 
