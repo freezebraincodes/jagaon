@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
 import type { RecordId } from "@/domain/shared";
 import type { CareSummaryExportOutcome } from "@/domain/care-preparation/care-summary-export";
@@ -71,6 +71,8 @@ type Props = {
   aiWording?: CareSummaryAiWordingPort | null;
   /** Packet 11C B4b: an accepted replacement's new snapshot, which this screen shows next (the app keeps its navigation in step). */
   onReplaced?: (recordId: RecordId) => void;
+  /** Owner decision 2026-10-16: the period overview from visit preparation, shown above the summary. */
+  overview?: ReactNode;
 };
 
 type Notice = "HASH_MISMATCH" | "SOURCE_CHANGED" | "TEMPLATE_SUPERSEDED" | "FAILED" | null;
@@ -157,7 +159,7 @@ function outcomeText(messages: AppMessages, outcome: CareSummaryExportOutcome | 
  * discarded, except a replacement that already committed (the old preview is then superseded, so the new one is shown). New
  * presentation: human acceptance pending.
  */
-export function CareSummaryPreviewScreen({ messages, locale, recordId, query, commands, print, onBack, aiWording = null, onReplaced }: Props) {
+export function CareSummaryPreviewScreen({ messages, locale, recordId, query, commands, print, onBack, aiWording = null, onReplaced, overview }: Props) {
   const copy = messages.careSummary;
   const t = messages.ai;
   // Packet 11C B4b: after an accepted replacement this screen shows the new snapshot (the app keeps its navigation in step).
@@ -480,6 +482,8 @@ export function CareSummaryPreviewScreen({ messages, locale, recordId, query, co
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
       </p>
+
+      {overview}
 
       {view === null ? <p className="care-loading">{copy.loading}</p> : null}
       {view !== null && !ready ? (

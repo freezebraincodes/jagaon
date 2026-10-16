@@ -5684,6 +5684,37 @@ button.summary-tile:hover:not(:disabled) {
   min-width: 0;
 }
 
+/* Owner decision 2026-10-16: the period overview on visit preparation and the summary preview (plain counts, no colour by value). */
+.care-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  min-width: 0;
+}
+
+.care-overview .choice-group--segmented .choice-face {
+  min-height: 3rem;
+  padding-inline: 0.5rem;
+  text-align: center;
+}
+
+.care-overview-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.care-overview-text p {
+  margin: 0;
+  font-size: 1.0625rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
 .printable-care-summary {
   display: flex;
   flex-direction: column;

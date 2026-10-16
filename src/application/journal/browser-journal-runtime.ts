@@ -526,6 +526,11 @@ export async function createBrowserJournalRuntime(
           await packet8;
           return careOrganisationQuery.loadVisitPreparation();
         },
+        // Owner decision 2026-10-16: the period overview on visit preparation and the summary preview.
+        async loadPeriodOverview(choice: Parameters<NonNullable<CareOrganisationQueryPort["loadPeriodOverview"]>>[0]) {
+          await packet8;
+          return careOrganisationQuery.loadPeriodOverview!(choice);
+        },
       }),
     }),
     resolveLocale: () => localeRepository.resolve(null, now()),

@@ -1152,3 +1152,23 @@ describe("Care-summary preview over the real wiring: optional passcode and AI cr
   });
 });
 
+describe("Care-summary preview: overview (owner decision 2026-10-16)", () => {
+  it("shows the period overview above the summary", async () => {
+    const { h, recordId } = await prepared();
+    render(
+      <CareSummaryPreviewScreen
+        messages={en}
+        locale="en-SG"
+        recordId={recordId}
+        query={h.query}
+        commands={h.service}
+        print={{ print: vi.fn(async () => "DIALOG_OPENED" as const) }}
+        onBack={vi.fn()}
+        overview={<section aria-label="overview">In the last 30 days you logged 1 glucose reading.</section>}
+      />,
+    );
+    const document = await screen.findByRole("article");
+    const overview = screen.getByRole("region", { name: "overview" });
+    expect(overview.compareDocumentPosition(document) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  }, 60_000);
+});

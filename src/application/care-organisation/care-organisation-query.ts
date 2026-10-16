@@ -13,7 +13,10 @@ import {
   type AppointmentView,
   type CareOrganisationQueryPort,
   type CareQuestionView,
+  type FactGroupKey,
   type FactGroupView,
+  type OverviewPeriodChoice,
+  type PeriodOverviewView,
   type PreventiveCareItemView,
   type PreventiveCareView,
   type PreventiveHistoryEntry,
@@ -40,9 +43,11 @@ export type {
   FactGroupKey,
   FactGroupView,
   VisitPreparationView,
+  OverviewPeriodChoice,
+  PeriodOverviewView,
   CareOrganisationQueryPort,
 } from "./care-organisation-contracts";
-export { FACT_GROUP_KEYS } from "./care-organisation-contracts";
+export { FACT_GROUP_KEYS, OVERVIEW_PERIOD_CHOICES } from "./care-organisation-contracts";
 
 const FACT_GROUP_RECORD_TYPE = Object.freeze({ GLUCOSE: "GLUCOSE_READING", INSULIN: "MEDICATION_EVENT", MEALS: "INTAKE_EVENT", WALKS: "ACTIVITY_EVENT" } as const);
 
@@ -171,70 +176,127 @@ export function createCareOrganisationQuery(database: JagaOnDatabase, dependenci
     }
   }
 
+  type Period = { startAt: Instant; endAtExclusive: Instant; startDate: string; endDate: string };
+
+  /** The local days ending today: `days` of them, or from `startAt` when given. */
+  function periodEndingToday(today: string, options: { days: number } | { startAt: Instant }): Period {
+    const endAtExclusive = localMidnightUtc(localDateOf(new Date(Date.parse(`${today}T00:00:00.000Z`) + DAY_MS).toISOString()));
+    if ("startAt" in options) return { startAt: options.startAt, endAtExclusive, startDate: localDateOf(options.startAt), endDate: today };
+    const startDate = localDateOf(new Date(Date.parse(`${today}T00:00:00.000Z`) - (options.days - 1) * DAY_MS).toISOString());
+    return { startAt: localMidnightUtc(startDate), endAtExclusive, startDate, endDate: today };
+  }
+
+  /** The scheduled appointments the patient recorded from today onward, soonest first. */
+  async function upcomingAppointments(today: string): Promise<AppointmentView[]> {
+    const appointments: AppointmentView[] = [];
+    for (const head of await activeHeads("APPOINTMENT")) {
+      const revision = await carePlanHead<AppointmentRevision>(head);
+      if (revision.payload.status !== "SCHEDULED") continue;
+      const at = instantOf(revision.temporal.occurrence);
+      if (at === null || at < localMidnightUtc(today)) continue;
+      appointments.push({ recordId: revision.recordId, revisionId: revision.revisionId, revisionNumber: revision.revisionNumber, payload: revision.payload, scheduledAt: revision.temporal.occurrence });
+    }
+    appointments.sort((a, b) => instantOf(a.scheduledAt)!.localeCompare(instantOf(b.scheduledAt)!) || a.recordId.localeCompare(b.recordId));
+    return appointments;
+  }
+
+  /** The latest past appointment the patient reported attending; a passed date alone is never taken as a visit. */
+  async function lastAttendedVisit(now: Instant): Promise<{ recordId: RecordId; at: Instant } | null> {
+    let latest: { recordId: RecordId; at: Instant } | null = null;
+    for (const head of await activeHeads("APPOINTMENT")) {
+      const revision = await carePlanHead<AppointmentRevision>(head);
+      if (revision.payload.status !== "PATIENT_REPORTED_ATTENDED") continue;
+      const at = instantOf(revision.temporal.occurrence);
+      if (at === null || at >= now) continue;
+      if (!latest || at > latest.at || (at === latest.at && revision.recordId > latest.recordId)) latest = { recordId: revision.recordId, at: at as Instant };
+    }
+    return latest;
+  }
+
+  /** The patient's own questions still ready to ask, in entry order. */
+  async function readyQuestions(): Promise<CareQuestionView[]> {
+    const questions: Array<CareQuestionView & { firstRecordedAt: string }> = [];
+    for (const head of await activeHeads("CARE_QUESTION")) {
+      const revision = await carePlanHead<CareQuestionRevision>(head);
+      if (revision.payload.state !== "READY_TO_ASK" || revision.payload.origin.kind !== "PATIENT_AUTHORED") continue;
+      const first = (await chain<CareQuestionRevision>(head.recordId, carePlanRevisionRowCodec))[0]!;
+      questions.push({
+        firstRecordedAt: first.revisionCreatedAt,
+        recordId: revision.recordId,
+        revisionId: revision.revisionId,
+        revisionNumber: revision.revisionNumber,
+        text: revision.payload.questionText.text,
+        language: revision.payload.questionText.language,
+        relatedAppointment: revision.payload.relatedAppointment?.recordId ?? null,
+      });
+    }
+    // Entry order, so a newly added question appears last.
+    questions.sort((a, b) => a.firstRecordedAt.localeCompare(b.firstRecordedAt) || a.recordId.localeCompare(b.recordId));
+    return questions.map(({ firstRecordedAt: _entryOrder, ...question }) => question);
+  }
+
+  /** Each fact group's current source revisions whose known occurrence falls inside the period, by time. */
+  async function factGroupsIn(period: Period): Promise<FactGroupView[]> {
+    const factGroups: FactGroupView[] = [];
+    for (const key of FACT_GROUP_KEYS) {
+      const recordType = FACT_GROUP_RECORD_TYPE[key];
+      const sources: Array<{ ref: FactGroupView["sources"][number]; at: string }> = [];
+      for (const head of await activeHeads(recordType)) {
+        const stored = validatePacket6StoredRevision(await database.table("recordRevisions").get(head.headRevisionId));
+        const temporal = stored.revision.temporal as { kind: string; occurrence?: TimePoint; start?: TimePoint };
+        const point = temporal.kind === "POINT" ? temporal.occurrence! : temporal.kind === "INTERVAL" ? temporal.start! : { kind: "UNKNOWN" as const };
+        // A medication record with no known time is placed by the occasion the patient recorded it for.
+        const at = instantOf(point) ?? (recordType === "MEDICATION_EVENT" ? intendedOccasionInstant(stored.revision.payload) : null);
+        // An unknown occurrence cannot be placed inside the period, so it is not listed.
+        if (at === null || at < period.startAt || at >= period.endAtExclusive) continue;
+        sources.push({ ref: { recordType, recordId: head.recordId, revisionId: head.headRevisionId } as FactGroupView["sources"][number], at });
+      }
+      sources.sort((a, b) => a.at.localeCompare(b.at) || a.ref.recordId.localeCompare(b.ref.recordId));
+      factGroups.push({ key, sources: sources.map((entry) => entry.ref) });
+    }
+    return factGroups;
+  }
+
   async function loadVisitPreparation(): Promise<VisitPreparationView> {
     try {
-      const now = dependencies.now();
-      const today = localDateOf(now);
-      const startDate = localDateOf(new Date(Date.parse(`${today}T00:00:00.000Z`) - (VISIT_PREPARATION_PERIOD_DAYS - 1) * DAY_MS).toISOString());
-      const period = {
-        startAt: localMidnightUtc(startDate),
-        endAtExclusive: localMidnightUtc(localDateOf(new Date(Date.parse(`${today}T00:00:00.000Z`) + DAY_MS).toISOString())),
-        startDate,
-        endDate: today,
-      };
-
+      const today = localDateOf(dependencies.now());
+      const period = periodEndingToday(today, { days: VISIT_PREPARATION_PERIOD_DAYS });
       // The next scheduled appointment the patient recorded from today onward.
-      const appointments: AppointmentView[] = [];
-      for (const head of await activeHeads("APPOINTMENT")) {
-        const revision = await carePlanHead<AppointmentRevision>(head);
-        if (revision.payload.status !== "SCHEDULED") continue;
-        const at = instantOf(revision.temporal.occurrence);
-        if (at === null || at < localMidnightUtc(today)) continue;
-        appointments.push({ recordId: revision.recordId, revisionId: revision.revisionId, revisionNumber: revision.revisionNumber, payload: revision.payload, scheduledAt: revision.temporal.occurrence });
-      }
-      appointments.sort((a, b) => instantOf(a.scheduledAt)!.localeCompare(instantOf(b.scheduledAt)!) || a.recordId.localeCompare(b.recordId));
-
-      const questions: Array<CareQuestionView & { firstRecordedAt: string }> = [];
-      for (const head of await activeHeads("CARE_QUESTION")) {
-        const revision = await carePlanHead<CareQuestionRevision>(head);
-        if (revision.payload.state !== "READY_TO_ASK" || revision.payload.origin.kind !== "PATIENT_AUTHORED") continue;
-        const first = (await chain<CareQuestionRevision>(head.recordId, carePlanRevisionRowCodec))[0]!;
-        questions.push({
-          firstRecordedAt: first.revisionCreatedAt,
-          recordId: revision.recordId,
-          revisionId: revision.revisionId,
-          revisionNumber: revision.revisionNumber,
-          text: revision.payload.questionText.text,
-          language: revision.payload.questionText.language,
-          relatedAppointment: revision.payload.relatedAppointment?.recordId ?? null,
-        });
-      }
-      // Entry order, so a newly added question appears last.
-      questions.sort((a, b) => a.firstRecordedAt.localeCompare(b.firstRecordedAt) || a.recordId.localeCompare(b.recordId));
-
-      const factGroups: FactGroupView[] = [];
-      for (const key of FACT_GROUP_KEYS) {
-        const recordType = FACT_GROUP_RECORD_TYPE[key];
-        const sources: Array<{ ref: FactGroupView["sources"][number]; at: string }> = [];
-        for (const head of await activeHeads(recordType)) {
-          const stored = validatePacket6StoredRevision(await database.table("recordRevisions").get(head.headRevisionId));
-          const temporal = stored.revision.temporal as { kind: string; occurrence?: TimePoint; start?: TimePoint };
-          const point = temporal.kind === "POINT" ? temporal.occurrence! : temporal.kind === "INTERVAL" ? temporal.start! : { kind: "UNKNOWN" as const };
-          // A medication record with no known time is placed by the occasion the patient recorded it for.
-          const at = instantOf(point) ?? (recordType === "MEDICATION_EVENT" ? intendedOccasionInstant(stored.revision.payload) : null);
-          // An unknown occurrence cannot be placed inside the period, so it is not listed.
-          if (at === null || at < period.startAt || at >= period.endAtExclusive) continue;
-          sources.push({ ref: { recordType, recordId: head.recordId, revisionId: head.headRevisionId } as FactGroupView["sources"][number], at });
-        }
-        sources.sort((a, b) => a.at.localeCompare(b.at) || a.ref.recordId.localeCompare(b.ref.recordId));
-        factGroups.push({ key, sources: sources.map((entry) => entry.ref) });
-      }
-
-      return { status: "READY", appointment: appointments[0] ?? null, questions: questions.map(({ firstRecordedAt: _entryOrder, ...question }) => question), period, factGroups };
+      const appointment = (await upcomingAppointments(today))[0] ?? null;
+      return { status: "READY", appointment, questions: await readyQuestions(), period, factGroups: await factGroupsIn(period) };
     } catch {
       return { status: "UNAVAILABLE" };
     }
   }
 
-  return Object.freeze({ loadPreventiveCare, loadVisitPreparation });
+  /**
+   * Owner decision 2026-10-16: plain counts for the overview on "Prepare for my appointment", over the chosen period only (the
+   * summary's own period is unchanged). Counts use the same placement as the summary's record groups.
+   */
+  async function loadPeriodOverview(choice: OverviewPeriodChoice): Promise<PeriodOverviewView> {
+    try {
+      const now = dependencies.now();
+      const today = localDateOf(now);
+      const visit = await lastAttendedVisit(now);
+      const counted: OverviewPeriodChoice = choice === "SINCE_LAST_VISIT" && !visit ? "LAST_30_DAYS" : choice;
+      const period =
+        counted === "SINCE_LAST_VISIT" ? periodEndingToday(today, { startAt: visit!.at }) : periodEndingToday(today, { days: counted === "LAST_7_DAYS" ? 7 : counted === "LAST_14_DAYS" ? 14 : 30 });
+      const groups = await factGroupsIn(period);
+      const counts = Object.fromEntries(groups.map((group) => [group.key, group.sources.length])) as Record<FactGroupKey, number>;
+      const upcoming = (await upcomingAppointments(today))[0] ?? null;
+      return {
+        status: "READY",
+        choice: counted,
+        period,
+        lastVisit: visit ? { recordId: visit.recordId, localDate: localDateOf(visit.at) } : null,
+        counts,
+        questionCount: (await readyQuestions()).length,
+        questionsFor: upcoming ? (upcoming.payload.careContactLabel ?? upcoming.payload.appointmentLabel) : null,
+      };
+    } catch {
+      return { status: "UNAVAILABLE" };
+    }
+  }
+
+  return Object.freeze({ loadPreventiveCare, loadVisitPreparation, loadPeriodOverview });
 }
