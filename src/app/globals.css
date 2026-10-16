@@ -5729,6 +5729,20 @@ button.summary-tile:hover:not(:disabled) {
   color: var(--ink);
 }
 
+/* Owner decision 2026-10-16: the on-screen summary keeps the app's own column width (the app shell's 30rem, 40rem from 48rem wide), so
+   it reads like the phone screen it is handed over on, never as a wide landscape page. */
+.care-summary-onscreen > * {
+  width: 100%;
+  max-width: calc(30rem - 2 * var(--gutter, 16px));
+  margin-inline: auto;
+}
+
+@media (min-width: 48rem) {
+  .care-summary-onscreen > * {
+    max-width: calc(40rem - 48px);
+  }
+}
+
 .care-summary-onscreen-bar {
   display: flex;
   align-items: center;
