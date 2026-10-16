@@ -133,10 +133,8 @@ export function SettingsScreen({
         </span>
         <ToggleGroup
           label={msg.language}
-          options={[
-            { label: msg.english, value: "en-SG" },
-            { label: msg.chinese, value: "zh-SG" },
-          ]}
+          // Owner decision 2026-10-16: the demo is English only; Chinese stays in the code but is not offered.
+          options={[{ label: msg.english, value: "en-SG" }]}
           value={locale}
           onChange={handleLocaleChange}
         />

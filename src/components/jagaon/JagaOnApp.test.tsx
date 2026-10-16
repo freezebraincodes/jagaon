@@ -564,24 +564,22 @@ describe("JagaOnApp journal integration", () => {
     expect(screen.getByPlaceholderText(en.food.locationPlaceholder)).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
 
-    // Language and reset are part of More (frame 12), not a separate route.
-    fireEvent.click(screen.getByRole("button", { name: en.settings.chinese }));
-    expect(await screen.findByText(zh.settings.languageSaved)).toBeInTheDocument();
-    expect(runtime.persistLocale).toHaveBeenCalledWith("zh-SG");
-    expect(document.documentElement.lang).toBe("zh-SG");
-    expect(screen.getByRole("heading", { level: 1, name: zh.more.title })).toBeInTheDocument();
+    // Language and reset are part of More (frame 12), not a separate route. Owner decision 2026-10-16: the demo is English only, so
+    // Settings offers English alone and the journey stays in English.
+    expect(screen.queryByRole("button", { name: en.settings.chinese })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: en.settings.english })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(zh.more.helpInfo) }));
-    expect(await screen.findByRole("link", { name: new RegExp(zh.help.call995) })).toHaveAttribute("href", "tel:995");
-    expect(screen.getByRole("link", { name: new RegExp(zh.help.nurseFirst) })).toHaveAttribute("href", "tel:62626262");
-    expect(screen.getByRole("link", { name: new RegExp(zh.help.accessibleEmergency) })).toHaveAttribute(
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(en.more.helpInfo) }));
+    expect(await screen.findByRole("link", { name: new RegExp(en.help.call995) })).toHaveAttribute("href", "tel:995");
+    expect(screen.getByRole("link", { name: new RegExp(en.help.nurseFirst) })).toHaveAttribute("href", "tel:62626262");
+    expect(screen.getByRole("link", { name: new RegExp(en.help.accessibleEmergency) })).toHaveAttribute(
       "href",
       "sms:70995",
     );
     expect(screen.queryByText(/1777/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: zh.shared.back }));
+    fireEvent.click(screen.getByRole("button", { name: en.shared.back }));
 
-    confirmDeleteAll(zh);
+    confirmDeleteAll(en);
 
     // Delete-all removes IndexedDB and the onboarding key: setup restarts on a new, unseeded dataset.
     expect(await screen.findByRole("heading", { level: 1, name: en.onboarding.welcomeTitle })).toBeInTheDocument();
@@ -1229,7 +1227,8 @@ describe("durable local-state cleanup across app instances (Corrective Pass C)",
    * Packet 11C C7 finding D1 (fix round 1): the language chosen on Welcome is the setup's own locale. The first runtime's stored locale
    * (en-SG here) never replaces it, whether the runtime opens after the prepared setup finished (a) or while Welcome is still shown (b).
    */
-  it("D1 (a): zh-SG chosen on Welcome stays zh-SG when the first runtime opens after the prepared setup finished", async () => {
+  // Owner decision 2026-10-16: the English-only demo hides the language choice on Welcome; re-enable with it.
+  it.skip("D1 (a): zh-SG chosen on Welcome stays zh-SG when the first runtime opens after the prepared setup finished", async () => {
     const zh = getMessages("zh-SG");
     const dev = device(false);
     dev.holdOpen();
@@ -1247,7 +1246,8 @@ describe("durable local-state cleanup across app instances (Corrective Pass C)",
     expect(document.documentElement.lang).toBe("zh-SG");
   });
 
-  it("D1 (b): zh-SG chosen on Welcome stays zh-SG when the first runtime opens while Welcome is still shown", async () => {
+  // Owner decision 2026-10-16: the English-only demo hides the language choice on Welcome; re-enable with it.
+  it.skip("D1 (b): zh-SG chosen on Welcome stays zh-SG when the first runtime opens while Welcome is still shown", async () => {
     const zh = getMessages("zh-SG");
     const dev = device(false);
     dev.holdOpen();
