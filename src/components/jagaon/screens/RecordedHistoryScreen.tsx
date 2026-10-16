@@ -368,13 +368,14 @@ export function RecordedHistoryScreen({ messages, locale, history, selection, ex
     openExplanation(shownDisclosure.factId, "ACCEPTED");
   }, [shownDisclosure, openExplanation]);
 
-  // Packet 11C B4a: an explicit decline is passed with the request (audited REMOTE_USE_DECLINED since C5; nothing is sent).
+  // Owner decision 2026-10-16: Cancel (or Escape) only closes the dialog: nothing is explained, sent or audited, and the comparison stays
+  // as it was. (Packet 11C B4a used to open the standard-wording explanation here; that wording is now only the fallback when an
+  // accepted AI request fails.)
   const cancelDisclosure = useCallback(() => {
     if (!shownDisclosure) return;
     decidedDisclosures.current.add(shownDisclosure);
     setPendingDisclosure(null);
-    openExplanation(shownDisclosure.factId, "DECLINED");
-  }, [shownDisclosure, openExplanation]);
+  }, [shownDisclosure]);
 
   const changePeriod = useCallback(
     (next: HistoryPeriod) => {
