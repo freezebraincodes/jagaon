@@ -92,4 +92,34 @@ describe("HistoryReadingsChart", () => {
     expect(getMessages("en-SG").history.chartReadout.reading("Tue 29 Sep", "7:10 am", "6.2", "mmol/L")).toBe("Tue 29 Sep, 7:10 am: 6.2 mmol/L");
     expect(getMessages("zh-SG").history.chartReadout.reading("9月29日周二", "上午7:10", "6.2", "mmol/L")).toBe("9月29日周二，上午7:10：6.2 mmol/L");
   });
+
+  it("labels every day with its weekday and date, and lets 30 days scroll sideways at a readable width (owner decision 2026-10-16)", () => {
+    const messages = getMessages("en-SG");
+    const { container, rerender } = render(<HistoryReadingsChart messages={messages} locale="en-SG" period="THIS_WEEK" chart={CHART} headingId="h" />);
+    expect([...container.querySelectorAll(".history-day-label")].map((label) => label.textContent)).toEqual(["Tue29", "Wed30"]);
+    expect(container.querySelector<HTMLElement>(".history-scroll-inner")!.style.width).toBe("");
+    // The scroll area sits inside the hidden visual chart and is never a keyboard stop: the table carries every value.
+    expect(container.querySelector(".history-scroll")).toHaveAttribute("tabindex", "-1");
+
+    rerender(<HistoryReadingsChart messages={messages} locale="en-SG" period="THIRTY_DAYS" chart={CHART} headingId="h" />);
+    expect([...container.querySelectorAll(".history-day-label")].map((label) => label.textContent)).toEqual(["T29", "W30"]);
+    expect(container.querySelector<HTMLElement>(".history-scroll-inner")!.style.width).toBe("5rem");
+  });
+
+  it("does not select a bar when the pointer moved to scroll the chart", () => {
+    const messages = getMessages("en-SG");
+    const { container } = render(<HistoryReadingsChart messages={messages} locale="en-SG" period="THIRTY_DAYS" chart={CHART} headingId="h" />);
+    const plot = container.querySelector(".history-plot")!;
+    fireEvent.pointerDown(plot, { pointerType: "touch", clientX: 100 });
+    fireEvent.pointerUp(plot, { pointerType: "touch", clientX: 40 });
+    expect(container.querySelector(".history-readout")!.textContent).toBe(messages.history.chartReadout.hint);
+    fireEvent.pointerDown(plot, { pointerType: "touch", clientX: 40 });
+    fireEvent.pointerUp(plot, { pointerType: "touch", clientX: 43 });
+    expect(container.querySelector(".history-bar--selected")).not.toBeNull();
+  });
+
+  it("labels days in Chinese as weekday over date", () => {
+    const { container } = render(<HistoryReadingsChart messages={getMessages("zh-SG")} locale="zh-SG" period="THIS_WEEK" chart={CHART} headingId="h" />);
+    expect([...container.querySelectorAll(".history-day-label")].map((label) => label.textContent)).toEqual(["周二29", "周三30"]);
+  });
 });

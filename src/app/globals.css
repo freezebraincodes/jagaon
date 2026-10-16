@@ -3954,11 +3954,38 @@ button.summary-tile:hover:not(:disabled) {
   grid-template-columns: 1.75rem minmax(0, 1fr);
   grid-template-rows: 9.5rem auto;
   column-gap: 0.5rem;
-  row-gap: 0.5rem;
 }
 
 .history-axis {
   position: relative;
+  grid-column: 1;
+  grid-row: 1;
+}
+
+/* Owner decision 2026-10-16: the plot and its day labels scroll sideways together under a fixed axis (30 days). The extra top
+   padding (cancelled by the negative margin) keeps a selected bar's value bubble inside the scroll area's clip. */
+.history-scroll {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-width: 0;
+  margin-top: -1.75rem;
+  padding-top: 1.75rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.history-scroll:focus {
+  outline: none;
+}
+
+.history-scroll-inner {
+  display: grid;
+  grid-template-rows: 9.5rem auto;
+  row-gap: 0.5rem;
+  min-width: 100%;
+  padding-bottom: 0.75rem;
 }
 
 .history-axis-label {
@@ -3980,7 +4007,7 @@ button.summary-tile:hover:not(:disabled) {
 }
 
 .history-plot--month {
-  gap: 1px;
+  gap: 0.25rem;
 }
 
 .history-gridline {
@@ -4041,15 +4068,18 @@ button.summary-tile:hover:not(:disabled) {
 
 /* Owner decision 2026-10-16: pointing at or tapping a bar shows its reading above the chart and over the bar. */
 .history-readout {
-  margin: 0;
-  min-height: 1.5rem;
+  margin: 0 0 1.75rem;
+  min-height: 1.75rem;
   font-size: 0.9375rem;
   color: var(--ink-3);
 }
 
+/* Owner decision 2026-10-16: the chosen reading's day, date, time and value stand out. */
 .history-readout--reading {
   color: var(--ink);
-  font-weight: 700;
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  font-weight: 800;
 }
 
 .history-plot {
@@ -4100,28 +4130,36 @@ button.summary-tile:hover:not(:disabled) {
 }
 
 .history-day-labels {
-  grid-column: 1 / -1;
   display: flex;
   gap: 0.375rem;
   font-family: var(--font-display);
-  font-weight: 800;
-  font-size: 0.875rem;
   color: var(--ink-2);
 }
 
-.history-day-labels .history-axis-spacer {
-  flex: 0 0 calc(1.75rem + 0.5rem - 0.375rem);
-}
-
 .history-plot--month ~ .history-day-labels {
-  gap: 1px;
+  gap: 0.25rem;
 }
 
+/* Owner decision 2026-10-16: weekday over date for every day. */
 .history-day-label {
   flex: 1 1 0;
   min-width: 0;
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.15;
   white-space: nowrap;
+}
+
+.history-day-label-weekday {
+  font-weight: 800;
+  font-size: 0.8125rem;
+}
+
+.history-day-label-date {
+  font-weight: 600;
+  font-size: 0.75rem;
+  color: var(--ink-3);
 }
 
 .history-chart-note {
