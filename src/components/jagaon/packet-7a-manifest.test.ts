@@ -134,8 +134,9 @@ describe("Packet 7A public exports and manifests", () => {
 
   it("ships every 07a copy-matrix row and typed label in both locales", () => {
     const keys = Object.keys(getMessages("en-SG").history).sort();
-    // 54 Packet 7A rows, plus the one Packet 11C Task 7 group `explanation` (pinned in bilingual-evidence.test.ts).
-    expect(keys.filter((key) => key !== "explanation")).toHaveLength(54);
+    // 54 Packet 7A rows (55 with `positionLegend`, owner decision 2026-10-16), plus the Packet 11C Task 7 group `explanation` (pinned
+    // in bilingual-evidence.test.ts) and the owner's 2026-10-16 `notice` and `trends` groups (pinned in NoticeTrends.test.tsx).
+    expect(keys.filter((key) => !["explanation", "notice", "trends"].includes(key))).toHaveLength(55);
     expect(keys).toContain("explanation");
     expect(Object.keys(getMessages("zh-SG").history).sort()).toEqual(keys);
   });

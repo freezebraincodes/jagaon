@@ -805,7 +805,7 @@ export const zhSGMessages: AppMessages = {
     chartDescription: (recorded, positions, unit) =>
       `图表显示${positions}个位置中的${recorded}个读数记录，单位为${unit}。没有记录的位置标为未记录。`,
     // Owner decision 2026-10-12: every reading is drawn; the note says how. Human acceptance pending.
-    chartSlotsNote: "每天显示两个位置：早上（中午12点前）和晚上。每个已记录的读数各有一条柱。",
+    chartSlotsNote: "一天三个时段：早上（中午12点前）、下午（12点至6点）和晚上（6点起）。每个读数各有一条柱。一天两个读数也可以。",
     recordedDataTag: "您记录的数据",
     factsTitle: "这些记录显示",
     periodRange: (range) => `${range}`,
@@ -834,9 +834,9 @@ export const zhSGMessages: AppMessages = {
     loggingLimitation: "这是记录，并非临床分析。数字只描述您输入的内容，并不解释原因。",
     bookletTitle: "记录册印章",
     bookletOnly: "仅代表记录完成",
-    bookletExplanation: "印章表示当天两个显示位置都有记录，并不说明数值的意义。",
-    completeStamp: (date) => `${date}的两个显示位置都有记录。`,
-    incompleteStamp: (date, count) => `${date}的两个显示位置中有${count}个记录。`,
+    bookletExplanation: "印章表示当天在两个或以上时段有记录，并不说明数值的意义。",
+    completeStamp: (date) => `${date}在两个或以上时段有读数。`,
+    incompleteStamp: (date, count) => (count === 0 ? `${date}没有读数记录。` : `${date}在一个时段有读数。`),
     actionsTag: "您的操作",
     addFacts: "将这些事实加入看诊备注",
     selectFacts: "选择要加入看诊备注的事实",
@@ -851,7 +851,8 @@ export const zhSGMessages: AppMessages = {
       BEFORE_DINNER: "晚餐前",
       BEDTIME: "睡前",
     },
-    positionLabels: { MORNING: "早上", EVENING: "晚上" },
+    positionLabels: { MORNING: "早上", AFTERNOON: "下午", EVENING: "晚上" },
+    positionLegend: { MORNING: "早上", AFTERNOON: "下午", EVENING: "晚上" },
     // Drafts (English only for the hackathon).
     notice: {
       title: "从您的读数中注意到",

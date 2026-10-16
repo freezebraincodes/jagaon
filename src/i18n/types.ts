@@ -626,7 +626,9 @@ export type HistoryMessages = {
   familyUnavailable: string;
   disabledFamily: (family: string) => string;
   slotLabels: Record<"BEFORE_BREAKFAST" | "BEFORE_LUNCH" | "BEFORE_DINNER" | "BEDTIME", string>;
-  positionLabels: Record<"MORNING" | "EVENING", string>;
+  positionLabels: Record<"MORNING" | "AFTERNOON" | "EVENING", string>;
+  /** Owner decision 2026-10-16: the chart legend, one colour per time of day. */
+  positionLegend: Record<"MORNING" | "AFTERNOON" | "EVENING", string>;
   periodLabels: Record<"THIS_WEEK" | "LAST_WEEK" | "THIRTY_DAYS", string>;
   /** Packet 11C Task 7: the explanation panel under an explainable comparison (new application copy; the 7A rows above are unchanged). */
   explanation: HistoryExplanationMessages;

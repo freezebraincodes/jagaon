@@ -1,7 +1,7 @@
 "use client";
 
 import type { AppMessages, SupportedLocale } from "@/i18n/types";
-import type { HistoryChartPosition, HistoryPeriod } from "@/application/history/recorded-history-contracts";
+import { HISTORY_DISPLAY_POSITIONS, type HistoryChartPosition, type HistoryPeriod } from "@/application/history/recorded-history-contracts";
 import { formatSingaporeTime } from "../journal/singapore-time";
 import { formatChartDay, formatShortDate } from "./history-format";
 
@@ -16,9 +16,9 @@ type Props = {
 const UNIT = "mmol/L";
 
 /**
- * Neutral recorded-readings chart (design Section 8.2). Bars use one neutral
- * ink colour; a not-recorded position is an empty dashed outline, never a
- * zero bar. There is no target band, threshold line, risk zone, forecast or
+ * Neutral recorded-readings chart (design Section 8.2). Owner decision 2026-10-16: three times of day (morning, afternoon, evening),
+ * each with its own calm colour and a legend; the colours name the time of day only (no status, target or risk meaning). A
+ * not-recorded position is an empty dashed outline, never a zero bar. There is no target band, threshold line, risk zone, forecast or
  * annotation. The visual chart is hidden from assistive technology and the
  * table below carries every position, value and missing position.
  * CR-11 (AC-20z): a recorded 0.0 keeps a thin solid bar (drawn, never mistaken
@@ -39,10 +39,13 @@ export function HistoryReadingsChart({ messages, locale, period, chart, headingI
   return (
     <figure className="history-chart" aria-labelledby={headingId} aria-describedby={descriptionId}>
       <ul className="history-legend">
-        <li>
-          <span className="history-legend-swatch history-legend-swatch--recorded" aria-hidden="true" />
-          {msg.recordedLegend}
-        </li>
+        {/* Owner decision 2026-10-16: one calm colour per time of day (never a status colour). */}
+        {HISTORY_DISPLAY_POSITIONS.map((position) => (
+          <li key={position}>
+            <span className={`history-legend-swatch history-legend-swatch--${position.toLowerCase()}`} aria-hidden="true" />
+            {msg.positionLegend[position]}
+          </li>
+        ))}
         <li>
           <span className="history-legend-swatch history-legend-swatch--missing" aria-hidden="true" />
           {msg.notRecordedLegend}
@@ -80,7 +83,7 @@ export function HistoryReadingsChart({ messages, locale, period, chart, headingI
                       position.readings.map((reading, index) => (
                         <span
                           key={index}
-                          className={`history-bar history-bar--recorded${Number(reading.valueMmolL) === 0 ? " history-bar--zero" : ""}`}
+                          className={`history-bar history-bar--recorded history-bar--${position.position.toLowerCase()}${Number(reading.valueMmolL) === 0 ? " history-bar--zero" : ""}`}
                           data-value={reading.valueMmolL}
                           style={{ height: `${(Number(reading.valueMmolL) / axisMax) * 100}%` }}
                         />

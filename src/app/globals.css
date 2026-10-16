@@ -32,6 +32,10 @@
   --danger: #b3261e;
   --danger-tint: #fce8e5;
   --reviewed: #2f4a63;
+  /* Owner decision 2026-10-16: History chart colours, one per time of day (morning, afternoon, evening). */
+  --time-morning: #c08a2e;
+  --time-afternoon: #3b8c8c;
+  --time-evening: #2f4a63;
   --reviewed-tint: #eef3f7;
   --reviewed-line: #d3e0ea;
   --safe-top: env(safe-area-inset-top, 0px);
@@ -4017,6 +4021,22 @@ button.summary-tile:hover:not(:disabled) {
 
 .history-bar--recorded {
   background: var(--ink);
+}
+
+/* Owner decision 2026-10-16: one calm colour per time of day. They name the time of day only: no red or green, no status meaning. */
+.history-bar--morning,
+.history-legend-swatch--morning {
+  background: var(--time-morning);
+}
+
+.history-bar--afternoon,
+.history-legend-swatch--afternoon {
+  background: var(--time-afternoon);
+}
+
+.history-bar--evening,
+.history-legend-swatch--evening {
+  background: var(--time-evening);
 }
 
 /* CR-11 (AC-20z): a recorded 0.0 is drawn as a thin solid line, never as an empty (not-recorded) outline. */

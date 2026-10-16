@@ -30,8 +30,9 @@ const STATIC: Record<string, [string, string]> = {
   recordedLegend: ["recorded", "已记录"],
   notRecordedLegend: ["not recorded", "未记录"],
   chartSlotsNote: [
-    "Two display positions per day: morning (before 12 pm) and evening. Each recorded reading has its own bar.",
-    "每天显示两个位置：早上（中午12点前）和晚上。每个已记录的读数各有一条柱。",
+    // Owner decision 2026-10-16: three times of day, as on Today; two readings a day is fine.
+    "Three times of day: morning (before 12 pm), afternoon (12 to 6 pm) and evening (from 6 pm). Each reading has its own bar. Two readings a day is fine.",
+    "一天三个时段：早上（中午12点前）、下午（12点至6点）和晚上（6点起）。每个读数各有一条柱。一天两个读数也可以。",
   ],
   recordedDataTag: ["Your recorded data", "您记录的数据"],
   factsTitle: ["What these records show", "这些记录显示"],
@@ -45,8 +46,8 @@ const STATIC: Record<string, [string, string]> = {
   bookletTitle: ["Booklet stamps", "记录册印章"],
   bookletOnly: ["logging completion only", "仅代表记录完成"],
   bookletExplanation: [
-    "A stamp means both display positions were recorded that day. It says nothing about the values.",
-    "印章表示当天两个显示位置都有记录，并不说明数值的意义。",
+    "A stamp means readings were recorded at two or more times of day. It says nothing about the values.",
+    "印章表示当天在两个或以上时段有记录，并不说明数值的意义。",
   ],
   actionsTag: ["Your actions", "您的操作"],
   addFacts: ["Add these facts to appointment notes", "将这些事实加入看诊备注"],
@@ -112,10 +113,12 @@ describe("Packet 7A history catalogue", () => {
       "Evidence windows: recent 20 Sep – 4 Oct; earlier comparison 23 Aug – 20 Sep.",
     );
     expect(zh.evidenceWindow("9月20日至10月4日", "8月23日至9月20日")).toBe("证据期间：近期9月20日至10月4日；较早比较期间8月23日至9月20日。");
-    expect(en.completeStamp("Mon 28 Sep")).toBe("Both display positions recorded on Mon 28 Sep.");
-    expect(zh.completeStamp("9月28日")).toBe("9月28日的两个显示位置都有记录。");
-    expect(en.incompleteStamp("Tue 29 Sep", 1)).toBe("1 of 2 display positions recorded on Tue 29 Sep.");
-    expect(zh.incompleteStamp("9月29日", 1)).toBe("9月29日的两个显示位置中有1个记录。");
+    expect(en.completeStamp("Mon 28 Sep")).toBe("Readings at two or more times of day on Mon 28 Sep.");
+    expect(zh.completeStamp("9月28日")).toBe("9月28日在两个或以上时段有读数。");
+    expect(en.incompleteStamp("Tue 29 Sep", 1)).toBe("A reading at one time of day on Tue 29 Sep.");
+    expect(zh.incompleteStamp("9月29日", 1)).toBe("9月29日在一个时段有读数。");
+    expect(en.incompleteStamp("Wed 30 Sep", 0)).toBe("No reading recorded on Wed 30 Sep.");
+    expect(zh.incompleteStamp("9月30日", 0)).toBe("9月30日没有读数记录。");
     expect(en.disabledFamily("ROUTINE_SHIFT")).toBe("ROUTINE_SHIFT is not enabled in this demo. No conclusion was produced.");
     expect(zh.disabledFamily("ROUTINE_SHIFT")).toBe("本演示未启用ROUTINE_SHIFT。系统没有作出结论。");
   });
@@ -128,7 +131,7 @@ describe("Packet 7A history catalogue", () => {
       "comparisonVariability", "noMaterialComparison", "repeatedItem", "repeatedContext", "notRecordedPosition", "notRecordedPositions",
       "sourceSummary", "correctionSummary", "evidenceWindow", "completeStamp", "incompleteStamp", "disabledFamily",
     ];
-    const LABEL_GROUPS = ["slotLabels", "positionLabels", "periodLabels"];
+    const LABEL_GROUPS = ["slotLabels", "positionLabels", "positionLegend", "periodLabels"];
     // Owner decision 2026-10-16: `notice` and `trends` are pinned in NoticeTrends.test.tsx.
     expect([...Object.keys(STATIC), ...PARAMETERISED, ...LABEL_GROUPS, "explanation", "notice", "trends"].sort()).toEqual(Object.keys(en).sort());
     // The only 7A message that is not the copy-matrix row is comparisonVariability (IQR); comparisonHigher/Lower keep "median".
@@ -149,8 +152,10 @@ describe("Packet 7A history catalogue", () => {
       BEDTIME: "bedtime",
     });
     expect(zh.slotLabels).toEqual({ BEFORE_BREAKFAST: "早餐前", BEFORE_LUNCH: "午餐前", BEFORE_DINNER: "晚餐前", BEDTIME: "睡前" });
-    expect(en.positionLabels).toEqual({ MORNING: "morning", EVENING: "evening" });
-    expect(zh.positionLabels).toEqual({ MORNING: "早上", EVENING: "晚上" });
+    expect(en.positionLabels).toEqual({ MORNING: "morning", AFTERNOON: "afternoon", EVENING: "evening" });
+    expect(zh.positionLabels).toEqual({ MORNING: "早上", AFTERNOON: "下午", EVENING: "晚上" });
+    expect(en.positionLegend).toEqual({ MORNING: "Morning", AFTERNOON: "Afternoon", EVENING: "Evening" });
+    expect(zh.positionLegend).toEqual({ MORNING: "早上", AFTERNOON: "下午", EVENING: "晚上" });
     expect(en.periodLabels).toEqual({ THIS_WEEK: "this week", LAST_WEEK: "last week", THIRTY_DAYS: "30 days" });
     expect(zh.periodLabels).toEqual({ THIS_WEEK: "本周", LAST_WEEK: "上周", THIRTY_DAYS: "30天" });
   });
